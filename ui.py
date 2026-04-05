@@ -723,56 +723,27 @@ class MessageBubble(QFrame):
 # ── Main Window ────────────────────────────────────────────────────────────────
 
 class JarvisWindow(QMainWindow):
-    CORNER_RADIUS = 20
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("J.A.R.V.I.S")
-        self.setMinimumSize(460, 900)
-        self.resize(500, 980)
+        self.setMinimumSize(400, 500)
+        self.resize(500, 900)
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.Window |
             Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self._drag_pos = None
         self._workers = []
         self._build_ui()
         self._start_voice()
 
-    # ── Rounded shape ──────────────────────────────────────────────────────────
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), self.CORNER_RADIUS, self.CORNER_RADIUS)
-        p.fillPath(path, QColor(C_BG))
-        # Subtle border
-        p.setPen(QPen(QColor(C_BORDER), 1.5))
-        p.drawPath(path)
-        p.end()
-
-    # ── Drag to move (no title bar) ────────────────────────────────────────────
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag_pos and e.buttons() == Qt.MouseButton.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag_pos)
-
-    def mouseReleaseEvent(self, e):
-        self._drag_pos = None
-
     # ── Build UI ───────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # Root widget — transparent so JarvisWindow.paintEvent draws the rounded bg
         central = QWidget()
-        central.setAutoFillBackground(False)
-        central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        central.setAutoFillBackground(True)
+        p = central.palette()
+        p.setColor(QPalette.ColorRole.Window, QColor(C_BG))
+        central.setPalette(p)
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
@@ -791,12 +762,7 @@ class JarvisWindow(QMainWindow):
         hp = header.palette()
         hp.setColor(QPalette.ColorRole.Window, QColor(C_BG2))
         header.setPalette(hp)
-        header.setStyleSheet(f"""
-            background: {C_BG2};
-            border-bottom: 1px solid {C_BORDER};
-            border-top-left-radius: {self.CORNER_RADIUS}px;
-            border-top-right-radius: {self.CORNER_RADIUS}px;
-        """)
+        header.setStyleSheet(f"border-bottom: 1px solid {C_BORDER};")
 
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(14, 8, 14, 8)
@@ -865,35 +831,6 @@ class JarvisWindow(QMainWindow):
         overlay_btn.setToolTip("Toggle Meeting Assist overlay (Cmd+Opt+O)")
         overlay_btn.clicked.connect(_overlay_mod.toggle)
         h_layout.addWidget(overlay_btn)
-
-        # Window controls (no OS title bar — frameless)
-        wc_layout = QVBoxLayout()
-        wc_layout.setSpacing(4)
-        wc_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        def _wc_btn(symbol, color, tip):
-            b = QPushButton(symbol)
-            b.setFixedSize(18, 18)
-            b.setToolTip(tip)
-            b.setStyleSheet(f"""
-                QPushButton {{
-                    background: {color};
-                    color: transparent;
-                    border: none;
-                    border-radius: 9px;
-                    font-size: 9px;
-                }}
-                QPushButton:hover {{ color: #000; font-weight: bold; }}
-            """)
-            return b
-
-        close_btn = _wc_btn("✕", "#FF5F57", "Close")
-        mini_btn  = _wc_btn("—", "#FFBD2E", "Minimise")
-        close_btn.clicked.connect(self.close)
-        mini_btn.clicked.connect(self.showMinimized)
-        wc_layout.addWidget(close_btn)
-        wc_layout.addWidget(mini_btn)
-        h_layout.addLayout(wc_layout)
 
         root.addWidget(header)
 
