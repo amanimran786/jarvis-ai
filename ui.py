@@ -1147,22 +1147,7 @@ class JarvisWindow(QMainWindow):
     # ── Briefing ───────────────────────────────────────────────────────────────
 
     def _maybe_brief(self):
-        facts = mem.list_facts()
         learner.reflect()
-        if briefing.should_brief():
-            try:
-                speak(briefing.build_briefing(facts))
-                speak(f"Weather: {tools.get_weather()}")
-                speak(gs.get_todays_events())
-                speak(gs.get_unread_emails(max_results=3))
-                from learner import _load_knowledge
-                feed = _load_knowledge().get("knowledge_feed", [])
-                if feed:
-                    item = feed[0]
-                    speak(f"Something you might find relevant — {item['summary']}")
-                self._add_message("Morning briefing delivered.", "jarvis", "")
-            except Exception as e:
-                print(f"[Briefing Error] {e}")
         self._set_status("ONLINE")
 
     def _sync_orb_to_voice(self):

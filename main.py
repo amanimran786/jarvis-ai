@@ -78,10 +78,7 @@ if "--no-ui" in sys.argv:
 
     def main():
         set_timer_callback(on_timer_done)
-        if briefing.should_brief():
-            run_briefing(mem.list_facts())
-        else:
-            speak("Jarvis online.")
+        speak("Online.")
         while True:
             wait_for_wake_word()
             if not conversation_loop():
