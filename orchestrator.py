@@ -20,6 +20,7 @@ from typing import Any
 
 from brain_claude import ask_claude
 from config import HAIKU
+import skills
 
 # ── Tool registry ─────────────────────────────────────────────────────────────
 
@@ -117,6 +118,18 @@ Examples:
 """
 
 
+def _build_system(user_input: str) -> str:
+    skill_block = skills.metadata_block(user_input, limit=3)
+    if not skill_block:
+        return _SYSTEM
+    return (
+        _SYSTEM
+        + "\nRelevant local skill metadata for this request:\n"
+        + skill_block
+        + "\nIf one of these skills is relevant, include it as params.skill_id."
+    )
+
+
 # ── Decision dataclass ────────────────────────────────────────────────────────
 
 @dataclass
@@ -150,19 +163,28 @@ def classify(user_input: str) -> ToolDecision:
     # Fast-path: some patterns are so unambiguous it's faster to skip the LLM
     fast = _fast_classify(user_input.lower().strip())
     if fast:
-        return fast
+        return _attach_skill(user_input, fast)
 
     # Full LLM classification
     try:
         raw = ask_claude(
             user_input,
             model=HAIKU,
-            system=_SYSTEM,
+            system=_build_system(user_input),
         )
-        return _parse(raw)
+        return _attach_skill(user_input, _parse(raw))
     except Exception as e:
         print(f"[Orchestrator] Classification failed: {e}")
         return _FALLBACK
+
+
+def _attach_skill(user_input: str, decision: ToolDecision) -> ToolDecision:
+    if decision.params.get("skill_id") and skills.get_skill(decision.params.get("skill_id")):
+        return decision
+    skill = skills.choose_skill(user_input, tool=decision.tool)
+    if skill:
+        decision.params["skill_id"] = skill.id
+    return decision
 
 
 def _fast_classify(lower: str) -> ToolDecision | None:

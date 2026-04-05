@@ -28,6 +28,7 @@ import memory as mem
 import model_router
 import hardware as hw
 import evals
+import conversation_context as ctx
 
 app = FastAPI(title="Jarvis", version="1.0")
 
@@ -74,7 +75,8 @@ def chat(req: ChatRequest):
                 chunks.append(chunk)
                 yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
             response = "".join(chunks)
-            interaction = evals.log_interaction(req.message, response, model, source="api_stream")
+            context_stats = ctx.record_request_stats(model, source="api_stream")
+            interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
             evals.maybe_log_automatic_failure(interaction)
             yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'type': 'meta'})}\n\n"
             yield "data: [DONE]\n\n"
@@ -82,9 +84,10 @@ def chat(req: ChatRequest):
 
     stream, model = route_stream(req.message)
     response = "".join(stream)
-    interaction = evals.log_interaction(req.message, response, model)
+    context_stats = ctx.record_request_stats(model, source="api")
+    interaction = evals.log_interaction(req.message, response, model, context=context_stats)
     evals.maybe_log_automatic_failure(interaction)
-    return {"response": response, "model": model, "interaction_id": interaction["id"]}
+    return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats}
 
 
 @app.post("/feedback")
@@ -112,6 +115,15 @@ def status():
         "status": "online",
         "mode": model_router.get_mode(),
         "local_available": model_router._has_local(),
+        "context": ctx.get_stats(),
+    }
+
+
+@app.get("/context")
+def get_context_stats():
+    return {
+        "current": ctx.get_stats(),
+        "recent_requests": ctx.recent_request_stats(10),
     }
 
 

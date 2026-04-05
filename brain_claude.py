@@ -1,22 +1,28 @@
 import anthropic
 import re
-from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT, MAX_CONVERSATION_TURNS
+from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT
 import memory as mem
+import conversation_context as ctx
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-conversation_history = []
 
-
-def ask_claude(user_input: str, model: str = HAIKU, system: str = None) -> str:
-    return "".join(ask_claude_stream(user_input, model, system=system))
-
-
-def _trim_history() -> None:
-    """Keep only recent turns so long sessions don't balloon token cost."""
-    max_messages = max(2, MAX_CONVERSATION_TURNS * 2)
-    if len(conversation_history) > max_messages:
-        del conversation_history[:-max_messages]
+def ask_claude(
+    user_input: str,
+    model: str = HAIKU,
+    system: str = None,
+    system_extra: str = "",
+    track_context: bool = False,
+) -> str:
+    return "".join(
+        ask_claude_stream(
+            user_input,
+            model,
+            system=system,
+            system_extra=system_extra,
+            track_context=track_context,
+        )
+    )
 
 
 def _strip_markdown(text: str) -> str:
@@ -30,17 +36,29 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
-def ask_claude_stream(user_input: str, model: str = HAIKU, system: str = None):
-    conversation_history.append({"role": "user", "content": user_input})
-    _trim_history()
-    effective_system = system if system is not None else (SYSTEM_PROMPT + mem.get_context())
+def ask_claude_stream(
+    user_input: str,
+    model: str = HAIKU,
+    system: str = None,
+    system_extra: str = "",
+    track_context: bool = False,
+):
+    system_base = system if system is not None else (SYSTEM_PROMPT + mem.get_context())
+    if track_context:
+        ctx.begin_turn(user_input)
+        effective_system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
+    else:
+        effective_system = system_base
+        if system_extra:
+            effective_system += "\n\n" + system_extra
+        messages = [{"role": "user", "content": user_input}]
 
     full_reply = ""
     with client.messages.stream(
         model=model,
         max_tokens=2048,
         system=effective_system,
-        messages=conversation_history
+        messages=messages
     ) as stream:
         buffer = ""
         for text in stream.text_stream:
@@ -53,5 +71,5 @@ def ask_claude_stream(user_input: str, model: str = HAIKU, system: str = None):
         if buffer:
             yield _strip_markdown(buffer)
 
-    conversation_history.append({"role": "assistant", "content": _strip_markdown(full_reply)})
-    _trim_history()
+    if track_context:
+        ctx.end_turn(_strip_markdown(full_reply))

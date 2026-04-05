@@ -1,11 +1,10 @@
 import re
 from openai import OpenAI
-from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT, MAX_CONVERSATION_TURNS
+from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT
 import memory as mem
+import conversation_context as ctx
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-
-conversation_history = []
 
 
 def _strip_markdown(text: str) -> str:
@@ -19,22 +18,21 @@ def _strip_markdown(text: str) -> str:
     return text
 
 
-def _trim_history() -> None:
-    """Keep only the most recent conversation turns to control token growth."""
-    max_messages = max(2, MAX_CONVERSATION_TURNS * 2)
-    if len(conversation_history) > max_messages:
-        del conversation_history[:-max_messages]
+def ask(user_input: str, model: str = GPT_MINI, system_extra: str = "", track_context: bool = False) -> str:
+    return "".join(ask_stream(user_input, model, system_extra=system_extra, track_context=track_context))
 
 
-def ask(user_input: str, model: str = GPT_MINI) -> str:
-    return "".join(ask_stream(user_input, model))
-
-
-def ask_stream(user_input: str, model: str = GPT_MINI):
-    conversation_history.append({"role": "user", "content": user_input})
-    _trim_history()
-    system = SYSTEM_PROMPT + mem.get_context()
-    messages = [{"role": "system", "content": system}] + conversation_history
+def ask_stream(user_input: str, model: str = GPT_MINI, system_extra: str = "", track_context: bool = False):
+    system_base = SYSTEM_PROMPT + mem.get_context()
+    if track_context:
+        ctx.begin_turn(user_input)
+        system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
+        messages = [{"role": "system", "content": system}] + messages
+    else:
+        system = system_base
+        if system_extra:
+            system += "\n\n" + system_extra
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user_input}]
 
     stream = client.chat.completions.create(
         model=model,
@@ -57,5 +55,5 @@ def ask_stream(user_input: str, model: str = GPT_MINI):
     if buffer:
         yield _strip_markdown(buffer)
 
-    conversation_history.append({"role": "assistant", "content": _strip_markdown(full_reply)})
-    _trim_history()
+    if track_context:
+        ctx.end_turn(_strip_markdown(full_reply))

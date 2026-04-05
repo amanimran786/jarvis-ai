@@ -10,9 +10,11 @@ import self_improve as si
 import hotkeys
 import meeting_listener
 import agents
+import evals
+import conversation_context as ctx
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit, QLineEdit, QLabel, QFileDialog,
+    QPushButton, QTextEdit, QLineEdit, QLabel, QFileDialog, QInputDialog,
     QScrollArea, QFrame, QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import (
@@ -27,7 +29,6 @@ from PyQt6.QtGui import (
 
 from router import route_stream, set_timer_callback
 from voice import speak, speak_stream, listen, wait_for_wake_word
-from brain import ask as ask_gpt
 import memory as mem
 import briefing
 import tools
@@ -515,6 +516,7 @@ class PulseDot(QWidget):
 
 class VoiceWorker(QThread):
     message = pyqtSignal(str, str, str)
+    interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -578,6 +580,10 @@ class VoiceWorker(QThread):
             try:
                 stream, model = route_stream(user_input)
                 response = speak_stream(stream)
+                context_stats = ctx.record_request_stats(model, source="voice_ui")
+                entry = evals.log_interaction(user_input, response, model, source="voice_ui", context=context_stats)
+                evals.maybe_log_automatic_failure(entry)
+                self.interaction.emit(entry)
                 self.message.emit(response, "jarvis", model)
                 exchanges.append(f"Jarvis: {response}")
 
@@ -608,6 +614,7 @@ class VoiceWorker(QThread):
 
 class TextWorker(QThread):
     message = pyqtSignal(str, str, str)
+    interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
 
     def __init__(self, user_input: str, parent=None):
@@ -622,6 +629,10 @@ class TextWorker(QThread):
             for chunk in stream:
                 chunks.append(chunk)
             response = "".join(chunks)
+            context_stats = ctx.record_request_stats(model, source="text_ui")
+            entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
+            evals.maybe_log_automatic_failure(entry)
+            self.interaction.emit(entry)
             speak(response)
             self.message.emit(response, "jarvis", model)
             exchanges = [f"User: {self.user_input}", f"Jarvis: {response}"]
@@ -638,8 +649,7 @@ class TextWorker(QThread):
 
 def _summarize(exchanges):
     try:
-        transcript = "\n".join(exchanges[-10:])
-        summary = ask_gpt(f"Summarize this Jarvis conversation in one sentence:\n{transcript}")
+        summary = ctx.summarize_transcript(exchanges[-10:])
         mem.save_conversation(summary)
         threading.Thread(
             target=learner.extract_and_learn,
@@ -733,6 +743,7 @@ class JarvisWindow(QMainWindow):
             Qt.WindowType.WindowStaysOnTopHint
         )
         self._workers = []
+        self._last_jarvis_interaction = None
         self._build_ui()
         self._start_voice()
 
@@ -911,6 +922,10 @@ class JarvisWindow(QMainWindow):
         self.listen_btn.setToolTip("Smart Listen — tap into call audio (Cmd+Shift+M)")
         self.listen_btn.clicked.connect(self._toggle_smart_listen)
 
+        self.flag_btn = self._hud_btn("⚑")
+        self.flag_btn.setToolTip("Flag the last Jarvis answer for evals")
+        self.flag_btn.clicked.connect(self._flag_last_answer)
+
         self.input_field = EnterLineEdit()
         self.input_field.setPlaceholderText("ENTER COMMAND...")
         self.input_field.setFont(QFont("Courier New", 12))
@@ -953,6 +968,7 @@ class JarvisWindow(QMainWindow):
 
         i_layout.addWidget(self.attach_btn)
         i_layout.addWidget(self.listen_btn)
+        i_layout.addWidget(self.flag_btn)
         i_layout.addWidget(self.input_field, stretch=1)
         i_layout.addWidget(self.send_btn)
         root.addWidget(input_bar)
@@ -1038,6 +1054,7 @@ class JarvisWindow(QMainWindow):
 
         self.voice_worker = VoiceWorker()
         self.voice_worker.message.connect(self._add_message)
+        self.voice_worker.interaction.connect(self._register_interaction)
         self.voice_worker.status.connect(self._set_status)
         self.voice_worker.start()
 
@@ -1179,6 +1196,42 @@ class JarvisWindow(QMainWindow):
             self.scroll.verticalScrollBar().maximum()
         ))
 
+    def _register_interaction(self, entry: dict):
+        if entry and entry.get("response"):
+            self._last_jarvis_interaction = entry
+
+    def _flag_last_answer(self):
+        entry = self._last_jarvis_interaction
+        if not entry:
+            self._add_message("No recent Jarvis reply is available to flag yet.", "jarvis", "Eval")
+            return
+
+        issue, ok = QInputDialog.getText(
+            self,
+            "Flag Last Answer",
+            "What's wrong with the last Jarvis answer?",
+            text="Too generic for Aman."
+        )
+        if not ok or not issue.strip():
+            return
+
+        expected, ok = QInputDialog.getText(
+            self,
+            "Expected Behavior",
+            "What should Jarvis have done instead?",
+            text=""
+        )
+        if not ok:
+            return
+
+        failure = evals.log_failure(
+            issue=issue.strip(),
+            interaction_id=entry.get("id"),
+            expected=expected.strip(),
+            source="ui_feedback",
+        )
+        self._add_message(f"Logged feedback under {failure['category']} for the last Jarvis answer.", "jarvis", "Eval")
+
     def _set_status(self, text: str):
         self._status_label.setText(text)
         if "LISTEN" in text or "ACTIVE" in text or "VOICE" in text:
@@ -1206,6 +1259,7 @@ class JarvisWindow(QMainWindow):
 
         worker = TextWorker(text)
         worker.message.connect(self._add_message)
+        worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
         worker.start()
         self._workers.append(worker)
@@ -1223,6 +1277,7 @@ class JarvisWindow(QMainWindow):
         prompt = f"The user shared a file called '{filename}'. Here is its content:\n\n{content}\n\nAcknowledge it and ask what they want to do with it."
         worker = TextWorker(prompt)
         worker.message.connect(self._add_message)
+        worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
         worker.start()
         self._workers.append(worker)

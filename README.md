@@ -7,6 +7,8 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
 - **Voice + text interface** — speech-to-text input, ElevenLabs TTS output, and a desktop chat UI
 - **Local-first model routing** — Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost
 - **Persistent memory** — remembers facts, preferences, projects, and recent context from local JSON stores
+- **Local skills** — lightweight skill metadata stays cheap to load, while full `SKILL.md` instructions and references load only for the active request
+- **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary
 - **Self-learning** — background knowledge feed, fact extraction, and daily reflection
 - **Live browser control** — open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons
 - **System control** — volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands
@@ -82,8 +84,25 @@ Jarvis exposes a local API while running:
 
 - `GET /status` — current mode and local-model availability
 - `POST /chat` — chat with Jarvis
+- `GET /context` — inspect current prompt/session footprint and recent request context stats
 - `GET /memory` — inspect saved memory
 - `POST /mode` — switch `local`, `cloud`, or `auto`
+
+## Skills
+
+Jarvis now supports a local skill layer under `skills/`:
+
+- `skills/index.json` is the L1 metadata index used for cheap relevance checks
+- `skills/<skill_id>/SKILL.md` holds the full L2 skill instructions
+- `skills/<skill_id>/references/` holds L3 reference files that load only when that skill is active
+
+The first built-in skills are:
+
+- `browser_execution` for live browser navigation and page-action recovery
+- `personal_context` for Aman-specific answers grounded in memory and eval signals
+- `self_improvement` for evidence-gated self-editing behavior
+
+This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it.
 
 ## Hotkeys
 
@@ -107,6 +126,8 @@ ui.py                # PyQt6 desktop interface
 router.py            # Layer 1 routing: fast-path commands, hardware, orchestrator fallback
 orchestrator.py      # Layer 2 intent classification into tool decisions
 model_router.py      # Layer 3 model selection: Local -> GPT-mini -> Haiku -> Sonnet -> Opus
+skills.py            # Local skill registry, matching, and on-demand SKILL.md loading
+conversation_context.py  # Shared task-scoped chat session manager and prompt compaction
 brain.py             # OpenAI backend
 brain_claude.py      # Anthropic backend
 brain_ollama.py      # Ollama backend
@@ -117,6 +138,7 @@ learner.py           # Fact extraction, knowledge feed, reflection
 overlay.py           # Floating meeting HUD
 meeting_listener.py  # BlackHole audio capture and Whisper transcription
 self_improve.py      # Self-rewriting pipeline with backup and syntax validation
+skills/              # Local skill packages: metadata index, SKILL.md files, references
 ```
 
 ## Configuration
@@ -136,6 +158,8 @@ Current recommended local defaults:
 - `mistral` for stronger local reasoning
 
 `auto` mode is the default and is intended to keep API usage low without forcing everything through weaker local models.
+
+Jarvis now also tracks prompt footprint per request. `/chat` responses include a `context` object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.
 
 ## Self-Improve Safety
 

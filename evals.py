@@ -85,7 +85,7 @@ def _find_interaction(data: dict, interaction_id: str) -> dict | None:
     return None
 
 
-def log_interaction(user_input: str, response: str, model: str, source: str = "api") -> dict:
+def log_interaction(user_input: str, response: str, model: str, source: str = "api", context: dict | None = None) -> dict:
     data = load()
     entry = {
         "id": uuid.uuid4().hex[:12],
@@ -94,6 +94,7 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
         "user_input": user_input,
         "response": response,
         "model": model,
+        "context": context or {},
     }
     data["interactions"].append(entry)
     save(data)
@@ -302,9 +303,11 @@ def record_improvement(result: dict) -> None:
 def summary(hours: int = 24 * 7) -> dict:
     failures = recent_failures(limit=50, hours=hours)
     categories = Counter(f["category"] for f in failures)
+    interactions = recent_interactions(10)
     return {
         "recent_failure_count": len(failures),
         "categories": dict(categories),
         "recent_failures": failures[-10:],
-        "recent_interactions": recent_interactions(10),
+        "recent_interactions": interactions,
+        "recent_context_stats": [i.get("context", {}) for i in interactions if i.get("context")],
     }

@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "id": "browser_execution",
+      "name": "Browser Execution",
+      "description": "Handle live browser navigation, multi-step page actions, and page summaries with recovery instead of vague chat.",
+      "tool": "browser",
+      "cost_hint": "local",
+      "triggers": [
+        "browse",
+        "browser",
+        "website",
+        "page",
+        "click",
+        "navigate",
+        "summarize this page"
+      ],
+      "path": "browser_execution/SKILL.md",
+      "resources": [
+        "browser_execution/references/browser_patterns.md"
+      ]
+    },
+    {
+      "id": "personal_context",
+      "name": "Personal Context",
+      "description": "Answer using Aman-specific context from memory, projects, and recent eval signals instead of generic assistant language.",
+      "tool": "chat",
+      "cost_hint": "local",
+      "triggers": [
+        "aman",
+        "personalized",
+        "personalise",
+        "generic",
+        "more useful",
+        "my project",
+        "my goals"
+      ],
+      "path": "personal_context/SKILL.md",
+      "resources": [
+        "personal_context/references/personalization_rules.md"
+      ]
+    },
+    {
+      "id": "self_improvement",
+      "name": "Self Improvement",
+      "description": "Keep self-editing evidence-gated, concrete, and file-targeted instead of speculative.",
+      "tool": "self_improve",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "improve yourself",
+        "self improve",
+        "modify your code",
+        "change your code",
+        "routing",
+        "evidence",
+        "self sustaining"
+      ],
+      "path": "self_improvement/SKILL.md",
+      "resources": [
+        "self_improvement/references/self_improve_policy.md"
+      ]
+    }
+  ]
+}

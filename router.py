@@ -23,6 +23,7 @@ import google_services as gs
 import camera
 import memory as mem
 import evals
+import skills
 import self_improve as si
 import hardware as hw
 import messages as msg
@@ -109,8 +110,9 @@ def _is_self_improve_safety_query(lower: str) -> bool:
 
 def _runtime_status_reply(user_input: str) -> str:
     mode = get_mode()
-    summary = describe_runtime_for(user_input)
-    return f"{summary} The current routing mode is {mode}."
+    skill = skills.choose_skill(user_input, tool="chat")
+    summary = describe_runtime_for(user_input, skill_id=skill.id if skill else None)
+    return f"This answer is coming from Jarvis's runtime status layer, not from a model-generated reply. {summary} The current routing mode is {mode}."
 
 
 def _self_improve_safety_reply() -> str:
@@ -307,13 +309,21 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
     decision = classify(user_input)
     tool      = decision.tool
     params    = decision.params
+    skill_id  = params.get("skill_id")
+    if not skill_id:
+        skill = skills.choose_skill(user_input, tool=tool)
+        if skill:
+            skill_id = skill.id
+            params["skill_id"] = skill_id
 
     # ── Search ────────────────────────────────────────────────────────────────
     if tool == "search":
         query = params.get("query", user_input)
         raw = tools.web_search(query)
         return format_with_mini(
-            f"Summarize these search results concisely in Jarvis voice:\n{raw}"
+            f"Summarize these search results concisely in Jarvis voice:\n{raw}",
+            skill_id=skill_id,
+            tool=tool,
         ), "Search"
 
     # ── Browser ───────────────────────────────────────────────────────────────
@@ -417,7 +427,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if action == "read":
             return _s(gs.get_todays_events()), "Calendar"
         # create — fall through to chat for now
-        return smart_stream(user_input)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool)
 
     # ── Email ─────────────────────────────────────────────────────────────────
     if tool == "email":
@@ -447,13 +457,15 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if cmd:
             output = terminal.run_command(cmd)
             return format_with_mini(
-                f"The user ran: '{cmd}'. Output:\n{output}\nSummarize concisely in Jarvis voice."
+                f"The user ran: '{cmd}'. Output:\n{output}\nSummarize concisely in Jarvis voice.",
+                skill_id=skill_id,
+                tool=tool,
             ), "Terminal"
         path = params.get("path", "")
         if path:
             content = terminal.read_file(path)
-            return format_with_mini(f"Summarize this file concisely:\n{content}"), "File"
-        return smart_stream(user_input)
+            return format_with_mini(f"Summarize this file concisely:\n{content}", skill_id=skill_id, tool=tool), "File"
+        return smart_stream(user_input, skill_id=skill_id, tool=tool)
 
     # ── Admin shell ───────────────────────────────────────────────────────────
     if tool == "admin":
@@ -463,7 +475,9 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if cmd:
             output = terminal.run_admin_command(cmd)
             return format_with_mini(
-                f"The user requested an admin command. Command: '{cmd}'. Output:\n{output}\nSummarize this in Jarvis voice."
+                f"The user requested an admin command. Command: '{cmd}'. Output:\n{output}\nSummarize this in Jarvis voice.",
+                skill_id=skill_id,
+                tool=tool,
             ), "Admin"
         return _s("Tell me the exact command you want me to run with administrator privileges."), "Admin"
 
@@ -472,7 +486,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         app_name = params.get("app", _parse_app(user_input) or "")
         if app_name:
             return _s(tools.open_app(app_name)), "App"
-        return smart_stream(user_input)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool)
 
     # ── Camera / Vision ───────────────────────────────────────────────────────
     if tool == "camera":
@@ -496,7 +510,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if any(p in lower for p in ("briefing", "catch me up", "what did i miss")):
             from briefing import build_briefing
             return _s(build_briefing(mem.list_facts())), "Memory"
-        return smart_stream(user_input)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool)
 
     # ── Self-improve ──────────────────────────────────────────────────────────
     if tool == "self_improve":
@@ -530,7 +544,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         return _s(ml.auto_configure_blackhole()), "Meeting"
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
-    return smart_stream(user_input)
+    return smart_stream(user_input, skill_id=skill_id, tool=tool)
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────

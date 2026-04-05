@@ -271,7 +271,7 @@ def summarize_current_page(request: str = "", browser: str | None = None) -> str
         f"Page text:\n{page_text}\n\n"
         "Summarize this for Aman in Jarvis voice. Keep it concise and spoken naturally."
     )
-    return "".join(format_with_mini(prompt))
+    return "".join(format_with_mini(prompt, skill_id="browser_execution", tool="browser"))
 
 
 def _browser_command(action: str, browser: str | None = None) -> str:

@@ -21,6 +21,7 @@ from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, DEFAULT_MODE
 from brain import ask_stream
 from brain_claude import ask_claude_stream
 from brain_ollama import ask_local_stream, list_local_models
+import skills
 
 _current_mode = DEFAULT_MODE
 
@@ -129,55 +130,67 @@ def _best_local(text: str) -> str:
     return available[0]
 
 
-def describe_runtime_for(user_input: str = "") -> str:
+def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> str:
     """Return a truthful summary of Jarvis's current routing state."""
     mode = _current_mode
     local_models = list_local_models()
+    _, resolved_skill_id = skills.build_system_extra(user_input, skill_id=skill_id, tool="chat")
+    active_skill = f" with the {resolved_skill_id} skill active" if resolved_skill_id else ""
 
     if mode == "local":
         if local_models:
             chosen = _best_local(user_input or "general conversation")
-            return f"I'm in local mode and I'd answer this with Ollama using {chosen}."
+            return f"I'm in local mode and I'd answer this{active_skill} with Ollama using {chosen}."
         return "I'm in local mode, but no Ollama model is currently available."
 
     if mode == "cloud":
-        tier = _classify_complexity(user_input or "general conversation")
+        tier = _classify_complexity(user_input or "general conversation", skill_id=resolved_skill_id)
         if tier in ("local", "mini"):
-            return f"I'm in cloud mode and this request would use {GPT_MINI}."
+            return f"I'm in cloud mode and this request would use {GPT_MINI}{active_skill}."
         if tier == "haiku":
-            return f"I'm in cloud mode and this request would use {HAIKU}."
+            return f"I'm in cloud mode and this request would use {HAIKU}{active_skill}."
         if tier == "sonnet":
-            return f"I'm in cloud mode and this request would use {SONNET}."
-        return f"I'm in cloud mode and this request would use {OPUS}."
+            return f"I'm in cloud mode and this request would use {SONNET}{active_skill}."
+        return f"I'm in cloud mode and this request would use {OPUS}{active_skill}."
 
-    tier = _classify_complexity(user_input or "general conversation")
+    tier = _classify_complexity(user_input or "general conversation", skill_id=resolved_skill_id)
     if tier == "local" and local_models:
         chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
+        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
     if tier == "haiku" and local_models:
         chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
+        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
     if tier == "mini":
-        return f"I'm in auto mode and this request would use {GPT_MINI}."
+        return f"I'm in auto mode and this request would use {GPT_MINI}{active_skill}."
     if tier == "haiku":
-        return f"I'm in auto mode and this request would use {HAIKU}."
+        return f"I'm in auto mode and this request would use {HAIKU}{active_skill}."
     if tier == "sonnet":
-        return f"I'm in auto mode and this request would use {SONNET}."
+        return f"I'm in auto mode and this request would use {SONNET}{active_skill}."
     if tier == "opus":
-        return f"I'm in auto mode and this request would use {OPUS}."
+        return f"I'm in auto mode and this request would use {OPUS}{active_skill}."
     if local_models:
         chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
-    return f"I'm in auto mode, but no local Ollama model is currently available, so this request would fall back to {GPT_MINI}."
+        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
+    return f"I'm in auto mode, but no local Ollama model is currently available, so this request would fall back to {GPT_MINI}{active_skill}."
 
 
-def _classify_complexity(text: str) -> str:
+def _classify_complexity(text: str, skill_id: str | None = None) -> str:
     """
     Returns: 'local', 'mini', 'haiku', 'sonnet', 'opus'
     Based on task complexity — cheapest viable option.
     """
     lower = text.lower()
     word_count = len(lower.split())
+    cost_hint = skills.skill_cost_hint(skill_id)
+
+    if cost_hint == "opus":
+        return "opus"
+    if cost_hint == "sonnet":
+        return "sonnet"
+    if cost_hint == "haiku":
+        return "haiku"
+    if cost_hint == "mini":
+        return "mini"
 
     # Explicitly asking for local
     if any(t in lower for t in EXPLICIT_LOCAL):
@@ -203,67 +216,68 @@ def _classify_complexity(text: str) -> str:
     return "local"
 
 
-def smart_stream(user_input: str) -> tuple:
+def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None = "chat") -> tuple:
     """
     Core routing function. Returns (stream, model_label).
     Strategy: local → mini → haiku → sonnet → opus
     Only escalates when the task genuinely requires it.
     """
     mode = _current_mode
-    lower = user_input.lower()
+    system_extra, resolved_skill_id = skills.build_system_extra(user_input, skill_id=skill_id, tool=tool)
 
     # ── Force local ───────────────────────────────────────────────────────────
     if mode == "local":
         if _has_local():
             model = _best_local(user_input)
-            return ask_local_stream(user_input, model), f"Local"
+            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
         else:
-            return ask_claude_stream(user_input, HAIKU), "Haiku"
+            return ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True), "Haiku"
 
     # ── Force cloud ───────────────────────────────────────────────────────────
     if mode == "cloud":
-        tier = _classify_complexity(user_input)
+        tier = _classify_complexity(user_input, skill_id=resolved_skill_id)
         if tier in ("local", "mini"):
-            return ask_stream(user_input, GPT_MINI), "GPT-mini"
+            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
         elif tier == "haiku":
-            return ask_claude_stream(user_input, HAIKU), "Haiku"
+            return ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True), "Haiku"
         elif tier == "sonnet":
-            return ask_claude_stream(user_input, SONNET), "Sonnet"
+            return ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True), "Sonnet"
         else:
-            return ask_claude_stream(user_input, OPUS), "Opus"
+            return ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True), "Opus"
 
     # ── Auto mode: local-first, cloud only when needed ────────────────────────
-    tier = _classify_complexity(user_input)
+    tier = _classify_complexity(user_input, skill_id=resolved_skill_id)
 
     if tier == "local":
         if _has_local():
             model = _best_local(user_input)
-            return ask_local_stream(user_input, model), "Local"
+            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
         else:
             # No local model — use cheapest cloud
-            return ask_stream(user_input, GPT_MINI), "GPT-mini"
+            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
 
     elif tier == "mini":
-        return ask_stream(user_input, GPT_MINI), "GPT-mini"
+        return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
 
     elif tier == "haiku":
         # Try local first, fall back to Haiku
         if _has_local():
             model = _best_local(user_input)
-            return ask_local_stream(user_input, model), "Local"
-        return ask_claude_stream(user_input, HAIKU), "Haiku"
+            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
+        return ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True), "Haiku"
 
     elif tier == "sonnet":
-        return ask_claude_stream(user_input, SONNET), "Sonnet"
+        return ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True), "Sonnet"
 
     else:  # opus — only when genuinely needed
-        return ask_claude_stream(user_input, OPUS), "Opus"
+        return ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True), "Opus"
 
 
-def format_with_mini(prompt: str):
+def format_with_mini(prompt: str, skill_id: str | None = None, tool: str | None = None):
     """Format tool output using cheapest cloud model, with user context."""
     import memory as _mem
     context = _mem.get_context()
+    system_extra, _ = skills.build_system_extra(prompt, skill_id=skill_id, tool=tool)
     if context:
         prompt = prompt + f"\n\nUser context for personalization:{context}"
-    return ask_stream(prompt, GPT_MINI)
+    return ask_stream(prompt, GPT_MINI, system_extra=system_extra)
