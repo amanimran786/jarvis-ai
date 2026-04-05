@@ -103,6 +103,30 @@ def open_then_summarize(target: str, request: str = "", browser: str | None = No
     return f"{opened} {summary}"
 
 
+def open_then_click(target: str, click_target: str, browser: str | None = None, wait_seconds: float = 2.0) -> str:
+    """Open a page, click a visible label, and report the result."""
+    opened = open_url(target, browser=browser)
+    time.sleep(wait_seconds)
+    clicked = click_text(click_target, browser=browser)
+    return f"{opened} {clicked}"
+
+
+def open_click_then_summarize(
+    target: str,
+    click_target: str,
+    request: str = "",
+    browser: str | None = None,
+    wait_seconds: float = 2.0,
+) -> str:
+    """Open a page, click a visible label, then summarize the resulting page."""
+    opened = open_url(target, browser=browser)
+    time.sleep(wait_seconds)
+    clicked = click_text(click_target, browser=browser)
+    time.sleep(wait_seconds)
+    summary = summarize_current_page(request or f"Summarize the page after clicking {click_target} on {target}.", browser=browser)
+    return f"{opened} {clicked} {summary}"
+
+
 def _front_tab_data(browser: str | None = None) -> dict:
     app = _choose_browser(browser)
     if app == "Safari":
@@ -183,6 +207,43 @@ def _fetch_url_text(url: str) -> str:
     text = unescape(text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:_MAX_PAGE_TEXT]
+
+
+def _fetch_url_html(url: str) -> str:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Jarvis/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _find_link_url(page_url: str, target_text: str) -> str:
+    html = _fetch_url_html(page_url)
+    if not html:
+        return ""
+
+    target = target_text.lower().strip()
+    candidates = []
+    for href, inner_html in re.findall(r'(?is)<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', html):
+        text = re.sub(r"(?s)<[^>]+>", " ", inner_html)
+        text = unescape(re.sub(r"\s+", " ", text).strip()).lower()
+        href_lower = href.lower()
+        score = 0
+        if text == target:
+            score = 100
+        elif re.search(rf"(?:^|/){re.escape(target)}(?:/|$)", href_lower):
+            score = 95
+        elif re.search(rf"\b{re.escape(target)}\b", text):
+            score = 80
+        elif re.search(rf"\b{re.escape(target)}\b", href_lower):
+            score = 60
+        if score:
+            candidates.append((score, urllib.parse.urljoin(page_url, href)))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 def get_current_page(browser: str | None = None) -> str:
@@ -291,7 +352,21 @@ def click_text(target_text: str, browser: str | None = None) -> str:
 
     out, err = _run_applescript(script)
     if err:
+        page = _front_tab_data(browser)
+        fallback_url = _find_link_url(page.get("url", ""), target_text) if page.get("ok") else ""
+        if fallback_url:
+            return (
+                f"Couldn't click '{target_text}' in {app} via JavaScript, so I opened the matching link directly. "
+                f"{open_url(fallback_url, browser=browser)}"
+            )
         return f"Couldn't click '{target_text}' in {app}: {err}"
     if out == "NOT_FOUND":
+        page = _front_tab_data(browser)
+        fallback_url = _find_link_url(page.get("url", ""), target_text) if page.get("ok") else ""
+        if fallback_url:
+            return (
+                f"I didn't find an exact clickable element labeled '{target_text}', so I opened the closest matching link directly. "
+                f"{open_url(fallback_url, browser=browser)}"
+            )
         return f"I couldn't find a visible link or button matching '{target_text}' on the current page."
     return f"Clicked '{target_text}' in {app}."

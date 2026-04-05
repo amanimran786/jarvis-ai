@@ -6,6 +6,8 @@ Shares the same memory, model router, and conversation state.
 
 Endpoints:
   POST /chat          — send a message, get a response (or stream it)
+  POST /feedback      — log a bad answer or tool failure
+  GET  /evals/summary — inspect recent eval state
   GET  /status        — current mode, online check
   GET  /memory        — facts, topics, recent conversations
   POST /memory/add    — add a fact
@@ -25,6 +27,7 @@ from router import route_stream
 import memory as mem
 import model_router
 import hardware as hw
+import evals
 
 app = FastAPI(title="Jarvis", version="1.0")
 
@@ -48,6 +51,16 @@ class ModeRequest(BaseModel):
     mode: str
 
 
+class FeedbackRequest(BaseModel):
+    issue: str
+    interaction_id: str | None = None
+    expected: str = ""
+    user_input: str = ""
+    response: str = ""
+    model: str = ""
+    source: str = "user_feedback"
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -56,14 +69,41 @@ def chat(req: ChatRequest):
     if req.stream:
         def generate():
             stream, model = route_stream(req.message)
+            chunks = []
             for chunk in stream:
+                chunks.append(chunk)
                 yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
+            response = "".join(chunks)
+            interaction = evals.log_interaction(req.message, response, model, source="api_stream")
+            evals.maybe_log_automatic_failure(interaction)
+            yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'type': 'meta'})}\n\n"
             yield "data: [DONE]\n\n"
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     stream, model = route_stream(req.message)
     response = "".join(stream)
-    return {"response": response, "model": model}
+    interaction = evals.log_interaction(req.message, response, model)
+    evals.maybe_log_automatic_failure(interaction)
+    return {"response": response, "model": model, "interaction_id": interaction["id"]}
+
+
+@app.post("/feedback")
+def feedback(req: FeedbackRequest):
+    entry = evals.log_failure(
+        issue=req.issue,
+        interaction_id=req.interaction_id,
+        expected=req.expected,
+        user_input=req.user_input,
+        response=req.response,
+        model=req.model,
+        source=req.source,
+    )
+    return {"ok": True, "failure": entry}
+
+
+@app.get("/evals/summary")
+def eval_summary(hours: int = 24 * 7):
+    return evals.summary(hours=hours)
 
 
 @app.get("/status")

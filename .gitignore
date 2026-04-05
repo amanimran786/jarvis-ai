@@ -10,6 +10,7 @@ token.json
 memory.json
 knowledge.json
 last_session.json
+evals.json
 
 # Self-improvement backups
 .jarvis_backups/

@@ -21,6 +21,7 @@ import tempfile
 from datetime import datetime
 from brain_claude import ask_claude
 from config import OPUS
+import evals
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR = os.path.join(BASE_DIR, ".jarvis_backups")
@@ -193,7 +194,7 @@ Keep your response concise — 3-4 sentences max."""
     return ask_claude(prompt, model=OPUS)
 
 
-def generate_improvement(filename: str, instruction: str) -> str:
+def generate_improvement(filename: str, instruction: str, evidence_bundle: dict | None = None) -> str:
     """
     Ask Opus to rewrite a specific file with an improvement applied.
     Returns the new code as a string.
@@ -207,6 +208,11 @@ def generate_improvement(filename: str, instruction: str) -> str:
             content = read_source(f)
             all_context += f"\n\n### {f} (for context)\n```python\n{content[:1500]}\n```"
 
+    evidence_text = ""
+    if evidence_bundle and evidence_bundle.get("ok"):
+        evidence_lines = "\n".join(f"- {line}" for line in evidence_bundle.get("evidence_lines", []))
+        evidence_text = f"\n\nRecent failure evidence:\n{evidence_lines}\n"
+
     prompt = f"""You are improving Jarvis, a personal AI assistant.
 
 Task: {instruction}
@@ -216,13 +222,14 @@ Current {filename}:
 {current_code}
 ```
 
-Related files for context:{all_context}
+Related files for context:{all_context}{evidence_text}
 
 Rewrite {filename} with the improvement applied.
 Rules:
 - Keep all existing functionality intact unless explicitly told to remove it
 - Make the improvement clean and well-integrated
 - Do not add unnecessary complexity
+- The change must directly address the attached recent failure evidence when evidence is provided
 - Return ONLY the complete new Python code for {filename}, nothing else
 - No explanation, no markdown, just the raw Python code"""
 
@@ -242,6 +249,68 @@ Rules:
     return new_code
 
 
+def _validation_commands(filename: str) -> list[tuple[str, list[str]]]:
+    commands = [
+        (
+            "py_compile",
+            [sys.executable, "-m", "py_compile", filename],
+        )
+    ]
+
+    smoke_imports = {
+        "router.py": ["router", "orchestrator", "model_router", "browser", "terminal"],
+        "browser.py": ["browser", "router"],
+        "model_router.py": ["model_router", "brain", "brain_claude", "brain_ollama"],
+        "brain.py": ["brain"],
+        "brain_claude.py": ["brain_claude"],
+        "brain_ollama.py": ["brain_ollama"],
+        "self_improve.py": ["self_improve", "evals"],
+        "api.py": ["api", "router", "model_router"],
+        "memory.py": ["memory"],
+        "terminal.py": ["terminal"],
+        "config.py": ["config", "model_router"],
+    }
+    modules = smoke_imports.get(filename)
+    if modules:
+        commands.append(
+            (
+                "import_smoke",
+                [sys.executable, "-c", f"import {', '.join(modules)}; print('ok')"],
+            )
+        )
+    return commands
+
+
+def _run_validation(filename: str) -> dict:
+    results = []
+    for name, command in _validation_commands(filename):
+        proc = subprocess.run(
+            command,
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = (proc.stdout + proc.stderr).strip()
+        results.append({
+            "name": name,
+            "ok": proc.returncode == 0,
+            "output": output,
+        })
+        if proc.returncode != 0:
+            break
+
+    return {
+        "ok": all(item["ok"] for item in results),
+        "checks": results,
+        "summary": "; ".join(
+            f"{item['name']}={'ok' if item['ok'] else 'failed'}" +
+            (f" ({item['output'][:160]})" if item["output"] else "")
+            for item in results
+        ),
+    }
+
+
 def self_improve(instruction: str = None, filename: str = None) -> dict:
     """
     Full self-improvement pipeline:
@@ -253,18 +322,18 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
 
     Returns dict with: file, backup, diff, summary
     """
+    evidence_bundle = None
+
     # Step 1: figure out what to improve
     if not instruction:
-        analysis = analyze_weakness()
-        # Extract filename from analysis if not provided
-        if not filename:
-            for f in IMPROVABLE_FILES:
-                if f in analysis:
-                    filename = f
-                    break
-        if not filename:
-            return {"error": analysis, "action_needed": "specify a file"}
-        instruction = analysis
+        evidence_bundle = evals.build_improvement_brief(area=filename)
+        if not evidence_bundle.get("ok"):
+            return {
+                "error": evidence_bundle.get("reason", "Not enough recent eval evidence to justify self-improvement."),
+                "action_needed": "log failures via /feedback or trigger reproducible runtime failures first",
+            }
+        filename = filename or evidence_bundle["target_file"]
+        instruction = evidence_bundle["instruction"]
     elif not filename:
         # Try to infer filename from instruction
         for f in IMPROVABLE_FILES:
@@ -278,7 +347,7 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
     print(f"[Self-Improve] Improving {filename}: {instruction[:80]}...")
 
     # Step 2: generate improved code
-    new_code = generate_improvement(filename, instruction)
+    new_code = generate_improvement(filename, instruction, evidence_bundle=evidence_bundle)
 
     # Step 3 & 4: backup and apply
     try:
@@ -290,13 +359,35 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
             "instruction": instruction,
         }
 
-    return {
+    validation = _run_validation(filename)
+    if not validation["ok"]:
+        restore_backup(os.path.basename(backup_path))
+        evals.log_failure(
+            issue=f"Self-improve validation failed for {filename}.",
+            expected="Generated change should compile and pass smoke validation.",
+            response=validation["summary"],
+            source="self_improve_validation",
+        )
+        return {
+            "error": f"Self-improve reverted after validation failed: {validation['summary']}",
+            "file": filename,
+            "instruction": instruction,
+            "backup": os.path.basename(backup_path),
+            "validation": validation,
+            "evidence_ids": evidence_bundle.get("failure_ids", []) if evidence_bundle else [],
+        }
+
+    result = {
         "file": filename,
         "backup": os.path.basename(backup_path),
         "diff": diff,
         "instruction": instruction,
         "lines_changed": diff.count("\n+") + diff.count("\n-"),
+        "validation": validation,
+        "evidence_ids": evidence_bundle.get("failure_ids", []) if evidence_bundle else [],
     }
+    evals.record_improvement(result)
+    return result
 
 
 def restart_jarvis() -> None:

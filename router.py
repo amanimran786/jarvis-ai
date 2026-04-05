@@ -22,6 +22,7 @@ import notes
 import google_services as gs
 import camera
 import memory as mem
+import evals
 import self_improve as si
 import hardware as hw
 import messages as msg
@@ -66,8 +67,26 @@ def _parse_browser_target(text: str):
     if not match:
         return None
     target = match.group(1).strip()
-    target = re.split(r"\b(?:and then|then|and)\b\s+(?:summari[sz]e|tell me|what's|what is|click|go back|go forward|reload|refresh)", target, maxsplit=1, flags=re.IGNORECASE)[0]
+    target = re.split(
+        r"(?:,\s*click\b|\b(?:and then|then|and)\b\s+(?:summari[sz]e|tell me|what's|what is|click|go back|go forward|reload|refresh)|\bclick\b)",
+        target,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
     return target.strip(" ,.?") or None
+
+
+def _parse_browser_click_target(text: str):
+    match = re.search(
+        r"\bclick(?: on)?(?: the)?\s+(.+?)(?=(?:,\s*|\b(?:and then|then|and)\b\s+)(?:summari[sz]e|tell me|what's|what is|go back|go forward|reload|refresh)|[.?!]|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    label = match.group(1).strip(" ,.?\"'")
+    label = re.sub(r"\b(?:link|button)\b$", "", label, flags=re.IGNORECASE).strip(" ,.?\"'")
+    return label or None
 
 
 def _is_model_status_query(lower: str) -> bool:
@@ -78,6 +97,13 @@ def _is_self_improve_safety_query(lower: str) -> bool:
     return (
         ("improve your own code" in lower or "improve yourself safely" in lower or "before writing any file" in lower)
         or ("self improve" in lower and any(p in lower for p in ("safely", "safe", "before writing", "before changing")))
+        or ("improve yourself" in lower and any(
+            p in lower for p in (
+                "what evidence", "what would you need", "would you need", "before changing code",
+                "before writing code", "before writing any file", "what steps", "how would you",
+                "what happens", "explain", "policy", "gate"
+            )
+        ))
     )
 
 
@@ -92,6 +118,61 @@ def _self_improve_safety_reply() -> str:
         "Before changing my own code, I identify the target file, read the current source, generate the update, "
         "syntax-validate the new Python before touching disk, create a timestamped backup, write through a temporary file with atomic replace, "
         "and only then report the diff and ask for a restart to apply it."
+    )
+
+
+def _is_meta_improvement_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "what needs improving",
+            "what do you need to improve",
+            "how can you become more useful",
+            "become more useful to aman",
+            "you are still too generic",
+            "too generic sometimes",
+            "what should you improve",
+            "how would you improve over time",
+            "what would you do to become more useful",
+        )
+    )
+
+
+def _meta_improvement_reply() -> str:
+    summary = evals.summary()
+    failures = summary.get("recent_failures", [])
+    categories = summary.get("categories", {})
+    projects = [p.get("name") for p in mem.get_projects()[:3] if p.get("name")]
+    topics = mem.get_top_topics(3)
+
+    if failures:
+        top_categories = ", ".join(f"{name} ({count})" for name, count in sorted(categories.items(), key=lambda kv: kv[1], reverse=True)[:3])
+        latest = "; ".join(f"{f['category']}: {f['issue']}" for f in failures[-2:])
+        next_steps_map = {
+            "browser": "keep tightening browser execution and page-action parsing",
+            "routing": "tighten intent routing and status-query handling",
+            "self_improve": "keep self-improve in evidence-gated explanation mode unless the request is an explicit edit",
+            "formatting": "remove spoken-output artifacts before they reach TTS",
+            "memory": "anchor more answers in stored user context",
+            "tool_execution": "make tool results and fallbacks more reliable",
+        }
+        ordered_categories = [name for name, _ in sorted(categories.items(), key=lambda kv: kv[1], reverse=True)]
+        next_steps = [next_steps_map[name] for name in ordered_categories if name in next_steps_map]
+        next_steps_text = ", and ".join(next_steps[:3]) if next_steps else "fix whichever paths keep failing in the eval log"
+        project_text = f" Your current project context includes {', '.join(projects)}." if projects else ""
+        topic_text = f" The topics you ask about most are {', '.join(topics)}." if topics else ""
+        return (
+            f"The main things I need to improve right now are {top_categories}. "
+            f"My most recent concrete failures were {latest}. "
+            f"So the right next steps are to {next_steps_text}, and then keep following the eval log instead of guessing. "
+            f"To become more useful to Aman, I should anchor more answers in his real context instead of generic advice.{project_text}{topic_text}"
+        )
+
+    project_text = f" Your current projects include {', '.join(projects)}." if projects else ""
+    topic_text = f" The topics you ask about most are {', '.join(topics)}." if topics else ""
+    return (
+        "I don't have enough recent failure evidence yet to claim a specific weakness with confidence. "
+        "The right move is to keep logging weak answers, then improve whichever failure category repeats most instead of making abstract changes."
+        f"{project_text}{topic_text}"
     )
 
 
@@ -130,6 +211,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(_runtime_status_reply(user_input)), "Status"
     if _is_self_improve_safety_query(lower):
         return _s(_self_improve_safety_reply()), "Self-Improve"
+    if _is_meta_improvement_query(lower):
+        return _s(_meta_improvement_reply()), "Status"
 
     # Timer
     if any(p in lower for p in ("set a timer", "timer for", "remind me in")):
@@ -164,6 +247,11 @@ def route_stream(user_input: str) -> tuple:
     # Browser
     if any(p in lower for p in ("browse to", "open website", "open site", "go to http", "go to www.", "search the web for", "search google for")):
         target = _parse_browser_target(user_input) or user_input
+        click_target = _parse_browser_click_target(user_input)
+        if click_target and (any(p in lower for p in ("summarize this page", "summarise this page", "summarize the current page", "summarise the current page", "summarize the page", "summarise the page")) or re.search(r"\b(and then|then|and)\b\s+summari[sz]e\b", lower)):
+            return _s(browser.open_click_then_summarize(target, click_target, user_input)), "Browser"
+        if click_target:
+            return _s(browser.open_then_click(target, click_target)), "Browser"
         if any(p in lower for p in ("summarize this page", "summarise this page", "summarize the current page", "summarise the current page")) or re.search(r"\b(and then|then|and)\b\s+summari[sz]e\b", lower):
             return _s(browser.open_then_summarize(target, user_input)), "Browser"
         return _s(browser.open_url(target)), "Browser"
@@ -239,7 +327,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             or _parse_browser_target(user_input)
             or user_input
         )
-        click_target = params.get("link_text") or params.get("text") or params.get("label") or ""
+        click_target = params.get("link_text") or params.get("text") or params.get("label") or _parse_browser_click_target(user_input) or ""
 
         if "back" in action:
             return _s(browser.go_back()), "Browser"
@@ -249,6 +337,10 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             return _s(browser.reload_page()), "Browser"
         if "click" in action and click_target:
             return _s(browser.click_text(click_target)), "Browser"
+        if click_target and ("summary" in action or "summarize" in action or "summarise" in action) and target and _parse_browser_target(user_input):
+            return _s(browser.open_click_then_summarize(target, click_target, user_input)), "Browser"
+        if click_target and target and _parse_browser_target(user_input):
+            return _s(browser.open_then_click(target, click_target)), "Browser"
         if ("summary" in action or "summarize" in action or "summarise" in action) and target and _parse_browser_target(user_input):
             return _s(browser.open_then_summarize(target, user_input)), "Browser"
         if "summary" in action or "summarize" in action or "summarise" in lower or "this page" in lower:
