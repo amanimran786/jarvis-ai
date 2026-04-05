@@ -1,0 +1,982 @@
+{
+  "doc_count": 10,
+  "docs": [
+    {
+      "path": "indexes/keyword_index.md",
+      "title": "Vault Keyword Index",
+      "preview": "Vault Keyword Index - should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Ingested File: README.md, Jarvis Vault Strategy - local: Ingested File: README.md, Jarvis Vault Strategy - jarvis: Ingested File: README.md, Jarvis Vault Strategy - context: Ingested File: README.md, Jarvis Vault Strategy - recent: Eval Pattern: self_improve - eval: Eval Pattern: self_improve - improve: Eval Pattern: self_improve - evidence: Eval Pattern: self_improve - self: Eval Pattern: self_improve - eno",
+      "keywords": [
+        "vault",
+        "eval",
+        "pattern",
+        "self",
+        "improve",
+        "jarvis",
+        "strategy",
+        "ingested",
+        "file",
+        "readme",
+        "keyword",
+        "index",
+        "should",
+        "local",
+        "context",
+        "recent",
+        "evidence",
+        "enough",
+        "markdown",
+        "prompt"
+      ],
+      "chars": 800,
+      "sections": [
+        {
+          "heading": "Vault Keyword Index",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "- should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Ingested File: README.md, Jarvis Vault Strategy - local: Ingested File: README.md, Jarvis Vault Strategy - jarvis: Ingested File: README.md, Jarvis Vault Strategy - context: Ingested File: README.md, Jarvis Vault Strategy - recent: Eval Pattern: self_improve - eval: Eval Pattern: self_improve - improve: Eval Pattern: self_improve - evidence: Eval Pattern: self_improve - self: Eval Pattern: self_improve - enough: Eval Pattern: self_improve - pattern: Eval Pattern: self_improve - markdown: Jarvis Vault Strategy - prompt: Jarvis Vault Strategy - topic: Jarvis Vault Strategy - screen: Ingested File: README.md - can: Ingested File: README.md - mode: Ingested File: README.md - skill: Ingested File: README.md",
+          "keywords": [
+            "eval",
+            "pattern",
+            "self",
+            "improve",
+            "jarvis",
+            "vault",
+            "strategy",
+            "ingested",
+            "file",
+            "readme",
+            "should",
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "indexes/source_map.md",
+      "title": "Vault Source Map",
+      "preview": "Vault Source Map - raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/readme-md.md -> wiki/compiled/ingested-file-readme-md.md - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-vault-strategy.md - Jarvis Vault Strategy at line 1",
+      "keywords": [
+        "line",
+        "vault",
+        "jarvis",
+        "raw",
+        "wiki",
+        "compiled",
+        "readme",
+        "strategy",
+        "eval",
+        "self",
+        "improve",
+        "ingested",
+        "file",
+        "source",
+        "map",
+        "patterns",
+        "pattern",
+        "423574acb974",
+        "features"
+      ],
+      "chars": 373,
+      "sections": [
+        {
+          "heading": "Vault Source Map",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "- raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/readme-md.md -> wiki/compiled/ingested-file-readme-md.md - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-vault-strategy.md - Jarvis Vault Strategy at line 1",
+          "keywords": [
+            "line",
+            "jarvis",
+            "raw",
+            "wiki",
+            "compiled",
+            "readme",
+            "vault",
+            "strategy",
+            "eval",
+            "self",
+            "improve",
+            "ingested"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "indexes/topics.md",
+      "title": "Vault Topics",
+      "preview": "Vault Topics Compiled topic pages: 3 Eval Pattern: self_improve Page: wiki/compiled/eval-pattern-self-improve.md Source: raw/eval-self-improve-patterns.md Keywords: recent, eval, improve, evidence, self, should, enough, pattern Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. Citations: - 423574acb974 at line 3 Ingested File: README.md Page: wiki/com",
+      "keywords": [
+        "jarvis",
+        "vault",
+        "self",
+        "line",
+        "eval",
+        "improve",
+        "should",
+        "readme",
+        "strategy",
+        "compiled",
+        "pattern",
+        "source",
+        "ingested",
+        "file",
+        "local",
+        "page",
+        "wiki",
+        "raw",
+        "keywords",
+        "recent"
+      ],
+      "chars": 1460,
+      "sections": [
+        {
+          "heading": "Vault Topics",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Compiled topic pages: 3",
+          "keywords": [
+            "compiled",
+            "topic",
+            "pages"
+          ]
+        },
+        {
+          "heading": "Eval Pattern: self_improve",
+          "level": 2,
+          "page": null,
+          "line_start": 5,
+          "text": "Page: wiki/compiled/eval-pattern-self-improve.md Source: raw/eval-self-improve-patterns.md Keywords: recent, eval, improve, evidence, self, should, enough, pattern Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. Citations: - 423574acb974 at line 3",
+          "keywords": [
+            "eval",
+            "self",
+            "improve",
+            "pattern",
+            "recent",
+            "evidence",
+            "should",
+            "enough",
+            "423574acb974",
+            "page",
+            "wiki",
+            "compiled"
+          ]
+        },
+        {
+          "heading": "Ingested File: README.md",
+          "level": 2,
+          "page": null,
+          "line_start": 13,
+          "text": "Page: wiki/compiled/ingested-file-readme-md.md Source: raw/readme-md.md Keywords: local, jarvis, vault, screen, can, mode, context, skill Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Citations: - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - Requirements at line 28 - Setup at line 35",
+          "keywords": [
+            "readme",
+            "jarvis",
+            "line",
+            "ingested",
+            "file",
+            "source",
+            "local",
+            "page",
+            "wiki",
+            "compiled",
+            "raw",
+            "keywords"
+          ]
+        },
+        {
+          "heading": "Jarvis Vault Strategy",
+          "level": 2,
+          "page": null,
+          "line_start": 25,
+          "text": "Page: wiki/compiled/jarvis-vault-strategy.md Source: raw/jarvis_vault_strategy.md Keywords: vault, should, local, jarvis, markdown, prompt, context, topic Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Citations: - Jarvis Vault Strategy at line 1",
+          "keywords": [
+            "vault",
+            "jarvis",
+            "strategy",
+            "should",
+            "local",
+            "markdown",
+            "prompt",
+            "context",
+            "page",
+            "wiki",
+            "compiled",
+            "source"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/eval-self-improve-patterns.md",
+      "title": "Eval Pattern: self_improve",
+      "preview": "Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete: Not enough recent eval evidence. Need at least 2 recent logged failures.",
+      "keywords": [
+        "recent",
+        "eval",
+        "improve",
+        "evidence",
+        "self",
+        "should",
+        "enough",
+        "pattern",
+        "423574acb974",
+        "issue",
+        "only",
+        "act",
+        "there",
+        "failure",
+        "expected",
+        "require",
+        "before",
+        "proposing",
+        "changes",
+        "user"
+      ],
+      "chars": 405,
+      "sections": [
+        {
+          "heading": "423574acb974",
+          "level": 2,
+          "page": null,
+          "line_start": 3,
+          "text": "Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete: Not enough recent eval evidence. Need at least 2 recent logged failures.",
+          "keywords": [
+            "recent",
+            "evidence",
+            "improve",
+            "should",
+            "enough",
+            "eval",
+            "issue",
+            "self",
+            "only",
+            "act",
+            "there",
+            "failure"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/jarvis_vault_strategy.md",
+      "title": "Jarvis Vault Strategy",
+      "preview": "Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regenerated from local files instead of being hidden in model context. When a request can be answered from local markdown, Jarvis should load only the smallest relevant snippets for that request. The ",
+      "keywords": [
+        "vault",
+        "should",
+        "local",
+        "jarvis",
+        "markdown",
+        "prompt",
+        "context",
+        "topic",
+        "request",
+        "strategy",
+        "use",
+        "before",
+        "grows",
+        "relies",
+        "long",
+        "conversational",
+        "carry",
+        "over",
+        "stay",
+        "inspectable"
+      ],
+      "chars": 575,
+      "sections": [
+        {
+          "heading": "Jarvis Vault Strategy",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regenerated from local files instead of being hidden in model context. When a request can be answered from local markdown, Jarvis should load only the smallest relevant snippets for that request. The vault is not a giant prompt dump. It is a searchable local knowledge layer.",
+          "keywords": [
+            "should",
+            "local",
+            "vault",
+            "jarvis",
+            "markdown",
+            "prompt",
+            "context",
+            "topic",
+            "request",
+            "use",
+            "before",
+            "grows"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/readme-md.md",
+      "title": "Ingested File: README.md",
+      "preview": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Features - **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, H",
+      "keywords": [
+        "local",
+        "jarvis",
+        "vault",
+        "screen",
+        "can",
+        "mode",
+        "context",
+        "skill",
+        "prompt",
+        "self",
+        "skills",
+        "wiki",
+        "memory",
+        "request",
+        "into",
+        "current",
+        "raw",
+        "indexes",
+        "file",
+        "macos"
+      ],
+      "chars": 6680,
+      "sections": [
+        {
+          "heading": "Ingested File: README.md",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Source path: /Users/truthseeker/jarvis-ai/README.md",
+          "keywords": [
+            "source",
+            "path",
+            "users",
+            "truthseeker",
+            "jarvis",
+            "readme"
+          ]
+        },
+        {
+          "heading": "Jarvis AI",
+          "level": 1,
+          "page": null,
+          "line_start": 5,
+          "text": "A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+          "keywords": [
+            "personal",
+            "voice",
+            "text",
+            "assistant",
+            "macos",
+            "jarvis",
+            "combines",
+            "local",
+            "first",
+            "inference",
+            "cloud",
+            "escalation"
+          ]
+        },
+        {
+          "heading": "Features",
+          "level": 2,
+          "page": null,
+          "line_start": 9,
+          "text": "- **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs",
+          "keywords": [
+            "screen",
+            "local",
+            "can",
+            "only",
+            "task",
+            "context",
+            "jarvis",
+            "prompt",
+            "into",
+            "markdown",
+            "vault",
+            "text"
+          ]
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "page": null,
+          "line_start": 28,
+          "text": "- macOS - Python 3.12+ - for local model support - (optional) for capturing call audio in meeting mode",
+          "keywords": [
+            "macos",
+            "python",
+            "local",
+            "model",
+            "support",
+            "optional",
+            "capturing",
+            "call",
+            "audio",
+            "meeting",
+            "mode"
+          ]
+        },
+        {
+          "heading": "Setup",
+          "level": 2,
+          "page": null,
+          "line_start": 35,
+          "text": "1. Clone the repo: 2. Create and activate a virtual environment: 3. Install dependencies: 4. Create a .env file in the project root: 5. Optional: add credentials.json from Google Cloud Console for Calendar/Gmail OAuth. 6. Install and pull the recommended local models: 7. Grant macOS permissions when prompted: - Accessibility, so global hotkeys and input automation can work - Contacts, so first-run iMessage contact lookup can succeed - Microphone, camera, and screen recording as needed for voice, webcam, and screen analysis - Automation permissions for controlling apps like Safari, Messages, and Terminal",
+          "keywords": [
+            "create",
+            "install",
+            "permissions",
+            "automation",
+            "can",
+            "screen",
+            "clone",
+            "repo",
+            "activate",
+            "virtual",
+            "environment",
+            "dependencies"
+          ]
+        },
+        {
+          "heading": "Running",
+          "level": 2,
+          "page": null,
+          "line_start": 79,
+          "text": "```bash",
+          "keywords": [
+            "bash"
+          ]
+        },
+        {
+          "heading": "GUI mode (default)",
+          "level": 1,
+          "page": null,
+          "line_start": 82,
+          "text": "./run.sh",
+          "keywords": [
+            "run"
+          ]
+        },
+        {
+          "heading": "Headless / terminal-only",
+          "level": 1,
+          "page": null,
+          "line_start": 85,
+          "text": "./run.sh --no-ui `` Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto`",
+          "keywords": [
+            "local",
+            "get",
+            "vault",
+            "current",
+            "post",
+            "inspect",
+            "jarvis",
+            "status",
+            "mode",
+            "chat",
+            "context",
+            "memory"
+          ]
+        },
+        {
+          "heading": "Skills",
+          "level": 2,
+          "page": null,
+          "line_start": 99,
+          "text": "Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it.",
+          "keywords": [
+            "skill",
+            "skills",
+            "jarvis",
+            "index",
+            "holds",
+            "load",
+            "browser",
+            "self",
+            "now",
+            "supports",
+            "local",
+            "layer"
+          ]
+        },
+        {
+          "heading": "Hotkeys",
+          "level": 2,
+          "page": null,
+          "line_start": 115,
+          "text": "All hotkeys use Cmd + Option and work system-wide, even during screen share. | Hotkey | Action | |---|---| | \u2318\u2325J | Capture screen \u2192 Jarvis analyzes it | | \u2318\u2325K | Capture webcam frame \u2192 Jarvis analyzes it | | \u2318\u2325L | Read clipboard \u2192 Jarvis responds | | \u2318\u2325M | Toggle Smart Listen (meeting audio) | | \u2318\u2325O | Toggle Meeting Overlay HUD | | \u2318\u2325; | Toggle Jarvis window visibility |",
+          "keywords": [
+            "jarvis",
+            "toggle",
+            "screen",
+            "capture",
+            "analyzes",
+            "meeting",
+            "all",
+            "hotkeys",
+            "use",
+            "cmd",
+            "option",
+            "work"
+          ]
+        },
+        {
+          "heading": "Configuration",
+          "level": 2,
+          "page": null,
+          "line_start": 154,
+          "text": "All model identifiers and the system prompt live in config.py. Change models there, not inline. Model routing mode can be switched at runtime via natural language: - *\"switch to cloud mode\"* - *\"switch to local mode\"* - *\"switch to auto mode\"* Current recommended local defaults: - llama3.1:8b for general local conversation - qwen2.5-coder:7b for coding tasks - mistral for stronger local reasoning auto mode is the default and is intended to keep API usage low without forcing everything through weaker local models. Jarvis now also tracks prompt footprint per request. /chat responses include a context object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.",
+          "keywords": [
+            "mode",
+            "local",
+            "prompt",
+            "switch",
+            "model",
+            "models",
+            "can",
+            "auto",
+            "context",
+            "size",
+            "all",
+            "identifiers"
+          ]
+        },
+        {
+          "heading": "Vault",
+          "level": 2,
+          "page": null,
+          "line_start": 174,
+          "text": "Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base. Jarvis also searches the vault automatically for knowledge-seeking requests and injects only the most relevant snippets into the active request. You can also say build the vault wiki or compile the wiki. That runs the deterministic wiki_builder.py pipeline, which turns files in vault/raw/ into compiled pages under vault/wiki/compiled/ and refreshes the topic and keyword indexes in vault/indexes/.",
+          "keywords": [
+            "vault",
+            "wiki",
+            "indexes",
+            "raw",
+            "jarvis",
+            "local",
+            "topic",
+            "pages",
+            "generated",
+            "knowledge",
+            "also",
+            "into"
+          ]
+        },
+        {
+          "heading": "Self-Improve Safety",
+          "level": 2,
+          "page": null,
+          "line_start": 187,
+          "text": "Jarvis can modify parts of its own source, but the apply path is guarded: - generated Python is syntax-validated before any file is changed - the original file is backed up to .jarvis_backups/ - writes go through a temporary file and atomic replace - Jarvis tells you to restart after a successful self-improve run so modules reload cleanly",
+          "keywords": [
+            "jarvis",
+            "file",
+            "can",
+            "modify",
+            "parts",
+            "its",
+            "own",
+            "source",
+            "apply",
+            "path",
+            "guarded",
+            "generated"
+          ]
+        },
+        {
+          "heading": "Security",
+          "level": 2,
+          "page": null,
+          "line_start": 196,
+          "text": "- API keys are loaded from .env and never hardcoded - credentials.json and token.json are gitignored - memory, knowledge, backup, and session files stay local - meeting overlay is invisible to screen share via NSWindowSharingNone",
+          "keywords": [
+            "json",
+            "api",
+            "keys",
+            "loaded",
+            "env",
+            "never",
+            "hardcoded",
+            "credentials",
+            "token",
+            "gitignored",
+            "memory",
+            "knowledge"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/compiled/eval-pattern-self-improve.md",
+      "title": "Eval Pattern: self_improve",
+      "preview": "Eval Pattern: self_improve Source file: raw/eval-self-improve-patterns.md Summary Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. Key Terms recent, eval, improve, evidence, self, should, enough, pattern, 423574acb974, issue, only, act Citation Map - 423574acb974 at line 3: Issue: Self-improve should only act when there is enough recent failure evide",
+      "keywords": [
+        "self",
+        "improve",
+        "eval",
+        "should",
+        "recent",
+        "evidence",
+        "pattern",
+        "423574acb974",
+        "issue",
+        "only",
+        "act",
+        "enough",
+        "there",
+        "failure",
+        "source",
+        "file",
+        "raw",
+        "patterns",
+        "summary",
+        "expected"
+      ],
+      "chars": 504,
+      "sections": [
+        {
+          "heading": "Eval Pattern: self_improve",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Source file: raw/eval-self-improve-patterns.md",
+          "keywords": [
+            "source",
+            "file",
+            "raw",
+            "eval",
+            "self",
+            "improve",
+            "patterns"
+          ]
+        },
+        {
+          "heading": "Summary",
+          "level": 2,
+          "page": null,
+          "line_start": 5,
+          "text": "Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.",
+          "keywords": [
+            "eval",
+            "self",
+            "improve",
+            "should",
+            "recent",
+            "evidence",
+            "pattern",
+            "423574acb974",
+            "issue",
+            "only",
+            "act",
+            "there"
+          ]
+        },
+        {
+          "heading": "Key Terms",
+          "level": 2,
+          "page": null,
+          "line_start": 8,
+          "text": "recent, eval, improve, evidence, self, should, enough, pattern, 423574acb974, issue, only, act",
+          "keywords": [
+            "recent",
+            "eval",
+            "improve",
+            "evidence",
+            "self",
+            "should",
+            "enough",
+            "pattern",
+            "423574acb974",
+            "issue",
+            "only",
+            "act"
+          ]
+        },
+        {
+          "heading": "Citation Map",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "text": "- 423574acb974 at line 3: Issue: Self-improve should only act when there is enough recent failure evidence.",
+          "keywords": [
+            "423574acb974",
+            "line",
+            "issue",
+            "self",
+            "improve",
+            "should",
+            "only",
+            "act",
+            "there",
+            "enough",
+            "recent",
+            "failure"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/compiled/ingested-file-readme-md.md",
+      "title": "Ingested File: README.md",
+      "preview": "Ingested File: README.md Source file: raw/readme-md.md Summary Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Key Terms local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, wiki Citation Map - Ingested File: README.md at line ",
+      "keywords": [
+        "vault",
+        "local",
+        "jarvis",
+        "line",
+        "skill",
+        "screen",
+        "skills",
+        "context",
+        "prompt",
+        "readme",
+        "raw",
+        "self",
+        "mode",
+        "source",
+        "macos",
+        "memory",
+        "live",
+        "can",
+        "only",
+        "markdown"
+      ],
+      "chars": 4653,
+      "sections": [
+        {
+          "heading": "Ingested File: README.md",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Source file: raw/readme-md.md",
+          "keywords": [
+            "source",
+            "file",
+            "raw",
+            "readme"
+          ]
+        },
+        {
+          "heading": "Summary",
+          "level": 2,
+          "page": null,
+          "line_start": 5,
+          "text": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+          "keywords": [
+            "jarvis",
+            "readme",
+            "ingested",
+            "file",
+            "source",
+            "path",
+            "users",
+            "truthseeker",
+            "personal",
+            "voice",
+            "text",
+            "assistant"
+          ]
+        },
+        {
+          "heading": "Key Terms",
+          "level": 2,
+          "page": null,
+          "line_start": 8,
+          "text": "local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, wiki",
+          "keywords": [
+            "local",
+            "jarvis",
+            "vault",
+            "screen",
+            "can",
+            "mode",
+            "context",
+            "skill",
+            "prompt",
+            "self",
+            "skills",
+            "wiki"
+          ]
+        },
+        {
+          "heading": "Citation Map",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "text": "- Ingested File: README.md at line 1: Source path: /Users/truthseeker/jarvis-ai/README.md - Jarvis AI at line 5: A personal voice + text AI assistant for macOS. - Features at line 9: - **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs - Requirements at line 28: - macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode - Setup at line 35: 1. - Running at line 79: ``bash - GUI mode (default) at line 82: ./run.sh - Headless / terminal-only at line 85: ./run.sh --no-ui Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto - Skills at line 99: Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it. - Hotkeys at line 115: All hotkeys use Cmd + Option and work system-wide, even during screen share. - Configuration at line 154: All model identifiers and the system prompt live in config.py. - Vault at line 174: Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base.",
+          "keywords": [
+            "vault",
+            "local",
+            "line",
+            "jarvis",
+            "skill",
+            "skills",
+            "screen",
+            "context",
+            "prompt",
+            "only",
+            "markdown",
+            "current"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/compiled/jarvis-vault-strategy.md",
+      "title": "Jarvis Vault Strategy",
+      "preview": "Jarvis Vault Strategy Source file: raw/jarvis_vault_strategy.md Summary Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Key Terms vault, should, local, jarvis, markdown, prompt, context, topic, request, strategy, use, before Citation Map - Jarvis Vault Strategy at line 1: Jarvis should use a local markdown vault before it grows prompt context or relies on long c",
+      "keywords": [
+        "vault",
+        "jarvis",
+        "strategy",
+        "should",
+        "use",
+        "local",
+        "markdown",
+        "before",
+        "prompt",
+        "context",
+        "grows",
+        "relies",
+        "long",
+        "conversational",
+        "carry",
+        "over",
+        "source",
+        "file",
+        "raw",
+        "summary"
+      ],
+      "chars": 525,
+      "sections": [
+        {
+          "heading": "Jarvis Vault Strategy",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Source file: raw/jarvis_vault_strategy.md",
+          "keywords": [
+            "source",
+            "file",
+            "raw",
+            "jarvis",
+            "vault",
+            "strategy"
+          ]
+        },
+        {
+          "heading": "Summary",
+          "level": 2,
+          "page": null,
+          "line_start": 5,
+          "text": "Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap.",
+          "keywords": [
+            "vault",
+            "jarvis",
+            "should",
+            "strategy",
+            "use",
+            "local",
+            "markdown",
+            "before",
+            "grows",
+            "prompt",
+            "context",
+            "relies"
+          ]
+        },
+        {
+          "heading": "Key Terms",
+          "level": 2,
+          "page": null,
+          "line_start": 8,
+          "text": "vault, should, local, jarvis, markdown, prompt, context, topic, request, strategy, use, before",
+          "keywords": [
+            "vault",
+            "should",
+            "local",
+            "jarvis",
+            "markdown",
+            "prompt",
+            "context",
+            "topic",
+            "request",
+            "strategy",
+            "use",
+            "before"
+          ]
+        },
+        {
+          "heading": "Citation Map",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "text": "- Jarvis Vault Strategy at line 1: Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over.",
+          "keywords": [
+            "jarvis",
+            "vault",
+            "strategy",
+            "line",
+            "should",
+            "use",
+            "local",
+            "markdown",
+            "before",
+            "grows",
+            "prompt",
+            "context"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/overview.md",
+      "title": "Jarvis Local Vault Overview",
+      "preview": "Jarvis Local Vault Overview This vault exists so Jarvis can rely on indexed local markdown knowledge before growing prompts or depending on long chat carry-over. The current design goal is simple: Keep source material organized. Build small searchable indexes. Load only the relevant snippets for the current request.",
+      "keywords": [
+        "jarvis",
+        "local",
+        "vault",
+        "current",
+        "overview",
+        "exists",
+        "can",
+        "rely",
+        "indexed",
+        "markdown",
+        "knowledge",
+        "before",
+        "growing",
+        "prompts",
+        "depending",
+        "long",
+        "chat",
+        "carry",
+        "over",
+        "design"
+      ],
+      "chars": 317,
+      "sections": [
+        {
+          "heading": "Jarvis Local Vault Overview",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "This vault exists so Jarvis can rely on indexed local markdown knowledge before growing prompts or depending on long chat carry-over. The current design goal is simple: Keep source material organized. Build small searchable indexes. Load only the relevant snippets for the current request.",
+          "keywords": [
+            "current",
+            "vault",
+            "exists",
+            "jarvis",
+            "can",
+            "rely",
+            "indexed",
+            "local",
+            "markdown",
+            "knowledge",
+            "before",
+            "growing"
+          ]
+        }
+      ]
+    }
+  ]
+}

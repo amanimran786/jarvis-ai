@@ -3,6 +3,7 @@ import base64
 import email as email_lib
 import email.mime.text
 from datetime import datetime, timedelta, timezone
+import re
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -11,6 +12,7 @@ from googleapiclient.discovery import build
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 BASE_DIR = os.path.dirname(__file__)
@@ -39,6 +41,63 @@ def _calendar():
 
 def _gmail():
     return build("gmail", "v1", credentials=_get_creds())
+
+
+def _drive():
+    return build("drive", "v3", credentials=_get_creds())
+
+
+def _extract_drive_file_id(source: str) -> str | None:
+    if not source:
+        return None
+    match = re.search(r"/d/([a-zA-Z0-9_-]+)", source)
+    if match:
+        return match.group(1)
+    match = re.search(r"[?&]id=([a-zA-Z0-9_-]+)", source)
+    if match:
+        return match.group(1)
+    if re.fullmatch(r"[a-zA-Z0-9_-]{20,}", source.strip()):
+        return source.strip()
+    return None
+
+
+def get_drive_file_text(source: str) -> dict:
+    file_id = _extract_drive_file_id(source)
+    if not file_id:
+        raise ValueError("Could not extract a Google Drive file ID from that source.")
+
+    meta = _drive().files().get(
+        fileId=file_id,
+        fields="id,name,mimeType,webViewLink",
+        supportsAllDrives=True,
+    ).execute()
+    mime_type = meta.get("mimeType", "")
+    name = meta.get("name", file_id)
+    web_url = meta.get("webViewLink") or source
+
+    if mime_type == "application/vnd.google-apps.document":
+        payload = _drive().files().export_media(fileId=file_id, mimeType="text/plain").execute()
+        text = payload.decode("utf-8", errors="replace")
+    elif mime_type == "application/vnd.google-apps.spreadsheet":
+        payload = _drive().files().export_media(fileId=file_id, mimeType="text/csv").execute()
+        text = payload.decode("utf-8", errors="replace")
+    elif mime_type == "application/pdf":
+        payload = _drive().files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+        text = payload
+    else:
+        payload = _drive().files().get_media(fileId=file_id, supportsAllDrives=True).execute()
+        if isinstance(payload, bytes):
+            text = payload.decode("utf-8", errors="replace")
+        else:
+            text = str(payload)
+
+    return {
+        "id": file_id,
+        "name": name,
+        "mime_type": mime_type,
+        "web_url": web_url,
+        "text": text,
+    }
 
 
 # ── Calendar ──────────────────────────────────────────────────────────────────

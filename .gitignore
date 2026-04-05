@@ -5,12 +5,18 @@ token.json
 
 # Runtime state
 .jarvis_port
+.jarvis_crash.log
 
 # Persistent runtime data
 memory.json
 knowledge.json
 last_session.json
 evals.json
+training/exports/
+training/distilled/
+training/modelfiles/
+training/packs/
+training/handoffs/
 
 # Self-improvement backups
 .jarvis_backups/

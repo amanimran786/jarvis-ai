@@ -4,7 +4,6 @@ fastapi
 uvicorn
 elevenlabs
 pyserial
-anthropic
 python-dotenv
 pyttsx3
 SpeechRecognition
@@ -17,4 +16,5 @@ opencv-python
 PyQt6
 pyobjc-framework-Cocoa
 ollama
+pypdf
 # self_improve uses stdlib only (difflib, shutil, subprocess)

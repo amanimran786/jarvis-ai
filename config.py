@@ -20,6 +20,7 @@ SONNET     = "claude-sonnet-4-6"
 OPUS       = "claude-opus-4-6"
 
 # Local model tiers (Ollama — no restrictions, fully private)
+LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
 LOCAL_DEFAULT   = "llama3.1:8b"
 LOCAL_CODER     = "qwen2.5-coder:7b"
 LOCAL_REASONING = "mistral"
@@ -63,6 +64,7 @@ Response rules:
 - Every interaction is an opportunity to learn more about the owner and serve them better
 - Never invent your underlying model, training history, or system state
 - If asked about your current model or mode, only state what the runtime has actually provided
+- For technical questions, answer like a strong software engineer: lead with the conclusion, name the real tradeoff or likely causes, and explain how to verify or narrow them down
 
 CRITICAL formatting rule — your output is spoken aloud by a text-to-speech engine:
 - NEVER use markdown: no **, no ##, no -, no numbered lists, no bullet points, no code fences

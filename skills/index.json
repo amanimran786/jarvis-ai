@@ -2,6 +2,26 @@
   "version": 1,
   "skills": [
     {
+      "id": "architecture_design",
+      "name": "Architecture Design",
+      "description": "Handle system design, API design, scaling, and tradeoff questions with clear structure and practical engineering judgment.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "architecture",
+        "system design",
+        "design this system",
+        "scaling",
+        "microservice",
+        "distributed system",
+        "tradeoff"
+      ],
+      "path": "architecture_design/SKILL.md",
+      "resources": [
+        "architecture_design/references/design_rules.md"
+      ]
+    },
+    {
       "id": "browser_execution",
       "name": "Browser Execution",
       "description": "Handle live browser navigation, multi-step page actions, and page summaries with recovery instead of vague chat.",
@@ -19,6 +39,187 @@
       "path": "browser_execution/SKILL.md",
       "resources": [
         "browser_execution/references/browser_patterns.md"
+      ]
+    },
+    {
+      "id": "code_implementation",
+      "name": "Code Implementation",
+      "description": "Write and modify code with focused diffs, explicit assumptions, and minimal breakage risk.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "implement",
+        "write the code",
+        "patch this",
+        "fix this code",
+        "add a feature",
+        "modify this file",
+        "write a function"
+      ],
+      "path": "code_implementation/SKILL.md",
+      "resources": [
+        "code_implementation/references/implementation_rules.md"
+      ]
+    },
+    {
+      "id": "code_review",
+      "name": "Code Review",
+      "description": "Review code like a senior engineer and prioritize concrete bugs, regressions, and missing tests.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "review this code",
+        "code review",
+        "review this pr",
+        "what could break",
+        "regression risk",
+        "review the diff"
+      ],
+      "path": "code_review/SKILL.md",
+      "resources": [
+        "code_review/references/review_rules.md"
+      ]
+    },
+    {
+      "id": "debugging_diagnostics",
+      "name": "Debugging Diagnostics",
+      "description": "Debug software failures by ranking likely causes, naming evidence to collect, and narrowing quickly.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "debug",
+        "traceback",
+        "stack trace",
+        "failing test",
+        "exception",
+        "not working",
+        "why does this crash"
+      ],
+      "path": "debugging_diagnostics/SKILL.md",
+      "resources": [
+        "debugging_diagnostics/references/debugging_rules.md"
+      ]
+    },
+    {
+      "id": "engineering_reasoning",
+      "name": "Engineering Reasoning",
+      "description": "Answer technical software-engineering questions like a strong senior engineer: direct, concrete, and diagnostic rather than generic.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "memory leak",
+        "race condition",
+        "distributed system",
+        "optimistic locking",
+        "pessimistic locking",
+        "fastapi",
+        "nginx",
+        "dockerized"
+      ],
+      "path": "engineering_reasoning/SKILL.md",
+      "resources": [
+        "engineering_reasoning/references/engineering_rules.md"
+      ]
+    },
+    {
+      "id": "eval-pattern-self-improve",
+      "name": "Eval Pattern Self Improve",
+      "description": "Use local vault knowledge about Eval Pattern: self_improve.",
+      "tool": "self_improve",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "eval",
+        "eval pattern self_improve",
+        "eval pattern: self_improve",
+        "evidence",
+        "improve",
+        "recent",
+        "self",
+        "should"
+      ],
+      "path": "eval-pattern-self-improve/SKILL.md",
+      "resources": [
+        "eval-pattern-self-improve/references/vault_context.md"
+      ]
+    },
+    {
+      "id": "jarvis-local-vault-overview",
+      "name": "Jarvis Local Vault Overview",
+      "description": "Use local vault knowledge about Jarvis Local Vault Overview.",
+      "tool": "chat",
+      "cost_hint": "local",
+      "triggers": [
+        "current",
+        "exists",
+        "jarvis",
+        "jarvis local vault overview",
+        "local",
+        "local markdown knowledge",
+        "overview",
+        "vault"
+      ],
+      "path": "jarvis-local-vault-overview/SKILL.md",
+      "resources": [
+        "jarvis-local-vault-overview/references/vault_context.md"
+      ]
+    },
+    {
+      "id": "local_knowledge",
+      "name": "Local Knowledge Vault",
+      "description": "Search indexed local markdown knowledge before relying on long chat carry-over or cloud research.",
+      "tool": "knowledge",
+      "cost_hint": "local",
+      "triggers": [
+        "vault",
+        "knowledge base",
+        "local knowledge",
+        "wiki",
+        "search the vault",
+        "from the vault",
+        "index the vault"
+      ],
+      "path": "local_knowledge/SKILL.md",
+      "resources": [
+        "local_knowledge/references/vault_rules.md"
+      ]
+    },
+    {
+      "id": "local_model_tuning",
+      "name": "Local Model Tuning",
+      "description": "Improve Jarvis's local model quality through dataset export, selective distillation, and tuned Ollama targets instead of blindly paying for every answer.",
+      "tool": "local_model",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "train local model",
+        "train local models",
+        "improve local model",
+        "distill local examples",
+        "export training dataset",
+        "ollama tuning",
+        "modelfile"
+      ],
+      "path": "local_model_tuning/SKILL.md",
+      "resources": [
+        "local_model_tuning/references/tuning_rules.md"
+      ]
+    },
+    {
+      "id": "planning_execution",
+      "name": "Planning and Execution",
+      "description": "Break complex requests into ordered steps, decide what to do first, and verify before declaring success.",
+      "tool": "chat",
+      "cost_hint": "haiku",
+      "triggers": [
+        "plan this",
+        "step by step",
+        "what should i do first",
+        "workflow",
+        "end to end",
+        "multi step"
+      ],
+      "path": "planning_execution/SKILL.md",
+      "resources": [
+        "planning_execution/references/planning_rules.md"
       ]
     },
     {
@@ -42,6 +243,25 @@
       ]
     },
     {
+      "id": "research_synthesis",
+      "name": "Research Synthesis",
+      "description": "Handle research questions by comparing sources, separating fact from inference, and producing a tight synthesis.",
+      "tool": "deep_research",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "research",
+        "deep dive",
+        "full report",
+        "compare sources",
+        "synthesize this",
+        "cited report"
+      ],
+      "path": "research_synthesis/SKILL.md",
+      "resources": [
+        "research_synthesis/references/research_rules.md"
+      ]
+    },
+    {
       "id": "self_improvement",
       "name": "Self Improvement",
       "description": "Keep self-editing evidence-gated, concrete, and file-targeted instead of speculative.",
@@ -59,6 +279,46 @@
       "path": "self_improvement/SKILL.md",
       "resources": [
         "self_improvement/references/self_improve_policy.md"
+      ]
+    },
+    {
+      "id": "source_grounding",
+      "name": "Source Grounding",
+      "description": "Ground answers in inspectable sources, prefer exact citations, and avoid invented authority.",
+      "tool": "knowledge",
+      "cost_hint": "local",
+      "triggers": [
+        "cite this",
+        "source",
+        "citation",
+        "exact file",
+        "which section",
+        "page number",
+        "ground this"
+      ],
+      "path": "source_grounding/SKILL.md",
+      "resources": [
+        "source_grounding/references/citation_rules.md"
+      ]
+    },
+    {
+      "id": "writing_editor",
+      "name": "Writing Editor",
+      "description": "Rewrite drafts for clarity, tone, concision, and structure without losing the underlying point.",
+      "tool": "chat",
+      "cost_hint": "haiku",
+      "triggers": [
+        "rewrite this",
+        "rephrase",
+        "edit this",
+        "tighten this",
+        "make this concise",
+        "draft a message",
+        "polish this"
+      ],
+      "path": "writing_editor/SKILL.md",
+      "resources": [
+        "writing_editor/references/editing_rules.md"
       ]
     }
   ]

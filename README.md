@@ -6,14 +6,19 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
 
 - **Voice + text interface** — speech-to-text input, ElevenLabs TTS output, and a desktop chat UI
 - **Local-first model routing** — Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost
+- **Local-model improvement loop** — Jarvis can export strong interaction datasets, distill repeated failures into better teacher answers, and generate tuned Ollama model targets so the local path gets stronger over time
 - **Persistent memory** — remembers facts, preferences, projects, and recent context from local JSON stores
 - **Local skills** — lightweight skill metadata stays cheap to load, while full `SKILL.md` instructions and references load only for the active request
+- **Specialist skill bench** — Jarvis can stack a small set of specialist skills per request for planning, coding, debugging, review, architecture, writing, research, and source-grounded answers
 - **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary
+- **Local markdown vault** — indexed markdown files in `vault/` can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward, with citations to exact local files and headings
+- **Wiki compiler** — raw markdown in `vault/raw/` can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval
+- **Structured source ingestion** — PDFs keep page boundaries, PowerPoint decks keep slide boundaries, and Google Drive sources can be pulled into the vault before indexing
 - **Self-learning** — background knowledge feed, fact extraction, and daily reflection
 - **Live browser control** — open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons
 - **System control** — volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands
 - **Admin command path** — can run a terminal command through the native macOS administrator prompt when explicitly asked
-- **Google integration** — Calendar and Gmail read/create/send via OAuth2
+- **Google integration** — Calendar and Gmail read/create/send via OAuth2, plus Google Drive document ingestion into the local vault
 - **Meeting overlay** — floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share
 - **Webcam + screen vision** — image and screen analysis from the camera and desktop
 - **Self-improvement** — Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically
@@ -53,7 +58,7 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
    ELEVENLABS_VOICE_ID=...   # optional, defaults to George
    ```
 
-5. Optional: add `credentials.json` from Google Cloud Console for Calendar/Gmail OAuth.
+5. Optional: add `credentials.json` from Google Cloud Console for Calendar/Gmail/Drive OAuth.
 
 6. Install and pull the recommended local models:
    ```bash
@@ -85,6 +90,14 @@ Jarvis exposes a local API while running:
 - `GET /status` — current mode and local-model availability
 - `POST /chat` — chat with Jarvis
 - `GET /context` — inspect current prompt/session footprint and recent request context stats
+- `GET /vault` — inspect the current local vault index status
+- `POST /vault/build` — compile raw markdown into wiki pages and rebuild the vault indexes
+- `GET /local/training/status` — inspect exported datasets, distilled examples, and Modelfiles for local tuning
+- `POST /local/training/export` — export successful interaction examples into JSONL for local SFT
+- `POST /local/training/distill` — ask a stronger teacher model to rewrite failed cases into better training targets
+- `POST /local/training/modelfile` — generate an Ollama Modelfile for the tuned Jarvis local model target
+- `POST /local/training/run` — run the full export + distill + pack + Modelfile pipeline in one call
+- `POST /local/training/handoff` — build offline Unsloth and Axolotl fine-tune handoff folders from the latest training pack
 - `GET /memory` — inspect saved memory
 - `POST /mode` — switch `local`, `cloud`, or `auto`
 
@@ -96,13 +109,23 @@ Jarvis now supports a local skill layer under `skills/`:
 - `skills/<skill_id>/SKILL.md` holds the full L2 skill instructions
 - `skills/<skill_id>/references/` holds L3 reference files that load only when that skill is active
 
-The first built-in skills are:
+The current built-in skills include:
 
 - `browser_execution` for live browser navigation and page-action recovery
+- `planning_execution` for ordered multi-step planning and finish conditions
+- `code_implementation` for focused code changes and implementation guidance
+- `debugging_diagnostics` for ranked root-cause analysis and narrowing steps
+- `code_review` for senior-style review focused on bugs and regressions
+- `architecture_design` for system design and tradeoff questions
+- `engineering_reasoning` for technical software-engineering answers
+- `writing_editor` for rewrite, tone, and concision requests
+- `research_synthesis` for source comparison and grounded research summaries
+- `local_knowledge` and `source_grounding` for vault-first, citation-aware answers
+- `local_model_tuning` for dataset export, selective distillation, and tuned Ollama targets
 - `personal_context` for Aman-specific answers grounded in memory and eval signals
 - `self_improvement` for evidence-gated self-editing behavior
 
-This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it.
+Jarvis now loads a small relevant skill stack per request instead of relying on one giant baseline prompt.
 
 ## Hotkeys
 
@@ -128,6 +151,9 @@ orchestrator.py      # Layer 2 intent classification into tool decisions
 model_router.py      # Layer 3 model selection: Local -> GPT-mini -> Haiku -> Sonnet -> Opus
 skills.py            # Local skill registry, matching, and on-demand SKILL.md loading
 conversation_context.py  # Shared task-scoped chat session manager and prompt compaction
+vault.py                 # Local markdown vault indexing, citation-aware search, and snippet loading
+wiki_builder.py          # Deterministic wiki compiler with section metadata
+source_ingest.py         # Structured ingest for files, PDFs, slides, URLs, and Google Drive
 brain.py             # OpenAI backend
 brain_claude.py      # Anthropic backend
 brain_ollama.py      # Ollama backend
@@ -139,6 +165,7 @@ overlay.py           # Floating meeting HUD
 meeting_listener.py  # BlackHole audio capture and Whisper transcription
 self_improve.py      # Self-rewriting pipeline with backup and syntax validation
 skills/              # Local skill packages: metadata index, SKILL.md files, references
+vault/               # Local markdown knowledge layer: raw, wiki, indexes, outputs
 ```
 
 ## Configuration
@@ -153,13 +180,50 @@ Model routing mode can be switched at runtime via natural language:
 
 Current recommended local defaults:
 
+- `jarvis-local` as the preferred tuned general model target once you create it in Ollama
 - `llama3.1:8b` for general local conversation
 - `qwen2.5-coder:7b` for coding tasks
 - `mistral` for stronger local reasoning
 
 `auto` mode is the default and is intended to keep API usage low without forcing everything through weaker local models.
 
+Jarvis now also includes a local-model improvement loop. The intended low-cost order is:
+
+- export strong successful cloud answers into SFT-style JSONL
+- distill only repeated failures or weak local answers with a stronger teacher
+- build and register a tuned Ollama target such as `jarvis-local`
+- let general local routing prefer that tuned model automatically once it exists
+
+The one-shot path is now available too: Jarvis can build a merged local training pack that combines exported strong examples with distilled failure corrections and writes a manifest plus Modelfile for the target model.
+
+Jarvis can also emit offline fine-tune handoff folders for `llama3.1:8b` and `qwen2.5-coder:7b`. Each handoff contains:
+
+- train and validation JSONL splits in conversation format
+- train and validation JSONL splits in instruction format
+- a baseline Unsloth training script
+- a baseline Axolotl QLoRA config
+- a per-target manifest and handoff README
+
 Jarvis now also tracks prompt footprint per request. `/chat` responses include a `context` object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.
+
+## Vault
+
+Jarvis now includes a local markdown vault:
+
+- `vault/raw/` for raw source material
+- `vault/wiki/` for cleaned topic pages
+- `vault/indexes/` for generated indexes
+- `vault/outputs/` for generated reports and artifacts
+
+Use phrases like `refresh the vault index`, `search the vault for X`, or `what's in your local knowledge base`. Jarvis also searches the vault automatically for knowledge-seeking requests and injects only the most relevant snippets into the active request.
+
+You can also say `build the vault wiki` or `compile the wiki`. That runs the deterministic `wiki_builder.py` pipeline, which turns files in `vault/raw/` into compiled pages under `vault/wiki/compiled/` and refreshes the topic and keyword indexes in `vault/indexes/`.
+
+Vault search is citation-aware. Jarvis can now point to the exact local file and heading it used, and ingested PDFs/slides preserve page or slide boundaries instead of flattening everything into one text block.
+
+You can ingest local files, repositories, notes, normal URLs, and Google Drive links through the API:
+
+- `POST /vault/ingest` with `source_type` set to `auto`, `google_drive`, `directory`, `url`, or `notes`
 
 ## Self-Improve Safety
 

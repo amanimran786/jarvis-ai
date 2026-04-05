@@ -1,0 +1,186 @@
+{
+  "page_count": 3,
+  "pages": [
+    {
+      "title": "Eval Pattern: self_improve",
+      "slug": "eval-pattern-self-improve",
+      "source": "raw/eval-self-improve-patterns.md",
+      "page": "wiki/compiled/eval-pattern-self-improve.md",
+      "summary": "Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.",
+      "keywords": [
+        "recent",
+        "eval",
+        "improve",
+        "evidence",
+        "self",
+        "should",
+        "enough",
+        "pattern",
+        "423574acb974",
+        "issue",
+        "only",
+        "act"
+      ],
+      "sections": [
+        {
+          "heading": "423574acb974",
+          "level": 2,
+          "page": null,
+          "line_start": 3,
+          "summary": "Issue: Self-improve should only act when there is enough recent failure evidence."
+        }
+      ]
+    },
+    {
+      "title": "Ingested File: README.md",
+      "slug": "ingested-file-readme-md",
+      "source": "raw/readme-md.md",
+      "page": "wiki/compiled/ingested-file-readme-md.md",
+      "summary": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+      "keywords": [
+        "local",
+        "jarvis",
+        "vault",
+        "screen",
+        "can",
+        "mode",
+        "context",
+        "skill",
+        "prompt",
+        "self",
+        "skills",
+        "wiki"
+      ],
+      "sections": [
+        {
+          "heading": "Ingested File: README.md",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Source path: /Users/truthseeker/jarvis-ai/README.md"
+        },
+        {
+          "heading": "Jarvis AI",
+          "level": 1,
+          "page": null,
+          "line_start": 5,
+          "summary": "A personal voice + text AI assistant for macOS."
+        },
+        {
+          "heading": "Features",
+          "level": 2,
+          "page": null,
+          "line_start": 9,
+          "summary": "- **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "page": null,
+          "line_start": 28,
+          "summary": "- macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode"
+        },
+        {
+          "heading": "Setup",
+          "level": 2,
+          "page": null,
+          "line_start": 35,
+          "summary": "1."
+        },
+        {
+          "heading": "Running",
+          "level": 2,
+          "page": null,
+          "line_start": 79,
+          "summary": "```bash"
+        },
+        {
+          "heading": "GUI mode (default)",
+          "level": 1,
+          "page": null,
+          "line_start": 82,
+          "summary": "./run.sh"
+        },
+        {
+          "heading": "Headless / terminal-only",
+          "level": 1,
+          "page": null,
+          "line_start": 85,
+          "summary": "./run.sh --no-ui `` Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto`"
+        },
+        {
+          "heading": "Skills",
+          "level": 2,
+          "page": null,
+          "line_start": 99,
+          "summary": "Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it."
+        },
+        {
+          "heading": "Hotkeys",
+          "level": 2,
+          "page": null,
+          "line_start": 115,
+          "summary": "All hotkeys use Cmd + Option and work system-wide, even during screen share."
+        },
+        {
+          "heading": "Configuration",
+          "level": 2,
+          "page": null,
+          "line_start": 154,
+          "summary": "All model identifiers and the system prompt live in config.py."
+        },
+        {
+          "heading": "Vault",
+          "level": 2,
+          "page": null,
+          "line_start": 174,
+          "summary": "Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base."
+        },
+        {
+          "heading": "Self-Improve Safety",
+          "level": 2,
+          "page": null,
+          "line_start": 187,
+          "summary": "Jarvis can modify parts of its own source, but the apply path is guarded: - generated Python is syntax-validated before any file is changed - the original file is backed up to .jarvis_backups/ - writes go through a temporary file and atomic replace - Jarvis tells you to restart after a successful self-improve run so modules reload cleanly"
+        },
+        {
+          "heading": "Security",
+          "level": 2,
+          "page": null,
+          "line_start": 196,
+          "summary": "- API keys are loaded from .env and never hardcoded - credentials.json and token.json are gitignored - memory, knowledge, backup, and session files stay local - meeting overlay is invisible to screen share via NSWindowSharingNone"
+        }
+      ]
+    },
+    {
+      "title": "Jarvis Vault Strategy",
+      "slug": "jarvis-vault-strategy",
+      "source": "raw/jarvis_vault_strategy.md",
+      "page": "wiki/compiled/jarvis-vault-strategy.md",
+      "summary": "Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap.",
+      "keywords": [
+        "vault",
+        "should",
+        "local",
+        "jarvis",
+        "markdown",
+        "prompt",
+        "context",
+        "topic",
+        "request",
+        "strategy",
+        "use",
+        "before"
+      ],
+      "sections": [
+        {
+          "heading": "Jarvis Vault Strategy",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over."
+        }
+      ]
+    }
+  ]
+}
