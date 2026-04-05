@@ -60,11 +60,33 @@ def _parse_volume(text: str):
     return int(match.group(1)) if match else None
 
 
+# ── Pending message state (survives across voice turns) ───────────────────────
+_pending_msg_recipient: str = ""
+
+
+def _set_pending_recipient(name: str):
+    global _pending_msg_recipient
+    _pending_msg_recipient = name
+
+
+def _clear_pending_recipient():
+    global _pending_msg_recipient
+    _pending_msg_recipient = ""
+
+
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
+    global _pending_msg_recipient
     lower = user_input.lower().strip()
     mem.track_topic(lower)
+
+    # ── 0. Pending message body ───────────────────────────────────────────────
+    if _pending_msg_recipient:
+        recipient = _pending_msg_recipient
+        _clear_pending_recipient()
+        result = msg.send_imessage(recipient, user_input)
+        return _s(result), "Messages"
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
@@ -208,6 +230,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if recipient and body:
             return _s(msg.send_imessage(recipient, body)), "Messages"
         if recipient and not body:
+            _set_pending_recipient(recipient)
             return _s(f"What would you like to say to {recipient}?"), "Messages"
         return _s("Who would you like to message?"), "Messages"
 
