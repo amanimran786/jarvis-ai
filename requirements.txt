@@ -1,0 +1,20 @@
+openai
+anthropic
+fastapi
+uvicorn
+elevenlabs
+pyserial
+anthropic
+python-dotenv
+pyttsx3
+SpeechRecognition
+pyaudio
+ddgs
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+opencv-python
+PyQt6
+pyobjc-framework-Cocoa
+ollama
+# self_improve uses stdlib only (difflib, shutil, subprocess)

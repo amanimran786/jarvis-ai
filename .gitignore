@@ -1,0 +1,35 @@
+# Secrets & credentials
+.env
+credentials.json
+token.json
+
+# Runtime state
+.jarvis_port
+
+# Persistent runtime data
+memory.json
+knowledge.json
+last_session.json
+
+# Self-improvement backups
+.jarvis_backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/
+
+# macOS
+.DS_Store
