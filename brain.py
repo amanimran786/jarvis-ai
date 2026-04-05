@@ -3,6 +3,7 @@ from openai import OpenAI
 from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT
 import memory as mem
 import conversation_context as ctx
+import usage_tracker
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -37,12 +38,18 @@ def ask_stream(user_input: str, model: str = GPT_MINI, system_extra: str = "", t
     stream = client.chat.completions.create(
         model=model,
         messages=messages,
-        stream=True
+        stream=True,
+        stream_options={"include_usage": True},
     )
 
     full_reply = ""
     buffer = ""
+    usage = None
     for chunk in stream:
+        if getattr(chunk, "usage", None) is not None:
+            usage = chunk.usage
+        if not getattr(chunk, "choices", None):
+            continue
         delta = chunk.choices[0].delta.content or ""
         full_reply += delta
         buffer += delta
@@ -55,5 +62,20 @@ def ask_stream(user_input: str, model: str = GPT_MINI, system_extra: str = "", t
     if buffer:
         yield _strip_markdown(buffer)
 
+    cleaned_reply = _strip_markdown(full_reply)
+    usage_tracker.record(
+        provider="openai",
+        model=model,
+        local=False,
+        source="brain.ask_stream",
+        prompt_tokens=getattr(usage, "prompt_tokens", None) if usage else None,
+        completion_tokens=getattr(usage, "completion_tokens", None) if usage else None,
+        total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+        messages=messages,
+        response_text=cleaned_reply,
+        estimated=usage is None,
+        metadata={"track_context": track_context},
+    )
+
     if track_context:
-        ctx.end_turn(_strip_markdown(full_reply))
+        ctx.end_turn(cleaned_reply)

@@ -51,6 +51,27 @@ MODEL_PRESETS = {
     },
 }
 
+EXPERT_DISTILL_CASES = [
+    {
+        "id": "tech_kv_cache",
+        "category": "technology_science",
+        "prompt": "Why do transformer KV caches improve inference speed, and what are the memory tradeoffs as sequence length grows?",
+        "expected": "Lead with the mechanism, explain the compute-versus-memory tradeoff, and name the dominant scaling constraint.",
+    },
+    {
+        "id": "science_entropy",
+        "category": "technology_science",
+        "prompt": "What is the difference between entropy in thermodynamics and entropy in information theory?",
+        "expected": "State the shared mathematical structure, then distinguish the physical meaning from the probabilistic meaning without generic filler.",
+    },
+    {
+        "id": "science_crispr",
+        "category": "technology_science",
+        "prompt": "What are the main ways CRISPR editing creates off-target effects, and how do researchers reduce them?",
+        "expected": "Explain the main mechanisms, then map them to the main mitigation strategies with concrete terminology.",
+    },
+]
+
 
 def _ensure_dirs() -> None:
     for path in (EXPORTS_DIR, DISTILLED_DIR, MODELFILES_DIR, PACKS_DIR, HANDOFFS_DIR):
@@ -475,6 +496,74 @@ def distill_failures(
     }
 
 
+def _build_expert_distill_prompt(case: dict) -> str:
+    return (
+        "Write the ideal Jarvis answer for this advanced technology or science question.\n"
+        "The target is a strong small local model, so the answer should be compact, precise, and high-signal.\n"
+        "Do not use markdown, bullets, or headers.\n"
+        "Do not open with filler like 'great question'.\n"
+        "Lead with the conclusion or core distinction, then explain the mechanism and the main tradeoff or constraint.\n"
+        "Use exact technical terms when they help, but define them naturally if they could be misunderstood.\n\n"
+        f"User input:\n{case['prompt']}\n\n"
+        f"Expected behavior:\n{case['expected']}\n\n"
+        "Return only the improved assistant answer."
+    )
+
+
+def distill_expert_cases(
+    limit: int = 3,
+    teacher_model: str = SONNET,
+    case_ids: list[str] | None = None,
+) -> dict:
+    _ensure_dirs()
+    selected = []
+    wanted = set(case_ids or [])
+    for case in EXPERT_DISTILL_CASES:
+        if wanted and case["id"] not in wanted:
+            continue
+        selected.append(case)
+        if len(selected) >= limit:
+            break
+
+    examples = []
+    for case in selected:
+        system_extra, _ = skills.build_system_extra(case["prompt"], tool="chat")
+        improved = ask_claude(
+            _build_expert_distill_prompt(case),
+            model=teacher_model,
+            system_extra=system_extra,
+        ).strip()
+        if not improved:
+            continue
+        examples.append(
+            {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": case["prompt"]},
+                    {"role": "assistant", "content": improved},
+                ],
+                "meta": {
+                    "interaction_id": "",
+                    "teacher_source": "expert_distillation",
+                    "teacher_model": teacher_model,
+                    "case_id": case["id"],
+                    "category": case["category"],
+                    "expected": case["expected"],
+                },
+            }
+        )
+
+    path = DISTILLED_DIR / f"jarvis_expert_distilled_{_timestamp()}.jsonl"
+    _write_jsonl(path, examples)
+    return {
+        "ok": True,
+        "path": str(path),
+        "example_count": len(examples),
+        "teacher_model": teacher_model,
+        "case_ids": [case["id"] for case in selected],
+    }
+
+
 def _example_key(example: dict) -> str:
     messages = example.get("messages", [])
     user_text = ""
@@ -489,6 +578,8 @@ def _example_key(example: dict) -> str:
 def _example_priority(example: dict) -> int:
     meta = example.get("meta", {})
     source = meta.get("teacher_source", "")
+    if source == "expert_distillation":
+        return 4
     if source == "failure_distillation":
         return 3
     if source == "successful_interaction":
@@ -499,6 +590,7 @@ def _example_priority(example: dict) -> int:
 def build_training_pack(
     export_limit: int = 150,
     distill_limit: int = 8,
+    expert_distill_limit: int = 3,
     teacher_model: str = SONNET,
     cloud_only_export: bool = True,
     base_model: str = LOCAL_DEFAULT,
@@ -508,13 +600,15 @@ def build_training_pack(
     _ensure_dirs()
     export_result = export_sft_dataset(limit=export_limit, cloud_only=cloud_only_export)
     distill_result = distill_failures(limit=distill_limit, teacher_model=teacher_model, categories=categories)
+    expert_result = distill_expert_cases(limit=expert_distill_limit, teacher_model=teacher_model)
     modelfile_result = build_modelfile(base_model=base_model, target_name=target_name)
 
     exported_examples = _read_jsonl(Path(export_result["path"]))
     distilled_examples = _read_jsonl(Path(distill_result["path"]))
+    expert_examples = _read_jsonl(Path(expert_result["path"]))
 
     deduped = {}
-    for example in exported_examples + distilled_examples:
+    for example in exported_examples + distilled_examples + expert_examples:
         key = _example_key(example)
         existing = deduped.get(key)
         if existing is None or _example_priority(example) >= _example_priority(existing):
@@ -534,8 +628,10 @@ def build_training_pack(
         "teacher_model": teacher_model,
         "export_examples": export_result["example_count"],
         "distilled_examples": distill_result["example_count"],
+        "expert_distilled_examples": expert_result["example_count"],
         "merged_examples": len(merged_examples),
         "distilled_categories": distill_result.get("categories", []),
+        "expert_case_ids": expert_result.get("case_ids", []),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
@@ -545,6 +641,7 @@ def build_training_pack(
         "manifest_path": str(manifest_path),
         "export": export_result,
         "distill": distill_result,
+        "expert_distill": expert_result,
         "modelfile": modelfile_result,
         "example_count": len(merged_examples),
         "teacher_model": teacher_model,
@@ -706,8 +803,14 @@ def result_text(result: dict) -> str:
         if "pack_path" in result:
             return (
                 f"Built a local training pack with {result['example_count']} total examples. "
-                f"Exported {result['export']['example_count']} strong examples, distilled {result['distill']['example_count']} corrected examples with {result['teacher_model']}, "
+                f"Exported {result['export']['example_count']} strong examples, distilled {result['distill']['example_count']} corrected failure examples, "
+                f"and added {result['expert_distill']['example_count']} expert technology and science examples with {result['teacher_model']}, "
                 f"and wrote the merged pack to {result['pack_path']}."
+            )
+        if "case_ids" in result:
+            return (
+                f"Distilled {result['example_count']} expert technology and science examples for local training using {result['teacher_model']}. "
+                f"The dataset is at {result['path']}."
             )
         return (
             f"Distilled {result['example_count']} corrected teacher examples for local training using {result['teacher_model']}. "

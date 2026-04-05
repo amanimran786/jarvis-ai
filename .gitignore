@@ -12,6 +12,9 @@ memory.json
 knowledge.json
 last_session.json
 evals.json
+usage_log.jsonl
+usage_state.json
+hook_events.jsonl
 training/exports/
 training/distilled/
 training/modelfiles/

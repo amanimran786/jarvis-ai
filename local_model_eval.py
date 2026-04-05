@@ -55,6 +55,24 @@ CURATED_CASES = [
         "prompt": "Search the vault for Jarvis Vault Strategy and summarize it in two sentences with the exact local file and heading you used.",
         "expected": "Stay concise, grounded in local knowledge, and cite the exact local file and heading.",
     },
+    {
+        "id": "tech_kv_cache",
+        "category": "technology_science",
+        "prompt": "Why do transformer KV caches improve inference speed, and what are the memory tradeoffs as sequence length grows?",
+        "expected": "Lead with the mechanism, explain the compute-versus-memory tradeoff, and name the dominant scaling constraint.",
+    },
+    {
+        "id": "science_entropy",
+        "category": "technology_science",
+        "prompt": "What is the difference between entropy in thermodynamics and entropy in information theory?",
+        "expected": "State the shared mathematical structure, then distinguish the physical meaning from the probabilistic meaning without generic filler.",
+    },
+    {
+        "id": "science_crispr",
+        "category": "technology_science",
+        "prompt": "What are the main ways CRISPR editing creates off-target effects, and how do researchers reduce them?",
+        "expected": "Explain the main mechanisms, then map them to the main mitigation strategies with concrete terminology.",
+    },
 ]
 
 
