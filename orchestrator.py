@@ -55,8 +55,15 @@ TOOLS = {
     "app": "Launch a macOS application. "
            "Triggers: 'open', 'launch', 'start' followed by app name.",
 
+    "browser": "Control Safari or Chrome and work with live pages. "
+               "Triggers: 'browse to', 'open website', 'go to this page', 'search the web', "
+               "'summarize this page', 'go back', 'reload page', 'click the link'.",
+
     "terminal": "Run a shell command, read/write files, list directory. "
                 "Triggers: 'run', 'execute', 'terminal', 'command', 'read file', 'list files'.",
+
+    "admin": "Run a shell command with administrator privileges using the native macOS password prompt. "
+             "ONLY use when the user explicitly asks for admin, administrator, root, or sudo access.",
 
     "notes": "Take, read, search personal notes. "
              "Triggers: 'note', 'write this down', 'my notes', 'find a note'.",
@@ -170,6 +177,9 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     if re.match(r"\b(open|launch|start)\b\s+\w+", lower) and "interface" not in lower:
         app = re.sub(r"^(open|launch|start)\s+", "", lower).strip()
         return ToolDecision("app", 0.99, "open", {"app": app})
+    # Browser
+    if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|search the web|search google for|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
+        return ToolDecision("browser", 0.97, "browse")
     # Weather
     if re.search(r"\b(weather|forecast|temperature)\b", lower):
         return ToolDecision("weather", 0.99, "get")
@@ -182,6 +192,9 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Memory
     if re.match(r"^(remember |forget )", lower):
         return ToolDecision("memory", 0.99, "save" if lower.startswith("remember") else "forget")
+    # Admin
+    if re.search(r"\b(as admin|with admin privileges|administrator privileges|run as root|sudo)\b", lower):
+        return ToolDecision("admin", 0.99, "run")
     # Self-improve — require self-referential context to avoid false positives
     if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")

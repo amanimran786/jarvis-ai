@@ -4,15 +4,34 @@ No API keys, no external servers, no restrictions, completely private.
 """
 
 import ollama as _ollama
-from config import SYSTEM_PROMPT
+import re
+from config import SYSTEM_PROMPT, MAX_CONVERSATION_TURNS
 import memory as mem
 
 # Default local models — change to whatever you've pulled
 LOCAL_DEFAULT   = "llama3.1:8b"     # fast general purpose
-LOCAL_CODER     = "deepseek-coder-v2"  # best for code
+LOCAL_CODER     = "qwen2.5-coder:7b"   # practical local coder model
 LOCAL_REASONING = "mistral"          # sharp reasoning
 
 conversation_history = []
+
+
+def _trim_history() -> None:
+    """Keep only recent turns so local chats do not grow without bound."""
+    max_messages = max(2, MAX_CONVERSATION_TURNS * 2)
+    if len(conversation_history) > max_messages:
+        del conversation_history[:-max_messages]
+
+
+def _strip_markdown(text: str) -> str:
+    """Remove markdown artifacts because Jarvis responses are spoken aloud."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.M)
+    text = re.sub(r'^\s*\d+[.)](?:\s+|$)', '', text, flags=re.M)
+    text = re.sub(r'```\w*\n?', '', text)
+    return text
 
 
 def _is_available(model: str) -> bool:
@@ -45,6 +64,7 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT):
     """Stream a response from a local Ollama model."""
     model = get_best_available(model)
     conversation_history.append({"role": "user", "content": user_input})
+    _trim_history()
 
     system = SYSTEM_PROMPT + mem.get_context()
     messages = [{"role": "system", "content": system}] + conversation_history
@@ -56,16 +76,23 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT):
             messages=messages,
             stream=True
         )
+        buffer = ""
         for chunk in stream:
             delta = chunk.message.content or ""
             full_reply += delta
-            yield delta
+            buffer += delta
+            if any(buffer.endswith(c) for c in ('.', '!', '?', '\n')):
+                yield _strip_markdown(buffer)
+                buffer = ""
+        if buffer:
+            yield _strip_markdown(buffer)
     except Exception as e:
         error = f"Local model error: {e}. Make sure Ollama is running: ollama serve"
         yield error
         full_reply = error
 
-    conversation_history.append({"role": "assistant", "content": full_reply})
+    conversation_history.append({"role": "assistant", "content": _strip_markdown(full_reply)})
+    _trim_history()
 
 
 def list_local_models() -> list[str]:

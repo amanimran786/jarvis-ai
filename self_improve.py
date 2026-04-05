@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import difflib
+import tempfile
 from datetime import datetime
 from brain_claude import ask_claude
 from config import OPUS
@@ -94,20 +95,42 @@ def _diff(original: str, updated: str, filename: str) -> str:
     return "".join(diff)
 
 
+def _validate_python_code(filename: str, code: str) -> None:
+    """Reject empty or syntactically invalid model output before touching disk."""
+    if not code or not code.strip():
+        raise ValueError(f"Generated code for {filename} was empty.")
+
+    try:
+        compile(code, f"<generated {filename}>", "exec")
+    except SyntaxError as e:
+        detail = f"line {e.lineno}: {e.msg}"
+        lines = code.splitlines()
+        if e.lineno and 0 < e.lineno <= len(lines):
+            detail += f" near {lines[e.lineno - 1].strip()[:120]!r}"
+        raise ValueError(f"Generated code for {filename} failed syntax validation at {detail}.") from e
+
+
 def apply_improvement(filename: str, new_code: str) -> tuple[str, str]:
     """
     Apply new code to a file. Creates backup first.
     Returns (backup_path, diff_summary).
     """
     path = os.path.join(BASE_DIR, filename)
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         original = f.read()
 
+    _validate_python_code(filename, new_code)
     backup_path = _backup(filename)
     diff = _diff(original, new_code, filename)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{filename}.", suffix=".tmp", dir=BASE_DIR, text=True)
 
-    with open(path, "w") as f:
-        f.write(new_code)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_code)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
     return backup_path, diff
 
@@ -118,7 +141,7 @@ def read_source(filename: str) -> str:
     path = os.path.join(BASE_DIR, filename)
     if not os.path.exists(path):
         return f"File not found: {filename}"
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -258,7 +281,14 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
     new_code = generate_improvement(filename, instruction)
 
     # Step 3 & 4: backup and apply
-    backup_path, diff = apply_improvement(filename, new_code)
+    try:
+        backup_path, diff = apply_improvement(filename, new_code)
+    except Exception as e:
+        return {
+            "error": f"Self-improve aborted before applying changes: {e}",
+            "file": filename,
+            "instruction": instruction,
+        }
 
     return {
         "file": filename,

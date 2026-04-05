@@ -129,6 +129,48 @@ def _best_local(text: str) -> str:
     return available[0]
 
 
+def describe_runtime_for(user_input: str = "") -> str:
+    """Return a truthful summary of Jarvis's current routing state."""
+    mode = _current_mode
+    local_models = list_local_models()
+
+    if mode == "local":
+        if local_models:
+            chosen = _best_local(user_input or "general conversation")
+            return f"I'm in local mode and I'd answer this with Ollama using {chosen}."
+        return "I'm in local mode, but no Ollama model is currently available."
+
+    if mode == "cloud":
+        tier = _classify_complexity(user_input or "general conversation")
+        if tier in ("local", "mini"):
+            return f"I'm in cloud mode and this request would use {GPT_MINI}."
+        if tier == "haiku":
+            return f"I'm in cloud mode and this request would use {HAIKU}."
+        if tier == "sonnet":
+            return f"I'm in cloud mode and this request would use {SONNET}."
+        return f"I'm in cloud mode and this request would use {OPUS}."
+
+    tier = _classify_complexity(user_input or "general conversation")
+    if tier == "local" and local_models:
+        chosen = _best_local(user_input or "general conversation")
+        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
+    if tier == "haiku" and local_models:
+        chosen = _best_local(user_input or "general conversation")
+        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
+    if tier == "mini":
+        return f"I'm in auto mode and this request would use {GPT_MINI}."
+    if tier == "haiku":
+        return f"I'm in auto mode and this request would use {HAIKU}."
+    if tier == "sonnet":
+        return f"I'm in auto mode and this request would use {SONNET}."
+    if tier == "opus":
+        return f"I'm in auto mode and this request would use {OPUS}."
+    if local_models:
+        chosen = _best_local(user_input or "general conversation")
+        return f"I'm in auto mode and this request is currently routing to local inference with Ollama using {chosen}."
+    return f"I'm in auto mode, but no local Ollama model is currently available, so this request would fall back to {GPT_MINI}."
+
+
 def _classify_complexity(text: str) -> str:
     """
     Returns: 'local', 'mini', 'haiku', 'sonnet', 'opus'

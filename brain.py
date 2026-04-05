@@ -1,6 +1,6 @@
 import re
 from openai import OpenAI
-from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT
+from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT, MAX_CONVERSATION_TURNS
 import memory as mem
 
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -12,11 +12,18 @@ def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts that slip through despite system prompt instructions."""
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)       # **bold**
     text = re.sub(r'\*(.+?)\*', r'\1', text)            # *italic*
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M)  # ### headers
-    text = re.sub(r'^[-*]\s+', '', text, flags=re.M)    # - bullet points
-    text = re.sub(r'^\d+\.\s+', '', text, flags=re.M)   # 1. numbered lists
+    text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)  # ### headers
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.M)    # - bullet points
+    text = re.sub(r'^\s*\d+[.)](?:\s+|$)', '', text, flags=re.M) # 1. or 1) numbered lists
     text = re.sub(r'```\w*\n?', '', text)                # code fences
     return text
+
+
+def _trim_history() -> None:
+    """Keep only the most recent conversation turns to control token growth."""
+    max_messages = max(2, MAX_CONVERSATION_TURNS * 2)
+    if len(conversation_history) > max_messages:
+        del conversation_history[:-max_messages]
 
 
 def ask(user_input: str, model: str = GPT_MINI) -> str:
@@ -25,6 +32,7 @@ def ask(user_input: str, model: str = GPT_MINI) -> str:
 
 def ask_stream(user_input: str, model: str = GPT_MINI):
     conversation_history.append({"role": "user", "content": user_input})
+    _trim_history()
     system = SYSTEM_PROMPT + mem.get_context()
     messages = [{"role": "system", "content": system}] + conversation_history
 
@@ -50,3 +58,4 @@ def ask_stream(user_input: str, model: str = GPT_MINI):
         yield _strip_markdown(buffer)
 
     conversation_history.append({"role": "assistant", "content": _strip_markdown(full_reply)})
+    _trim_history()

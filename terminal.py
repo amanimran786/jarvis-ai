@@ -12,12 +12,23 @@ _DESTRUCTIVE_PATTERNS = [
 ]
 
 
-def run_command(command: str, cwd: str = None) -> str:
-    """Run a shell command and return its output."""
+def _contains_blocked_pattern(command: str) -> str | None:
     lower_cmd = command.lower()
     for pattern in _DESTRUCTIVE_PATTERNS:
         if pattern in lower_cmd:
-            return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
+            return pattern
+    return None
+
+
+def _escape_applescript(text: str) -> str:
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def run_command(command: str, cwd: str = None) -> str:
+    """Run a shell command and return its output."""
+    pattern = _contains_blocked_pattern(command)
+    if pattern:
+        return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
     try:
         result = subprocess.run(
             command, shell=True, capture_output=True, text=True,
@@ -29,6 +40,34 @@ def run_command(command: str, cwd: str = None) -> str:
         return "Command timed out after 30 seconds."
     except Exception as e:
         return f"Error running command: {e}"
+
+
+def run_admin_command(command: str) -> str:
+    """
+    Run a shell command through macOS's admin prompt.
+    The user must approve with their password in the native dialog.
+    """
+    pattern = _contains_blocked_pattern(command)
+    if pattern:
+        return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
+
+    safe_command = _escape_applescript(command)
+    script = f'do shell script "{safe_command}" with administrator privileges'
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        output = result.stdout.strip() or result.stderr.strip()
+        if result.returncode != 0:
+            return output or "Admin command failed or was cancelled."
+        return output if output else "Admin command ran successfully."
+    except subprocess.TimeoutExpired:
+        return "Admin command timed out waiting for approval or completion."
+    except Exception as e:
+        return f"Error running admin command: {e}"
 
 
 def read_file(path: str) -> str:

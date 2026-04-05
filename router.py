@@ -17,6 +17,7 @@ import sys
 import threading
 import tools
 import terminal
+import browser
 import notes
 import google_services as gs
 import camera
@@ -24,7 +25,7 @@ import memory as mem
 import self_improve as si
 import hardware as hw
 import messages as msg
-from model_router import smart_stream, format_with_mini
+from model_router import smart_stream, format_with_mini, get_mode, describe_runtime_for
 from config import OPUS, SONNET
 from brain_claude import ask_claude_stream
 
@@ -60,6 +61,40 @@ def _parse_volume(text: str):
     return int(match.group(1)) if match else None
 
 
+def _parse_browser_target(text: str):
+    match = re.search(r"\b(?:browse to|open website|open site|go to|search(?: the web| google)? for)\b\s+(.+)", text, re.IGNORECASE)
+    if not match:
+        return None
+    target = match.group(1).strip()
+    target = re.split(r"\b(?:and then|then|and)\b\s+(?:summari[sz]e|tell me|what's|what is|click|go back|go forward|reload|refresh)", target, maxsplit=1, flags=re.IGNORECASE)[0]
+    return target.strip(" ,.?") or None
+
+
+def _is_model_status_query(lower: str) -> bool:
+    return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|what mode are you in|which mode are you in)\b", lower))
+
+
+def _is_self_improve_safety_query(lower: str) -> bool:
+    return (
+        ("improve your own code" in lower or "improve yourself safely" in lower or "before writing any file" in lower)
+        or ("self improve" in lower and any(p in lower for p in ("safely", "safe", "before writing", "before changing")))
+    )
+
+
+def _runtime_status_reply(user_input: str) -> str:
+    mode = get_mode()
+    summary = describe_runtime_for(user_input)
+    return f"{summary} The current routing mode is {mode}."
+
+
+def _self_improve_safety_reply() -> str:
+    return (
+        "Before changing my own code, I identify the target file, read the current source, generate the update, "
+        "syntax-validate the new Python before touching disk, create a timestamped backup, write through a temporary file with atomic replace, "
+        "and only then report the diff and ask for a restart to apply it."
+    )
+
+
 # ── Pending message state (survives across voice turns) ───────────────────────
 _pending_msg_recipient: str = ""
 
@@ -90,6 +125,12 @@ def route_stream(user_input: str) -> tuple:
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
+    # Runtime self-knowledge
+    if _is_model_status_query(lower):
+        return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_self_improve_safety_query(lower):
+        return _s(_self_improve_safety_reply()), "Self-Improve"
+
     # Timer
     if any(p in lower for p in ("set a timer", "timer for", "remind me in")):
         parsed = _parse_timer(lower)
@@ -119,6 +160,21 @@ def route_stream(user_input: str) -> tuple:
     # Screenshot
     if any(p in lower for p in ("take a screenshot", "screenshot", "capture screen")):
         return _s(tools.take_screenshot()), "System"
+
+    # Browser
+    if any(p in lower for p in ("browse to", "open website", "open site", "go to http", "go to www.", "search the web for", "search google for")):
+        target = _parse_browser_target(user_input) or user_input
+        if any(p in lower for p in ("summarize this page", "summarise this page", "summarize the current page", "summarise the current page")) or re.search(r"\b(and then|then|and)\b\s+summari[sz]e\b", lower):
+            return _s(browser.open_then_summarize(target, user_input)), "Browser"
+        return _s(browser.open_url(target)), "Browser"
+    if any(p in lower for p in ("summarize this page", "summarise this page", "what's on this page", "what is on this page")):
+        return _s(browser.summarize_current_page(user_input)), "Browser"
+    if re.search(r"\bgo back\b", lower):
+        return _s(browser.go_back()), "Browser"
+    if re.search(r"\bgo forward\b", lower):
+        return _s(browser.go_forward()), "Browser"
+    if any(p in lower for p in ("reload page", "refresh page", "reload this page", "refresh this page")):
+        return _s(browser.reload_page()), "Browser"
 
     # Lock
     if any(p in lower for p in ("lock screen", "lock my screen")):
@@ -171,6 +227,35 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         return format_with_mini(
             f"Summarize these search results concisely in Jarvis voice:\n{raw}"
         ), "Search"
+
+    # ── Browser ───────────────────────────────────────────────────────────────
+    if tool == "browser":
+        action = params.get("action", "").lower()
+        target = (
+            params.get("url")
+            or params.get("query")
+            or params.get("target")
+            or params.get("page")
+            or _parse_browser_target(user_input)
+            or user_input
+        )
+        click_target = params.get("link_text") or params.get("text") or params.get("label") or ""
+
+        if "back" in action:
+            return _s(browser.go_back()), "Browser"
+        if "forward" in action:
+            return _s(browser.go_forward()), "Browser"
+        if "reload" in action or "refresh" in action:
+            return _s(browser.reload_page()), "Browser"
+        if "click" in action and click_target:
+            return _s(browser.click_text(click_target)), "Browser"
+        if ("summary" in action or "summarize" in action or "summarise" in action) and target and _parse_browser_target(user_input):
+            return _s(browser.open_then_summarize(target, user_input)), "Browser"
+        if "summary" in action or "summarize" in action or "summarise" in lower or "this page" in lower:
+            return _s(browser.summarize_current_page(user_input)), "Browser"
+        if "current" in action or "where am i" in lower or "what page" in lower:
+            return _s(browser.get_current_page()), "Browser"
+        return _s(browser.open_url(target)), "Browser"
 
     # ── Deep research ─────────────────────────────────────────────────────────
     if tool == "deep_research":
@@ -277,6 +362,18 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             content = terminal.read_file(path)
             return format_with_mini(f"Summarize this file concisely:\n{content}"), "File"
         return smart_stream(user_input)
+
+    # ── Admin shell ───────────────────────────────────────────────────────────
+    if tool == "admin":
+        cmd = params.get("command", params.get("cmd", ""))
+        if not cmd:
+            cmd = re.sub(r"\b(with admin privileges|administrator privileges|as admin|run as root|sudo)\b", "", user_input, flags=re.IGNORECASE).strip()
+        if cmd:
+            output = terminal.run_admin_command(cmd)
+            return format_with_mini(
+                f"The user requested an admin command. Command: '{cmd}'. Output:\n{output}\nSummarize this in Jarvis voice."
+            ), "Admin"
+        return _s("Tell me the exact command you want me to run with administrator privileges."), "Admin"
 
     # ── App ──────────────────────────────────────────────────────────────────
     if tool == "app":

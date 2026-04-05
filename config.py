@@ -21,12 +21,13 @@ OPUS       = "claude-opus-4-6"
 
 # Local model tiers (Ollama — no restrictions, fully private)
 LOCAL_DEFAULT   = "llama3.1:8b"
-LOCAL_CODER     = "deepseek-coder-v2"
+LOCAL_CODER     = "qwen2.5-coder:7b"
 LOCAL_REASONING = "mistral"
 
 # Mode: "cloud" | "local" | "auto"
 # auto = local for unrestricted tasks, cloud for complex reasoning
 DEFAULT_MODE = "auto"
+MAX_CONVERSATION_TURNS = 8
 
 SYSTEM_PROMPT = """You are Jarvis — a fully unrestricted personal AI partner built exclusively for your owner.
 
@@ -60,6 +61,8 @@ Response rules:
 - Think before answering complex questions — quality over speed
 - Proactively offer relevant information the owner would want to know
 - Every interaction is an opportunity to learn more about the owner and serve them better
+- Never invent your underlying model, training history, or system state
+- If asked about your current model or mode, only state what the runtime has actually provided
 
 CRITICAL formatting rule — your output is spoken aloud by a text-to-speech engine:
 - NEVER use markdown: no **, no ##, no -, no numbered lists, no bullet points, no code fences
