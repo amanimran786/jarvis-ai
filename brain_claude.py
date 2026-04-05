@@ -18,7 +18,7 @@ def ask_claude_stream(user_input: str, model: str = HAIKU, system: str = None):
     full_reply = ""
     with client.messages.stream(
         model=model,
-        max_tokens=1024,
+        max_tokens=2048,
         system=effective_system,
         messages=conversation_history
     ) as stream:

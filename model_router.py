@@ -63,6 +63,11 @@ NEEDS_CLOUD_MID = {
     "review", "proofread", "plan", "strategy", "research",
     "pros and cons", "difference between", "recommend",
     "should i", "what's better",
+    # Technical debugging / troubleshooting
+    "debug", "troubleshoot", "crashes", "crash", "error",
+    "503", "500", "timeout", "timed out", "not working",
+    "how do i fix", "how to fix", "what causes", "why does",
+    "most likely", "top 3", "top 5", "best way to",
 }
 
 # Tasks that a local model handles perfectly
@@ -148,6 +153,10 @@ def _classify_complexity(text: str) -> str:
     if word_count <= 8 and not any(t in lower for t in NEEDS_CLOUD_MID):
         return "mini"
 
+    # Long, complex questions (15+ words with a question mark) need at least Haiku
+    if word_count >= 15 and "?" in lower:
+        return "haiku"
+
     # Everything else — try local first, fall back to haiku if unavailable
     return "local"
 
@@ -210,5 +219,9 @@ def smart_stream(user_input: str) -> tuple:
 
 
 def format_with_mini(prompt: str):
-    """Format tool output using cheapest cloud model."""
+    """Format tool output using cheapest cloud model, with user context."""
+    import memory as _mem
+    context = _mem.get_context()
+    if context:
+        prompt = prompt + f"\n\nUser context for personalization:{context}"
     return ask_stream(prompt, GPT_MINI)
