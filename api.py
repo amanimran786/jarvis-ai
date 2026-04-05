@@ -29,8 +29,13 @@ import model_router
 import hardware as hw
 import evals
 import conversation_context as ctx
+import vault
+import source_ingest
+import skill_factory
+import local_training
 
 app = FastAPI(title="Jarvis", version="1.0")
+_CHAT_LOCK = threading.Lock()
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -62,6 +67,55 @@ class FeedbackRequest(BaseModel):
     source: str = "user_feedback"
 
 
+class VaultIngestRequest(BaseModel):
+    source: str
+    source_type: str = "auto"
+    auto_build: bool = True
+
+
+class SkillCreateRequest(BaseModel):
+    query: str
+    tool: str = "chat"
+    cost_hint: str = "local"
+
+
+class SkillPromoteRequest(BaseModel):
+    min_failures: int = 2
+
+
+class SelfReviewRequest(BaseModel):
+    area: str = ""
+
+
+class LocalTrainingExportRequest(BaseModel):
+    limit: int = 150
+    cloud_only: bool = True
+
+
+class LocalTrainingDistillRequest(BaseModel):
+    limit: int = 12
+    teacher_model: str = "claude-sonnet-4-6"
+
+
+class LocalTrainingModelfileRequest(BaseModel):
+    base_model: str = ""
+    target_name: str = ""
+
+
+class LocalTrainingRunRequest(BaseModel):
+    export_limit: int = 150
+    distill_limit: int = 8
+    teacher_model: str = "claude-sonnet-4-6"
+    cloud_only_export: bool = True
+    base_model: str = ""
+    target_name: str = ""
+
+
+class LocalTrainingHandoffRequest(BaseModel):
+    pack_path: str = ""
+    targets: list[str] = []
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -69,25 +123,27 @@ def chat(req: ChatRequest):
     """Send a message to Jarvis and get a response."""
     if req.stream:
         def generate():
-            stream, model = route_stream(req.message)
-            chunks = []
-            for chunk in stream:
-                chunks.append(chunk)
-                yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
-            response = "".join(chunks)
-            context_stats = ctx.record_request_stats(model, source="api_stream")
-            interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
-            evals.maybe_log_automatic_failure(interaction)
-            yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'type': 'meta'})}\n\n"
-            yield "data: [DONE]\n\n"
+            with _CHAT_LOCK:
+                stream, model = route_stream(req.message)
+                chunks = []
+                for chunk in stream:
+                    chunks.append(chunk)
+                    yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
+                response = "".join(chunks)
+                context_stats = ctx.record_request_stats(model, source="api_stream")
+                interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
+                evals.maybe_log_automatic_failure(interaction)
+                yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'type': 'meta'})}\n\n"
+                yield "data: [DONE]\n\n"
         return StreamingResponse(generate(), media_type="text/event-stream")
 
-    stream, model = route_stream(req.message)
-    response = "".join(stream)
-    context_stats = ctx.record_request_stats(model, source="api")
-    interaction = evals.log_interaction(req.message, response, model, context=context_stats)
-    evals.maybe_log_automatic_failure(interaction)
-    return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats}
+    with _CHAT_LOCK:
+        stream, model = route_stream(req.message)
+        response = "".join(stream)
+        context_stats = ctx.record_request_stats(model, source="api")
+        interaction = evals.log_interaction(req.message, response, model, context=context_stats)
+        evals.maybe_log_automatic_failure(interaction)
+        return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats}
 
 
 @app.post("/feedback")
@@ -125,6 +181,104 @@ def get_context_stats():
         "current": ctx.get_stats(),
         "recent_requests": ctx.recent_request_stats(10),
     }
+
+
+@app.get("/vault")
+def get_vault_status():
+    return vault.status()
+
+
+@app.post("/vault/build")
+def build_vault():
+    message = vault.build_wiki_text()
+    return {"ok": True, "message": message, "vault": vault.status()}
+
+
+@app.post("/vault/ingest")
+def ingest_vault(req: VaultIngestRequest):
+    result = source_ingest.ingest_source(req.source, source_type=req.source_type, auto_build=req.auto_build)
+    return {"ok": result.get("ok", False), "message": source_ingest.result_text(result), "result": result, "vault": vault.status()}
+
+
+@app.post("/skills/create")
+def create_skill(req: SkillCreateRequest):
+    result = skill_factory.create_skill_from_vault(req.query, tool=req.tool, cost_hint=req.cost_hint)
+    return {"ok": result.get("ok", False), "message": skill_factory.result_text(result), "result": result}
+
+
+@app.post("/skills/promote")
+def promote_skills(req: SkillPromoteRequest):
+    result = skill_factory.promote_failures(min_failures=req.min_failures)
+    return {"ok": result.get("ok", False), "message": skill_factory.result_text(result), "result": result}
+
+
+@app.get("/local/training/status")
+def get_local_training_status():
+    return {"ok": True, "status": local_training.status()}
+
+
+@app.post("/local/training/export")
+def export_local_training(req: LocalTrainingExportRequest):
+    result = local_training.export_sft_dataset(limit=req.limit, cloud_only=req.cloud_only)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/distill")
+def distill_local_training(req: LocalTrainingDistillRequest):
+    result = local_training.distill_failures(limit=req.limit, teacher_model=req.teacher_model)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/modelfile")
+def build_local_training_modelfile(req: LocalTrainingModelfileRequest):
+    kwargs = {}
+    if req.base_model:
+        kwargs["base_model"] = req.base_model
+    if req.target_name:
+        kwargs["target_name"] = req.target_name
+    result = local_training.build_modelfile(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/run")
+def run_local_training(req: LocalTrainingRunRequest):
+    kwargs = {
+        "export_limit": req.export_limit,
+        "distill_limit": req.distill_limit,
+        "teacher_model": req.teacher_model,
+        "cloud_only_export": req.cloud_only_export,
+    }
+    if req.base_model:
+        kwargs["base_model"] = req.base_model
+    if req.target_name:
+        kwargs["target_name"] = req.target_name
+    result = local_training.build_training_pack(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/handoff")
+def build_local_training_handoff(req: LocalTrainingHandoffRequest):
+    kwargs = {}
+    if req.pack_path:
+        kwargs["pack_path"] = req.pack_path
+    if req.targets:
+        kwargs["targets"] = req.targets
+    result = local_training.build_finetune_handoff(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.get("/self/review")
+def get_self_review(area: str = ""):
+    import self_improve as si
+    result = si.self_review(area=area or None)
+    return {"ok": result.get("ok", False), "message": si.review_text(result), "result": result}
+
+
+@app.post("/self/review")
+def post_self_review(req: SelfReviewRequest):
+    import self_improve as si
+    result = si.self_review(area=req.area or None)
+    return {"ok": result.get("ok", False), "message": si.review_text(result), "result": result}
 
 
 @app.get("/memory")

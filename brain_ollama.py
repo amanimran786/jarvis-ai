@@ -5,14 +5,9 @@ No API keys, no external servers, no restrictions, completely private.
 
 import ollama as _ollama
 import re
-from config import SYSTEM_PROMPT
+from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED
 import memory as mem
 import conversation_context as ctx
-
-# Default local models — change to whatever you've pulled
-LOCAL_DEFAULT   = "llama3.1:8b"     # fast general purpose
-LOCAL_CODER     = "qwen2.5-coder:7b"   # practical local coder model
-LOCAL_REASONING = "mistral"          # sharp reasoning
 
 def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts because Jarvis responses are spoken aloud."""
@@ -40,6 +35,9 @@ def get_best_available(preferred: str) -> str:
         models = [m.model for m in _ollama.list().models]
         if not models:
             raise RuntimeError("No Ollama models found. Run: ollama pull llama3.1:8b")
+        if LOCAL_TUNED and any(LOCAL_TUNED in m for m in models):
+            if preferred == LOCAL_DEFAULT:
+                return LOCAL_TUNED
         if any(preferred in m for m in models):
             return preferred
         return models[0]

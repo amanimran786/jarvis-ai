@@ -30,6 +30,16 @@ TOOLS = {
     "search": "Web search for current news, facts, prices, recent events. "
               "Triggers: 'search for', 'look up', 'google', 'find information', 'what is X'.",
 
+    "knowledge": "Search or build Jarvis's local markdown vault and inspect indexed knowledge files. "
+                 "Use for requests about the local vault, knowledge base, wiki, indexed markdown context, or rebuilding the local wiki. "
+                 "Triggers: 'search the vault', 'refresh the vault', 'build the vault wiki', 'compile the wiki', 'what's in your local knowledge base'.",
+
+    "local_model": "Improve Jarvis's local-model stack by exporting training data, distilling failed examples, generating a tuned Ollama Modelfile, or preparing offline fine-tune handoff folders for Unsloth or Axolotl. "
+                   "Use for requests to train local models, improve Ollama quality, distill local examples, export local training data, build a local Jarvis model target, or prepare LoRA fine-tune handoff assets.",
+
+    "skill": "Create or promote reusable Jarvis skills from vault knowledge or repeated eval failures. "
+             "Use for requests to create a skill, generate a skill from the vault, or promote repeated failures into a skill.",
+
     "deep_research": "Multi-step research producing a cited report. Use when the user "
                      "wants thorough, sourced research on a topic — not a quick lookup. "
                      "Triggers: 'research', 'deep dive', 'full report', 'write a report on'.",
@@ -81,7 +91,8 @@ TOOLS = {
     "self_improve": "Modify Jarvis's own source code. ONLY use when the user explicitly "
                     "asks Jarvis to change its own code or interface. "
                     "Triggers: 'improve yourself', 'modify your code', 'update your code', "
-                    "'upgrade your routing', 'change your interface'. "
+                    "'upgrade your routing', 'change your interface', 'review your own code', "
+                    "'what are your shortcomings', 'self review'. "
                     "Do NOT use for general questions about improvement or modification.",
 
     "meeting": "Smart Listen — tap call audio and get real-time suggestions. "
@@ -119,7 +130,7 @@ Examples:
 
 
 def _build_system(user_input: str) -> str:
-    skill_block = skills.metadata_block(user_input, limit=3)
+    skill_block = skills.metadata_block(user_input, limit=6)
     if not skill_block:
         return _SYSTEM
     return (
@@ -208,6 +219,38 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Email
     if re.search(r"\b(check (my )?email|unread emails|my inbox|any emails)\b", lower):
         return ToolDecision("email", 0.99, "read")
+    # Skill factory
+    if re.search(r"\b(create|generate|make|build|promote)\b.*\bskill\b", lower):
+        action = "create"
+        if re.search(r"\b(promote|failure|failures|eval)\b", lower):
+            action = "promote"
+        return ToolDecision("skill", 0.96, action)
+    # Local model training / distillation
+    if re.search(r"\b(train|tune|improve|distill|export|build|fine tune|prepare)\b.*\b(local model|local models|ollama|training data|training dataset|modelfile|distillation pipeline|training pack|handoff|axolotl|unsloth|lora)\b", lower):
+        action = "status"
+        if re.search(r"\bdistill\b", lower):
+            action = "distill"
+        elif re.search(r"\bexport\b", lower):
+            action = "export"
+        elif re.search(r"\bbuild\b.*\bmodelfile\b", lower):
+            action = "modelfile"
+        elif re.search(r"\bhandoff|axolotl|unsloth|lora\b", lower):
+            action = "handoff"
+        elif re.search(r"\btrain|tune|improve|fine tune\b", lower):
+            action = "train"
+        return ToolDecision("local_model", 0.96, action)
+    # Local knowledge vault
+    if re.search(r"\b(vault|knowledge base|local knowledge|search the vault|refresh the vault|index the vault|build the vault wiki|compile the wiki|ingest (?:source|file|repo|repository|url|notes)|wiki)\b", lower):
+        action = "search"
+        if re.search(r"\bingest\b", lower):
+            action = "ingest"
+        elif re.search(r"\b(build|compile)\b", lower):
+            action = "build"
+        elif re.search(r"\b(refresh|reindex|index)\b", lower):
+            action = "refresh"
+        elif re.search(r"\b(status|what's in|what is in|show)\b", lower):
+            action = "status"
+        return ToolDecision("knowledge", 0.97, action)
     # Calendar
     if re.search(r"\b(my schedule|my calendar|what do i have today|any events)\b", lower):
         return ToolDecision("calendar", 0.99, "read")
@@ -218,6 +261,8 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     if re.search(r"\b(as admin|with admin privileges|administrator privileges|run as root|sudo)\b", lower):
         return ToolDecision("admin", 0.99, "run")
     # Self-improve — require self-referential context to avoid false positives
+    if re.search(r"\b(review your own code|review your code|self review|what are your shortcomings|what are your weaknesses|review yourself)\b", lower):
+        return ToolDecision("self_improve", 0.99, "review")
     if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
     # Restart

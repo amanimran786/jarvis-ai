@@ -1,20 +1,73 @@
+import os
 import sys
+import traceback
+import threading
+import faulthandler
+
 import api
 import agents
+import evals
 
-# Start API server in background (shared memory/model state with main process)
-api.start()
 
-if "--no-ui" in sys.argv:
-    # Terminal-only fallback mode
-    import re
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CRASH_LOG = os.path.join(BASE_DIR, ".jarvis_crash.log")
+_CRASH_STREAM = None
+
+
+def _append_crash_log(label: str, exc_type, exc_value, exc_traceback) -> None:
+    timestamp = __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stack = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    message = f"[{timestamp}] {label}\n{stack}\n"
+    try:
+        with open(CRASH_LOG, "a", encoding="utf-8") as f:
+            f.write(message)
+    except OSError:
+        pass
+    try:
+        evals.log_failure(
+            issue=f"{label}: {exc_value}",
+            response=stack[:1200],
+            model="Process",
+            source="runtime_crash",
+        )
+    except Exception:
+        pass
+
+
+def _install_crash_logging() -> None:
+    global _CRASH_STREAM
+    if _CRASH_STREAM is not None:
+        return
+
+    _CRASH_STREAM = open(CRASH_LOG, "a", encoding="utf-8", buffering=1)
+    faulthandler.enable(_CRASH_STREAM, all_threads=True)
+
+    def _handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        _append_crash_log("Unhandled main-thread exception", exc_type, exc_value, exc_traceback)
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+    def _handle_thread_exception(args):
+        _append_crash_log(
+            f"Unhandled thread exception in {getattr(args.thread, 'name', 'unknown')}",
+            args.exc_type,
+            args.exc_value,
+            args.exc_traceback,
+        )
+
+    sys.excepthook = _handle_exception
+    threading.excepthook = _handle_thread_exception
+
+
+def _run_headless():
+    import briefing
+    import google_services as gs
+    import memory as mem
+    import tools
     from router import route_stream, set_timer_callback
     from voice import speak, speak_stream, listen, wait_for_wake_word
-    from brain import ask as ask_gpt
-    import memory as mem
-    import briefing
-    import tools
-    import google_services as gs
 
     END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
     QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -50,7 +103,6 @@ if "--no-ui" in sys.argv:
     def conversation_loop():
         speak("Yes?")
         misses = 0
-        exchanges = []
         while True:
             user_input = listen()
             if not user_input:
@@ -73,20 +125,29 @@ if "--no-ui" in sys.argv:
                 stream, model = route_stream(user_input)
                 print(f"[{model}]")
                 speak_stream(stream)
-            except Exception as e:
+            except Exception:
+                traceback.print_exc()
                 speak("Sorry, something went wrong.")
 
-    def main():
-        set_timer_callback(on_timer_done)
-        speak("Online.")
-        while True:
-            wait_for_wake_word()
-            if not conversation_loop():
-                break
+    set_timer_callback(on_timer_done)
+    speak("Online.")
+    while True:
+        wait_for_wake_word()
+        if not conversation_loop():
+            break
 
-    main()
 
-else:
-    # Default: launch the GUI
+def _run():
+    _install_crash_logging()
+    api.start()
+
+    if "--no-ui" in sys.argv:
+        _run_headless()
+        return
+
     from ui import run
     run()
+
+
+if __name__ == "__main__":
+    _run()

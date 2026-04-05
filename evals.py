@@ -20,8 +20,10 @@ _MAX_FAILURES = 200
 _MAX_IMPROVEMENTS = 100
 
 _CATEGORY_FILE_MAP = {
+    "stability": ["main.py", "run.sh", "api.py", "ui.py"],
     "routing": ["router.py", "orchestrator.py", "model_router.py"],
     "browser": ["browser.py", "router.py"],
+    "knowledge": ["vault.py", "wiki_builder.py", "source_ingest.py", "router.py", "model_router.py", "skill_factory.py"],
     "formatting": ["brain.py", "brain_claude.py", "brain_ollama.py", "config.py"],
     "memory": ["memory.py", "learner.py", "brain.py", "brain_claude.py", "brain_ollama.py"],
     "self_improve": ["self_improve.py"],
@@ -104,15 +106,19 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
 def classify_failure(issue: str = "", user_input: str = "", response: str = "", expected: str = "") -> str:
     text = " ".join(x for x in (issue, user_input, response, expected) if x).lower()
 
+    if any(t in text for t in ("crash", "crashed", "stopped serving", "process exited", "connection refused", "jarvis died", "app exited", "unhandled exception", "runtime crash")):
+        return "stability"
     if any(t in text for t in ("markdown", "bullet", "bullets", "formatted wrong", "numbered list", "read aloud", "spoken aloud", "formatting")):
         return "formatting"
     if any(t in text for t in ("hallucinat", "made up", "invented", "false", "wrong fact", "not true", "claimed it was using")):
         return "hallucination"
-    if any(t in text for t in ("browser", "page", "site", "openai.com", "clicked the wrong", "opened the wrong", "search instead", "tab", "safari", "chrome")):
+    if any(t in text for t in ("vault", "knowledge base", "local knowledge", "wiki", "citation", "google drive", "source-grounded", "two-sentence grounded summary")):
+        return "knowledge"
+    if any(t in text for t in ("browser", "safari", "chrome", "clicked the wrong", "opened the wrong", "search instead", "tab", "website", "web page", "reload page", "openai.com")):
         return "browser"
     if any(t in text for t in ("route", "routing", "wrong tool", "wrong intent", "misclassified", "should have used")):
         return "routing"
-    if any(t in text for t in ("remember", "forgot", "memory", "context", "personalization", "personalised", "personalized")):
+    if any(t in text for t in ("remember", "forgot", "memory", "context", "personalization", "personalised", "personalized", "based on what you know about me", "generic")):
         return "memory"
     if any(t in text for t in ("self-improve", "self improve", "rewrite its own code", "syntax validation", "backup", "corrupt file", "restart yourself")):
         return "self_improve"

@@ -107,6 +107,33 @@ def choose_skill(user_input: str, tool: str | None = None) -> Skill | None:
     return None
 
 
+def choose_skills(
+    user_input: str,
+    tool: str | None = None,
+    limit: int = 3,
+    min_score: int = 4,
+    include_chat_helpers: bool = True,
+) -> list[Skill]:
+    selected: list[Skill] = []
+    seen: set[str] = set()
+
+    for skill, score in match_skills(user_input, limit=max(limit * 4, 8)):
+        if score < min_score:
+            continue
+        if tool:
+            allowed = skill.tool == tool or (include_chat_helpers and tool == "chat" and skill.tool == "chat")
+            if not allowed:
+                continue
+        if skill.id in seen:
+            continue
+        selected.append(skill)
+        seen.add(skill.id)
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
 def metadata_block(user_input: str, tool: str | None = None, limit: int = 3) -> str:
     lines = []
     for skill, score in match_skills(user_input, limit=limit):
@@ -150,13 +177,60 @@ def load_skill_bundle(skill_id: str | None) -> str:
     return "\n\n".join(sections)
 
 
-def build_system_extra(user_input: str, skill_id: str | None = None, tool: str | None = None) -> tuple[str, str | None]:
-    skill = get_skill(skill_id) or choose_skill(user_input, tool=tool)
-    if not skill:
-        return "", None
-    return load_skill_bundle(skill.id), skill.id
+def load_skill_bundles(skill_ids: list[str]) -> str:
+    bundles = []
+    for skill_id in skill_ids:
+        bundle = load_skill_bundle(skill_id)
+        if bundle:
+            bundles.append(bundle)
+    if not bundles:
+        return ""
+    active = ", ".join(skill_ids)
+    return f"Active skill stack: {active}\n\n" + "\n\n".join(bundles)
 
 
-def skill_cost_hint(skill_id: str | None) -> str | None:
-    skill = get_skill(skill_id)
-    return skill.cost_hint if skill else None
+def resolve_skills(user_input: str, skill_id: str | None = None, tool: str | None = None, limit: int = 3) -> list[Skill]:
+    explicit = get_skill(skill_id)
+    resolved: list[Skill] = []
+    seen: set[str] = set()
+
+    if explicit:
+        resolved.append(explicit)
+        seen.add(explicit.id)
+
+    for skill in choose_skills(user_input, tool=tool, limit=limit):
+        if skill.id in seen:
+            continue
+        resolved.append(skill)
+        seen.add(skill.id)
+        if len(resolved) >= limit:
+            break
+
+    return resolved
+
+
+def build_system_extra(user_input: str, skill_id: str | None = None, tool: str | None = None, limit: int = 3) -> tuple[str, list[Skill]]:
+    resolved = resolve_skills(user_input, skill_id=skill_id, tool=tool, limit=limit)
+    if not resolved:
+        return "", []
+    return load_skill_bundles([skill.id for skill in resolved]), resolved
+
+
+def skill_cost_hint(skill_ref) -> str | None:
+    if not skill_ref:
+        return None
+
+    if isinstance(skill_ref, Skill):
+        return skill_ref.cost_hint
+
+    if isinstance(skill_ref, str):
+        skill = get_skill(skill_ref)
+        return skill.cost_hint if skill else None
+
+    hints = [skill_cost_hint(item) for item in skill_ref]
+    hints = [hint for hint in hints if hint]
+    if not hints:
+        return None
+
+    order = {"local": 0, "mini": 1, "haiku": 2, "sonnet": 3, "opus": 4}
+    return max(hints, key=lambda hint: order.get(hint, 0))

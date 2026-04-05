@@ -21,19 +21,21 @@ import html
 from ddgs import DDGS
 from brain_claude import ask_claude
 from config import SONNET, HAIKU
+import skills
 
 
 # ── Query generation ──────────────────────────────────────────────────────────
 
 def _generate_queries(topic: str) -> list[str]:
     """Use Haiku to generate diverse search queries for better coverage."""
+    system_extra, _ = skills.build_system_extra(topic, skill_id="research_synthesis", tool="deep_research")
     prompt = (
         f"Generate 4 diverse search queries to thoroughly research: {topic}\n"
         f"Make them specific and complementary — different angles.\n"
         f"Return ONLY a JSON array of strings, nothing else."
     )
     try:
-        raw = ask_claude(prompt, model=HAIKU)
+        raw = ask_claude(prompt, model=HAIKU, system_extra=system_extra)
         raw = raw.strip()
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:-1])
@@ -87,6 +89,7 @@ def _fetch_page(url: str, max_chars: int = 4000) -> str:
 
 def _synthesize(topic: str, sources: list[dict]) -> str:
     """Use Sonnet to synthesize all sources into a structured report."""
+    system_extra, _ = skills.build_system_extra(topic, skill_id="research_synthesis", tool="deep_research")
     source_block = ""
     for i, src in enumerate(sources):
         source_block += f"\n\n--- Source {i+1}: {src['title']} ({src['url']}) ---\n{src['content']}"
@@ -109,7 +112,7 @@ Report requirements:
 
 Do not invent facts not supported by the sources."""
 
-    return ask_claude(prompt, model=SONNET)
+    return ask_claude(prompt, model=SONNET, system_extra=system_extra)
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────

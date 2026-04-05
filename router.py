@@ -24,6 +24,10 @@ import camera
 import memory as mem
 import evals
 import skills
+import vault
+import source_ingest
+import skill_factory
+import local_training
 import self_improve as si
 import hardware as hw
 import messages as msg
@@ -90,6 +94,28 @@ def _parse_browser_click_target(text: str):
     return label or None
 
 
+def _parse_source_target(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:ingest|add to the vault|put in the vault)\b(?:\s+(?:source|file|repo|repository|url|notes))?(?:\s+from)?\s+(.+)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    target = match.group(1).strip()
+    target = re.sub(r"\s+(?:into|in)\s+the\s+vault\b.*$", "", target, flags=re.IGNORECASE).strip()
+    target = target.strip(" \"'")
+    target = re.sub(r"[.?!]+$", "", target)
+    return target or None
+
+
+def _parse_skill_topic(text: str) -> str | None:
+    match = re.search(r"\b(?:create|generate|make|build)\b\s+(?:a\s+)?skill(?:\s+from\s+the\s+vault)?(?:\s+(?:about|for))\s+(.+)", text, re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1).strip(" .")
+
+
 def _is_model_status_query(lower: str) -> bool:
     return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|what mode are you in|which mode are you in)\b", lower))
 
@@ -108,6 +134,15 @@ def _is_self_improve_safety_query(lower: str) -> bool:
     )
 
 
+def _is_self_review_query(lower: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(review your own code|review your code|self review|what are your shortcomings|what are your weaknesses|review yourself|analyze your shortcomings|analyse your shortcomings)\b",
+            lower,
+        )
+    )
+
+
 def _runtime_status_reply(user_input: str) -> str:
     mode = get_mode()
     skill = skills.choose_skill(user_input, tool="chat")
@@ -117,9 +152,64 @@ def _runtime_status_reply(user_input: str) -> str:
 
 def _self_improve_safety_reply() -> str:
     return (
-        "Before changing my own code, I identify the target file, read the current source, generate the update, "
-        "syntax-validate the new Python before touching disk, create a timestamped backup, write through a temporary file with atomic replace, "
-        "and only then report the diff and ask for a restart to apply it."
+        "I should not change my own code unless there are enough recent eval failures to justify it. "
+        "Right now the gate is evidence first: I look for at least two recent logged failures pointing at the same weak path, and without that I should refuse the change. "
+        "Only after that do I identify the target file, generate the update, syntax-validate it, back up the original, write atomically, and ask for a restart."
+    )
+
+
+def _is_personal_interest_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "tell me something interesting based on what you know about me",
+            "tell me something interesting about me",
+            "what's interesting about me",
+            "what do you know about me that is interesting",
+        )
+    )
+
+
+def _personal_interest_reply() -> str:
+    facts = mem.list_facts()
+    projects = [p for p in mem.get_projects() if p.get("name")]
+    topics = mem.get_top_topics(5)
+
+    role_fact = next((fact for fact in facts if "anthropic" in fact.lower() or "trust" in fact.lower() or "safety" in fact.lower()), "")
+    project_names = [p["name"] for p in projects[:3]]
+    role_clause = role_fact.rstrip(".")
+    if role_clause:
+        if role_clause.lower().startswith(("current role is", "i am", "i'm", "role:")):
+            role_clause = role_clause[0].upper() + role_clause[1:]
+        else:
+            role_clause = f"You are {role_clause}"
+
+    if role_fact and project_names:
+        return (
+            f"What stands out is how tightly your day job and side projects line up. "
+            f"{role_clause} while also building {', '.join(project_names)}, so your work consistently sits at the intersection of AI safety, product behavior, and real system execution."
+        )
+
+    if project_names and topics:
+        return (
+            f"The interesting pattern is how consistent your interests are across both what you build and what you ask about. "
+            f"Your current projects include {', '.join(project_names)}, and your recurring topics are {', '.join(topics[:3])}, which means you keep converging on applied AI systems rather than abstract theory."
+        )
+
+    if role_fact:
+        return (
+            f"The clearest thing I know about you is that {role_clause}. "
+            "That puts you in a rare position where you see how AI policy, misuse risk, and product behavior collide in the real world, not just in theory."
+        )
+
+    if project_names:
+        return (
+            f"What is interesting is that you are not just using AI tools, you are building them. "
+            f"Right now that includes {', '.join(project_names)}, which suggests you care more about useful, working systems than novelty."
+        )
+
+    return (
+        "What stands out is that your questions keep clustering around applied AI safety, real-world system behavior, and practical tooling. "
+        "That usually means you are optimizing for systems that hold up under pressure, not just systems that demo well."
     )
 
 
@@ -150,7 +240,9 @@ def _meta_improvement_reply() -> str:
         top_categories = ", ".join(f"{name} ({count})" for name, count in sorted(categories.items(), key=lambda kv: kv[1], reverse=True)[:3])
         latest = "; ".join(f"{f['category']}: {f['issue']}" for f in failures[-2:])
         next_steps_map = {
+            "stability": "stabilize the runtime and keep crash evidence in the log so the process does not silently die",
             "browser": "keep tightening browser execution and page-action parsing",
+            "knowledge": "tighten vault retrieval, citation grounding, and knowledge summarization",
             "routing": "tighten intent routing and status-query handling",
             "self_improve": "keep self-improve in evidence-gated explanation mode unless the request is an explicit edit",
             "formatting": "remove spoken-output artifacts before they reach TTS",
@@ -211,8 +303,12 @@ def route_stream(user_input: str) -> tuple:
     # Runtime self-knowledge
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_self_review_query(lower):
+        return _s(si.review_text(si.self_review())), "Self-Review"
     if _is_self_improve_safety_query(lower):
         return _s(_self_improve_safety_reply()), "Self-Improve"
+    if _is_personal_interest_query(lower):
+        return _s(_personal_interest_reply()), "Status"
     if _is_meta_improvement_query(lower):
         return _s(_meta_improvement_reply()), "Status"
 
@@ -291,6 +387,56 @@ def route_stream(user_input: str) -> tuple:
         threading.Thread(target=_do_restart, daemon=True).start()
         return _s("Restarting now."), "Self-Improve"
 
+    # Local vault
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config")):
+        if any(p in lower for p in ("fine tune handoff", "axolotl", "unsloth", "lora config")):
+            return _s(local_training.result_text(local_training.build_finetune_handoff())), "Local Model"
+        if "distill" in lower:
+            return _s(local_training.result_text(local_training.distill_failures())), "Local Model"
+        if "export" in lower:
+            return _s(local_training.result_text(local_training.export_sft_dataset())), "Local Model"
+        if "modelfile" in lower:
+            return _s(local_training.result_text(local_training.build_modelfile())), "Local Model"
+        if any(p in lower for p in ("pipeline", "run it", "full run", "full pipeline", "fine tune")):
+            return _s(local_training.result_text(local_training.build_training_pack())), "Local Model"
+        export_result = local_training.export_sft_dataset()
+        modelfile_result = local_training.build_modelfile()
+        return _s(
+            f"{local_training.result_text(export_result)} "
+            f"{local_training.result_text(modelfile_result)} "
+            "If you want higher local quality on the failure cases, run a distillation pass next."
+        ), "Local Model"
+
+    if re.search(r"\b(create|generate|make|build|promote)\b.*\bskill\b", lower):
+        if any(p in lower for p in ("promote", "failure", "failures", "eval")):
+            return _s(skill_factory.result_text(skill_factory.promote_failures())), "Skill"
+        topic = _parse_skill_topic(user_input)
+        if topic:
+            return _s(skill_factory.result_text(skill_factory.create_skill_from_vault(topic))), "Skill"
+        return _s("Tell me what topic you want the skill to cover."), "Skill"
+
+    if any(p in lower for p in ("search the vault", "refresh the vault", "index the vault", "build the vault wiki", "compile the wiki", "ingest source", "ingest file", "ingest repo", "ingest repository", "ingest url", "ingest notes", "add to the vault", "knowledge base", "local knowledge", "from the vault", "in the vault")):
+        if any(p in lower for p in ("ingest", "add to the vault")):
+            target = _parse_source_target(user_input) or "notes"
+            source_type = "notes" if target.lower() in {"notes", "my notes"} else ("google_drive" if ("docs.google.com" in target or "drive.google.com" in target) else "auto")
+            result = source_ingest.ingest_source(target, source_type=source_type, auto_build=True)
+            return _s(source_ingest.result_text(result)), "Knowledge"
+        if any(p in lower for p in ("build", "compile")):
+            return _s(vault.build_wiki_text()), "Knowledge"
+        if any(p in lower for p in ("refresh", "reindex", "index")):
+            data = vault.refresh_index()
+            return _s(f"Refreshed the local vault index. I indexed {data.get('doc_count', 0)} markdown documents."), "Knowledge"
+        if any(p in lower for p in ("status", "what's in", "what is in", "show")):
+            return _s(vault.status_text()), "Knowledge"
+        raw = vault.search_text(user_input)
+        if any(p in lower for p in ("summarize", "summarise", "in two sentences", "briefly", "concise", "what does it say")):
+            return format_with_mini(
+                f"Summarize this local vault context in two concise spoken sentences and include the exact cited local file and heading you relied on:\n{raw}",
+                skill_id="local_knowledge",
+                tool="knowledge",
+            ), "Knowledge"
+        return _s(raw), "Knowledge"
+
     # ── 2. Hardware fast-path ─────────────────────────────────────────────────
     hw_result = _route_hardware(lower, user_input)
     if hw_result:
@@ -325,6 +471,65 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             skill_id=skill_id,
             tool=tool,
         ), "Search"
+
+    # ── Local knowledge vault ────────────────────────────────────────────────
+    if tool == "knowledge":
+        action = params.get("action", "").lower() or decision.action.lower()
+        if action == "ingest":
+            target = params.get("source") or params.get("path") or params.get("url") or _parse_source_target(user_input) or "notes"
+            source_type = "notes" if str(target).lower() in {"notes", "my notes"} else ("google_drive" if ("docs.google.com" in str(target) or "drive.google.com" in str(target)) else "auto")
+            result = source_ingest.ingest_source(target, source_type=source_type, auto_build=True)
+            return _s(source_ingest.result_text(result)), "Knowledge"
+        if action in {"build", "compile"}:
+            return _s(vault.build_wiki_text()), "Knowledge"
+        if action in {"refresh", "reindex", "index"}:
+            data = vault.refresh_index()
+            return _s(f"Refreshed the local vault index. I indexed {data.get('doc_count', 0)} markdown documents."), "Knowledge"
+        if action in {"status", "show"}:
+            return _s(vault.status_text()), "Knowledge"
+
+        query = params.get("query") or params.get("topic") or user_input
+        results = vault.search(query)
+        if not results:
+            return _s(f"I didn't find anything relevant in the local vault for {query}."), "Knowledge"
+        raw = vault.search_text(query)
+        return format_with_mini(
+            f"Summarize this local vault context in Jarvis voice and stay grounded in the local files only:\n{raw}",
+            skill_id=skill_id or "local_knowledge",
+            tool="knowledge",
+        ), "Knowledge"
+
+    # ── Skill factory ────────────────────────────────────────────────────────
+    if tool == "skill":
+        action = params.get("action", "").lower() or decision.action.lower()
+        if action == "promote":
+            return _s(skill_factory.result_text(skill_factory.promote_failures())), "Skill"
+
+        topic = params.get("topic") or params.get("query") or _parse_skill_topic(user_input)
+        if not topic:
+            return _s("Tell me the topic you want me to turn into a reusable skill."), "Skill"
+        result = skill_factory.create_skill_from_vault(topic)
+        return _s(skill_factory.result_text(result)), "Skill"
+
+    # ── Local model training ────────────────────────────────────────────────
+    if tool == "local_model":
+        action = params.get("action", "").lower() or decision.action.lower()
+        if action == "distill":
+            result = local_training.distill_failures()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action == "export":
+            result = local_training.export_sft_dataset()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action == "modelfile":
+            result = local_training.build_modelfile()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action in {"handoff", "lora"}:
+            result = local_training.build_finetune_handoff()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action in {"train", "tune", "improve"}:
+            result = local_training.build_training_pack()
+            return _s(local_training.result_text(result)), "Local Model"
+        return _s(f"Local training status: {local_training.status()}"), "Local Model"
 
     # ── Browser ───────────────────────────────────────────────────────────────
     if tool == "browser":
@@ -517,6 +722,9 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         action = params.get("action", "improve")
         if action == "restart":
             return _s("Restarting now to apply the latest changes."), "Self-Improve"
+        if action == "review":
+            area = params.get("area") or params.get("target") or None
+            return _s(si.review_text(si.self_review(area=area))), "Self-Review"
         if action == "analyze":
             area = params.get("area", None)
             analysis = si.analyze_weakness(area)

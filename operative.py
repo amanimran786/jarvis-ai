@@ -23,6 +23,7 @@ from typing import Callable
 
 from brain_claude import ask_claude
 from config import SONNET, HAIKU
+import skills
 
 
 # ── Step definition ───────────────────────────────────────────────────────────
@@ -71,11 +72,13 @@ _PLAN_USER = "Plan this task: {task}"
 
 def _plan_steps(task: str) -> list[Step]:
     """Use Sonnet to break the task into executable steps."""
+    system_extra, _ = skills.build_system_extra(task, skill_id="planning_execution", tool="chat")
     try:
         raw = ask_claude(
             _PLAN_USER.format(task=task),
             model=SONNET,
             system=_PLAN_SYSTEM,
+            system_extra=system_extra,
         )
         raw = raw.strip()
         if raw.startswith("```"):
@@ -200,7 +203,8 @@ def _execute_step(step: Step, step_results: dict) -> tuple[bool, str]:
                 last = step_results.get(max(step_results.keys()))
                 if last and "$" not in prompt:
                     prompt = f"Context from previous step:\n{last[:1500]}\n\nTask: {prompt}"
-            result = ask_claude(prompt, model=SONNET)
+            system_extra, _ = skills.build_system_extra(prompt, tool="chat")
+            result = ask_claude(prompt, model=SONNET, system_extra=system_extra)
             return True, result
 
         else:

@@ -17,11 +17,12 @@ Mode commands:
 """
 
 from config import GPT_MINI, GPT_FULL, HAIKU, SONNET, OPUS
-from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, DEFAULT_MODE
+from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, DEFAULT_MODE
 from brain import ask_stream
 from brain_claude import ask_claude_stream
 from brain_ollama import ask_local_stream, list_local_models
 import skills
+import vault
 
 _current_mode = DEFAULT_MODE
 
@@ -48,7 +49,7 @@ def set_mode(mode: str) -> str:
 # Tasks that REQUIRE cloud — too complex for small local models
 NEEDS_CLOUD_HARD = {
     # Deep coding/architecture
-    "refactor", "architecture", "design pattern", "memory leak",
+    "refactor", "architecture", "design pattern",
     "race condition", "concurrency", "system design", "optimize this",
     # Deep reasoning
     "step by step", "walk me through", "explain in detail",
@@ -66,9 +67,13 @@ NEEDS_CLOUD_MID = {
     "should i", "what's better",
     # Technical debugging / troubleshooting
     "debug", "troubleshoot", "crashes", "crash", "error",
-    "503", "500", "timeout", "timed out", "not working",
+    "503", "502", "500", "timeout", "timed out", "not working",
     "how do i fix", "how to fix", "what causes", "why does",
     "most likely", "top 3", "top 5", "best way to",
+    "memory leak", "distributed system", "race condition",
+    "optimistic locking", "pessimistic locking", "nginx", "fastapi",
+    "dockerized", "dockerised", "queue over", "rpc call",
+    "narrow them down", "debugging plan",
 }
 
 # Tasks that a local model handles perfectly
@@ -115,6 +120,10 @@ def _best_local(text: str) -> str:
     available = list_local_models()
     lower = text.lower()
 
+    if LOCAL_TUNED and any(LOCAL_TUNED in m for m in available):
+        if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
+            return LOCAL_TUNED
+
     if any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
         if any(LOCAL_CODER in m for m in available):
             return LOCAL_CODER
@@ -124,7 +133,7 @@ def _best_local(text: str) -> str:
             return LOCAL_REASONING
 
     # Return first available
-    for preferred in (LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING):
+    for preferred in (LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING):
         if any(preferred.split(":")[0] in m for m in available):
             return preferred
     return available[0]
@@ -134,8 +143,14 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
     """Return a truthful summary of Jarvis's current routing state."""
     mode = _current_mode
     local_models = list_local_models()
-    _, resolved_skill_id = skills.build_system_extra(user_input, skill_id=skill_id, tool="chat")
-    active_skill = f" with the {resolved_skill_id} skill active" if resolved_skill_id else ""
+    _, resolved_skills = skills.build_system_extra(user_input, skill_id=skill_id, tool="chat")
+    if resolved_skills:
+        active_names = ", ".join(skill.id for skill in resolved_skills[:2])
+        if len(resolved_skills) > 2:
+            active_names += ", plus supporting skills"
+        active_skill = f" with {active_names} active"
+    else:
+        active_skill = ""
 
     if mode == "local":
         if local_models:
@@ -144,7 +159,7 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
         return "I'm in local mode, but no Ollama model is currently available."
 
     if mode == "cloud":
-        tier = _classify_complexity(user_input or "general conversation", skill_id=resolved_skill_id)
+        tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
         if tier in ("local", "mini"):
             return f"I'm in cloud mode and this request would use {GPT_MINI}{active_skill}."
         if tier == "haiku":
@@ -153,7 +168,7 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
             return f"I'm in cloud mode and this request would use {SONNET}{active_skill}."
         return f"I'm in cloud mode and this request would use {OPUS}{active_skill}."
 
-    tier = _classify_complexity(user_input or "general conversation", skill_id=resolved_skill_id)
+    tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
     if tier == "local" and local_models:
         chosen = _best_local(user_input or "general conversation")
         return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
@@ -174,14 +189,14 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
     return f"I'm in auto mode, but no local Ollama model is currently available, so this request would fall back to {GPT_MINI}{active_skill}."
 
 
-def _classify_complexity(text: str, skill_id: str | None = None) -> str:
+def _classify_complexity(text: str, skill_id: str | None = None, active_skills: list | None = None) -> str:
     """
     Returns: 'local', 'mini', 'haiku', 'sonnet', 'opus'
     Based on task complexity — cheapest viable option.
     """
     lower = text.lower()
     word_count = len(lower.split())
-    cost_hint = skills.skill_cost_hint(skill_id)
+    cost_hint = skills.skill_cost_hint(active_skills or skill_id)
 
     if cost_hint == "opus":
         return "opus"
@@ -191,6 +206,17 @@ def _classify_complexity(text: str, skill_id: str | None = None) -> str:
         return "haiku"
     if cost_hint == "mini":
         return "mini"
+    if cost_hint == "local":
+        hinted_local = True
+    else:
+        hinted_local = False
+
+    technical_markers = (
+        "python service", "memory leak", "distributed system", "race condition",
+        "optimistic locking", "pessimistic locking", "dockerized", "dockerised",
+        "fastapi", "nginx", "queue", "rpc", "debugging plan", "narrow them down",
+        "concrete debugging plan", "software engineer", "technical question",
+    )
 
     # Explicitly asking for local
     if any(t in lower for t in EXPLICIT_LOCAL):
@@ -203,6 +229,9 @@ def _classify_complexity(text: str, skill_id: str | None = None) -> str:
     # Mid complexity — Sonnet is the right call
     if any(t in lower for t in NEEDS_CLOUD_MID):
         return "sonnet"
+
+    if any(t in lower for t in technical_markers):
+        return "sonnet" if not hinted_local else "haiku"
 
     # Short simple factual — GPT-mini (cheap, fast)
     if word_count <= 8 and not any(t in lower for t in NEEDS_CLOUD_MID):
@@ -223,7 +252,10 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
     Only escalates when the task genuinely requires it.
     """
     mode = _current_mode
-    system_extra, resolved_skill_id = skills.build_system_extra(user_input, skill_id=skill_id, tool=tool)
+    system_extra, resolved_skills = skills.build_system_extra(user_input, skill_id=skill_id, tool=tool)
+    vault_extra = vault.build_context(user_input, tool=tool)
+    if vault_extra:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
 
     # ── Force local ───────────────────────────────────────────────────────────
     if mode == "local":
@@ -235,7 +267,7 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
 
     # ── Force cloud ───────────────────────────────────────────────────────────
     if mode == "cloud":
-        tier = _classify_complexity(user_input, skill_id=resolved_skill_id)
+        tier = _classify_complexity(user_input, active_skills=resolved_skills)
         if tier in ("local", "mini"):
             return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
         elif tier == "haiku":
@@ -246,7 +278,7 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
             return ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True), "Opus"
 
     # ── Auto mode: local-first, cloud only when needed ────────────────────────
-    tier = _classify_complexity(user_input, skill_id=resolved_skill_id)
+    tier = _classify_complexity(user_input, active_skills=resolved_skills)
 
     if tier == "local":
         if _has_local():
