@@ -12,6 +12,8 @@ in orchestrator.TOOLS — no regex patterns to write.
 """
 
 import re
+import os
+import sys
 import threading
 import tools
 import terminal
@@ -21,6 +23,7 @@ import camera
 import memory as mem
 import self_improve as si
 import hardware as hw
+import messages as msg
 from model_router import smart_stream, format_with_mini
 from config import OPUS, SONNET
 from brain_claude import ask_claude_stream
@@ -48,7 +51,7 @@ def _parse_timer(text: str):
 
 
 def _parse_app(text: str):
-    match = re.search(r"\b(?:open|launch|start)\b\s+(.+)", text, re.IGNORECASE)
+    match = re.search(r"\b(?:open|launch|start)\b\s+(?:up\s+)?(?:the\s+)?(?:my\s+)?(.+)", text, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
 
@@ -111,8 +114,14 @@ def route_stream(user_input: str) -> tuple:
         result = si.restore_backup(backups[0])
         return _s(result), "Self-Improve"
 
-    if any(p in lower for p in ("restart yourself", "restart jarvis", "reload yourself", "apply changes")):
-        return _s("Restarting now to apply the latest changes."), "Self-Improve"
+    if any(p in lower for p in ("restart yourself", "restart jarvis", "reload yourself",
+                                "apply changes", "hit your restart", "do a restart")):
+        def _do_restart():
+            import time
+            time.sleep(0.8)  # let the TTS finish speaking
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        threading.Thread(target=_do_restart, daemon=True).start()
+        return _s("Restarting now."), "Self-Improve"
 
     # ── 2. Hardware fast-path ─────────────────────────────────────────────────
     hw_result = _route_hardware(lower, user_input)
@@ -186,6 +195,15 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
                 yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
 
         return _operative_stream(), "Operative"
+
+    # ── Messages / iMessage ───────────────────────────────────────────────────
+    if tool == "message":
+        recipient = params.get("recipient", params.get("to", ""))
+        body      = params.get("message",   params.get("body", params.get("text", "")))
+        if recipient and body:
+            return _s(msg.send_imessage(recipient, body)), "Messages"
+        # Missing info — ask smart_stream to extract and retry, or prompt user
+        return smart_stream(user_input)
 
     # ── Calendar ──────────────────────────────────────────────────────────────
     if tool == "calendar":

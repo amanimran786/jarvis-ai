@@ -76,6 +76,10 @@ TOOLS = {
 
     "meeting": "Smart Listen — tap call audio and get real-time suggestions. "
                "Triggers: 'smart listen', 'listen to call', 'meeting mode', 'setup blackhole'.",
+
+    "message": "Send an iMessage or SMS via the macOS Messages app. "
+               "Triggers: 'text', 'message', 'send a message', 'iMessage', 'send a text'. "
+               "Params: recipient (name or phone), message (text body).",
 }
 
 _TOOL_LIST = "\n".join(f'  "{k}": {v}' for k, v in TOOLS.items())
@@ -180,28 +184,40 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     if re.search(r"\b(improve yourself|modify your|upgrade your|change your interface|redesign your)\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
     # Restart
-    if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes)\b", lower):
+    if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes|hit your restart|do a restart)\b", lower):
         return ToolDecision("self_improve", 0.99, "restart")
+    # Messaging
+    if re.search(r"\b(text|message|send a text|send a message|imessage)\b.*(to\s+\w+|\w+\s+imran|\w+\s+imran)", lower):
+        return ToolDecision("message", 0.95, "send")
+    if re.search(r"\b(text|send a text|send a message to|message)\s+\w+", lower):
+        return ToolDecision("message", 0.95, "send")
     return None
 
 
 def _parse(raw: str) -> ToolDecision:
     """Parse LLM JSON response into ToolDecision."""
-    # Strip markdown fences
     raw = raw.strip()
+
+    # Strip markdown fences
     if raw.startswith("```"):
         lines = raw.split("\n")
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    # Extract JSON object
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    # Find the first complete JSON object (non-greedy to avoid extra data errors)
+    match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
     if not match:
         return _FALLBACK
 
-    data = json.loads(match.group())
-    tool = data.get("tool", "chat")
+    try:
+        data = json.loads(match.group())
+    except json.JSONDecodeError:
+        # Try the whole string as a last resort
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return _FALLBACK
 
-    # Validate tool exists
+    tool = data.get("tool", "chat")
     if tool not in TOOLS:
         tool = "chat"
 
