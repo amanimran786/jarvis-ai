@@ -70,9 +70,11 @@ TOOLS = {
     "hardware": "Control physical hardware devices via serial/USB or WiFi. "
                 "Triggers: device names, 'fire', 'activate', 'trigger', 'relay', 'hardware status'.",
 
-    "self_improve": "Modify Jarvis's own source code. "
-                    "Triggers: 'improve yourself', 'modify your', 'update your code', "
-                    "'upgrade your', 'change your interface'.",
+    "self_improve": "Modify Jarvis's own source code. ONLY use when the user explicitly "
+                    "asks Jarvis to change its own code or interface. "
+                    "Triggers: 'improve yourself', 'modify your code', 'update your code', "
+                    "'upgrade your routing', 'change your interface'. "
+                    "Do NOT use for general questions about improvement or modification.",
 
     "meeting": "Smart Listen — tap call audio and get real-time suggestions. "
                "Triggers: 'smart listen', 'listen to call', 'meeting mode', 'setup blackhole'.",
@@ -180,8 +182,8 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Memory
     if re.match(r"^(remember |forget )", lower):
         return ToolDecision("memory", 0.99, "save" if lower.startswith("remember") else "forget")
-    # Self-improve
-    if re.search(r"\b(improve yourself|modify your|upgrade your|change your interface|redesign your)\b", lower):
+    # Self-improve — require self-referential context to avoid false positives
+    if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
     # Restart
     if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes|hit your restart|do a restart)\b", lower):

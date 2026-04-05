@@ -38,7 +38,7 @@ class Agent(ABC):
     enabled: bool = True
 
     def __init__(self):
-        self._last_run: float = 0
+        self._last_run: float = time.time()  # wait full interval before first run
         self._state: dict = {}   # persistent per-agent state
 
     def due(self) -> bool:

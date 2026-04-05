@@ -380,6 +380,9 @@ class MeetingOverlay(QMainWindow):
         """
 
     def _action_btn_css(self, color: str) -> str:
+        # Convert hex color to rgba for hover/pressed tints
+        c = QColor(color)
+        r, g, b = c.red(), c.green(), c.blue()
         return f"""
             QPushButton {{
                 background: transparent;
@@ -389,8 +392,8 @@ class MeetingOverlay(QMainWindow):
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
-            QPushButton:hover {{ background: rgba(0,180,220,0.12); }}
-            QPushButton:pressed {{ background: rgba(0,180,220,0.25); }}
+            QPushButton:hover {{ background: rgba({r},{g},{b},0.12); }}
+            QPushButton:pressed {{ background: rgba({r},{g},{b},0.25); }}
         """
 
     def _action_btn(self, label: str, color: str) -> QPushButton:

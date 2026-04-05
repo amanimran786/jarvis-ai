@@ -9,7 +9,7 @@ from config import OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEV
 _openai_client = OpenAI(api_key=OPENAI_API_KEY)
 _recognizer = sr.Recognizer()
 
-WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis"}
+WAKE_WORDS = {"hey jarvis", "ok jarvis"}
 OPENAI_TTS_VOICE = "onyx"   # fallback voice
 
 # Prevents mic from picking up Jarvis's own TTS output.
@@ -186,7 +186,7 @@ def wait_for_wake_word() -> None:
 
         try:
             text = _recognizer.recognize_google(audio).lower().strip()
-            if any(w in text for w in WAKE_WORDS):
+            if any(text == w or text.startswith(w + " ") or text.endswith(" " + w) for w in WAKE_WORDS):
                 print(f"\n[Wake word detected: '{text}']")
                 return
         except (sr.UnknownValueError, sr.RequestError):

@@ -203,7 +203,7 @@ def _listen_loop():
             audio = np.concatenate([overlap_audio, new_audio]) if len(overlap_audio) > 0 else new_audio
 
             # Save overlap for next chunk
-            overlap_samples = int(OVERLAP_SECONDS * SAMPLE_RATE)
+            overlap_samples = int(OVERLAP_SECONDS * _actual_sample_rate)
             overlap_audio = audio[-overlap_samples:] if len(audio) > overlap_samples else audio
 
             # Skip if audio is mostly silence

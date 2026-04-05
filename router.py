@@ -318,9 +318,22 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             area = params.get("area", None)
             analysis = si.analyze_weakness(area)
             return _s(analysis), "Self-Improve"
-        # improve
+        # improve — actually run the pipeline
         target = params.get("target", params.get("area", ""))
-        return _s("Analyzing my own code and generating improvements. This will take a moment..."), "Self-Improve"
+        instruction = target if target else None
+
+        def _improve_stream():
+            yield "Analyzing my own code and generating improvements. This will take a moment..."
+            result = si.self_improve(instruction=instruction)
+            if "error" in result:
+                yield f" Analysis complete: {result['error']}"
+            else:
+                yield (f" Done. Improved {result['file']}. "
+                       f"{result['lines_changed']} lines changed. "
+                       f"Backup saved as {result['backup']}. "
+                       f"Say 'restart yourself' to apply.")
+
+        return _improve_stream(), "Self-Improve"
 
     # ── Meeting ───────────────────────────────────────────────────────────────
     if tool == "meeting":
