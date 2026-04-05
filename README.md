@@ -10,6 +10,8 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
 - **Persistent memory** — remembers facts, preferences, projects, and recent context from local JSON stores
 - **Local skills** — lightweight skill metadata stays cheap to load, while full `SKILL.md` instructions and references load only for the active request
 - **Specialist skill bench** — Jarvis can stack a small set of specialist skills per request for planning, coding, debugging, review, architecture, writing, research, and source-grounded answers
+- **Specialized agents** — Jarvis can run isolated role passes such as planner, executor, reviewer, science expert, security reviewer, and self-improve critic through the local `agents/` layer
+- **Scoped prompt modifiers** — request-local shorthands like `ELI5:`, `/BRIEFLY`, `TONE formal:`, or `ROLE: ... TASK: ... FORMAT: ...` shape only the current answer instead of bloating the global system prompt
 - **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary
 - **Local markdown vault** — indexed markdown files in `vault/` can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward, with citations to exact local files and headings
 - **Wiki compiler** — raw markdown in `vault/raw/` can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval
@@ -18,6 +20,8 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
 - **Live browser control** — open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons
 - **System control** — volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands
 - **Admin command path** — can run a terminal command through the native macOS administrator prompt when explicitly asked
+- **Behavior gates** — deterministic pre/post hooks guard shell commands, admin commands, file writes, and self-improve entry before risky actions execute
+- **Cost policy** — Jarvis now uses a deterministic policy layer to keep simple chat local, escalate higher-stakes requests to cloud, and block distill or train cycles until repeated eval failures justify the spend
 - **Google integration** — Calendar and Gmail read/create/send via OAuth2, plus Google Drive document ingestion into the local vault
 - **Meeting overlay** — floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share
 - **Webcam + screen vision** — image and screen analysis from the camera and desktop
@@ -90,6 +94,9 @@ Jarvis exposes a local API while running:
 - `GET /status` — current mode and local-model availability
 - `POST /chat` — chat with Jarvis
 - `GET /context` — inspect current prompt/session footprint and recent request context stats
+- `GET /usage` — inspect provider call counts, token totals, local-vs-cloud split, and estimated cloud cost
+- `GET /cost-policy` — inspect the current routing and local-model-improvement policy state
+- `GET /hooks/status` — inspect behavior-gate activity and recent blocked actions
 - `GET /vault` — inspect the current local vault index status
 - `POST /vault/build` — compile raw markdown into wiki pages and rebuild the vault indexes
 - `GET /local/training/status` — inspect exported datasets, distilled examples, and Modelfiles for local tuning
@@ -131,6 +138,34 @@ The current built-in skills include:
 - `self_improvement` for evidence-gated self-editing behavior
 
 Jarvis now loads a small relevant skill stack per request instead of relying on one giant baseline prompt.
+
+## Agents
+
+Jarvis now supports an `agents/` layer for isolated role passes:
+
+- `planner`
+- `executor`
+- `reviewer`
+- `science_expert`
+- `security_reviewer`
+- `self_improve_critic`
+
+Use phrases like `use specialized agents`, `use a science expert`, or `use planner executor reviewer on this`.
+
+## Prompt Modifiers
+
+Jarvis now supports request-scoped prompt modifiers at the start of a message. These change only the current answer and are stripped before tool routing and memory tracking.
+
+Examples:
+
+- `ELI5: explain TCP congestion control`
+- `/BRIEFLY summarize this page`
+- `TONE formal: rewrite this email`
+- `COMPARE: Postgres vs SQLite for a local desktop app`
+- `FIRST PRINCIPLES: should I use a vector database here?`
+- `ROLE: security reviewer TASK: review this auth flow FORMAT: JSON`
+
+Supported modifiers include concise-answer, explanation-style, comparison, role, audience, tone, format, self-evaluation, first-principles, pitfall, and developer-style controls.
 
 ## Hotkeys
 
@@ -196,6 +231,7 @@ Jarvis now also includes a local-model improvement loop. The intended low-cost o
 
 - export strong successful cloud answers into SFT-style JSONL
 - distill only repeated failures or weak local answers with a stronger teacher
+- distill a small curated set of expert technology and science answers so the local model learns the tone and structure of high-quality advanced explanations
 - build and register a tuned Ollama target such as `jarvis-local`
 - let general local routing prefer that tuned model automatically once it exists
 
@@ -214,6 +250,38 @@ Jarvis now also has a local model eval gate. Candidate Ollama models are compare
 On top of that, Jarvis now has an automated local-model cycle. It can generate a fresh training pack, build a candidate Ollama model, benchmark it against the baseline, and only promote it if the benchmark clears the gate. This keeps the local model path improving without blindly overwriting the current best model.
 
 Jarvis now also tracks prompt footprint per request. `/chat` responses include a `context` object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.
+
+Jarvis now also keeps a real provider usage ledger for its text-model calls. `/chat` responses include a `usage` object for the work done during that request, and `/usage` returns a rolling summary across OpenAI, Anthropic, and Ollama calls. Local calls are tracked separately from cloud calls so you can see whether the system is actually staying local-first.
+
+Cloud cost is still an estimate, not an invoice. The ledger uses blended per-million-token assumptions in [usage_tracker.py](/Users/truthseeker/jarvis-ai/usage_tracker.py) so you can see directional spend even when providers return different usage formats.
+
+## Testing
+
+Jarvis now has two test layers:
+
+- deterministic regression coverage in [tests/test_jarvis_regression_suite.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_regression_suite.py)
+- opt-in live integration coverage in [tests/test_jarvis_live_integrations.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_live_integrations.py)
+
+Run the regression suite with:
+
+```bash
+venv/bin/python -m unittest tests.test_jarvis_regression_suite -v
+```
+
+Run the live integration suite only when you explicitly want to hit real services:
+
+```bash
+JARVIS_RUN_LIVE_INTEGRATION_TESTS=1 venv/bin/python -m unittest tests.test_jarvis_live_integrations -v
+```
+
+For side-effecting tests such as sending an iMessage, opt in separately:
+
+```bash
+JARVIS_RUN_LIVE_INTEGRATION_TESTS=1 \
+JARVIS_ALLOW_SIDE_EFFECTS=1 \
+JARVIS_TEST_IMESSAGE_RECIPIENT="Name or number" \
+venv/bin/python -m unittest tests.test_jarvis_live_integrations -v
+```
 
 ## Vault
 

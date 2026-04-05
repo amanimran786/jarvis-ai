@@ -16,6 +16,7 @@ from pathlib import Path
 
 from config import HAIKU, LOCAL_DEFAULT, LOCAL_TUNED, SONNET
 from brain_ollama import list_local_models
+import cost_policy
 import local_model_eval
 import local_training
 import model_router
@@ -72,10 +73,20 @@ def run_cycle(
     judge_model: str = HAIKU,
     promote_if_ready: bool = True,
     cleanup_failed: bool = False,
+    force: bool = False,
 ) -> dict:
     _ensure_dirs()
     stamp = _timestamp()
     candidate = candidate_name.strip() or f"{LOCAL_TUNED}-candidate-{stamp}"
+
+    policy = cost_policy.training_decision()
+    if not force and policy["action"] != "train":
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": f"Skipped local model automation. {policy['reason']}",
+            "policy": policy,
+        }
 
     training_result = local_training.build_training_pack(
         export_limit=export_limit,
@@ -146,6 +157,8 @@ def status() -> dict:
 
 def result_text(result: dict) -> str:
     if not result.get("ok"):
+        if result.get("skipped"):
+            return result.get("error", "Local model automation was skipped by policy.")
         return result.get("error", "Local model automation failed.")
 
     eval_result = result.get("eval", {})

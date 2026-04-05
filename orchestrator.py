@@ -49,6 +49,10 @@ TOOLS = {
                  "Example: 'research X then write a report and email it to me', "
                  "'find the best Python libraries for X, save a summary, and open VS Code'.",
 
+    "specialized_agent": "Run a scoped specialist-agent pass with isolated roles such as planner, executor, reviewer, science expert, security reviewer, or self-improve critic. "
+                         "Use when the user explicitly asks to use specialized agents, asks for a planner/executor/reviewer pass, asks for a science expert or security reviewer, "
+                         "or wants a multi-pass answer rather than a single direct reply.",
+
     "calendar": "Google Calendar — read events, create events, check schedule. "
                 "Triggers: 'my schedule', 'calendar', 'what do I have today', 'create event'.",
 
@@ -176,6 +180,10 @@ def classify(user_input: str) -> ToolDecision:
     if fast:
         return _attach_skill(user_input, fast)
 
+    auto_specialized = _auto_specialized_classify(user_input.lower().strip())
+    if auto_specialized:
+        return _attach_skill(user_input, auto_specialized)
+
     # Full LLM classification
     try:
         raw = ask_claude(
@@ -269,6 +277,8 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Self-improve — require self-referential context to avoid false positives
     if re.search(r"\b(review your own code|review your code|self review|what are your shortcomings|what are your weaknesses|review yourself)\b", lower):
         return ToolDecision("self_improve", 0.99, "review")
+    if re.search(r"\b(use specialized agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|self-improve critic)\b", lower):
+        return ToolDecision("specialized_agent", 0.97, "run")
     if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
     # Restart
@@ -279,6 +289,55 @@ def _fast_classify(lower: str) -> ToolDecision | None:
         return ToolDecision("message", 0.95, "send")
     if re.search(r"\b(text|send a text|send a message to|message)\s+\w+", lower):
         return ToolDecision("message", 0.95, "send")
+    return None
+
+
+def _auto_specialized_classify(lower: str) -> ToolDecision | None:
+    """
+    Promote clearly high-risk or high-complexity requests into a scoped
+    specialist-agent pass without requiring the user to ask explicitly.
+    Keep this conservative so normal requests stay cheap and direct.
+    """
+    word_count = len(re.findall(r"\b\w+\b", lower))
+    asks_for_reasoning = bool(re.search(r"\b(why|how|explain|walk me through|tradeoff|trade-offs|compare|root cause|debug|diagnose|design|architecture|review)\b", lower))
+    has_question = "?" in lower or asks_for_reasoning
+
+    science_markers = (
+        "transformer", "kv cache", "entropy", "thermodynamics", "information theory",
+        "crispr", "genome", "biology", "physics", "chemistry", "semiconductor",
+        "lithography", "materials science", "scientific", "science",
+    )
+    security_markers = (
+        "security", "secure", "auth", "authentication", "authorization", "permission",
+        "exploit", "vulnerability", "xss", "csrf", "sql injection", "secret", "token leak",
+        "credential", "threat model", "attack surface", "encryption",
+    )
+    technical_markers = (
+        "api", "fastapi", "nginx", "docker", "kubernetes", "postgres", "redis", "sql",
+        "python", "react", "next.js", "nextjs", "thread", "concurrency", "latency",
+        "throughput", "queue", "cache", "memory leak", "deadlock", "race condition",
+        "distributed system", "microservice", "schema", "index", "inference",
+    )
+    planning_markers = (
+        "plan", "approach", "sequence", "break this down", "step by step", "what should we do",
+        "implementation plan", "migration plan", "rollout plan",
+    )
+
+    if any(marker in lower for marker in ("review your own code", "review your code", "self review", "what are your shortcomings", "what are your weaknesses")):
+        return ToolDecision("specialized_agent", 0.95, "run", {"roles": ["self_improve_critic", "reviewer"]})
+
+    if any(marker in lower for marker in security_markers) and (has_question or word_count >= 8):
+        return ToolDecision("specialized_agent", 0.9, "run", {"roles": ["security_reviewer", "reviewer"]})
+
+    if any(marker in lower for marker in science_markers) and (has_question or word_count >= 10):
+        return ToolDecision("specialized_agent", 0.9, "run", {"roles": ["science_expert", "reviewer"]})
+
+    if any(marker in lower for marker in technical_markers) and has_question and word_count >= 10:
+        return ToolDecision("specialized_agent", 0.86, "run", {"roles": ["planner", "executor", "reviewer"]})
+
+    if any(marker in lower for marker in planning_markers) and word_count >= 8:
+        return ToolDecision("specialized_agent", 0.84, "run", {"roles": ["planner", "executor", "reviewer"]})
+
     return None
 
 

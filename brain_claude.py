@@ -3,6 +3,7 @@ import re
 from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT
 import memory as mem
 import conversation_context as ctx
+import usage_tracker
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -54,6 +55,7 @@ def ask_claude_stream(
         messages = [{"role": "user", "content": user_input}]
 
     full_reply = ""
+    final_message = None
     with client.messages.stream(
         model=model,
         max_tokens=2048,
@@ -70,6 +72,26 @@ def ask_claude_stream(
 
         if buffer:
             yield _strip_markdown(buffer)
+        final_message = stream.get_final_message()
+
+    cleaned_reply = _strip_markdown(full_reply)
+    usage = getattr(final_message, "usage", None) if final_message is not None else None
+    usage_tracker.record(
+        provider="anthropic",
+        model=model,
+        local=False,
+        source="brain_claude.ask_claude_stream",
+        prompt_tokens=getattr(usage, "input_tokens", None) if usage else None,
+        completion_tokens=getattr(usage, "output_tokens", None) if usage else None,
+        total_tokens=(
+            (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
+            if usage else None
+        ),
+        messages=[{"role": "system", "content": effective_system}] + messages,
+        response_text=cleaned_reply,
+        estimated=usage is None,
+        metadata={"track_context": track_context},
+    )
 
     if track_context:
-        ctx.end_turn(_strip_markdown(full_reply))
+        ctx.end_turn(cleaned_reply)

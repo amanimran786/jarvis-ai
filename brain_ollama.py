@@ -8,6 +8,7 @@ import re
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED
 import memory as mem
 import conversation_context as ctx
+import usage_tracker
 
 def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts because Jarvis responses are spoken aloud."""
@@ -65,6 +66,8 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user_input}]
 
     full_reply = ""
+    prompt_eval_count = None
+    eval_count = None
     try:
         stream = _ollama.chat(
             model=model,
@@ -73,6 +76,8 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
         )
         buffer = ""
         for chunk in stream:
+            prompt_eval_count = getattr(chunk, "prompt_eval_count", prompt_eval_count)
+            eval_count = getattr(chunk, "eval_count", eval_count)
             delta = chunk.message.content or ""
             full_reply += delta
             buffer += delta
@@ -86,8 +91,23 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
         yield error
         full_reply = error
 
+    cleaned_reply = _strip_markdown(full_reply)
+    usage_tracker.record(
+        provider="ollama",
+        model=model,
+        local=True,
+        source="brain_ollama.ask_local_stream",
+        prompt_tokens=prompt_eval_count,
+        completion_tokens=eval_count,
+        total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+        messages=messages,
+        response_text=cleaned_reply,
+        estimated=(prompt_eval_count is None and eval_count is None),
+        metadata={"track_context": track_context},
+    )
+
     if track_context:
-        ctx.end_turn(_strip_markdown(full_reply))
+        ctx.end_turn(cleaned_reply)
 
 
 def list_local_models() -> list[str]:

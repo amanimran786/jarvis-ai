@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import threading
 from datetime import date, datetime
 
@@ -38,9 +39,11 @@ def load() -> dict:
 def save(data: dict) -> None:
     with _lock:
         data["last_updated"] = str(date.today())
-        # Write to temp file first, then rename — prevents partial writes
-        tmp = MEMORY_FILE + ".tmp"
-        with open(tmp, "w") as f:
+        # Write to a unique temp file first, then rename — prevents partial
+        # writes and avoids cross-thread collisions on a shared .tmp name.
+        directory = os.path.dirname(MEMORY_FILE) or "."
+        fd, tmp = tempfile.mkstemp(prefix="memory.", suffix=".tmp", dir=directory)
+        with os.fdopen(fd, "w") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, MEMORY_FILE)
 

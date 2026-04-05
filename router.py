@@ -30,6 +30,11 @@ import skill_factory
 import local_training
 import local_model_eval
 import local_model_automation
+import specialized_agents
+import behavior_hooks
+import cost_policy
+import usage_tracker
+import prompt_modifiers
 import self_improve as si
 import hardware as hw
 import messages as msg
@@ -122,6 +127,15 @@ def _is_model_status_query(lower: str) -> bool:
     return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|what mode are you in|which mode are you in)\b", lower))
 
 
+def _is_specialized_agent_query(lower: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(use specialized agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|self-improve critic)\b",
+            lower,
+        )
+    )
+
+
 def _is_self_improve_safety_query(lower: str) -> bool:
     return (
         ("improve your own code" in lower or "improve yourself safely" in lower or "before writing any file" in lower)
@@ -180,8 +194,14 @@ def _personal_interest_reply() -> str:
     project_names = [p["name"] for p in projects[:3]]
     role_clause = role_fact.rstrip(".")
     if role_clause:
-        if role_clause.lower().startswith(("current role is", "i am", "i'm", "role:")):
-            role_clause = role_clause[0].upper() + role_clause[1:]
+        if role_clause.lower().startswith("current role is"):
+            role_value = role_clause[len("current role is"):].strip(" :")
+            role_clause = f"You currently work as {role_value}"
+        elif role_clause.lower().startswith("role:"):
+            role_value = role_clause.split(":", 1)[1].strip()
+            role_clause = f"You currently work as {role_value}"
+        elif role_clause.lower().startswith(("i am", "i'm")):
+            role_clause = "You are " + role_clause.split(" ", 1)[1].strip()
         else:
             role_clause = f"You are {role_clause}"
 
@@ -272,6 +292,46 @@ def _meta_improvement_reply() -> str:
     )
 
 
+def _fallback_self_review_text(area: str | None = None) -> str:
+    brief = evals.build_improvement_brief(area=area, min_failures=1)
+    if brief.get("ok"):
+        target = brief.get("target_file", "the routing layer")
+        summary = brief.get("summary", "")
+        evidence = brief.get("evidence_lines", [])[:2]
+        evidence_text = " ".join(evidence)
+        return (
+            f"My strongest current shortcomings are coming from recent eval evidence, not from a full self-review pass. "
+            f"{summary} The most likely next target is {target}. "
+            f"The clearest recent signals are {evidence_text}"
+        ).strip()
+
+    summary = evals.summary()
+    categories = summary.get("categories", {})
+    if categories:
+        top = ", ".join(f"{name} ({count})" for name, count in sorted(categories.items(), key=lambda kv: kv[1], reverse=True)[:3])
+        return (
+            f"My self-review module is incomplete right now, so I am falling back to eval evidence. "
+            f"The strongest recent weakness categories are {top}. "
+            "I should tighten those failing paths before attempting broader self-improvement."
+        )
+
+    return (
+        "My self-review module is incomplete right now, and I also do not have enough recent eval evidence to rank my weaknesses confidently. "
+        "The right next move is to log more weak answers and then review the repeated failure paths."
+    )
+
+
+def _self_review_text(area: str | None = None) -> str:
+    try:
+        review_fn = getattr(si, "self_review", None)
+        format_fn = getattr(si, "review_text", None)
+        if callable(review_fn) and callable(format_fn):
+            return format_fn(review_fn(area=area))
+    except Exception:
+        pass
+    return _fallback_self_review_text(area=area)
+
+
 # ── Pending message state (survives across voice turns) ───────────────────────
 _pending_msg_recipient: str = ""
 
@@ -290,29 +350,47 @@ def _clear_pending_recipient():
 
 def route_stream(user_input: str) -> tuple:
     global _pending_msg_recipient
+    modifiers = prompt_modifiers.parse(user_input)
+    user_input = modifiers.clean_text
+    modifier_system = modifiers.system_extra
     lower = user_input.lower().strip()
-    mem.track_topic(lower)
+    if lower:
+        mem.track_topic(lower)
 
     # ── 0. Pending message body ───────────────────────────────────────────────
     if _pending_msg_recipient:
+        if not lower:
+            return _s(f"What would you like to say to {_pending_msg_recipient}?"), "Messages"
         recipient = _pending_msg_recipient
         _clear_pending_recipient()
         result = msg.send_imessage(recipient, user_input)
         return _s(result), "Messages"
+
+    if not lower:
+        return _s("Tell me what you want me to do."), "Chat"
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
     # Runtime self-knowledge
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_specialized_agent_query(lower):
+        result = specialized_agents.run(user_input)
+        return _s(specialized_agents.result_text(result)), "Specialized Agents"
     if _is_self_review_query(lower):
-        return _s(si.review_text(si.self_review())), "Self-Review"
+        return _s(_self_review_text()), "Self-Review"
     if _is_self_improve_safety_query(lower):
         return _s(_self_improve_safety_reply()), "Self-Improve"
     if _is_personal_interest_query(lower):
         return _s(_personal_interest_reply()), "Status"
     if _is_meta_improvement_query(lower):
         return _s(_meta_improvement_reply()), "Status"
+    if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
+        return _s(behavior_hooks.status_text(hours=24)), "Status"
+    if any(p in lower for p in ("cost policy", "routing policy", "training policy", "should we train", "should we distill")):
+        return _s(cost_policy.policy_text()), "Status"
+    if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
+        return _s(usage_tracker.summary_text(hours=24)), "Status"
 
     # Timer
     if any(p in lower for p in ("set a timer", "timer for", "remind me in")):
@@ -449,21 +527,22 @@ def route_stream(user_input: str) -> tuple:
                 f"Summarize this local vault context in two concise spoken sentences and include the exact cited local file and heading you relied on:\n{raw}",
                 skill_id="local_knowledge",
                 tool="knowledge",
+                extra_system=modifier_system,
             ), "Knowledge"
         return _s(raw), "Knowledge"
 
     # ── 2. Hardware fast-path ─────────────────────────────────────────────────
-    hw_result = _route_hardware(lower, user_input)
+    hw_result = _route_hardware(lower, user_input, modifier_system=modifier_system)
     if hw_result:
         return hw_result
 
     # ── 3. Orchestrator dispatch ──────────────────────────────────────────────
-    return _orchestrate(user_input, lower)
+    return _orchestrate(user_input, lower, modifier_system=modifier_system)
 
 
 # ── Orchestrator dispatch ─────────────────────────────────────────────────────
 
-def _orchestrate(user_input: str, lower: str) -> tuple:
+def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tuple:
     """Use the orchestrator to classify intent and dispatch the right tool."""
     from orchestrator import classify
 
@@ -485,6 +564,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             f"Summarize these search results concisely in Jarvis voice:\n{raw}",
             skill_id=skill_id,
             tool=tool,
+            extra_system=modifier_system,
         ), "Search"
 
     # ── Local knowledge vault ────────────────────────────────────────────────
@@ -512,6 +592,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             f"Summarize this local vault context in Jarvis voice and stay grounded in the local files only:\n{raw}",
             skill_id=skill_id or "local_knowledge",
             tool="knowledge",
+            extra_system=modifier_system,
         ), "Knowledge"
 
     # ── Skill factory ────────────────────────────────────────────────────────
@@ -636,6 +717,12 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
 
         return _operative_stream(), "Operative"
 
+    # ── Specialized agents ───────────────────────────────────────────────────
+    if tool == "specialized_agent":
+        explicit_roles = params.get("roles") or []
+        result = specialized_agents.run(user_input, roles=explicit_roles or None)
+        return _s(specialized_agents.result_text(result)), "Specialized Agents"
+
     # ── Messages / iMessage ───────────────────────────────────────────────────
     if tool == "message":
         recipient = params.get("recipient", params.get("to", ""))
@@ -658,7 +745,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if action == "read":
             return _s(gs.get_todays_events()), "Calendar"
         # create — fall through to chat for now
-        return smart_stream(user_input, skill_id=skill_id, tool=tool)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Email ─────────────────────────────────────────────────────────────────
     if tool == "email":
@@ -691,12 +778,18 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
                 f"The user ran: '{cmd}'. Output:\n{output}\nSummarize concisely in Jarvis voice.",
                 skill_id=skill_id,
                 tool=tool,
+                extra_system=modifier_system,
             ), "Terminal"
         path = params.get("path", "")
         if path:
             content = terminal.read_file(path)
-            return format_with_mini(f"Summarize this file concisely:\n{content}", skill_id=skill_id, tool=tool), "File"
-        return smart_stream(user_input, skill_id=skill_id, tool=tool)
+            return format_with_mini(
+                f"Summarize this file concisely:\n{content}",
+                skill_id=skill_id,
+                tool=tool,
+                extra_system=modifier_system,
+            ), "File"
+        return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Admin shell ───────────────────────────────────────────────────────────
     if tool == "admin":
@@ -709,6 +802,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
                 f"The user requested an admin command. Command: '{cmd}'. Output:\n{output}\nSummarize this in Jarvis voice.",
                 skill_id=skill_id,
                 tool=tool,
+                extra_system=modifier_system,
             ), "Admin"
         return _s("Tell me the exact command you want me to run with administrator privileges."), "Admin"
 
@@ -717,7 +811,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         app_name = params.get("app", _parse_app(user_input) or "")
         if app_name:
             return _s(tools.open_app(app_name)), "App"
-        return smart_stream(user_input, skill_id=skill_id, tool=tool)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Camera / Vision ───────────────────────────────────────────────────────
     if tool == "camera":
@@ -741,7 +835,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if any(p in lower for p in ("briefing", "catch me up", "what did i miss")):
             from briefing import build_briefing
             return _s(build_briefing(mem.list_facts())), "Memory"
-        return smart_stream(user_input, skill_id=skill_id, tool=tool)
+        return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Self-improve ──────────────────────────────────────────────────────────
     if tool == "self_improve":
@@ -750,7 +844,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
             return _s("Restarting now to apply the latest changes."), "Self-Improve"
         if action == "review":
             area = params.get("area") or params.get("target") or None
-            return _s(si.review_text(si.self_review(area=area))), "Self-Review"
+            return _s(_self_review_text(area=area)), "Self-Review"
         if action == "analyze":
             area = params.get("area", None)
             analysis = si.analyze_weakness(area)
@@ -758,6 +852,9 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         # improve — actually run the pipeline
         target = params.get("target", params.get("area", ""))
         instruction = target if target else None
+        gate = behavior_hooks.pre_self_improve(target or user_input)
+        if not gate["ok"]:
+            return _s(gate["reason"]), "Self-Improve"
 
         def _improve_stream():
             yield "Analyzing my own code and generating improvements. This will take a moment..."
@@ -778,7 +875,7 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         return _s(ml.auto_configure_blackhole()), "Meeting"
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
-    return smart_stream(user_input, skill_id=skill_id, tool=tool)
+    return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────
@@ -794,14 +891,17 @@ _HW_ROUTES = [
 ]
 
 
-def _route_hardware(lower: str, user_input: str):
+def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
     devices = hw.list_devices()
 
     if any(p in lower for p in ["hardware status", "device status", "check devices", "show hardware"]):
         s = hw.status()
         if not s or "No hardware" in s:
             return _s("No hardware devices registered, sir."), "Hardware"
-        return format_with_mini(f"Report this hardware status in Jarvis voice: {s}"), "Hardware"
+        return format_with_mini(
+            f"Report this hardware status in Jarvis voice: {s}",
+            extra_system=modifier_system,
+        ), "Hardware"
 
     if any(p in lower for p in ["scan ports", "find devices", "detect hardware"]):
         ports = hw.scan_serial_ports()
@@ -829,13 +929,19 @@ def _route_hardware(lower: str, user_input: str):
                 cmd = "on"
             result = hw.command(device.name, cmd)
             msg = str(result)
-            return format_with_mini(f"Report this in Jarvis voice (1 sentence): {msg}"), "Hardware"
+            return format_with_mini(
+                f"Report this in Jarvis voice (1 sentence): {msg}",
+                extra_system=modifier_system,
+            ), "Hardware"
 
     for triggers, device_name, cmd, extra_params in _HW_ROUTES:
         if any(t in lower for t in triggers):
             dur = re.search(r"(\d+)\s*ms", lower)
             p = dict(extra_params, duration=int(dur.group(1))) if dur else extra_params
             result = hw.command(device_name, cmd, **p)
-            return format_with_mini(f"Report in Jarvis voice (1 sentence): {result}"), "Hardware"
+            return format_with_mini(
+                f"Report in Jarvis voice (1 sentence): {result}",
+                extra_system=modifier_system,
+            ), "Hardware"
 
     return None

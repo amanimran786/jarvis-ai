@@ -35,6 +35,35 @@ import skill_factory
 import local_training
 import local_model_eval
 import local_model_automation
+import behavior_hooks
+import cost_policy
+import usage_tracker
+
+
+def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
+    import self_improve as si
+    review_fn = getattr(si, "self_review", None)
+    format_fn = getattr(si, "review_text", None)
+    if callable(review_fn) and callable(format_fn):
+        result = review_fn(area=area or None)
+        return result, format_fn(result)
+
+    brief = evals.build_improvement_brief(area=area, min_failures=1)
+    if brief.get("ok"):
+        summary = brief.get("summary", "")
+        target = brief.get("target_file", "router.py")
+        evidence = " ".join(brief.get("evidence_lines", [])[:2])
+        text = (
+            f"My full self-review module is not available right now, so this is an eval-backed fallback. "
+            f"{summary} The most likely next target is {target}. "
+            f"The clearest recent signals are {evidence}"
+        ).strip()
+        return {"ok": True, "fallback": True, **brief}, text
+
+    text = (
+        "My full self-review module is not available right now, and there is not enough recent eval evidence to rank my shortcomings confidently."
+    )
+    return {"ok": False, "fallback": True, **brief}, text
 
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
@@ -143,6 +172,7 @@ class LocalModelAutomationRunRequest(BaseModel):
     judge_model: str = "claude-haiku-4-5-20251001"
     promote_if_ready: bool = True
     cleanup_failed: bool = False
+    force: bool = False
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -153,26 +183,30 @@ def chat(req: ChatRequest):
     if req.stream:
         def generate():
             with _CHAT_LOCK:
+                start_seq = usage_tracker.current_seq()
                 stream, model = route_stream(req.message)
                 chunks = []
                 for chunk in stream:
                     chunks.append(chunk)
                     yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
                 response = "".join(chunks)
+                usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 context_stats = ctx.record_request_stats(model, source="api_stream")
                 interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
                 evals.maybe_log_automatic_failure(interaction)
-                yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'type': 'meta'})}\n\n"
+                yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     with _CHAT_LOCK:
+        start_seq = usage_tracker.current_seq()
         stream, model = route_stream(req.message)
         response = "".join(stream)
+        usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
         context_stats = ctx.record_request_stats(model, source="api")
         interaction = evals.log_interaction(req.message, response, model, context=context_stats)
         evals.maybe_log_automatic_failure(interaction)
-        return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats}
+        return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
 
 
 @app.post("/feedback")
@@ -201,6 +235,8 @@ def status():
         "mode": model_router.get_mode(),
         "local_available": model_router._has_local(),
         "context": ctx.get_stats(),
+        "usage_24h": usage_tracker.summarize(hours=24, include_recent=0),
+        "cost_policy": cost_policy.policy_status(),
     }
 
 
@@ -210,6 +246,21 @@ def get_context_stats():
         "current": ctx.get_stats(),
         "recent_requests": ctx.recent_request_stats(10),
     }
+
+
+@app.get("/usage")
+def get_usage(hours: int = 24, since_seq: int = 0, recent: int = 10):
+    return {"ok": True, "usage": usage_tracker.summarize(hours=hours, since_seq=since_seq, include_recent=recent)}
+
+
+@app.get("/cost-policy")
+def get_cost_policy():
+    return {"ok": True, "policy": cost_policy.policy_status()}
+
+
+@app.get("/hooks/status")
+def get_hook_status(hours: int = 24):
+    return {"ok": True, "hooks": behavior_hooks.summary(hours=hours)}
 
 
 @app.get("/vault")
@@ -343,6 +394,7 @@ def run_local_automation(req: LocalModelAutomationRunRequest):
         "judge_model": req.judge_model,
         "promote_if_ready": req.promote_if_ready,
         "cleanup_failed": req.cleanup_failed,
+        "force": req.force,
     }
     if req.base_model:
         kwargs["base_model"] = req.base_model
@@ -356,16 +408,14 @@ def run_local_automation(req: LocalModelAutomationRunRequest):
 
 @app.get("/self/review")
 def get_self_review(area: str = ""):
-    import self_improve as si
-    result = si.self_review(area=area or None)
-    return {"ok": result.get("ok", False), "message": si.review_text(result), "result": result}
+    result, message = _safe_self_review(area=area or None)
+    return {"ok": result.get("ok", False), "message": message, "result": result}
 
 
 @app.post("/self/review")
 def post_self_review(req: SelfReviewRequest):
-    import self_improve as si
-    result = si.self_review(area=req.area or None)
-    return {"ok": result.get("ok", False), "message": si.review_text(result), "result": result}
+    result, message = _safe_self_review(area=req.area or None)
+    return {"ok": result.get("ok", False), "message": message, "result": result}
 
 
 @app.get("/memory")

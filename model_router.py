@@ -22,6 +22,7 @@ from brain import ask_stream
 from brain_claude import ask_claude_stream
 from brain_ollama import ask_local_stream, list_local_models
 import local_model_eval
+import cost_policy
 import skills
 import vault
 
@@ -75,6 +76,12 @@ NEEDS_CLOUD_MID = {
     "optimistic locking", "pessimistic locking", "nginx", "fastapi",
     "dockerized", "dockerised", "queue over", "rpc call",
     "narrow them down", "debugging plan",
+    # Science and advanced technology
+    "transformer", "kv cache", "attention mechanism", "scaling law",
+    "thermodynamics", "information theory", "entropy",
+    "crispr", "genome editing", "off-target effects",
+    "euv lithography", "stochastic defects", "semiconductor",
+    "materials science", "molecular biology", "quantum",
 }
 
 # Tasks that a local model handles perfectly
@@ -177,12 +184,25 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
         return f"I'm in cloud mode and this request would use {OPUS}{active_skill}."
 
     tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
-    if tier == "local" and local_models:
+    policy = cost_policy.route_decision(
+        user_input or "general conversation",
+        tier,
+        tool="chat",
+        local_available=bool(local_models),
+    )
+    policy_tier = policy.get("tier", tier)
+    provider = policy.get("provider", "base")
+    if provider == "local" and local_models:
         chosen = _best_local(user_input or "general conversation")
         return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
-    if tier == "haiku" and local_models:
-        chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
+    if provider == "cloud":
+        if policy_tier in ("local", "mini"):
+            return f"I'm in auto mode and this request would use {GPT_MINI}{active_skill}."
+        if policy_tier == "haiku":
+            return f"I'm in auto mode and this request would use {HAIKU}{active_skill}."
+        if policy_tier == "sonnet":
+            return f"I'm in auto mode and this request would use {SONNET}{active_skill}."
+        return f"I'm in auto mode and this request would use {OPUS}{active_skill}."
     if tier == "mini":
         return f"I'm in auto mode and this request would use {GPT_MINI}{active_skill}."
     if tier == "haiku":
@@ -224,6 +244,11 @@ def _classify_complexity(text: str, skill_id: str | None = None, active_skills: 
         "optimistic locking", "pessimistic locking", "dockerized", "dockerised",
         "fastapi", "nginx", "queue", "rpc", "debugging plan", "narrow them down",
         "concrete debugging plan", "software engineer", "technical question",
+        "transformer", "kv cache", "attention", "context window",
+        "thermodynamics", "information theory", "entropy",
+        "crispr", "genome editing", "cas9", "off-target",
+        "lithography", "euv", "stochastic defect", "semiconductor",
+        "physics", "biology", "chemistry", "materials science",
     )
 
     # Explicitly asking for local
@@ -253,7 +278,12 @@ def _classify_complexity(text: str, skill_id: str | None = None, active_skills: 
     return "local"
 
 
-def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None = "chat") -> tuple:
+def smart_stream(
+    user_input: str,
+    skill_id: str | None = None,
+    tool: str | None = "chat",
+    extra_system: str = "",
+) -> tuple:
     """
     Core routing function. Returns (stream, model_label).
     Strategy: local → mini → haiku → sonnet → opus
@@ -261,6 +291,8 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
     """
     mode = _current_mode
     system_extra, resolved_skills = skills.build_system_extra(user_input, skill_id=skill_id, tool=tool)
+    if extra_system:
+        system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     vault_extra = vault.build_context(user_input, tool=tool)
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
@@ -287,6 +319,27 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
 
     # ── Auto mode: local-first, cloud only when needed ────────────────────────
     tier = _classify_complexity(user_input, active_skills=resolved_skills)
+    policy = cost_policy.route_decision(
+        user_input,
+        tier,
+        tool=tool,
+        local_available=_has_local(),
+    )
+    tier = policy["tier"]
+    provider = policy.get("provider", "base")
+
+    if provider == "local":
+        model = _best_local(user_input)
+        return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
+
+    if provider == "cloud":
+        if tier in ("local", "mini"):
+            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
+        if tier == "haiku":
+            return ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True), "Haiku"
+        if tier == "sonnet":
+            return ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True), "Sonnet"
+        return ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True), "Opus"
 
     if tier == "local":
         if _has_local():
@@ -313,11 +366,18 @@ def smart_stream(user_input: str, skill_id: str | None = None, tool: str | None 
         return ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True), "Opus"
 
 
-def format_with_mini(prompt: str, skill_id: str | None = None, tool: str | None = None):
+def format_with_mini(
+    prompt: str,
+    skill_id: str | None = None,
+    tool: str | None = None,
+    extra_system: str = "",
+):
     """Format tool output using cheapest cloud model, with user context."""
     import memory as _mem
     context = _mem.get_context()
     system_extra, _ = skills.build_system_extra(prompt, skill_id=skill_id, tool=tool)
+    if extra_system:
+        system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     if context:
         prompt = prompt + f"\n\nUser context for personalization:{context}"
     return ask_stream(prompt, GPT_MINI, system_extra=system_extra)

@@ -122,6 +122,32 @@
       ]
     },
     {
+      "id": "technology_science_expert",
+      "name": "Technology and Science Expert",
+      "description": "Answer advanced technology, computing, and science questions with mechanism-first explanations, precise distinctions, and real constraints.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "transformer",
+        "kv cache",
+        "entropy",
+        "thermodynamics",
+        "information theory",
+        "crispr",
+        "off-target effects",
+        "lithography",
+        "semiconductor",
+        "stochastic defects",
+        "materials science",
+        "physics",
+        "biology"
+      ],
+      "path": "technology_science_expert/SKILL.md",
+      "resources": [
+        "technology_science_expert/references/science_rules.md"
+      ]
+    },
+    {
       "id": "eval-pattern-self-improve",
       "name": "Eval Pattern Self Improve",
       "description": "Use local vault knowledge about Eval Pattern: self_improve.",

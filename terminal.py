@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import behavior_hooks as hooks
 
 
 _DESTRUCTIVE_PATTERNS = [
@@ -26,6 +27,9 @@ def _escape_applescript(text: str) -> str:
 
 def run_command(command: str, cwd: str = None) -> str:
     """Run a shell command and return its output."""
+    gate = hooks.pre_shell_command(command, cwd=cwd, admin=False)
+    if not gate["ok"]:
+        return gate["reason"]
     pattern = _contains_blocked_pattern(command)
     if pattern:
         return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
@@ -35,7 +39,9 @@ def run_command(command: str, cwd: str = None) -> str:
             timeout=30, cwd=cwd or os.path.expanduser("~")
         )
         output = result.stdout.strip() or result.stderr.strip()
-        return output if output else "Command ran with no output."
+        final = output if output else "Command ran with no output."
+        hooks.post_shell_command(command, final, admin=False)
+        return final
     except subprocess.TimeoutExpired:
         return "Command timed out after 30 seconds."
     except Exception as e:
@@ -47,6 +53,9 @@ def run_admin_command(command: str) -> str:
     Run a shell command through macOS's admin prompt.
     The user must approve with their password in the native dialog.
     """
+    gate = hooks.pre_shell_command(command, admin=True)
+    if not gate["ok"]:
+        return gate["reason"]
     pattern = _contains_blocked_pattern(command)
     if pattern:
         return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
@@ -63,7 +72,9 @@ def run_admin_command(command: str) -> str:
         output = result.stdout.strip() or result.stderr.strip()
         if result.returncode != 0:
             return output or "Admin command failed or was cancelled."
-        return output if output else "Admin command ran successfully."
+        final = output if output else "Admin command ran successfully."
+        hooks.post_shell_command(command, final, admin=True)
+        return final
     except subprocess.TimeoutExpired:
         return "Admin command timed out waiting for approval or completion."
     except Exception as e:
@@ -88,13 +99,27 @@ def read_file(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     """Write content to a file."""
     path = os.path.expanduser(path)
+    gate = hooks.pre_file_write(path, source="terminal.write_file")
+    if not gate["ok"]:
+        return gate["reason"]
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = None
     try:
-        with open(path, "w") as f:
+        suffix = os.path.splitext(path)[1] or ".tmp"
+        fd, tmp = tempfile.mkstemp(prefix="jarvis-write.", suffix=suffix, dir=os.path.dirname(path) or ".")
+        with os.fdopen(fd, "w") as f:
             f.write(content)
+        post = hooks.post_file_write(tmp, source="terminal.write_file")
+        if not post["ok"]:
+            os.unlink(tmp)
+            return post["reason"]
+        os.replace(tmp, path)
         return f"File written to {path}."
     except Exception as e:
         return f"Could not write file: {e}"
+    finally:
+        if tmp and os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def list_directory(path: str = "~") -> str:
