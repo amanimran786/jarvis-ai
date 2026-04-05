@@ -95,15 +95,17 @@ class ScreenAnalysisWorker(QThread):
         self.status.emit("SCANNING SCREEN...")
         try:
             prompt = (
-                "You are Jarvis, a real-time meeting assistant. "
-                "The user is on a live call and just captured their screen. "
-                "Analyze EVERYTHING visible:\n"
-                "- If there's a coding question, coding problem, or code snippet: provide the full correct answer/solution with explanation\n"
-                "- If there's a verbal/technical question visible: answer it precisely\n"
-                "- If there's a presentation or document: summarize key points and suggest smart talking points\n"
-                "- If there's a diagram or architecture: explain it\n"
-                "Be direct and concise. The user needs this answer NOW, during the call. "
-                "Format as plain text — no markdown, no bullets. Max 4 sentences unless code is needed."
+                "You are Jarvis, an AI assistant helping Aman during a live interview or technical call. "
+                "Analyze everything visible on the screen RIGHT NOW and provide the most useful response:\n\n"
+                "PRIORITY ORDER:\n"
+                "1. Coding problem / LeetCode / algorithm question → give the full working solution with time/space complexity\n"
+                "2. System design question → outline the architecture clearly\n"
+                "3. Technical interview question → give a strong, precise answer with an example\n"
+                "4. Code with a bug → identify the bug and provide the fix\n"
+                "5. Presentation / document → key talking points Aman should mention\n"
+                "6. Anything else → describe what's visible and provide relevant context\n\n"
+                "Be direct. No markdown formatting. Write as if speaking out loud. "
+                "For code, include the actual code block. Max 6 sentences for explanations."
             )
             answer = camera.screenshot_and_describe(prompt)
             self.result.emit(answer)
@@ -377,11 +379,8 @@ class MeetingOverlay(QMainWindow):
             QPushButton:hover {{ background: {C_BORDER}; color: white; }}
         """
 
-    def _action_btn(self, label: str, color: str) -> QPushButton:
-        btn = QPushButton(label)
-        btn.setFixedHeight(32)
-        btn.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
-        btn.setStyleSheet(f"""
+    def _action_btn_css(self, color: str) -> str:
+        return f"""
             QPushButton {{
                 background: transparent;
                 color: {color};
@@ -390,13 +389,15 @@ class MeetingOverlay(QMainWindow):
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
-            QPushButton:hover {{
-                background: rgba(0,180,220,0.12);
-            }}
-            QPushButton:pressed {{
-                background: rgba(0,180,220,0.25);
-            }}
-        """)
+            QPushButton:hover {{ background: rgba(0,180,220,0.12); }}
+            QPushButton:pressed {{ background: rgba(0,180,220,0.25); }}
+        """
+
+    def _action_btn(self, label: str, color: str) -> QPushButton:
+        btn = QPushButton(label)
+        btn.setFixedHeight(32)
+        btn.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        btn.setStyleSheet(self._action_btn_css(color))
         return btn
 
     # ── Positioning ────────────────────────────────────────────────────────────
@@ -456,11 +457,16 @@ class MeetingOverlay(QMainWindow):
         self._set_status("SCANNING...")
         self._suggestion_lbl.setText("Analyzing screen...")
 
-        self._scan_worker = ScreenAnalysisWorker()
-        self._scan_worker.result.connect(self._on_suggestion)
-        self._scan_worker.status.connect(self._set_status)
-        self._scan_worker.finished.connect(lambda: self._scan_btn.setEnabled(True))
-        self._scan_worker.start()
+        # Hide overlay so it doesn't appear in its own screenshot, then restore
+        self.hide()
+        def _start_after_hide():
+            self._scan_worker = ScreenAnalysisWorker()
+            self._scan_worker.result.connect(self._on_suggestion)
+            self._scan_worker.result.connect(lambda _: self.show())
+            self._scan_worker.status.connect(self._set_status)
+            self._scan_worker.finished.connect(lambda: self._scan_btn.setEnabled(True))
+            self._scan_worker.start()
+        QTimer.singleShot(150, _start_after_hide)  # 150ms for window to fully hide
 
     # ── Smart Listen toggle ────────────────────────────────────────────────────
 
@@ -469,16 +475,17 @@ class MeetingOverlay(QMainWindow):
             meeting_listener.stop()
             self._listening = False
             self._listen_btn.setText("🎧  START LISTEN")
-            self._listen_btn.setStyleSheet(self._listen_btn.styleSheet().replace(C_CYAN, C_GREEN).replace(C_CYAN, C_GREEN))
+            self._listen_btn.setStyleSheet(self._action_btn_css(C_GREEN))
             self._set_status("STANDBY")
             self._status_dot.set_color(C_TEXT_DIM)
         else:
-            msg = meeting_listener.start(
+            meeting_listener.start(
                 on_transcript=lambda t: self._transcript_sig.emit(t),
                 on_suggestion=lambda s: self._suggestion_sig.emit(s),
             )
             self._listening = True
-            self._listen_btn.setText("🎧  STOP LISTEN")
+            self._listen_btn.setText("🔴  STOP LISTEN")
+            self._listen_btn.setStyleSheet(self._action_btn_css(C_RED))
             self._set_status("LIVE")
             self._status_dot.set_color(C_GREEN)
             if self._placeholder:
@@ -590,11 +597,34 @@ class MeetingOverlay(QMainWindow):
             self.show()
         self._scan_screen()
 
-    # ── Stealth ────────────────────────────────────────────────────────────────
+    # ── Stealth + fullscreen space support ────────────────────────────────────
 
     def showEvent(self, e):
         super().showEvent(e)
-        QTimer.singleShot(100, lambda: stealth.apply_stealth(int(self.winId())))
+        QTimer.singleShot(100, self._apply_macos_window_props)
+
+    def _apply_macos_window_props(self):
+        """
+        1. Hide from screen share (NSWindowSharingNone).
+        2. Allow window to appear in ALL spaces, including fullscreen Zoom/Teams.
+        3. Raise window level above normal windows.
+        """
+        stealth.apply_stealth(int(self.winId()))
+        try:
+            from AppKit import NSApp
+            # NSWindowCollectionBehaviorCanJoinAllSpaces = 1 << 0
+            # NSWindowCollectionBehaviorStationary        = 1 << 4 (don't expose in Mission Control)
+            JOIN_ALL = (1 << 0) | (1 << 4)
+            # NSStatusBarWindowLevel = 25
+            STATUS_LEVEL = 25
+            win_id = int(self.winId())
+            for ns_win in NSApp.windows():
+                if ns_win.windowNumber() == win_id:
+                    ns_win.setCollectionBehavior_(JOIN_ALL)
+                    ns_win.setLevel_(STATUS_LEVEL)
+                    break
+        except Exception as e:
+            print(f"[Overlay] Could not set macOS window properties: {e}")
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────

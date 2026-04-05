@@ -89,12 +89,12 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
                         },
                         {
                             "type": "text",
-                            "text": f"You are Jarvis. {prompt} Be concise — this will be spoken aloud."
+                            "text": f"You are Jarvis. {prompt}"
                         }
                     ]
                 }
             ],
-            max_tokens=300
+            max_tokens=1024
         )
         return response.choices[0].message.content
     finally:
