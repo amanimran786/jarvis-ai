@@ -17,6 +17,8 @@ training/distilled/
 training/modelfiles/
 training/packs/
 training/handoffs/
+training/model_evals/
+training/automation/
 
 # Self-improvement backups
 .jarvis_backups/

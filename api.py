@@ -33,6 +33,8 @@ import vault
 import source_ingest
 import skill_factory
 import local_training
+import local_model_eval
+import local_model_automation
 
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
@@ -114,6 +116,33 @@ class LocalTrainingRunRequest(BaseModel):
 class LocalTrainingHandoffRequest(BaseModel):
     pack_path: str = ""
     targets: list[str] = []
+
+
+class LocalModelEvalRunRequest(BaseModel):
+    candidate_model: str
+    baseline_model: str = ""
+    limit: int = 8
+    teacher_model: str = "claude-haiku-4-5-20251001"
+
+
+class LocalModelPromoteRequest(BaseModel):
+    candidate_model: str = ""
+    eval_path: str = ""
+    min_pass_rate: float = 0.6
+    min_score_delta: float = 0.35
+
+
+class LocalModelAutomationRunRequest(BaseModel):
+    export_limit: int = 40
+    distill_limit: int = 3
+    eval_limit: int = 2
+    base_model: str = ""
+    baseline_model: str = ""
+    candidate_name: str = ""
+    teacher_model: str = "claude-sonnet-4-6"
+    judge_model: str = "claude-haiku-4-5-20251001"
+    promote_if_ready: bool = True
+    cleanup_failed: bool = False
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -217,6 +246,16 @@ def get_local_training_status():
     return {"ok": True, "status": local_training.status()}
 
 
+@app.get("/local/evals/status")
+def get_local_eval_status():
+    return {"ok": True, "status": local_model_eval.status()}
+
+
+@app.get("/local/automation/status")
+def get_local_automation_status():
+    return {"ok": True, "status": local_model_automation.status()}
+
+
 @app.post("/local/training/export")
 def export_local_training(req: LocalTrainingExportRequest):
     result = local_training.export_sft_dataset(limit=req.limit, cloud_only=req.cloud_only)
@@ -265,6 +304,54 @@ def build_local_training_handoff(req: LocalTrainingHandoffRequest):
         kwargs["targets"] = req.targets
     result = local_training.build_finetune_handoff(**kwargs)
     return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/evals/run")
+def run_local_eval(req: LocalModelEvalRunRequest):
+    kwargs = {
+        "candidate_model": req.candidate_model,
+        "limit": req.limit,
+        "teacher_model": req.teacher_model,
+    }
+    if req.baseline_model:
+        kwargs["baseline_model"] = req.baseline_model
+    result = local_model_eval.run_eval(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_model_eval.result_text(result), "result": result}
+
+
+@app.post("/local/evals/promote")
+def promote_local_eval(req: LocalModelPromoteRequest):
+    kwargs = {
+        "min_pass_rate": req.min_pass_rate,
+        "min_score_delta": req.min_score_delta,
+    }
+    if req.candidate_model:
+        kwargs["candidate_model"] = req.candidate_model
+    if req.eval_path:
+        kwargs["eval_path"] = req.eval_path
+    result = local_model_eval.promote_candidate(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_model_eval.result_text(result), "result": result}
+
+
+@app.post("/local/automation/run")
+def run_local_automation(req: LocalModelAutomationRunRequest):
+    kwargs = {
+        "export_limit": req.export_limit,
+        "distill_limit": req.distill_limit,
+        "eval_limit": req.eval_limit,
+        "teacher_model": req.teacher_model,
+        "judge_model": req.judge_model,
+        "promote_if_ready": req.promote_if_ready,
+        "cleanup_failed": req.cleanup_failed,
+    }
+    if req.base_model:
+        kwargs["base_model"] = req.base_model
+    if req.baseline_model:
+        kwargs["baseline_model"] = req.baseline_model
+    if req.candidate_name:
+        kwargs["candidate_name"] = req.candidate_name
+    result = local_model_automation.run_cycle(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_model_automation.result_text(result), "result": result}
 
 
 @app.get("/self/review")
