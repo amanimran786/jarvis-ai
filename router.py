@@ -200,10 +200,16 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
     if tool == "message":
         recipient = params.get("recipient", params.get("to", ""))
         body      = params.get("message",   params.get("body", params.get("text", "")))
+        # Try to pull recipient from raw input if orchestrator missed it
+        if not recipient:
+            m = re.search(r"(?:text|message|send to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", user_input)
+            if m:
+                recipient = m.group(1)
         if recipient and body:
             return _s(msg.send_imessage(recipient, body)), "Messages"
-        # Missing info — ask smart_stream to extract and retry, or prompt user
-        return smart_stream(user_input)
+        if recipient and not body:
+            return _s(f"What would you like to say to {recipient}?"), "Messages"
+        return _s("Who would you like to message?"), "Messages"
 
     # ── Calendar ──────────────────────────────────────────────────────────────
     if tool == "calendar":
