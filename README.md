@@ -93,11 +93,16 @@ Jarvis exposes a local API while running:
 - `GET /vault` — inspect the current local vault index status
 - `POST /vault/build` — compile raw markdown into wiki pages and rebuild the vault indexes
 - `GET /local/training/status` — inspect exported datasets, distilled examples, and Modelfiles for local tuning
+- `GET /local/evals/status` — inspect local-model benchmark runs and current promoted local model
+- `GET /local/automation/status` — inspect automated local-model training and eval cycles
 - `POST /local/training/export` — export successful interaction examples into JSONL for local SFT
 - `POST /local/training/distill` — ask a stronger teacher model to rewrite failed cases into better training targets
 - `POST /local/training/modelfile` — generate an Ollama Modelfile for the tuned Jarvis local model target
 - `POST /local/training/run` — run the full export + distill + pack + Modelfile pipeline in one call
 - `POST /local/training/handoff` — build offline Unsloth and Axolotl fine-tune handoff folders from the latest training pack
+- `POST /local/evals/run` — compare a candidate local Ollama model against the current baseline on Jarvis-specific benchmark prompts
+- `POST /local/evals/promote` — promote a local model only if the benchmark result clears the configured thresholds
+- `POST /local/automation/run` — run the full automated cycle: build pack, create candidate model, evaluate it, and promote only if it wins
 - `GET /memory` — inspect saved memory
 - `POST /mode` — switch `local`, `cloud`, or `auto`
 
@@ -203,6 +208,10 @@ Jarvis can also emit offline fine-tune handoff folders for `llama3.1:8b` and `qw
 - a baseline Unsloth training script
 - a baseline Axolotl QLoRA config
 - a per-target manifest and handoff README
+
+Jarvis now also has a local model eval gate. Candidate Ollama models are compared against the current local baseline on Jarvis-specific prompts such as technical reasoning, self-improve policy, personalization, and source-grounded summarization. Promotion is refused unless the candidate improves average score and clears a minimum pass rate.
+
+On top of that, Jarvis now has an automated local-model cycle. It can generate a fresh training pack, build a candidate Ollama model, benchmark it against the baseline, and only promote it if the benchmark clears the gate. This keeps the local model path improving without blindly overwriting the current best model.
 
 Jarvis now also tracks prompt footprint per request. `/chat` responses include a `context` object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.
 

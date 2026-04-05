@@ -21,6 +21,7 @@ from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, DEF
 from brain import ask_stream
 from brain_claude import ask_claude_stream
 from brain_ollama import ask_local_stream, list_local_models
+import local_model_eval
 import skills
 import vault
 
@@ -119,6 +120,11 @@ def _best_local(text: str) -> str:
     """Pick the best available local model for the task."""
     available = list_local_models()
     lower = text.lower()
+    promoted = local_model_eval.promoted_model()
+
+    if promoted and any(promoted in m for m in available):
+        if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
+            return promoted
 
     if LOCAL_TUNED and any(LOCAL_TUNED in m for m in available):
         if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
@@ -133,7 +139,9 @@ def _best_local(text: str) -> str:
             return LOCAL_REASONING
 
     # Return first available
-    for preferred in (LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING):
+    for preferred in (promoted, LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING):
+        if not preferred:
+            continue
         if any(preferred.split(":")[0] in m for m in available):
             return preferred
     return available[0]

@@ -28,6 +28,8 @@ import vault
 import source_ingest
 import skill_factory
 import local_training
+import local_model_eval
+import local_model_automation
 import self_improve as si
 import hardware as hw
 import messages as msg
@@ -388,7 +390,20 @@ def route_stream(user_input: str) -> tuple:
         return _s("Restarting now."), "Self-Improve"
 
     # Local vault
-    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config")):
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle")):
+        if any(p in lower for p in ("local eval status", "local model status")):
+            return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}"), "Local Model"
+        if any(p in lower for p in ("automate local model", "local model autopilot", "local model cycle")):
+            return _s(local_model_automation.result_text(local_model_automation.run_cycle())), "Local Model"
+        if any(p in lower for p in ("promote local model", "promote adapter")):
+            return _s(local_model_eval.result_text(local_model_eval.promote_candidate())), "Local Model"
+        if any(p in lower for p in ("evaluate local model", "eval local model")):
+            candidate = ""
+            model_match = re.search(r"\b(?:evaluate|eval)\s+(?:local\s+)?model\s+([a-z0-9._:-]+)", lower)
+            if model_match:
+                candidate = model_match.group(1)
+            candidate = candidate or "jarvis-local"
+            return _s(local_model_eval.result_text(local_model_eval.run_eval(candidate_model=candidate))), "Local Model"
         if any(p in lower for p in ("fine tune handoff", "axolotl", "unsloth", "lora config")):
             return _s(local_training.result_text(local_training.build_finetune_handoff())), "Local Model"
         if "distill" in lower:
@@ -526,10 +541,21 @@ def _orchestrate(user_input: str, lower: str) -> tuple:
         if action in {"handoff", "lora"}:
             result = local_training.build_finetune_handoff()
             return _s(local_training.result_text(result)), "Local Model"
+        if action in {"automate", "autopilot", "cycle"}:
+            result = local_model_automation.run_cycle()
+            return _s(local_model_automation.result_text(result)), "Local Model"
+        if action in {"evaluate", "eval"}:
+            candidate = params.get("candidate_model") or params.get("model") or params.get("target") or "jarvis-local"
+            result = local_model_eval.run_eval(candidate_model=candidate)
+            return _s(local_model_eval.result_text(result)), "Local Model"
+        if action == "promote":
+            candidate = params.get("candidate_model") or params.get("model") or None
+            result = local_model_eval.promote_candidate(candidate_model=candidate)
+            return _s(local_model_eval.result_text(result)), "Local Model"
         if action in {"train", "tune", "improve"}:
             result = local_training.build_training_pack()
             return _s(local_training.result_text(result)), "Local Model"
-        return _s(f"Local training status: {local_training.status()}"), "Local Model"
+        return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}"), "Local Model"
 
     # ── Browser ───────────────────────────────────────────────────────────────
     if tool == "browser":

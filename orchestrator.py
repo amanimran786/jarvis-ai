@@ -34,8 +34,8 @@ TOOLS = {
                  "Use for requests about the local vault, knowledge base, wiki, indexed markdown context, or rebuilding the local wiki. "
                  "Triggers: 'search the vault', 'refresh the vault', 'build the vault wiki', 'compile the wiki', 'what's in your local knowledge base'.",
 
-    "local_model": "Improve Jarvis's local-model stack by exporting training data, distilling failed examples, generating a tuned Ollama Modelfile, or preparing offline fine-tune handoff folders for Unsloth or Axolotl. "
-                   "Use for requests to train local models, improve Ollama quality, distill local examples, export local training data, build a local Jarvis model target, or prepare LoRA fine-tune handoff assets.",
+    "local_model": "Improve Jarvis's local-model stack by exporting training data, distilling failed examples, generating a tuned Ollama Modelfile, preparing offline fine-tune handoff folders, evaluating candidate local models, promoting a measured winner, or running the full automated local improvement cycle. "
+                   "Use for requests to train local models, improve Ollama quality, distill local examples, export local training data, build a local Jarvis model target, prepare LoRA fine-tune handoff assets, evaluate a candidate local model, promote a tested local model, or run the automated local model cycle.",
 
     "skill": "Create or promote reusable Jarvis skills from vault knowledge or repeated eval failures. "
              "Use for requests to create a skill, generate a skill from the vault, or promote repeated failures into a skill.",
@@ -226,7 +226,7 @@ def _fast_classify(lower: str) -> ToolDecision | None:
             action = "promote"
         return ToolDecision("skill", 0.96, action)
     # Local model training / distillation
-    if re.search(r"\b(train|tune|improve|distill|export|build|fine tune|prepare)\b.*\b(local model|local models|ollama|training data|training dataset|modelfile|distillation pipeline|training pack|handoff|axolotl|unsloth|lora)\b", lower):
+    if re.search(r"\b(train|tune|improve|distill|export|build|fine tune|prepare|evaluate|eval|promote|status|check|automate|autopilot|cycle)\b.*\b(local model|local models|local eval|local evals|ollama|training data|training dataset|modelfile|distillation pipeline|training pack|handoff|axolotl|unsloth|lora|adapter)\b", lower):
         action = "status"
         if re.search(r"\bdistill\b", lower):
             action = "distill"
@@ -234,6 +234,12 @@ def _fast_classify(lower: str) -> ToolDecision | None:
             action = "export"
         elif re.search(r"\bbuild\b.*\bmodelfile\b", lower):
             action = "modelfile"
+        elif re.search(r"\bautomate|autopilot|cycle\b", lower):
+            action = "automate"
+        elif re.search(r"\bpromote\b", lower):
+            action = "promote"
+        elif re.search(r"\bevaluate|eval\b", lower):
+            action = "evaluate"
         elif re.search(r"\bhandoff|axolotl|unsloth|lora\b", lower):
             action = "handoff"
         elif re.search(r"\btrain|tune|improve|fine tune\b", lower):
