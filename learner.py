@@ -19,8 +19,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from brain_claude import ask_claude
-from config import HAIKU
+from provider_priority import ask_with_priority
 from tools import web_search
 import memory as mem
 
@@ -83,7 +82,7 @@ Extract ONLY new information not already known. Return a JSON object with these 
 Be specific. Only include things clearly stated or strongly implied. Return valid JSON only."""
 
     try:
-        response = ask_claude(prompt, model=HAIKU)
+        response = ask_with_priority(prompt, tier="cheap")
         # Extract JSON from response
         start = response.find("{")
         end = response.rfind("}") + 1
@@ -174,9 +173,9 @@ def refresh_knowledge_feed() -> None:
             results = web_search(f"latest news {topic} 2025", max_results=2)
             if results and "couldn't find" not in results:
                 # Summarize with Haiku (cheap)
-                summary = ask_claude(
+                summary = ask_with_priority(
                     f"Summarize these news results about '{topic}' in 1-2 sentences for a voice assistant:\n{results}",
-                    model=HAIKU
+                    tier="cheap",
                 )
                 feed.append({"topic": topic, "summary": summary,
                              "fetched": str(datetime.now().strftime("%Y-%m-%d %H:%M"))})
@@ -246,7 +245,7 @@ This will be used as context for an AI assistant.
 Return only the profile paragraph, no labels or headers."""
 
     try:
-        profile = ask_claude(prompt, model=HAIKU)
+        profile = ask_with_priority(prompt, tier="cheap")
         kdata["user_profile"]["synthesis"] = profile
         kdata["user_profile"]["last_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
         _save_knowledge(kdata)

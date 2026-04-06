@@ -13,7 +13,7 @@ Endpoints:
   POST /memory/add    — add a fact
   POST /memory/forget — forget by keyword
   GET  /mode          — current model routing mode
-  POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"}
+  POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"|"open-source"}
 """
 
 import json
@@ -35,6 +35,7 @@ import skill_factory
 import local_training
 import local_model_eval
 import local_model_automation
+import local_beta
 import behavior_hooks
 import cost_policy
 import usage_tracker
@@ -175,6 +176,15 @@ class LocalModelAutomationRunRequest(BaseModel):
     force: bool = False
 
 
+class LocalBetaRunRequest(BaseModel):
+    include_browser: bool = False
+    limit: int = 0
+    log_failures: bool = True
+    build_training_pack: bool = False
+    teacher_model: str = "claude-sonnet-4-6"
+    suite: str = "all"
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -307,6 +317,11 @@ def get_local_automation_status():
     return {"ok": True, "status": local_model_automation.status()}
 
 
+@app.get("/local/beta/status")
+def get_local_beta_status():
+    return {"ok": True, "status": local_beta.status()}
+
+
 @app.post("/local/training/export")
 def export_local_training(req: LocalTrainingExportRequest):
     result = local_training.export_sft_dataset(limit=req.limit, cloud_only=req.cloud_only)
@@ -406,6 +421,19 @@ def run_local_automation(req: LocalModelAutomationRunRequest):
     return {"ok": result.get("ok", False), "message": local_model_automation.result_text(result), "result": result}
 
 
+@app.post("/local/beta/run")
+def run_local_beta(req: LocalBetaRunRequest):
+    result = local_beta.run_beta_suite(
+        include_browser=req.include_browser,
+        limit=req.limit,
+        log_failures=req.log_failures,
+        build_training_pack=req.build_training_pack,
+        teacher_model=req.teacher_model,
+        suite=req.suite,
+    )
+    return {"ok": result.get("ok", False), "message": local_beta.result_text(result), "result": result}
+
+
 @app.get("/self/review")
 def get_self_review(area: str = ""):
     result, message = _safe_self_review(area=area or None)
@@ -425,7 +453,20 @@ def get_memory():
         "preferences": mem.get_all_preferences(),
         "top_topics": mem.get_top_topics(5),
         "recent_conversations": mem.get_recent_conversations(3),
+        "working_memory": mem.memory_status().get("working_memory", {}),
+        "long_term_profile": mem.memory_status().get("long_term_profile", {}),
     }
+
+
+@app.get("/memory/status")
+def get_memory_status():
+    return {"ok": True, "status": mem.memory_status()}
+
+
+@app.post("/memory/consolidate")
+def consolidate_memory():
+    result = mem.consolidate_memory()
+    return {"ok": result.get("ok", False), "result": result}
 
 
 @app.post("/memory/add")

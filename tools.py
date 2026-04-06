@@ -6,6 +6,7 @@ import urllib.request
 import json
 from datetime import datetime
 from ddgs import DDGS
+from screen_capture import capture_screenshot
 
 
 # ── Weather ───────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ def set_brightness(level: int) -> str:
 def take_screenshot() -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     path = os.path.expanduser(f"~/Desktop/screenshot_{timestamp}.png")
-    subprocess.run(["screencapture", "-x", path], check=True)
+    capture_screenshot(path, image_format="png")
     return f"Screenshot saved to your Desktop as screenshot_{timestamp}.png."
 
 

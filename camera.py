@@ -4,6 +4,7 @@ import os
 import cv2
 from openai import OpenAI
 from config import OPENAI_API_KEY
+from screen_capture import capture_screenshot_temp
 
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -70,9 +71,7 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
 
 def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> str:
     """Take a screenshot and describe it using Vision API."""
-    import subprocess
-    path = tempfile.mktemp(suffix=".jpg")
-    subprocess.run(["screencapture", "-x", "-t", "jpg", path], check=True)
+    path = capture_screenshot_temp(preferred_format="jpg", fallback_formats=("png",))
     try:
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")

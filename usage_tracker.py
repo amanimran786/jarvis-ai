@@ -27,6 +27,8 @@ _MAX_RECENT = 50
 BLENDED_USD_PER_MILLION_TOTAL = {
     "gpt-4o-mini": 0.15,
     "gpt-4o": 2.50,
+    "gemini-2.5-flash": 0.35,
+    "gemini-2.5-pro": 3.50,
     "claude-haiku-4-5-20251001": 0.80,
     "claude-sonnet-4-6": 3.00,
     "claude-opus-4-6": 15.00,
