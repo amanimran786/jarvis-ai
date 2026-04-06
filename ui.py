@@ -4,6 +4,9 @@ import threading
 import os
 import math
 import random
+import subprocess
+import shutil
+from datetime import datetime
 import learner
 import model_router
 import self_improve as si
@@ -24,7 +27,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QFont, QColor, QPalette, QIcon, QTextCursor, QKeyEvent,
     QPainter, QPen, QBrush, QLinearGradient, QRadialGradient,
-    QPainterPath, QFontDatabase
+    QPainterPath, QFontDatabase, QCursor
 )
 
 from router import route_stream, set_timer_callback
@@ -36,6 +39,7 @@ import google_services as gs
 import terminal
 import stealth
 import overlay as _overlay_mod
+import call_privacy
 
 # ── Color palette ──────────────────────────────────────────────────────────────
 C_BG        = "#020A10"       # deep space black
@@ -50,6 +54,8 @@ C_TEXT_DIM  = "#4A8FA8"       # subdued text
 C_ORANGE    = "#FF6B00"       # warning / user accent
 C_GREEN     = "#00FF88"       # online / status green
 C_PANEL     = "#021018"       # message panel bg
+C_WHITE_DIM = "#D8F6FF"       # highlight text
+C_WARNING   = "#FFAA00"       # processing state
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -64,6 +70,14 @@ def _glow(widget, color=C_CYAN, radius=12):
     fx.setOffset(0, 0)
     widget.setGraphicsEffect(fx)
     return fx
+
+
+def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
+    return f"""
+        background-color: {fill};
+        border: 1px solid {border};
+        border-radius: {radius}px;
+    """
 
 
 # ── Arc Reactor Widget ─────────────────────────────────────────────────────────
@@ -434,6 +448,26 @@ class HUDBackground(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = self.width(), self.height()
 
+        # Atmospheric gradient wash
+        bg = QLinearGradient(0, 0, w, h)
+        bg.setColorAt(0.0, QColor(1, 8, 14, 210))
+        bg.setColorAt(0.45, QColor(2, 14, 24, 130))
+        bg.setColorAt(1.0, QColor(0, 5, 10, 235))
+        p.fillRect(self.rect(), bg)
+
+        # Central hologram bloom behind the orb
+        bloom = QRadialGradient(w / 2, h * 0.33, min(w, h) * 0.42)
+        bloom.setColorAt(0.0, QColor(0, 212, 255, 46))
+        bloom.setColorAt(0.55, QColor(0, 160, 255, 18))
+        bloom.setColorAt(1.0, QColor(0, 120, 220, 0))
+        p.fillRect(self.rect(), bloom)
+
+        # Scanline texture
+        scan_pen = QPen(QColor(120, 240, 255, 10))
+        p.setPen(scan_pen)
+        for y in range(0, h, 5):
+            p.drawLine(0, y, w, y)
+
         # Dot grid
         grid_pen = QPen(QColor(0, 180, 220, 18))
         p.setPen(grid_pen)
@@ -441,6 +475,22 @@ class HUDBackground(QWidget):
         for x in range(0, w, step):
             for y in range(0, h, step):
                 p.drawPoint(x, y)
+
+        # Holographic target rings
+        p.setPen(QPen(QColor(0, 212, 255, 34), 1))
+        center_x = w / 2
+        center_y = h * 0.33
+        for factor in (0.18, 0.25, 0.33):
+            rr = min(w, h) * factor
+            p.drawEllipse(QRectF(center_x - rr, center_y - rr, rr * 2, rr * 2))
+
+        # Light beam accents
+        beam = QLinearGradient(w * 0.15, 0, w * 0.75, h)
+        beam.setColorAt(0.0, QColor(0, 212, 255, 0))
+        beam.setColorAt(0.45, QColor(0, 212, 255, 16))
+        beam.setColorAt(0.55, QColor(200, 255, 255, 20))
+        beam.setColorAt(1.0, QColor(0, 212, 255, 0))
+        p.fillRect(self.rect(), beam)
 
         # Corner bracket — top left
         self._bracket(p, 0, 0, 1, 1, w, h)
@@ -510,6 +560,131 @@ class PulseDot(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(1, 1, 8, 8)
         p.end()
+
+
+class SignalBars(QWidget):
+    """Ambient hologram spectrum bars used around the orb."""
+
+    def __init__(self, bars=18, parent=None):
+        super().__init__(parent)
+        self._bars = [0.0] * bars
+        self._targets = [0.0] * bars
+        self._intensity = 0.35
+        self.setFixedSize(220, 34)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(55)
+
+    def set_intensity(self, intensity: float):
+        self._intensity = max(0.1, min(1.0, intensity))
+
+    def _tick(self):
+        for i in range(len(self._targets)):
+            if random.random() < 0.35:
+                self._targets[i] = random.uniform(0.12, self._intensity)
+            self._bars[i] += (self._targets[i] - self._bars[i]) * 0.28
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w = self.width()
+        h = self.height()
+        count = len(self._bars)
+        gap = 4
+        bar_w = max(3, int((w - (count - 1) * gap) / count))
+        base_y = h - 3
+
+        p.setPen(Qt.PenStyle.NoPen)
+        for idx, level in enumerate(self._bars):
+            bar_h = 5 + int(level * (h - 9))
+            x = idx * (bar_w + gap)
+            grad = QLinearGradient(x, base_y - bar_h, x, base_y)
+            grad.setColorAt(0.0, QColor(215, 250, 255, 220))
+            grad.setColorAt(0.3, QColor(0, 212, 255, 190))
+            grad.setColorAt(1.0, QColor(0, 100, 170, 55))
+            p.setBrush(QBrush(grad))
+            p.drawRoundedRect(QRectF(x, base_y - bar_h, bar_w, bar_h), 1.5, 1.5)
+        p.end()
+
+
+class TelemetryPanel(QFrame):
+    """Small holographic side panel with live system metrics."""
+
+    def __init__(self, title: str, parent=None):
+        super().__init__(parent)
+        self._value_labels = {}
+        self._dot_widgets = {}
+        self.setObjectName("TelemetryPanel")
+        self.setMinimumWidth(168)
+        self.setMaximumWidth(196)
+        self.setStyleSheet(_glass_panel_css(fill="rgba(3, 18, 28, 205)", radius=12))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        title_lbl = QLabel(title)
+        title_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
+        layout.addWidget(title_lbl)
+
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 transparent, stop:0.25 {C_CYAN}, stop:0.75 {C_CYAN}, stop:1 transparent);"
+        )
+        layout.addWidget(divider)
+
+        self._rows = QVBoxLayout()
+        self._rows.setSpacing(8)
+        layout.addLayout(self._rows)
+        layout.addStretch()
+
+    def add_metric(self, key: str, label: str, value: str = "--", color: str = C_CYAN):
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        dot = PulseDot(color)
+        dot.setFixedSize(8, 8)
+        row_layout.addWidget(dot, alignment=Qt.AlignmentFlag.AlignTop)
+        self._dot_widgets[key] = dot
+
+        text_block = QVBoxLayout()
+        text_block.setContentsMargins(0, 0, 0, 0)
+        text_block.setSpacing(2)
+
+        label_lbl = QLabel(label)
+        label_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        label_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 1px;")
+        text_block.addWidget(label_lbl)
+
+        value_lbl = QLabel(value)
+        value_lbl.setWordWrap(True)
+        value_lbl.setFont(QFont("Courier New", 8))
+        value_lbl.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
+        text_block.addWidget(value_lbl)
+
+        self._value_labels[key] = value_lbl
+        row_layout.addLayout(text_block, stretch=1)
+        self._rows.addWidget(row)
+
+    def set_metric(self, key: str, value: str, color: str | None = None):
+        label = self._value_labels.get(key)
+        if label is not None:
+            label.setText(value)
+            label.setToolTip(value)
+            if color:
+                label.setStyleSheet(f"color: {color}; background: transparent;")
+            else:
+                label.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
+
+        dot = self._dot_widgets.get(key)
+        if dot is not None and color:
+            dot.set_color(color)
 
 
 # ── Worker threads ─────────────────────────────────────────────────────────────
@@ -633,7 +808,6 @@ class TextWorker(QThread):
             entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
             evals.maybe_log_automatic_failure(entry)
             self.interaction.emit(entry)
-            speak(response)
             self.message.emit(response, "jarvis", model)
             exchanges = [f"User: {self.user_input}", f"Jarvis: {response}"]
             threading.Thread(
@@ -707,21 +881,21 @@ class MessageBubble(QFrame):
 
         if is_user:
             msg.setStyleSheet(f"""
-                color: #FFD0A0;
-                background: #1A0A00;
+                color: #FFD9B8;
+                background: rgba(34, 15, 2, 220);
                 border: 1px solid #FF6B00;
-                border-radius: 2px;
-                padding: 8px 12px;
+                border-radius: 10px;
+                padding: 10px 14px;
             """)
             layout.setAlignment(Qt.AlignmentFlag.AlignRight)
             self.setStyleSheet("background: transparent;")
         else:
             msg.setStyleSheet(f"""
                 color: {C_TEXT};
-                background: {C_PANEL};
+                background: rgba(3, 18, 28, 220);
                 border: 1px solid {C_BORDER};
-                border-radius: 2px;
-                padding: 8px 12px;
+                border-radius: 10px;
+                padding: 10px 14px;
             """)
             layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
             self.setStyleSheet("background: transparent;")
@@ -738,6 +912,7 @@ class JarvisWindow(QMainWindow):
         self.setWindowTitle("J.A.R.V.I.S")
         self.setMinimumSize(400, 500)
         self.resize(500, 900)
+        self._session_started = datetime.now()
         self.setWindowFlags(
             Qt.WindowType.Window |
             Qt.WindowType.WindowStaysOnTopHint
@@ -773,7 +948,7 @@ class JarvisWindow(QMainWindow):
         hp = header.palette()
         hp.setColor(QPalette.ColorRole.Window, QColor(C_BG2))
         header.setPalette(hp)
-        header.setStyleSheet(f"border-bottom: 1px solid {C_BORDER};")
+        header.setStyleSheet(_glass_panel_css(fill="rgba(3, 13, 20, 235)", radius=0) + f"border-bottom: 1px solid {C_BORDER};")
 
         h_layout = QHBoxLayout(header)
         h_layout.setContentsMargins(14, 8, 14, 8)
@@ -853,14 +1028,37 @@ class JarvisWindow(QMainWindow):
 
         # ── Orb panel ────────────────────────────────────────────────────────
         orb_panel = QWidget()
-        orb_panel.setFixedHeight(290)
+        orb_panel.setFixedHeight(340)
         orb_panel.setStyleSheet("background: transparent;")
-        orb_layout = QVBoxLayout(orb_panel)
-        orb_layout.setContentsMargins(0, 8, 0, 8)
-        orb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        orb_layout = QHBoxLayout(orb_panel)
+        orb_layout.setContentsMargins(14, 10, 14, 10)
+        orb_layout.setSpacing(16)
+
+        self._left_telemetry = TelemetryPanel("SYSTEM MATRIX")
+        self._left_telemetry.add_metric("mode", "OPERATING MODE")
+        self._left_telemetry.add_metric("status", "CURRENT STATE")
+        self._left_telemetry.add_metric("memory", "MEMORY NODES")
+        self._left_telemetry.add_metric("recent", "RECENT FAILURES")
+        orb_layout.addWidget(self._left_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        center_stack = QVBoxLayout()
+        center_stack.setContentsMargins(0, 0, 0, 0)
+        center_stack.setSpacing(6)
+        center_stack.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._orb = JarvisOrb(size=260)
-        orb_layout.addWidget(self._orb, alignment=Qt.AlignmentFlag.AlignCenter)
+        center_stack.addWidget(self._orb, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._signal_bars = SignalBars()
+        center_stack.addWidget(self._signal_bars, alignment=Qt.AlignmentFlag.AlignCenter)
+        orb_layout.addLayout(center_stack, stretch=1)
+
+        self._right_telemetry = TelemetryPanel("TACTICAL FEED")
+        self._right_telemetry.add_metric("uptime", "SESSION UPTIME")
+        self._right_telemetry.add_metric("messages", "MESSAGE COUNT")
+        self._right_telemetry.add_metric("workers", "ACTIVE THREADS")
+        self._right_telemetry.add_metric("clock", "LOCAL CLOCK")
+        orb_layout.addWidget(self._right_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addWidget(orb_panel)
 
         # Divider below orb
@@ -909,6 +1107,7 @@ class JarvisWindow(QMainWindow):
         ip = input_bar.palette()
         ip.setColor(QPalette.ColorRole.Window, QColor(C_BG2))
         input_bar.setPalette(ip)
+        input_bar.setStyleSheet(_glass_panel_css(fill="rgba(3, 13, 20, 235)", radius=0))
 
         i_layout = QHBoxLayout(input_bar)
         i_layout.setContentsMargins(12, 10, 12, 10)
@@ -979,7 +1178,7 @@ class JarvisWindow(QMainWindow):
         sp = self.suggest_panel.palette()
         sp.setColor(QPalette.ColorRole.Window, QColor("#010D18"))
         self.suggest_panel.setPalette(sp)
-        self.suggest_panel.setStyleSheet(f"border-top: 1px solid {C_BORDER};")
+        self.suggest_panel.setStyleSheet(_glass_panel_css(fill="rgba(1, 13, 24, 230)", radius=0) + f"border-top: 1px solid {C_BORDER};")
         self.suggest_panel.hide()
 
         sl = QVBoxLayout(self.suggest_panel)
@@ -1017,6 +1216,11 @@ class JarvisWindow(QMainWindow):
 
         root.addWidget(self.suggest_panel)
 
+        self._telemetry_timer = QTimer(self)
+        self._telemetry_timer.timeout.connect(self._refresh_telemetry)
+        self._telemetry_timer.start(1200)
+        self._refresh_telemetry()
+
     def _hud_btn(self, label: str) -> QPushButton:
         btn = QPushButton(label)
         btn.setFixedSize(40, 40)
@@ -1040,6 +1244,11 @@ class JarvisWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "_hud_bg"):
             self._hud_bg.setGeometry(0, 0, self.width(), self.height())
+        wide = self.width() >= 760
+        if hasattr(self, "_left_telemetry"):
+            self._left_telemetry.setVisible(wide)
+        if hasattr(self, "_right_telemetry"):
+            self._right_telemetry.setVisible(wide)
 
     # ── Voice & startup ────────────────────────────────────────────────────────
 
@@ -1173,6 +1382,39 @@ class JarvisWindow(QMainWindow):
             if speaking:
                 self._orb.set_state(JarvisOrb.STATE_SPEAKING)
 
+    def _refresh_telemetry(self):
+        if not hasattr(self, "_left_telemetry"):
+            return
+
+        memory_data = mem.load()
+        recent_failures = len(evals.recent_failures(limit=12, hours=24))
+        facts = len(memory_data.get("facts", []))
+        working = memory_data.get("working_memory", {})
+        focus = len(working.get("recent_focus", []))
+        message_count = max(0, self.chat_layout.count() - 1) if hasattr(self, "chat_layout") else 0
+        active_workers = sum(1 for worker in self._workers if worker.isRunning())
+        uptime_seconds = int((datetime.now() - self._session_started).total_seconds())
+        uptime = f"{uptime_seconds // 60:02d}m {uptime_seconds % 60:02d}s"
+        status = self._status_label.text().replace("AWAITING WAKE WORD", "STANDBY")
+
+        self._left_telemetry.set_metric("mode", model_router.get_mode().upper(), C_CYAN)
+        self._left_telemetry.set_metric("status", status, self._status_color_for_text(status))
+        self._left_telemetry.set_metric("memory", f"{facts} facts / {focus} focus", C_WHITE_DIM)
+        self._left_telemetry.set_metric("recent", f"{recent_failures} in 24h", C_WARNING if recent_failures else C_GREEN)
+
+        self._right_telemetry.set_metric("uptime", uptime, C_WHITE_DIM)
+        self._right_telemetry.set_metric("messages", str(message_count), C_CYAN)
+        self._right_telemetry.set_metric("workers", str(active_workers), C_WARNING if active_workers else C_GREEN)
+        self._right_telemetry.set_metric("clock", datetime.now().strftime("%H:%M:%S"), C_WHITE_DIM)
+
+    def _status_color_for_text(self, text: str) -> str:
+        upper = (text or "").upper()
+        if "LISTEN" in upper or "ACTIVE" in upper or "VOICE" in upper:
+            return C_CYAN
+        if "PROCESS" in upper or "SCAN" in upper or "CAMERA" in upper or "READING" in upper:
+            return C_WARNING
+        return C_GREEN
+
     def _on_agent_alert(self, title: str, body: str, speak_it: bool):
         """Called from agent threads — must marshal to UI thread via QTimer."""
         def _show():
@@ -1238,14 +1480,18 @@ class JarvisWindow(QMainWindow):
             self._status_label.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_CYAN)
             self._orb.set_state(JarvisOrb.STATE_LISTENING)
+            self._signal_bars.set_intensity(0.55)
         elif "PROCESS" in text or "SCANNING" in text or "CAMERA" in text or "READING" in text:
-            self._status_label.setStyleSheet(f"color: #FFAA00; background: transparent; letter-spacing: 2px;")
-            self._status_dot.set_color("#FFAA00")
+            self._status_label.setStyleSheet(f"color: {C_WARNING}; background: transparent; letter-spacing: 2px;")
+            self._status_dot.set_color(C_WARNING)
             self._orb.set_state(JarvisOrb.STATE_SPEAKING)
+            self._signal_bars.set_intensity(1.0)
         else:
             self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_GREEN)
             self._orb.set_state(JarvisOrb.STATE_IDLE)
+            self._signal_bars.set_intensity(0.28)
+        self._refresh_telemetry()
 
     def _send_text(self):
         text = self.input_field.text().strip()
@@ -1334,6 +1580,598 @@ class JarvisWindow(QMainWindow):
         event.accept()
 
 
+class OrbShellWindow(JarvisWindow):
+    """Frameless orb-first shell that stays out of the way and reveals controls on demand."""
+
+    def __init__(self):
+        QMainWindow.__init__(self)
+        self.setWindowTitle("J.A.R.V.I.S")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
+        )
+        self._workers = []
+        self._last_jarvis_interaction = None
+        self._session_started = datetime.now()
+        self._drag_pos = None
+        self._tray_locked = False
+        self._last_yield_ms = 0
+        self._preferred_opacity = 0.84
+        self._current_summary = "Awaiting input..."
+        self._front_focus_app = ""
+        self._front_focus_rect = None
+        self._front_focus_checked_ms = 0
+        self._front_focus_refreshing = False
+        self._move_anim = None
+        self._bootstrapped = False
+        self.resize(320, 340)
+        self._build_ui()
+        self._position_initial()
+        self._adaptive_timer = QTimer(self)
+        self._adaptive_timer.timeout.connect(self._adaptive_tick)
+
+        self._call_status_timer = QTimer(self)
+        self._call_status_timer.timeout.connect(self._refresh_live_call_status)
+
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.timeout.connect(lambda: self._set_tray_visible(False))
+
+        self.setWindowOpacity(self._preferred_opacity)
+        QTimer.singleShot(120, self._finish_startup)
+
+    def _finish_startup(self):
+        if self._bootstrapped:
+            return
+        self._bootstrapped = True
+        self._refresh_live_call_status()
+        self._start_voice()
+        self._adaptive_timer.start(340)
+        self._call_status_timer.start(2200)
+
+    def _build_ui(self):
+        central = QWidget()
+        central.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setCentralWidget(central)
+
+        root = QVBoxLayout(central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        shell = QWidget()
+        shell.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        shell.setStyleSheet("background: transparent;")
+        self._shell = shell
+        layout = QVBoxLayout(shell)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        self._top_chip = QLabel("JARVIS ORBITAL SHELL")
+        self._top_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._top_chip.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._top_chip.setStyleSheet(
+            _glass_panel_css(fill="rgba(3, 18, 28, 150)", radius=12) +
+            f"color: {C_CYAN}; padding: 6px 12px; letter-spacing: 2px;"
+        )
+        self._top_chip.setFixedHeight(30)
+        layout.addWidget(self._top_chip, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        orb_shell = QFrame()
+        orb_shell.setObjectName("orb_shell")
+        orb_shell.setStyleSheet(_glass_panel_css(fill="rgba(1, 10, 18, 100)", radius=120))
+        orb_shell.setFixedSize(220, 220)
+        orb_layout = QVBoxLayout(orb_shell)
+        orb_layout.setContentsMargins(16, 12, 16, 12)
+        orb_layout.setSpacing(2)
+        orb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._mode_lbl = QLabel(f"MODE {model_router.get_mode().upper()}")
+        self._mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mode_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._mode_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 2px;")
+        orb_layout.addWidget(self._mode_lbl)
+
+        self._orb = JarvisOrb(size=164)
+        orb_layout.addWidget(self._orb, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._status_row = QHBoxLayout()
+        self._status_row.setSpacing(6)
+        self._status_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status_dot = PulseDot(C_GREEN)
+        self._status_label = QLabel("ONLINE")
+        self._status_label.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")
+        self._status_row.addWidget(self._status_dot)
+        self._status_row.addWidget(self._status_label)
+        status_wrap = QWidget()
+        status_wrap.setStyleSheet("background: transparent;")
+        status_wrap.setLayout(self._status_row)
+        orb_layout.addWidget(status_wrap, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(orb_shell, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._signal_bars = SignalBars(bars=14)
+        self._signal_bars.setFixedSize(180, 28)
+        layout.addWidget(self._signal_bars, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._peek_label = QLabel("Ambient mode active. Hover or double-click for controls.")
+        self._peek_label.setWordWrap(True)
+        self._peek_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._peek_label.setFont(QFont("Courier New", 8))
+        self._peek_label.setStyleSheet(
+            _glass_panel_css(fill="rgba(3, 18, 28, 125)", radius=12) +
+            f"color: {C_TEXT_DIM}; padding: 8px 10px;"
+        )
+        layout.addWidget(self._peek_label)
+
+        self.suggest_panel = QFrame()
+        self.suggest_panel.setStyleSheet(_glass_panel_css(fill="rgba(2, 16, 24, 220)", radius=14))
+        tray = QVBoxLayout(self.suggest_panel)
+        tray.setContentsMargins(12, 12, 12, 12)
+        tray.setSpacing(8)
+
+        tray_header = QHBoxLayout()
+        tray_header.setSpacing(6)
+        tray_header.addWidget(QLabel(""))
+        hdr = QLabel("TACTICAL PANEL")
+        hdr.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
+        tray_header.addWidget(hdr)
+        tray_header.addStretch()
+
+        self._pin_btn = QPushButton("PIN")
+        self._pin_btn.setFixedSize(44, 24)
+        self._pin_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._pin_btn.setStyleSheet(self._action_btn_css(C_TEXT_DIM))
+        self._pin_btn.clicked.connect(self._toggle_tray_lock)
+        tray_header.addWidget(self._pin_btn)
+        tray.addLayout(tray_header)
+
+        self.suggest_label = QTextEdit()
+        self.suggest_label.setReadOnly(True)
+        self.suggest_label.setPlainText("Awaiting input...")
+        self.suggest_label.setMinimumHeight(110)
+        self.suggest_label.setMaximumHeight(220)
+        self.suggest_label.setFont(QFont("Courier New", 10))
+        self.suggest_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.suggest_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.suggest_label.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(2, 12, 20, 215);
+                color: {C_TEXT};
+                border: 1px solid {C_BORDER};
+                border-radius: 10px;
+                padding: 6px 8px;
+            }}
+        """)
+        tray.addWidget(self.suggest_label)
+
+        self.transcript_label = QLabel("No live transcript yet.")
+        self.transcript_label.setWordWrap(True)
+        self.transcript_label.setFont(QFont("Courier New", 8))
+        self.transcript_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        tray.addWidget(self.transcript_label)
+
+        self._call_status_label = QLabel("Meeting: scanning...\nAudio: checking route...\nPrivacy: checking...\nScreen scan: checking...")
+        self._call_status_label.setWordWrap(True)
+        self._call_status_label.setFont(QFont("Courier New", 8))
+        self._call_status_label.setStyleSheet(
+            _glass_panel_css(fill="rgba(3, 18, 28, 155)", radius=10) +
+            f"color: {C_TEXT_DIM}; padding: 8px 10px;"
+        )
+        tray.addWidget(self._call_status_label)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+        self.listen_btn = self._hud_btn("🎧")
+        self.listen_btn.setToolTip("Toggle Smart Listen")
+        self.listen_btn.clicked.connect(self._toggle_smart_listen)
+        self.privacy_btn = self._hud_btn("🔇")
+        self.privacy_btn.setToolTip("Toggle meeting-safe quiet mode")
+        self.privacy_btn.clicked.connect(self._toggle_meeting_safe_mode)
+        self.attach_btn = self._hud_btn("📎")
+        self.attach_btn.setToolTip("Attach a file")
+        self.attach_btn.clicked.connect(self._attach_file)
+        self.flag_btn = self._hud_btn("⚑")
+        self.flag_btn.setToolTip("Flag the last Jarvis answer")
+        self.flag_btn.clicked.connect(self._flag_last_answer)
+        self._scan_btn = self._hud_btn("⌁")
+        self._scan_btn.setToolTip("Analyze the current screen")
+        self._scan_btn.clicked.connect(self._hotkey_screen)
+        action_row.addWidget(self.listen_btn)
+        action_row.addWidget(self.privacy_btn)
+        action_row.addWidget(self.attach_btn)
+        action_row.addWidget(self.flag_btn)
+        action_row.addWidget(self._scan_btn)
+        tray.addLayout(action_row)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(8)
+        self.input_field = EnterLineEdit()
+        self.input_field.setPlaceholderText("Type to Jarvis...")
+        self.input_field.setFont(QFont("Courier New", 11))
+        self.input_field.setStyleSheet(f"""
+            QLineEdit {{
+                background: rgba(0, 8, 14, 220);
+                color: {C_TEXT};
+                border: 1px solid {C_BORDER};
+                border-radius: 10px;
+                padding: 8px 12px;
+                letter-spacing: 1px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {C_CYAN};
+            }}
+        """)
+        self.input_field.returnPressed.connect(self._send_text)
+        self.send_btn = QPushButton("SEND")
+        self.send_btn.setFixedHeight(36)
+        self.send_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.send_btn.setStyleSheet(self._action_btn_css(C_CYAN))
+        self.send_btn.clicked.connect(self._send_text)
+        input_row.addWidget(self.input_field, stretch=1)
+        input_row.addWidget(self.send_btn)
+        tray.addLayout(input_row)
+
+        self.suggest_panel.hide()
+        layout.addWidget(self.suggest_panel)
+        root.addWidget(shell)
+
+    def _toggle_tray_lock(self):
+        self._tray_locked = not self._tray_locked
+        color = C_CYAN if self._tray_locked else C_TEXT_DIM
+        self._pin_btn.setStyleSheet(self._action_btn_css(color))
+        self._pin_btn.setText("LOCK" if self._tray_locked else "PIN")
+        if self._tray_locked:
+            self._set_tray_visible(True)
+        else:
+            self._collapse_timer.start(2200)
+
+    def _screen_geometry_for(self, point: QPoint | None = None):
+        point = point or QCursor.pos()
+        screen = QApplication.screenAt(point)
+        if screen is None:
+            screen = QApplication.primaryScreen()
+        return screen.availableGeometry()
+
+    def _position_initial(self):
+        geo = self._screen_geometry_for()
+        self.adjustSize()
+        x = geo.right() - self.width() - 22
+        y = geo.center().y() - self.height() // 2
+        self.move(max(geo.left() + 12, x), max(geo.top() + 12, y))
+
+    def _candidate_positions(self, geo):
+        margin = 18
+        return [
+            QPoint(geo.left() + margin, geo.top() + margin),
+            QPoint(geo.right() - self.width() - margin, geo.top() + margin),
+            QPoint(geo.left() + margin, geo.bottom() - self.height() - margin),
+            QPoint(geo.right() - self.width() - margin, geo.bottom() - self.height() - margin),
+            QPoint(geo.left() + margin, geo.center().y() - self.height() // 2),
+            QPoint(geo.right() - self.width() - margin, geo.center().y() - self.height() // 2),
+        ]
+
+    def _animate_to(self, point: QPoint):
+        if self.pos() == point:
+            return
+        self._move_anim = QPropertyAnimation(self, b"pos", self)
+        self._move_anim.setDuration(240)
+        self._move_anim.setStartValue(self.pos())
+        self._move_anim.setEndValue(point)
+        self._move_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._move_anim.start()
+
+    def _dock_away_from(self, point: QPoint):
+        geo = self._screen_geometry_for(point)
+        current = self.pos()
+        candidates = self._candidate_positions(geo)
+        best = max(
+            candidates,
+            key=lambda pos: (
+                (pos.x() - point.x()) ** 2 + (pos.y() - point.y()) ** 2,
+                -abs(pos.x() - current.x()) - abs(pos.y() - current.y()),
+            ),
+        )
+        self._animate_to(best)
+
+    def _front_window_info(self, force: bool = False):
+        now_ms = int(datetime.now().timestamp() * 1000)
+        if not force and now_ms - self._front_focus_checked_ms < 1200:
+            return self._front_focus_app, self._front_focus_rect
+
+        if not self._front_focus_refreshing:
+            self._front_focus_checked_ms = now_ms
+            self._front_focus_refreshing = True
+            threading.Thread(target=self._refresh_front_window_info, daemon=True).start()
+        return self._front_focus_app, self._front_focus_rect
+
+    def _refresh_front_window_info(self):
+        script = r'''
+tell application "System Events"
+    try
+        set frontProc to first application process whose frontmost is true
+        set appName to name of frontProc
+        try
+            tell front window of frontProc
+                set {xPos, yPos} to position
+                set {wSize, hSize} to size
+                return appName & "|" & xPos & "|" & yPos & "|" & wSize & "|" & hSize
+            end tell
+        on error
+            return appName & "|NONE"
+        end try
+    on error
+        return "NONE"
+    end try
+end tell
+'''
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=0.9,
+            )
+            raw = (result.stdout or "").strip()
+            if not raw or raw == "NONE":
+                self._front_focus_app = ""
+                self._front_focus_rect = None
+                return
+
+            parts = raw.split("|")
+            app_name = parts[0].strip()
+            if len(parts) < 2 or parts[1] == "NONE":
+                self._front_focus_app = app_name
+                self._front_focus_rect = None
+                return
+
+            if len(parts) >= 5:
+                x, y, w, h = [int(float(value.strip())) for value in parts[1:5]]
+                rect = QRect(x, y, max(w, 1), max(h, 1))
+                if app_name.lower() in {"python", "python3", "jarvis", "j.a.r.v.i.s"}:
+                    rect = None
+                self._front_focus_app = app_name
+                self._front_focus_rect = rect
+        except Exception:
+            self._front_focus_app = ""
+            self._front_focus_rect = None
+        finally:
+            self._front_focus_refreshing = False
+
+    def _score_position_for_focus(self, pos: QPoint, focus_rect: QRect, screen_geo: QRect) -> float:
+        shell_rect = QRect(pos, self.size())
+        overlap = shell_rect.intersected(focus_rect)
+        overlap_area = max(0, overlap.width()) * max(0, overlap.height())
+        shell_area = max(1, shell_rect.width() * shell_rect.height())
+        overlap_ratio = overlap_area / shell_area
+
+        shell_center = shell_rect.center()
+        focus_center = focus_rect.center()
+        dx = shell_center.x() - focus_center.x()
+        dy = shell_center.y() - focus_center.y()
+        distance = math.sqrt(dx * dx + dy * dy)
+
+        edge_clearance = min(
+            abs(shell_rect.left() - screen_geo.left()),
+            abs(shell_rect.right() - screen_geo.right()),
+            abs(shell_rect.top() - screen_geo.top()),
+            abs(shell_rect.bottom() - screen_geo.bottom()),
+        )
+
+        return distance - overlap_ratio * 2500 + edge_clearance * 0.2
+
+    def _yield_from_focus_rect(self, focus_rect: QRect, app_name: str):
+        screen_geo = self._screen_geometry_for(focus_rect.center())
+        current = self.pos()
+        candidates = self._candidate_positions(screen_geo)
+        best = max(candidates, key=lambda pos: self._score_position_for_focus(pos, focus_rect, screen_geo))
+        self._top_chip.setText(f"CLEAR VIEW FOR {app_name.upper()[:18]}" if app_name else "CLEAR VIEW MODE")
+        if current != best:
+            self._animate_to(best)
+
+    def _set_tray_visible(self, visible: bool):
+        if visible:
+            self.suggest_panel.show()
+            self._collapse_timer.stop()
+        elif not self._tray_locked:
+            self.suggest_panel.hide()
+        self.adjustSize()
+
+    def _action_btn_css(self, color: str) -> str:
+        c = QColor(color)
+        r, g, b = c.red(), c.green(), c.blue()
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {color};
+                border: 1px solid {color};
+                border-radius: 10px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{ background: rgba({r},{g},{b},0.14); }}
+            QPushButton:pressed {{ background: rgba({r},{g},{b},0.28); }}
+        """
+
+    def _call_status_css(self, tone: str) -> str:
+        palette = {
+            "live": (C_GREEN, "rgba(0, 255, 136, 0.12)"),
+            "meeting": (C_CYAN, "rgba(0, 212, 255, 0.12)"),
+            "fallback": (C_WARNING, "rgba(255, 170, 0, 0.12)"),
+            "idle": (C_TEXT_DIM, "rgba(3, 18, 28, 155)"),
+        }
+        border, fill = palette.get(tone, palette["idle"])
+        return (
+            _glass_panel_css(fill=fill, radius=10, border=border) +
+            f"color: {border}; padding: 8px 10px;"
+        )
+
+    def _adaptive_tick(self):
+        if self._drag_pos is not None:
+            return
+
+        cursor = QCursor.pos()
+        now_ms = int(datetime.now().timestamp() * 1000)
+        shell_rect = self.frameGeometry()
+        padded = shell_rect.adjusted(-48, -48, 48, 48)
+        app_name, focus_rect = self._front_window_info()
+
+        if focus_rect is not None:
+            overlap = shell_rect.intersected(focus_rect)
+            overlap_area = max(0, overlap.width()) * max(0, overlap.height())
+            shell_area = max(1, shell_rect.width() * shell_rect.height())
+            overlap_ratio = overlap_area / shell_area
+            focus_covers_screen = (
+                focus_rect.width() * focus_rect.height() >
+                self._screen_geometry_for(focus_rect.center()).width() *
+                self._screen_geometry_for(focus_rect.center()).height() * 0.72
+            )
+
+            if overlap_ratio > 0.08 or focus_rect.contains(shell_rect.center()):
+                if now_ms - self._last_yield_ms > 1000:
+                    self._yield_from_focus_rect(focus_rect, app_name)
+                    self._last_yield_ms = now_ms
+                self.setWindowOpacity(0.24 if focus_covers_screen else 0.42)
+                self._set_tray_visible(False)
+                return
+
+            if focus_rect.adjusted(-60, -60, 60, 60).contains(shell_rect.center()):
+                self._top_chip.setText(f"NEAR ACTIVE WINDOW {app_name.upper()[:14]}" if app_name else "NEAR ACTIVE WINDOW")
+                self.setWindowOpacity(0.54)
+                if not self._tray_locked:
+                    self._collapse_timer.start(1200)
+                return
+
+        self._top_chip.setText("JARVIS ORBITAL SHELL")
+
+        if shell_rect.contains(cursor):
+            self.setWindowOpacity(0.96)
+            self._set_tray_visible(True)
+            self._collapse_timer.stop()
+        elif padded.contains(cursor):
+            self.setWindowOpacity(0.78)
+            self._set_tray_visible(True)
+            self._collapse_timer.start(2200)
+        else:
+            active = self._status_label.text() not in ("ONLINE", "STANDBY", "AWAITING WAKE WORD")
+            target_opacity = 0.92 if active or self._tray_locked else self._preferred_opacity
+            self.setWindowOpacity(target_opacity)
+            if not self._tray_locked:
+                self._collapse_timer.start(1400)
+
+    def _add_message(self, text: str, sender: str, model: str):
+        prefix = "YOU" if sender == "user" else "JARVIS"
+        snippet = text.strip().replace("\n", " ")
+        if len(snippet) > 220:
+            snippet = snippet[:217].rstrip() + "..."
+        self._current_summary = f"{prefix}: {snippet}"
+        self._peek_label.setText(self._current_summary)
+        if sender != "user":
+            self.suggest_label.setPlainText(text)
+            self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
+            self._set_tray_visible(True)
+            self._collapse_timer.start(4200)
+
+    def _refresh_live_call_status(self):
+        meeting = _overlay_mod.detect_meeting_app() or "NONE"
+        snapshot = meeting_listener.status_snapshot()
+        privacy = call_privacy.snapshot()
+        preferred = snapshot.get("preferred", {})
+        device_name = snapshot.get("active_device_name") or preferred.get("device_name") or "unknown"
+        scan_ready = "READY" if shutil.which("screencapture") else "UNAVAILABLE"
+
+        if snapshot.get("running"):
+            audio_line = f"Audio: live via {device_name}"
+            tone = "live"
+        elif preferred.get("kind") == "microphone":
+            audio_line = f"Audio: mic fallback {device_name}"
+            tone = "fallback"
+        elif meeting != "NONE":
+            audio_line = f"Audio: ready via {device_name}"
+            tone = "meeting"
+        else:
+            audio_line = f"Audio: ready via {device_name}"
+            tone = "idle"
+
+        meeting_line = f"Meeting: {meeting}" if meeting != "NONE" else "Meeting: no active call detected"
+        if privacy.get("suppressing_audio"):
+            privacy_line = "Privacy: quiet mode active for live call"
+            self.privacy_btn.setStyleSheet(self._action_btn_css(C_GREEN))
+        elif privacy.get("enabled"):
+            privacy_line = "Privacy: quiet mode armed"
+            self.privacy_btn.setStyleSheet(self._action_btn_css(C_CYAN))
+        else:
+            privacy_line = "Privacy: quiet mode off"
+            self.privacy_btn.setStyleSheet(self._action_btn_css(C_TEXT_DIM))
+        self._call_status_label.setText(
+            f"{meeting_line}\n{audio_line}\n{privacy_line}\nScreen scan: {scan_ready}"
+        )
+        self._call_status_label.setStyleSheet(self._call_status_css(tone))
+
+    def _toggle_meeting_safe_mode(self):
+        enabled = call_privacy.toggle_enabled()
+        msg = call_privacy.status_text()
+        self._add_message(msg, "jarvis", "Meeting")
+        self._set_status("ONLINE")
+        self._refresh_live_call_status()
+
+    def _toggle_smart_listen(self):
+        if meeting_listener.is_running():
+            msg = meeting_listener.stop()
+            self._add_message(msg, "jarvis", "")
+            self.transcript_label.setText("Smart Listen offline.")
+            self.listen_btn.setText("🎧")
+            self._set_status("ONLINE")
+        else:
+            msg = meeting_listener.start(
+                on_transcript=self._on_transcript,
+                on_suggestion=self._on_suggestion,
+            )
+            self._add_message(msg, "jarvis", "")
+            self.transcript_label.setText("Live call transcript incoming...")
+            self.listen_btn.setText("■")
+            self._set_status("LISTENING")
+            self._set_tray_visible(True)
+        self._refresh_live_call_status()
+
+    def _on_transcript(self, text: str):
+        QTimer.singleShot(0, lambda: self.transcript_label.setText(f"Transcript: {text[:240]}"))
+
+    def _show_suggestion(self, suggestion: str):
+        self.suggest_label.setPlainText(suggestion)
+        self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
+        self._set_tray_visible(True)
+
+    def _on_suggestion(self, suggestion: str):
+        QTimer.singleShot(0, lambda: self._show_suggestion(suggestion))
+
+    def mouseDoubleClickEvent(self, event):
+        self._set_tray_visible(not self.suggest_panel.isVisible())
+        event.accept()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
+        super().mouseReleaseEvent(event)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(120, lambda: stealth.apply_stealth(int(self.winId())))
+
+
 class EnterLineEdit(QLineEdit):
     pass
 
@@ -1356,8 +2194,25 @@ def run():
     palette.setColor(QPalette.ColorRole.Highlight,       QColor(C_CYAN))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(C_BG))
     app.setPalette(palette)
+    app.setStyleSheet(f"""
+        QMainWindow, QWidget {{
+            color: {C_TEXT};
+            background: transparent;
+        }}
+        QToolTip {{
+            color: {C_TEXT};
+            background-color: rgba(2, 16, 24, 235);
+            border: 1px solid {C_CYAN};
+            padding: 6px 8px;
+            font-family: "Courier New";
+        }}
+        QScrollBar:horizontal {{
+            height: 0px;
+        }}
+    """)
 
-    window = JarvisWindow()
+    use_classic = "--classic-ui" in sys.argv or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"
+    window = JarvisWindow() if use_classic else OrbShellWindow()
     window.show()
     sys.exit(app.exec())
 

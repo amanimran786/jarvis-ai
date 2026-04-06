@@ -12,12 +12,13 @@ import threading
 import tempfile
 import os
 import time
+import re
 import numpy as np
 import sounddevice as sd
 import wave
 from openai import OpenAI
-from config import OPENAI_API_KEY, HAIKU
-from brain_claude import ask_claude
+from config import OPENAI_API_KEY
+from provider_priority import ask_with_priority
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -25,6 +26,8 @@ SAMPLE_RATE    = 16000
 CHUNK_SECONDS  = 8     # transcribe every 8 seconds
 OVERLAP_SECONDS = 2    # keep last 2s for continuity
 CONTEXT_LIMIT  = 20    # keep last 20 transcript lines for context
+MIC_RMS_THRESHOLD = 25
+SYSTEM_AUDIO_RMS_THRESHOLD = 120
 
 _running       = False
 _thread        = None
@@ -52,10 +55,60 @@ def get_blackhole_device() -> int | None:
     return None
 
 
+def get_virtual_meeting_audio_device() -> int | None:
+    """Prefer native meeting audio loopback devices when available."""
+    meeting_label = None
+    try:
+        import overlay
+        meeting_label = overlay.detect_meeting_app()
+    except Exception:
+        meeting_label = None
+
+    meeting_specific_markers = {
+        "TEAMS": ("microsoft teams audio",),
+        "ZOOM": ("zoomaudio", "zoom audio"),
+        "WEBEX": ("webex",),
+    }
+    generic_markers = ("loopback",)
+
+    preferred_markers = meeting_specific_markers.get(meeting_label, ())
+    if not preferred_markers:
+        preferred_markers = generic_markers
+
+    for d in list_audio_devices():
+        name = d["name"].lower()
+        if any(marker in name for marker in preferred_markers):
+            return d["index"]
+    if preferred_markers != generic_markers:
+        for d in list_audio_devices():
+            name = d["name"].lower()
+            if any(marker in name for marker in generic_markers):
+                return d["index"]
+    return None
+
+
+def get_preferred_microphone_device() -> int | None:
+    """Prefer the built-in MacBook mic over continuity or app-specific devices."""
+    devices = list_audio_devices()
+    for d in devices:
+        name = d["name"].lower()
+        if "macbook" in name and "microphone" in name:
+            return d["index"]
+    for d in devices:
+        name = d["name"].lower()
+        if "microphone" in name and "iphone" not in name:
+            return d["index"]
+    return None
+
+
 def set_device(index: int | None):
     """Set which audio input device to listen from."""
     global _device_index
     _device_index = index
+
+
+def current_device_index() -> int | None:
+    return _device_index
 
 
 def _resolve_device_sample_rate(device_index) -> int:
@@ -66,6 +119,62 @@ def _resolve_device_sample_rate(device_index) -> int:
         return int(info['default_samplerate'])
     except Exception:
         return SAMPLE_RATE
+
+
+def _device_name(device_index: int | None) -> str:
+    try:
+        idx = device_index if device_index is not None else sd.default.device[0]
+        info = sd.query_devices(idx)
+        return str(info["name"])
+    except Exception:
+        return "default input"
+
+
+def preferred_source_snapshot() -> dict:
+    blackhole = get_blackhole_device()
+    if blackhole is not None:
+        return {
+            "kind": "system_audio",
+            "device_index": blackhole,
+            "device_name": _device_name(blackhole),
+            "fallback": False,
+        }
+
+    meeting_audio = get_virtual_meeting_audio_device()
+    if meeting_audio is not None:
+        return {
+            "kind": "meeting_audio",
+            "device_index": meeting_audio,
+            "device_name": _device_name(meeting_audio),
+            "fallback": False,
+        }
+
+    mic = get_preferred_microphone_device()
+    return {
+        "kind": "microphone",
+        "device_index": mic,
+        "device_name": _device_name(mic),
+        "fallback": True,
+    }
+
+
+def status_snapshot() -> dict:
+    preferred = preferred_source_snapshot()
+    active_index = _device_index if _device_index is not None else preferred["device_index"]
+    return {
+        "running": _running,
+        "preferred": preferred,
+        "active_device_index": active_index,
+        "active_device_name": _device_name(active_index),
+        "sample_rate": _actual_sample_rate,
+    }
+
+
+def _silence_threshold() -> int:
+    name = _device_name(_device_index).lower()
+    if "blackhole" in name or "teams audio" in name:
+        return SYSTEM_AUDIO_RMS_THRESHOLD
+    return MIC_RMS_THRESHOLD
 
 
 def _record_chunk(seconds: int) -> np.ndarray:
@@ -151,6 +260,14 @@ def _generate_suggestion(new_line: str) -> str:
         return ""  # too short to be meaningful
 
     context = "\n".join(_transcript_history[-10:])
+    question_like = _looks_like_question(new_line)
+    technical = _looks_technical(new_line + "\n" + context)
+    tier = "strong" if (question_like or technical) else "cheap"
+    mode_line = (
+        "The latest line is a direct question. Answer it plainly and immediately."
+        if question_like else
+        "The latest line is not a direct question. Give the best concise response or follow-up."
+    )
 
     prompt = f"""You are a real-time meeting assistant helping Aman respond during a live call.
 
@@ -160,18 +277,44 @@ Recent conversation transcript:
 Latest thing just said:
 "{new_line}"
 
-Provide a CONCISE, smart suggested response or talking point Aman could use.
-- 1-3 sentences max
-- Be direct and actionable
-- If it's a question, answer it clearly
-- If it's a statement, suggest a smart follow-up or reaction
-- If it's technical, give the precise answer
-- Don't say "I suggest" or "You could say" — just give the response directly"""
+Instructions:
+- {mode_line}
+- Return exactly what Aman should say next, not analysis about the conversation.
+- Keep it clear, concise, and spoken naturally.
+- Default to 1-2 sentences.
+- If the question is technical, give the precise answer first and the key rationale second.
+- If there is uncertainty, still give the best answer you can instead of hedging.
+- Do not say "I suggest", "You could say", "Aman should say", or similar framing.
+- Do not use bullets, headers, markdown, or filler.
+- Do not invent personal experience that was not stated in the transcript."""
 
     try:
-        return ask_claude(prompt, model=HAIKU)
+        return ask_with_priority(prompt, tier=tier)
     except Exception:
         return ""
+
+
+def _looks_like_question(text: str) -> bool:
+    low = (text or "").strip().lower()
+    if "?" in low:
+        return True
+    starters = (
+        "what", "why", "how", "when", "where", "which", "who",
+        "can you", "could you", "would you", "do you", "did you",
+        "is it", "are you", "tell me", "walk me through", "explain",
+    )
+    return any(low.startswith(prefix) for prefix in starters)
+
+
+def _looks_technical(text: str) -> bool:
+    low = (text or "").lower()
+    markers = (
+        "variable", "function", "class", "python", "javascript", "api", "sql",
+        "database", "docker", "nginx", "index", "latency", "cache", "thread",
+        "locking", "algorithm", "complexity", "kubernetes", "service", "backend",
+        "frontend", "schema", "migration", "system design", "microservice",
+    )
+    return any(marker in low for marker in markers) or bool(re.search(r"\b[a-z_]+\(\)|\bo\(.*\)", low))
 
 
 def _listen_loop():
@@ -208,7 +351,7 @@ def _listen_loop():
 
             # Skip if audio is mostly silence
             rms = np.sqrt(np.mean(audio.astype(float) ** 2))
-            if rms < 500:
+            if rms < _silence_threshold():
                 continue
 
             # Transcribe
@@ -286,21 +429,23 @@ def start(on_transcript=None, on_suggestion=None) -> str:
     _on_suggestion = on_suggestion
     _transcript_history = []
 
-    # Try BlackHole first, fall back to default mic
-    bh = get_blackhole_device()
-    if bh is not None:
-        set_device(bh)
-        source = "BlackHole (call audio)"
-    else:
-        set_device(None)
-        source = "microphone (install BlackHole for direct call audio)"
+    preferred = preferred_source_snapshot()
+    set_device(preferred["device_index"])
+    source = _device_name(_device_index)
+    guidance = (
+        "" if not preferred.get("fallback")
+        else " For cleaner direct call audio later, BlackHole 2ch is optional."
+    )
 
     _running = True
     _thread = threading.Thread(target=_listen_loop, daemon=True, name="SmartListen")
     _thread.start()
 
     rate = _resolve_device_sample_rate(_device_index)
-    return f"Smart listening active via {source} at {rate}Hz. Suggestions will appear as the conversation unfolds."
+    return (
+        f"Smart listening is active via {source} at {rate}Hz."
+        f"{guidance} Suggestions will appear as the conversation unfolds."
+    )
 
 
 def stop() -> str:

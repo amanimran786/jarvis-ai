@@ -430,9 +430,21 @@ def distill_failures(
     prioritize_local: bool = True,
 ) -> dict:
     _ensure_dirs()
+    if limit <= 0:
+        path = DISTILLED_DIR / f"jarvis_distilled_{_timestamp()}.jsonl"
+        _write_jsonl(path, [])
+        return {
+            "ok": True,
+            "path": str(path),
+            "example_count": 0,
+            "teacher_model": teacher_model,
+            "categories": categories or [],
+        }
+
     data = evals.load()
     interactions_by_id = {item.get("id"): item for item in data.get("interactions", []) if item.get("id")}
     grouped = _linked_failure_map(data)
+    standalone_groups: dict[str, list[dict]] = {}
 
     examples = []
     used = 0
@@ -446,6 +458,28 @@ def distill_failures(
         priority = _failure_priority(failures, interaction if prioritize_local else None)
         last_ts = failures[-1].get("timestamp", "")
         ranked_groups.append((interaction_id, failures, interaction, priority, last_ts))
+
+    for failure in data.get("failures", []):
+        interaction_id = failure.get("interaction_id", "")
+        if interaction_id and interaction_id in interactions_by_id:
+            continue
+        if categories and failure.get("category") not in categories:
+            continue
+        prompt = (failure.get("user_input") or "").strip()
+        if not prompt:
+            continue
+        standalone_groups.setdefault(prompt, []).append(failure)
+
+    for prompt, failures in standalone_groups.items():
+        interaction = {
+            "id": "",
+            "user_input": prompt,
+            "response": next((f.get("response", "") for f in reversed(failures) if f.get("response")), ""),
+            "model": next((f.get("model", "") for f in reversed(failures) if f.get("model")), ""),
+        }
+        priority = _failure_priority(failures, interaction if prioritize_local else None)
+        last_ts = failures[-1].get("timestamp", "")
+        ranked_groups.append(("", failures, interaction, priority, last_ts))
 
     ranked_groups.sort(key=lambda item: (item[3], item[4]), reverse=True)
 
@@ -516,6 +550,17 @@ def distill_expert_cases(
     case_ids: list[str] | None = None,
 ) -> dict:
     _ensure_dirs()
+    if limit <= 0:
+        path = DISTILLED_DIR / f"jarvis_expert_distilled_{_timestamp()}.jsonl"
+        _write_jsonl(path, [])
+        return {
+            "ok": True,
+            "path": str(path),
+            "example_count": 0,
+            "teacher_model": teacher_model,
+            "case_ids": [],
+        }
+
     selected = []
     wanted = set(case_ids or [])
     for case in EXPERT_DISTILL_CASES:

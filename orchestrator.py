@@ -21,6 +21,7 @@ from typing import Any
 from brain_claude import ask_claude
 from config import HAIKU
 import skills
+import model_router
 
 # ── Tool registry ─────────────────────────────────────────────────────────────
 
@@ -70,9 +71,9 @@ TOOLS = {
     "app": "Launch a macOS application. "
            "Triggers: 'open', 'launch', 'start' followed by app name.",
 
-    "browser": "Control Safari or Chrome and work with live pages. "
+    "browser": "Control Safari, Chrome-family browsers, or browser tabs and work with live pages. "
                "Triggers: 'browse to', 'open website', 'go to this page', 'search the web', "
-               "'summarize this page', 'go back', 'reload page', 'click the link'.",
+               "'summarize this page', 'go back', 'reload page', 'click the link', 'read meeting captions', 'summarize live captions'.",
 
     "terminal": "Run a shell command, read/write files, list directory. "
                 "Triggers: 'run', 'execute', 'terminal', 'command', 'read file', 'list files'.",
@@ -183,6 +184,9 @@ def classify(user_input: str) -> ToolDecision:
     auto_specialized = _auto_specialized_classify(user_input.lower().strip())
     if auto_specialized:
         return _attach_skill(user_input, auto_specialized)
+
+    if model_router.is_open_source_mode():
+        return _attach_skill(user_input, _FALLBACK)
 
     # Full LLM classification
     try:

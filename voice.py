@@ -5,6 +5,7 @@ import threading
 import speech_recognition as sr
 from openai import OpenAI
 from config import OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL
+import call_privacy
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY)
 _recognizer = sr.Recognizer()
@@ -86,6 +87,9 @@ def speak(text: str) -> None:
     if not text or not text.strip():
         return
     print(f"Jarvis: {text}")
+    if call_privacy.should_suppress_audio():
+        print("[Voice] Suppressed audio because meeting-safe mode is active.")
+        return
     _done_speaking.clear()
     try:
         if not _speak_elevenlabs(text):
@@ -103,6 +107,14 @@ def speak_stream(text_chunks) -> str:
     buffer = ""
     full_text = ""
     sentence_enders = {".", "!", "?"}
+
+    if call_privacy.should_suppress_audio():
+        for chunk in text_chunks:
+            full_text += chunk
+        if full_text.strip():
+            print(f"Jarvis: {full_text}")
+            print("[Voice] Suppressed streaming audio because meeting-safe mode is active.")
+        return full_text
 
     for chunk in text_chunks:
         buffer += chunk

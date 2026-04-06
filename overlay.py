@@ -17,6 +17,7 @@ import subprocess
 import threading
 import os
 import sys
+import time
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFrame, QSizePolicy, QScrollArea,
@@ -62,26 +63,168 @@ MEETING_APPS = {
     "gotomeeting":   "GOTOMEETING",
 }
 
-_instance = None  # singleton overlay reference
+MEETING_URL_PATTERNS = {
+    "meet.google.com": "MEET",
+    "teams.microsoft.com": "TEAMS",
+    "app.zoom.us": "ZOOM",
+    "zoom.us/wc": "ZOOM",
+    "zoom.us/j/": "ZOOM",
+    "webex.com": "WEBEX",
+}
 
 
-# ── Meeting detection ─────────────────────────────────────────────────────────
+def meeting_label_for_url(url: str) -> str | None:
+    low = (url or "").strip().lower()
+    for pattern, label in MEETING_URL_PATTERNS.items():
+        if pattern in low:
+            return label
+    return None
 
-def detect_meeting_app() -> str | None:
-    """Return name of active meeting app, or None."""
+
+def _running_app_names() -> set[str]:
     try:
         result = subprocess.run(
             ["osascript", "-e",
              'tell application "System Events" to get name of every process whose background only is false'],
             capture_output=True, text=True, timeout=3
         )
-        running = result.stdout.lower()
-        for proc, label in MEETING_APPS.items():
-            if proc in running:
+        raw = (result.stdout or "").strip()
+        return {name.strip() for name in raw.split(",") if name.strip()}
+    except Exception:
+        return set()
+
+
+def _browser_active_meeting_label(app_name: str, url_script: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", url_script],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        return meeting_label_for_url((result.stdout or "").strip().lower())
+    except Exception:
+        return None
+
+
+def _browser_any_meeting_label(app_name: str) -> str | None:
+    script = f'''
+    tell application "{app_name}"
+        set outText to ""
+        repeat with w from 1 to count of windows
+            repeat with t from 1 to count of tabs of window w
+                try
+                    set theURL to URL of tab t of window w
+                    set outText to outText & theURL & linefeed
+                end try
+            end repeat
+        end repeat
+        return outText
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        urls = (result.stdout or "").splitlines()
+        for url in urls:
+            label = meeting_label_for_url(url)
+            if label:
                 return label
     except Exception:
-        pass
+        return None
     return None
+
+_instance = None  # singleton overlay reference
+_meeting_cache_lock = threading.Lock()
+_meeting_cache_value = None
+_meeting_cache_until = 0.0
+_meeting_refresh_in_flight = False
+
+
+# ── Meeting detection ─────────────────────────────────────────────────────────
+
+def _compute_meeting_app() -> str | None:
+    running_names = _running_app_names()
+    running = ", ".join(sorted(running_names)).lower()
+    for proc, label in MEETING_APPS.items():
+        if proc in running:
+            return label
+
+    browser_checks = [
+        (
+            "Google Chrome",
+            'tell application "Google Chrome" to get URL of active tab of front window',
+        ),
+        (
+            "Safari",
+            'tell application "Safari" to get URL of current tab of front window',
+        ),
+        (
+            "Brave Browser",
+            'tell application "Brave Browser" to get URL of active tab of front window',
+        ),
+        (
+            "ChatGPT Atlas",
+            'tell application "ChatGPT Atlas" to get URL of active tab of front window',
+        ),
+    ]
+    for _browser, script in browser_checks:
+        if _browser not in running_names:
+            continue
+        label = _browser_active_meeting_label(_browser, script)
+        if label:
+            return label
+        label = _browser_any_meeting_label(_browser)
+        if label:
+            return label
+    return None
+
+
+def _refresh_meeting_cache_async() -> None:
+    global _meeting_refresh_in_flight, _meeting_cache_value, _meeting_cache_until
+    with _meeting_cache_lock:
+        if _meeting_refresh_in_flight:
+            return
+        _meeting_refresh_in_flight = True
+
+    def _worker():
+        global _meeting_refresh_in_flight, _meeting_cache_value, _meeting_cache_until
+        try:
+            value = _compute_meeting_app()
+            with _meeting_cache_lock:
+                _meeting_cache_value = value
+                _meeting_cache_until = time.monotonic() + 3.0
+        finally:
+            with _meeting_cache_lock:
+                _meeting_refresh_in_flight = False
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def detect_meeting_app(force_refresh: bool = False) -> str | None:
+    """Return the best-known active meeting app label without blocking the UI by default."""
+    global _meeting_cache_value, _meeting_cache_until
+    now = time.monotonic()
+    with _meeting_cache_lock:
+        cached_value = _meeting_cache_value
+        cached_until = _meeting_cache_until
+
+    if force_refresh:
+        value = _compute_meeting_app()
+        with _meeting_cache_lock:
+            _meeting_cache_value = value
+            _meeting_cache_until = time.monotonic() + 3.0
+        return value
+
+    if now < cached_until:
+        return cached_value
+
+    _refresh_meeting_cache_async()
+    return cached_value
 
 
 # ── Screen analysis worker ────────────────────────────────────────────────────

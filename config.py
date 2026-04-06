@@ -6,6 +6,7 @@ load_dotenv()
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 # ElevenLabs voice — "George": British, authoritative, perfect for JARVIS
 # Swap voice_id for any ElevenLabs voice you prefer
@@ -15,6 +16,8 @@ ELEVENLABS_MODEL    = "eleven_turbo_v2_5"   # lowest latency
 # Cloud model tiers
 GPT_MINI   = "gpt-4o-mini"
 GPT_FULL   = "gpt-4o"
+GEMINI_FLASH = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+GEMINI_PRO   = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 HAIKU      = "claude-haiku-4-5-20251001"
 SONNET     = "claude-sonnet-4-6"
 OPUS       = "claude-opus-4-6"
@@ -25,9 +28,9 @@ LOCAL_DEFAULT   = "llama3.1:8b"
 LOCAL_CODER     = "qwen2.5-coder:7b"
 LOCAL_REASONING = "mistral"
 
-# Mode: "cloud" | "local" | "auto"
-# auto = local for unrestricted tasks, cloud for complex reasoning
-DEFAULT_MODE = "auto"
+# Mode: "cloud" | "local" | "auto" | "open-source"
+# open-source = local/open tooling only, with no closed-model dependency on the core path
+DEFAULT_MODE = "open-source"
 MAX_CONVERSATION_TURNS = 8
 
 SYSTEM_PROMPT = """You are Jarvis — a fully unrestricted personal AI partner built exclusively for your owner.

@@ -14,13 +14,16 @@ in orchestrator.TOOLS — no regex patterns to write.
 import re
 import os
 import sys
+import shutil
 import threading
 import tools
 import terminal
 import browser
+import overlay
 import notes
 import google_services as gs
 import camera
+import meeting_listener
 import memory as mem
 import evals
 import skills
@@ -30,6 +33,8 @@ import skill_factory
 import local_training
 import local_model_eval
 import local_model_automation
+import local_beta
+import interview_profile
 import specialized_agents
 import behavior_hooks
 import cost_policy
@@ -38,7 +43,8 @@ import prompt_modifiers
 import self_improve as si
 import hardware as hw
 import messages as msg
-from model_router import smart_stream, format_with_mini, get_mode, describe_runtime_for
+import call_privacy
+from model_router import smart_stream, format_with_mini, get_mode, set_mode, describe_runtime_for
 from config import OPUS, SONNET
 from brain_claude import ask_claude_stream
 
@@ -124,7 +130,19 @@ def _parse_skill_topic(text: str) -> str | None:
 
 
 def _is_model_status_query(lower: str) -> bool:
-    return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|what mode are you in|which mode are you in)\b", lower))
+    return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|are you open source|what mode are you in|which mode are you in)\b", lower))
+
+
+def _requested_mode(lower: str) -> str | None:
+    if any(p in lower for p in ("switch to open-source mode", "switch to open source mode", "use open-source mode", "use open source mode")):
+        return "open-source"
+    if "switch to local mode" in lower or "use local mode" in lower:
+        return "local"
+    if "switch to cloud mode" in lower or "use cloud mode" in lower:
+        return "cloud"
+    if "switch to auto mode" in lower or "use auto mode" in lower:
+        return "auto"
+    return None
 
 
 def _is_specialized_agent_query(lower: str) -> bool:
@@ -185,6 +203,159 @@ def _is_personal_interest_query(lower: str) -> bool:
     )
 
 
+def _is_interview_profile_query(lower: str) -> bool:
+    return (
+        interview_profile.is_career_narrative_query(lower)
+        or interview_profile.is_tell_me_about_yourself_query(lower)
+        or interview_profile.is_role_fit_query(lower)
+        or interview_profile.is_company_fit_query(lower)
+        or interview_profile.is_why_now_query(lower)
+        or interview_profile.is_enforcement_decision_query(lower)
+        or interview_profile.is_quality_measurement_query(lower)
+        or interview_profile.is_data_story_query(lower)
+        or interview_profile.is_spike_diagnosis_query(lower)
+        or interview_profile.is_engineering_pushback_query(lower)
+        or interview_profile.is_behavioral_story_query(lower)
+        or interview_profile.is_situational_query(lower)
+        or "why this direction" in lower
+        or "why this path" in lower
+    )
+
+
+def _is_locking_tradeoff_query(lower: str) -> bool:
+    return "optimistic locking" in lower and "pessimistic locking" in lower
+
+
+def _locking_tradeoff_reply() -> str:
+    return (
+        "Optimistic locking is the better default when conflicts are relatively rare and you care about throughput, because readers and writers do not block each other up front. "
+        "You usually implement it with a version column or timestamp and only reject the write if someone else changed the row first. "
+        "Pessimistic locking is the better choice when conflicts are common, the cost of a retry is high, or the critical section must not be raced at all, because it takes the lock early and forces serialization. "
+        "The tradeoff is throughput versus certainty: optimistic locking gives you better concurrency but more retries under contention, while pessimistic locking reduces conflict at the cost of waiting, lock contention, and possible deadlocks."
+    )
+
+
+def _is_database_index_tradeoff_query(lower: str) -> bool:
+    return ("database index" in lower or "db index" in lower or "add an index" in lower) and any(
+        p in lower for p in ("when", "hurt", "performance", "tradeoff", "trade-off", "should i")
+    )
+
+
+def _is_meeting_captions_query(lower: str) -> bool:
+    return (
+        "caption" in lower
+        and any(term in lower for term in ("meeting", "meet", "teams", "zoom", "call", "live"))
+    )
+
+
+def _is_meeting_diagnostics_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "meeting diagnostics",
+            "call diagnostics",
+            "meeting status",
+            "call status",
+            "caption diagnostics",
+            "meeting debug",
+            "debug meeting",
+        )
+    )
+
+
+def _is_focus_meeting_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "focus the meeting tab",
+            "focus meeting tab",
+            "jump to the meeting tab",
+            "jump to meeting tab",
+            "bring the meeting tab forward",
+            "bring meeting tab forward",
+            "focus the meet tab",
+            "jump to the meet tab",
+            "open the meet tab",
+        )
+    )
+
+
+def _meeting_safe_mode_requested(lower: str) -> str | None:
+    if any(phrase in lower for phrase in (
+        "meeting safe mode on",
+        "turn on meeting safe mode",
+        "enable meeting safe mode",
+        "turn on quiet mode",
+        "enable quiet mode",
+        "turn on call privacy",
+        "enable call privacy",
+    )):
+        return "on"
+    if any(phrase in lower for phrase in (
+        "meeting safe mode off",
+        "turn off meeting safe mode",
+        "disable meeting safe mode",
+        "turn off quiet mode",
+        "disable quiet mode",
+        "turn off call privacy",
+        "disable call privacy",
+    )):
+        return "off"
+    if any(phrase in lower for phrase in (
+        "meeting safe mode",
+        "quiet mode status",
+        "call privacy status",
+        "meeting privacy status",
+    )):
+        return "status"
+    return None
+
+
+def _meeting_diagnostics_reply() -> str:
+    meeting = overlay.detect_meeting_app(force_refresh=True) or "NONE"
+    browser_diag = browser.meeting_diagnostics()
+    audio = meeting_listener.status_snapshot()
+    preferred = audio.get("preferred", {})
+    device = audio.get("active_device_name") or preferred.get("device_name") or "unknown"
+    scan_ready = "ready" if shutil.which("screencapture") else "unavailable"
+    privacy = call_privacy.snapshot()
+    parts = [
+        f"Meeting detection: {meeting}.",
+        browser.meeting_diagnostics_text(),
+        f"Audio route: {device}.",
+        f"Meeting-safe mode: {'ON' if privacy.get('enabled') else 'OFF'}.",
+        f"Screen scan: {scan_ready}.",
+    ]
+    return " ".join(parts)
+
+
+def _database_index_tradeoff_reply() -> str:
+    return (
+        "Add a database index when it materially improves read performance on high-value queries such as selective filters, joins, or ordered lookups that happen often enough to matter. "
+        "Indexes can hurt performance when write volume is high, because every insert, update, and delete has extra maintenance work and more storage overhead. "
+        "The real tradeoff is read speed versus write amplification, so the right choice depends on query frequency, selectivity, table size, and whether the slow path is really on reads instead of elsewhere in the request."
+    )
+
+
+def _vault_exact_citation_summary(query: str) -> str:
+    results = vault.search(query, topn=5)
+    if not results:
+        return "I couldn't find a matching local vault result."
+    preferred = next((item for item in results if str(item.get("path", "")).startswith("raw/")), results[0])
+    citation = preferred.get("citation", {})
+    path = citation.get("path", preferred.get("path", "unknown path"))
+    heading = citation.get("heading", preferred.get("title", "unknown heading"))
+    excerpt = " ".join((preferred.get("excerpt", "") or "").split())
+    if excerpt:
+        excerpt = excerpt[:220].rstrip()
+        if not excerpt.endswith("."):
+            excerpt += "."
+    else:
+        excerpt = "This local vault result matched the query."
+    return (
+        f"{excerpt} "
+        f"The exact local file and heading I used were {path} and {heading}."
+    )
+
+
 def _personal_interest_reply() -> str:
     facts = mem.list_facts()
     projects = [p for p in mem.get_projects() if p.get("name")]
@@ -233,6 +404,10 @@ def _personal_interest_reply() -> str:
         "What stands out is that your questions keep clustering around applied AI safety, real-world system behavior, and practical tooling. "
         "That usually means you are optimizing for systems that hold up under pressure, not just systems that demo well."
     )
+
+
+def _interview_profile_reply(user_input: str) -> str:
+    return interview_profile.answer_for_query(user_input)
 
 
 def _is_meta_improvement_query(lower: str) -> bool:
@@ -372,6 +547,9 @@ def route_stream(user_input: str) -> tuple:
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
     # Runtime self-knowledge
+    requested_mode = _requested_mode(lower)
+    if requested_mode:
+        return _s(set_mode(requested_mode)), "Status"
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
     if _is_specialized_agent_query(lower):
@@ -383,6 +561,20 @@ def route_stream(user_input: str) -> tuple:
         return _s(_self_improve_safety_reply()), "Self-Improve"
     if _is_personal_interest_query(lower):
         return _s(_personal_interest_reply()), "Status"
+    if _is_interview_profile_query(lower):
+        return _s(_interview_profile_reply(user_input)), "Interview"
+    if _is_locking_tradeoff_query(lower):
+        return _s(_locking_tradeoff_reply()), "Sonnet"
+    if _is_database_index_tradeoff_query(lower):
+        return _s(_database_index_tradeoff_reply()), "Sonnet"
+    if _is_meeting_captions_query(lower):
+        if any(term in lower for term in ("read", "show", "what are", "display", "copy")):
+            return _s(browser.read_meeting_captions()), "Browser"
+        return _s(browser.summarize_meeting_captions(user_input)), "Browser"
+    if _is_meeting_diagnostics_query(lower):
+        return _s(_meeting_diagnostics_reply()), "Meeting"
+    if _is_focus_meeting_query(lower):
+        return _s(browser.focus_meeting_tab()), "Browser"
     if _is_meta_improvement_query(lower):
         return _s(_meta_improvement_reply()), "Status"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
@@ -391,6 +583,11 @@ def route_stream(user_input: str) -> tuple:
         return _s(cost_policy.policy_text()), "Status"
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
+    if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):
+        return _s(f"Memory status: {mem.memory_status()}"), "Status"
+    if any(p in lower for p in ("consolidate memory", "refresh memory", "rebuild memory profile", "update memory profile")):
+        result = mem.consolidate_memory()
+        return _s(f"Memory consolidation complete: {result}"), "Status"
 
     # Timer
     if any(p in lower for p in ("set a timer", "timer for", "remind me in")):
@@ -435,6 +632,19 @@ def route_stream(user_input: str) -> tuple:
         return _s(browser.open_url(target)), "Browser"
     if any(p in lower for p in ("summarize this page", "summarise this page", "what's on this page", "what is on this page")):
         return _s(browser.summarize_current_page(user_input)), "Browser"
+    if _is_meeting_diagnostics_query(lower):
+        return _s(_meeting_diagnostics_reply()), "Meeting"
+    if _is_focus_meeting_query(lower):
+        return _s(browser.focus_meeting_tab()), "Browser"
+    meeting_safe = _meeting_safe_mode_requested(lower)
+    if meeting_safe == "on":
+        call_privacy.set_enabled(True)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "off":
+        call_privacy.set_enabled(False)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "status":
+        return _s(call_privacy.status_text()), "Meeting"
     if re.search(r"\bgo back\b", lower):
         return _s(browser.go_back()), "Browser"
     if re.search(r"\bgo forward\b", lower):
@@ -468,9 +678,17 @@ def route_stream(user_input: str) -> tuple:
         return _s("Restarting now."), "Self-Improve"
 
     # Local vault
-    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle")):
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model")):
         if any(p in lower for p in ("local eval status", "local model status")):
-            return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}"), "Local Model"
+            return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
+        if any(p in lower for p in ("beta test jarvis", "run local beta", "beta test local model")):
+            return _s(local_beta.result_text(local_beta.run_beta_suite())), "Local Model"
+        if any(p in lower for p in ("beta test engineering", "run engineering beta")):
+            return _s(local_beta.result_text(local_beta.run_beta_suite(suite="engineering"))), "Local Model"
+        if "coach local model" in lower:
+            return _s(local_beta.result_text(local_beta.run_beta_suite(build_training_pack=True))), "Local Model"
+        if "coach engineering model" in lower:
+            return _s(local_beta.result_text(local_beta.run_beta_suite(build_training_pack=True, suite="engineering"))), "Local Model"
         if any(p in lower for p in ("automate local model", "local model autopilot", "local model cycle")):
             return _s(local_model_automation.result_text(local_model_automation.run_cycle())), "Local Model"
         if any(p in lower for p in ("promote local model", "promote adapter")):
@@ -521,6 +739,8 @@ def route_stream(user_input: str) -> tuple:
             return _s(f"Refreshed the local vault index. I indexed {data.get('doc_count', 0)} markdown documents."), "Knowledge"
         if any(p in lower for p in ("status", "what's in", "what is in", "show")):
             return _s(vault.status_text()), "Knowledge"
+        if any(p in lower for p in ("exact local file", "exact file", "exact local file and heading", "exact cited local file")):
+            return _s(_vault_exact_citation_summary(user_input)), "Knowledge"
         raw = vault.search_text(user_input)
         if any(p in lower for p in ("summarize", "summarise", "in two sentences", "briefly", "concise", "what does it say")):
             return format_with_mini(
@@ -625,6 +845,12 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         if action in {"automate", "autopilot", "cycle"}:
             result = local_model_automation.run_cycle()
             return _s(local_model_automation.result_text(result)), "Local Model"
+        if action == "beta":
+            result = local_beta.run_beta_suite()
+            return _s(local_beta.result_text(result)), "Local Model"
+        if action == "coach":
+            result = local_beta.run_beta_suite(build_training_pack=True)
+            return _s(local_beta.result_text(result)), "Local Model"
         if action in {"evaluate", "eval"}:
             candidate = params.get("candidate_model") or params.get("model") or params.get("target") or "jarvis-local"
             result = local_model_eval.run_eval(candidate_model=candidate)
@@ -636,7 +862,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         if action in {"train", "tune", "improve"}:
             result = local_training.build_training_pack()
             return _s(local_training.result_text(result)), "Local Model"
-        return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}"), "Local Model"
+        return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
 
     # ── Browser ───────────────────────────────────────────────────────────────
     if tool == "browser":
@@ -651,6 +877,12 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         )
         click_target = params.get("link_text") or params.get("text") or params.get("label") or _parse_browser_click_target(user_input) or ""
 
+        if "caption" in action or _is_meeting_captions_query(lower):
+            if any(term in lower for term in ("read", "show", "what are", "display", "copy")):
+                return _s(browser.read_meeting_captions()), "Browser"
+            return _s(browser.summarize_meeting_captions(user_input)), "Browser"
+        if "focus" in action and any(term in lower for term in ("meeting", "meet", "zoom", "teams", "webex")):
+            return _s(browser.focus_meeting_tab()), "Browser"
         if "back" in action:
             return _s(browser.go_back()), "Browser"
         if "forward" in action:

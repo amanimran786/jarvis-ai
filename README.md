@@ -102,6 +102,7 @@ Jarvis exposes a local API while running:
 - `GET /local/training/status` — inspect exported datasets, distilled examples, and Modelfiles for local tuning
 - `GET /local/evals/status` — inspect local-model benchmark runs and current promoted local model
 - `GET /local/automation/status` — inspect automated local-model training and eval cycles
+- `GET /local/beta/status` — inspect safe beta-test runs that replay Jarvis goldens and log failures into evals
 - `POST /local/training/export` — export successful interaction examples into JSONL for local SFT
 - `POST /local/training/distill` — ask a stronger teacher model to rewrite failed cases into better training targets
 - `POST /local/training/modelfile` — generate an Ollama Modelfile for the tuned Jarvis local model target
@@ -110,8 +111,11 @@ Jarvis exposes a local API while running:
 - `POST /local/evals/run` — compare a candidate local Ollama model against the current baseline on Jarvis-specific benchmark prompts
 - `POST /local/evals/promote` — promote a local model only if the benchmark result clears the configured thresholds
 - `POST /local/automation/run` — run the full automated cycle: build pack, create candidate model, evaluate it, and promote only if it wins
+- `POST /local/beta/run` — run a safe beta suite against Jarvis, log failures into evals, and optionally build a fresh training pack from that new evidence
 - `GET /memory` — inspect saved memory
-- `POST /mode` — switch `local`, `cloud`, or `auto`
+- `GET /memory/status` — inspect tiered-memory readiness, working-memory contents, and the durable user profile summary
+- `POST /memory/consolidate` — rebuild the working-memory and long-term-profile tiers from saved facts, projects, preferences, and recent conversations
+- `POST /mode` — switch `local`, `cloud`, `auto`, or `open-source`
 
 ## Skills
 
@@ -217,6 +221,7 @@ Model routing mode can be switched at runtime via natural language:
 - *"switch to cloud mode"*
 - *"switch to local mode"*
 - *"switch to auto mode"*
+- *"switch to open-source mode"*
 
 Current recommended local defaults:
 
@@ -225,7 +230,7 @@ Current recommended local defaults:
 - `qwen2.5-coder:7b` for coding tasks
 - `mistral` for stronger local reasoning
 
-`auto` mode is the default and is intended to keep API usage low without forcing everything through weaker local models.
+`open-source` mode is now the default. It keeps Jarvis on local models and local runtime logic first, so the product stays usable even when closed-model credits are unavailable. `auto` mode is still available when you want pragmatic cloud escalation without forcing everything through local models.
 
 Jarvis now also includes a local-model improvement loop. The intended low-cost order is:
 
@@ -236,6 +241,10 @@ Jarvis now also includes a local-model improvement loop. The intended low-cost o
 - let general local routing prefer that tuned model automatically once it exists
 
 The one-shot path is now available too: Jarvis can build a merged local training pack that combines exported strong examples with distilled failure corrections and writes a manifest plus Modelfile for the target model.
+
+Jarvis also has a local beta loop now. Safe golden-style beta runs can replay core product prompts, log any misses into `evals.json`, and feed those standalone failures back into the distillation path even when they were not produced by a normal `/chat` interaction. This is the fastest non-GPU path for improving the local model and product behavior together.
+
+The beta runner now supports a focused engineering suite too, so you can stress just the SWE-heavy prompts without mixing them with every other product behavior check.
 
 Jarvis can also emit offline fine-tune handoff folders for `llama3.1:8b` and `qwen2.5-coder:7b`. Each handoff contains:
 
@@ -255,12 +264,47 @@ Jarvis now also keeps a real provider usage ledger for its text-model calls. `/c
 
 Cloud cost is still an estimate, not an invoice. The ledger uses blended per-million-token assumptions in [usage_tracker.py](/Users/truthseeker/jarvis-ai/usage_tracker.py) so you can see directional spend even when providers return different usage formats.
 
+## Open-Source Mode
+
+Jarvis now has an explicit `open-source` runtime mode. In this mode, Jarvis keeps the answer path on local models and local runtime logic instead of depending on closed-model APIs for core behavior.
+
+- `smart_stream` stays on Ollama when a local model is available
+- formatting helpers avoid GPT fallback and stay local
+- orchestrator classification skips the Claude classifier and relies on the existing rule and heuristic paths
+- specialized-agent and answer fallbacks still keep the product usable when closed APIs are unavailable
+
+This is the right mode when you want Jarvis to behave like an open-source-heavy system rather than a cloud-first assistant with local fallback.
+
+## Local-First Workflow
+
+The clean day-to-day workflow now looks like this:
+
+- leave Jarvis in `open-source` mode for normal use
+- use `beta test jarvis` to replay the safe golden cases
+- use `beta test engineering` when you want a tighter SWE-focused pass
+- use `coach local model` when you want to refresh the local training pack from the latest failures and strong examples
+- use `coach engineering model` when you want the same loop but only from the engineering beta subset
+- inspect `GET /local/beta/status`, `GET /local/training/status`, and `GET /memory/status` when you want to see whether the local loop is actually improving
+- switch to `auto` or `cloud` only when you intentionally want stronger paid models involved
+
+That keeps the harness, memory, evals, and runtime behavior open-source heavy by default while still leaving optional cloud paths available when you deliberately choose them.
+
+## Tiered Memory
+
+Jarvis now consolidates memory into two tiers instead of only appending raw facts:
+
+- `working_memory` keeps the current active projects, recent conversational focus, recurring topics, and assistive preferences that should shape near-term behavior
+- `long_term_profile` keeps a compact durable summary plus stable facts and recurring project/topic signals that belong in the broader user model
+
+These tiers are rebuilt automatically whenever Jarvis saves new facts, preferences, projects, or conversation summaries. You can also inspect or refresh them directly through `GET /memory/status` and `POST /memory/consolidate`.
+
 ## Testing
 
 Jarvis now has two test layers:
 
 - deterministic regression coverage in [tests/test_jarvis_regression_suite.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_regression_suite.py)
 - opt-in live integration coverage in [tests/test_jarvis_live_integrations.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_live_integrations.py)
+- safe local beta coverage through [tests/jarvis_golden_cases.py](/Users/truthseeker/jarvis-ai/tests/jarvis_golden_cases.py) and `POST /local/beta/run`
 
 Run the regression suite with:
 

@@ -22,6 +22,7 @@ training/packs/
 training/handoffs/
 training/model_evals/
 training/automation/
+training/beta/
 
 # Self-improvement backups
 .jarvis_backups/

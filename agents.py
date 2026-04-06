@@ -25,8 +25,7 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 from abc import ABC, abstractmethod
 
-from brain_claude import ask_claude
-from config import HAIKU, SONNET
+from provider_priority import ask_with_priority
 import memory as mem
 
 # ── Base agent ────────────────────────────────────────────────────────────────
@@ -177,7 +176,7 @@ class MeetingPrepAgent(Agent):
                         f"Give a 2-sentence prep brief: what to expect and one smart talking point. "
                         f"Spoken aloud — no markdown."
                     )
-                    brief = ask_claude(prompt, model=HAIKU)
+                    brief = ask_with_priority(prompt, tier="cheap")
                     return f"📅 {title} in ~{mins_away} min", brief, True
 
         except Exception:
@@ -319,7 +318,7 @@ class IdleContextAgent(Agent):
                 f"Give one short, specific, actionable suggestion or insight — 1-2 sentences. "
                 f"No filler. Spoken aloud."
             )
-            suggestion = ask_claude(prompt, model=HAIKU)
+            suggestion = ask_with_priority(prompt, tier="cheap")
             self._last_suggestion_hour = hour
             return f"💡 {time_of_day.capitalize()} Insight", suggestion, False
 
