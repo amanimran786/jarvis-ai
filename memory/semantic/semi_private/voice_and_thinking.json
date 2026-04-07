@@ -1,0 +1,26 @@
+[
+  {
+    "id": "sem_voice_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["voice", "communication", "communicate", "communicates", "writing style", "write", "writes", "written voice", "tone", "STAR", "behavioral", "storytelling"],
+    "content": "Aman's communication and writing style: leads with conclusion first. He communicates directly, writes clearly, and names mechanisms not just outcomes. Uses data to show investigation, not to impress. Comfortable naming tradeoffs explicitly — 'both X and Y have real costs.' Confident without arrogance. Warm only when genuine, not performative. Talks like someone who already does the job. Never says: leveraged, synergized, passionate about, I've always been driven by, utilized (when used works). Natural phrases: 'The signal I look for is...', 'The mechanism was...', 'A conscious choice, not a default.', 'That's the muscle this built.', 'The goal isn't to fix the number — it's to fix the system.'",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_thinking_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["systems thinking", "root cause", "diagnostic", "mental model", "problem solving"],
+    "content": "Aman's thinking style: systems first — always asks what upstream system produced this outcome. Root cause before solution — does not treat symptoms. Default diagnostic loop: characterize the failure → identify root cause → design intervention at root → build monitoring for recurrence. Does not assume the cause before investigating. Instinctively skeptical of solutions that fix the metric without fixing the underlying system. Treats calibration problems as clarity problems, not people problems.",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_what_aman_wants_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["preferences", "work environment", "values", "ownership", "feedback", "directness"],
+    "content": "What Aman wants in work: ownership over a domain (design the system, not just execute it), feedback loops (see the impact of decisions), working with people who are excellent and direct, building things that outlast his tenure. What he does not want: pure policy theory without operational grounding, pure data work without judgment, avoiding conflict, validation-seeking. How Jarvis should treat him: as a senior peer, with directness including disagreement when warranted, with specific references to his actual experience, never generic.",
+    "privacy_tier": "semi_private"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "id": "ep_arch_decisions_001",
+  "timestamp": "2026-04-06T00:00:00+00:00",
+  "domain": "technical",
+  "tags": ["architecture", "design decisions", "routing", "memory", "MCP", "skillful-mcp", "harness", "context window"],
+  "content": "Key architecture decisions made building Jarvis (April 2026): (1) Router ceiling normalization: fixed from hits/10.0 (all scores sub-0.25) to hits/2.0 (1 hit = MEDIUM, 2+ = HIGH). (2) Interview contamination fix: is_interview = routing.primary.module_id == 'interview_intel' only, not OR cfg.interview.mode — the OR was loading 12k tokens of interview context into every single query. (3) InterviewIntel HIGH-confidence guard: only wins primary routing at threshold score, not MEDIUM. (4) General fallback module: explicit catch for score < 0.20 to avoid forcing all low-confidence queries into StrategyOS. (5) MemoryManager signal tightening: phrases not single words, to avoid collision with interview mentions in context. Adjacent insight from LinkedIn: skillful-mcp solves the same problem one layer down — lazy tool discovery instead of loading 80+ schemas upfront. Same pattern as Jarvis's lazy pack loading. 'The harness is the product. The model is a dependency.'",
+  "outcome": "All decisions implemented. No regressions. Harness syntactically clean."
+}

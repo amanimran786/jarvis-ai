@@ -1,0 +1,34 @@
+[
+  {
+    "id": "sem_expertise_trust_safety_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["trust safety", "content policy", "enforcement", "CSAM", "age appropriateness", "child safety", "moderation"],
+    "content": "Trust & Safety expertise: content policy enforcement, age-appropriateness decisions, child safety (CSAM detection and enforcement), calibration programs, IRR (inter-rater reliability) tracking, vendor audits, gold standard maintenance, quality framework design. Aman has built the operational infrastructure behind enforcement — not just made decisions, but built the systems that make consistent decisions at scale. Has operated at YouTube, Meta, TikTok, Google Play. Understands both the policy side (what the rule should be) and the operational side (how to run 100+ people making decisions under that rule consistently).",
+    "privacy_tier": "public"
+  },
+  {
+    "id": "sem_expertise_ai_safety_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["AI safety", "jailbreak", "model misuse", "coordinated abuse", "Anthropic", "red teaming", "abuse detection"],
+    "content": "AI Safety operations expertise from Anthropic: model misuse detection, jailbreak pattern identification, coordinated abuse response, tooling for safety operations. Importantly, Aman bridges the gap between model safety research and operational reality — he translates 'what the model should not do' into 'how do we catch it when it does, at scale, with a team of humans.' This is not a common profile — most AI safety people are either researchers or pure policy. Aman is the operational layer in between.",
+    "privacy_tier": "public"
+  },
+  {
+    "id": "sem_expertise_data_sql_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["SQL", "data", "analytics", "Python", "dashboard", "root cause analysis", "metrics"],
+    "content": "Data and analytics skills: production-level SQL for root cause analysis and automated dashboards. Python for operational tooling and data workflows. Aman uses data as an investigative tool — not to generate pretty charts, but to characterize failures and identify root causes. His default posture is: see a metric move → form a hypothesis → write SQL to test it → identify root cause → design intervention. He does not call something a data problem until he has ruled out policy clarity and operational execution as causes.",
+    "privacy_tier": "public"
+  },
+  {
+    "id": "sem_expertise_cross_functional_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["cross-functional", "policy", "engineering", "operations", "program management", "stakeholders"],
+    "content": "Cross-functional operating expertise: translating between policy intent, engineering implementation, and operational execution. Aman's distinctive strength is reframing problems so that policy, engineering, and ops can align without each side losing what they care about. He does not win arguments through politics — he wins them by making the tradeoffs visible and proposing solutions that acknowledge the real costs on each side.",
+    "privacy_tier": "public"
+  }
+]

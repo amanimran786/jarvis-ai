@@ -1,0 +1,26 @@
+[
+  {
+    "id": "sem_story_meta_calibration_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["Meta", "calibration", "story", "behavioral", "quality", "IRR", "systems", "B1"],
+    "content": "B1 Story — Meta calibration (primary behavioral story, use first for most roles): At Meta, Aman identified that enforcement quality issues were not people problems — they were clarity problems. Built a calibration program that improved inter-rater reliability significantly by redesigning the guidance, not retraining the people. Key insight surfaced: when reviewers disagree, the answer is almost never 'one person is wrong' — it's 'the policy is ambiguous at the margin.' Built gold standard datasets and audit frameworks that made calibration a measurable, systematic process rather than a subjective spot-check. This story demonstrates: root cause before solution, systems thinking, cross-functional execution (policy team + operations + data), operational rigor.",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_story_youtube_2018_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["YouTube", "2018", "CSAM", "child safety", "origin story", "enforcement", "B2"],
+    "content": "B2 Story — YouTube 2018 CSAM enforcement (origin story): First job out of school. Enforcing child safety content at YouTube when the stakes were the highest possible — real harm to real children. This is where judgment under pressure, documentation discipline, and understanding that decisions have direct consequences for real people were built. Not a theoretical start. The muscle built here: operating in ambiguous, high-stakes conditions, making defensible decisions under time pressure, understanding that 'I'll use my best judgment' is not a process. Use when: asked about origins, earliest career experience, why trust and safety, or why YouTube specifically.",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_story_anthropic_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["Anthropic", "AI safety", "jailbreak", "coordinated abuse", "tooling", "B5", "technical credibility"],
+    "content": "B5 Story — Anthropic AI Safety operations (use for technical credibility questions): Operated on the AI safety problem not as a researcher but as the operational layer — taking model safety research and building the processes that catch violations at scale with human reviewers in the loop. Worked on jailbreak detection patterns, coordinated abuse response, tooling for safety operations teams. Distinctive insight: AI safety is not just a model problem. It's an ops problem — who is watching, how fast do they catch it, how do they calibrate, how do you build feedback loops between model behavior and human review? Use when: asked about AI/LLM experience, technical depth, what makes you different from a traditional T&S person.",
+    "privacy_tier": "semi_private"
+  }
+]

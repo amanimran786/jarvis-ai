@@ -237,6 +237,15 @@ class InterviewProfileTests(unittest.TestCase):
         self.assertIn("Cybersecurity", text)
         self.assertTrue(any(term in text.lower() for term in ("risk", "detection", "incident", "automation")))
 
+    def test_imported_role_pack_is_discoverable(self):
+        text = interview_profile.supported_role_families_text()
+        self.assertIn("youtube_pem_2026", text)
+
+    def test_file_backed_youtube_role_pack_mentions_policy_enforcement_manager(self):
+        text = interview_profile.target_role_pack_text("Give me my YouTube PEM 2026 role pack.")
+        self.assertIn("Policy Enforcement Manager, Age Appropriateness", text)
+        self.assertIn("YouTube / Google", text)
+
     def test_youtube_tell_me_about_yourself_mentions_child_safety_and_systems(self):
         text = interview_profile.tell_me_about_yourself_text(
             "Tell me about yourself for the Policy Enforcement Manager, Age Appropriateness role at YouTube."
@@ -338,6 +347,30 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Sonnet")
         self.assertTrue(any(term in text for term in ("read performance", "write amplification", "storage", "insert")))
 
+    def test_python_race_condition_routes_to_specialized_agents(self):
+        stream, label = router.route_stream(
+            "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?"
+        )
+        text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertTrue(any(term in text for term in ("shared state", "thread", "reproduce", "stress test", "lock")))
+
+    def test_stale_read_routes_to_specialized_agents(self):
+        stream, label = router.route_stream(
+            "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?"
+        )
+        text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertTrue(any(term in text for term in ("cache invalidation", "replica lag", "read-after-write", "primary", "TTL", "correlation")))
+
+    def test_fastapi_502_routes_to_specialized_agents(self):
+        stream, label = router.route_stream(
+            "I have a Dockerized FastAPI app that works locally but returns 502 behind Nginx in production. What are the top likely causes and how would you narrow them down?"
+        )
+        text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertTrue(any(term in text for term in ("Nginx", "0.0.0.0", "proxy_pass", "Docker", "502")))
+
     def test_tell_me_about_yourself_fast_path(self):
         stream, label = router.route_stream("Tell me about yourself.")
         text = "".join(stream)
@@ -383,6 +416,13 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Interview")
         self.assertIn("Target role pack: AI Trust and Safety", text)
         self.assertTrue(any(term in text for term in ("quality_measurement", "spike_diagnosis", "cross_functional")))
+
+    def test_file_backed_youtube_pack_fast_path(self):
+        stream, label = router.route_stream("Give me my YouTube PEM 2026 role pack.")
+        text = "".join(stream)
+        self.assertEqual(label, "Interview")
+        self.assertIn("Policy Enforcement Manager, Age Appropriateness", text)
+        self.assertIn("YouTube / Google", text)
 
     def test_youtube_why_google_fast_path(self):
         stream, label = router.route_stream("Why YouTube and Google for the Policy Enforcement Manager, Age Appropriateness role?")

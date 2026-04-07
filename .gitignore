@@ -12,6 +12,8 @@ memory.json
 knowledge.json
 last_session.json
 evals.json
+memory/chroma/
+memory/working/session.json
 usage_log.jsonl
 usage_state.json
 hook_events.jsonl

@@ -27,7 +27,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QFont, QColor, QPalette, QIcon, QTextCursor, QKeyEvent,
     QPainter, QPen, QBrush, QLinearGradient, QRadialGradient,
-    QPainterPath, QFontDatabase, QCursor
+    QPainterPath, QFontDatabase, QCursor, QPixmap
 )
 
 from router import route_stream, set_timer_callback
@@ -40,6 +40,14 @@ import terminal
 import stealth
 import overlay as _overlay_mod
 import call_privacy
+
+try:
+    from Foundation import NSBundle, NSProcessInfo
+    from AppKit import NSApplication
+except Exception:
+    NSBundle = None
+    NSProcessInfo = None
+    NSApplication = None
 
 # ── Color palette ──────────────────────────────────────────────────────────────
 C_BG        = "#020A10"       # deep space black
@@ -79,6 +87,95 @@ def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
         border-radius: {radius}px;
     """
 
+
+def _build_runtime_app_icon(size: int = 512) -> QIcon:
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    center = size / 2
+    outer = size * 0.42
+    inner = size * 0.18
+
+    bg = QRadialGradient(center, center, outer)
+    bg.setColorAt(0.0, QColor(9, 40, 60, 255))
+    bg.setColorAt(0.55, QColor(2, 18, 28, 245))
+    bg.setColorAt(1.0, QColor(1, 8, 14, 235))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QBrush(bg))
+    p.drawEllipse(int(center - outer), int(center - outer), int(outer * 2), int(outer * 2))
+
+    glow_pen = QPen(QColor(C_CYAN), max(8, size // 40))
+    glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(glow_pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawEllipse(int(center - outer * 0.72), int(center - outer * 0.72), int(outer * 1.44), int(outer * 1.44))
+
+    core = QRadialGradient(center, center, inner)
+    core.setColorAt(0.0, QColor(255, 255, 255, 250))
+    core.setColorAt(0.35, QColor(80, 225, 255, 240))
+    core.setColorAt(1.0, QColor(0, 120, 180, 0))
+    p.setBrush(QBrush(core))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(int(center - inner), int(center - inner), int(inner * 2), int(inner * 2))
+
+    p.end()
+    return QIcon(pixmap)
+
+
+def _apply_macos_identity(app: QApplication, icon: QIcon):
+    app.setApplicationName("Jarvis")
+    if hasattr(app, "setApplicationDisplayName"):
+        app.setApplicationDisplayName("Jarvis")
+    if hasattr(app, "setDesktopFileName"):
+        app.setDesktopFileName("Jarvis")
+    app.setWindowIcon(icon)
+    QApplication.setWindowIcon(icon)
+
+    if NSProcessInfo is not None:
+        try:
+            NSProcessInfo.processInfo().setProcessName_("Jarvis")
+        except Exception:
+            pass
+
+    if NSBundle is not None:
+        try:
+            info = NSBundle.mainBundle().infoDictionary()
+            if info is not None:
+                info["CFBundleName"] = "Jarvis"
+                info["CFBundleDisplayName"] = "Jarvis"
+                info["CFBundleExecutable"] = "Jarvis"
+            localized = NSBundle.mainBundle().localizedInfoDictionary()
+            if localized is not None:
+                localized["CFBundleName"] = "Jarvis"
+                localized["CFBundleDisplayName"] = "Jarvis"
+        except Exception:
+            pass
+
+    if NSApplication is not None:
+        try:
+            ns_app = NSApplication.sharedApplication()
+            # Promote the bundled launch into a normal foreground Mac app so the
+            # Dock and menu bar use the app identity instead of utility-window behavior.
+            ns_app.setActivationPolicy_(0)
+        except Exception:
+            pass
+
+
+def _activate_macos_app(window: QMainWindow):
+    if NSApplication is not None:
+        try:
+            ns_app = NSApplication.sharedApplication()
+            ns_app.activateIgnoringOtherApps_(True)
+        except Exception:
+            pass
+    try:
+        window.raise_()
+        window.activateWindow()
+    except Exception:
+        pass
 
 # ── Arc Reactor Widget ─────────────────────────────────────────────────────────
 
@@ -2180,7 +2277,8 @@ class EnterLineEdit(QLineEdit):
 
 def run():
     app = QApplication(sys.argv)
-    app.setApplicationName("J.A.R.V.I.S")
+    runtime_icon = _build_runtime_app_icon()
+    _apply_macos_identity(app, runtime_icon)
     app.setStyle("Fusion")
 
     palette = QPalette()
@@ -2213,7 +2311,9 @@ def run():
 
     use_classic = "--classic-ui" in sys.argv or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"
     window = JarvisWindow() if use_classic else OrbShellWindow()
+    window.setWindowIcon(runtime_icon)
     window.show()
+    QTimer.singleShot(0, lambda: _activate_macos_app(window))
     sys.exit(app.exec())
 
 

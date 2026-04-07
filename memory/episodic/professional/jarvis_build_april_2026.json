@@ -1,0 +1,8 @@
+{
+  "id": "ep_jarvis_build_001",
+  "timestamp": "2026-04-06T00:00:00+00:00",
+  "domain": "professional",
+  "tags": ["Jarvis", "architecture", "build session", "harness", "routing", "memory", "interview packs", "Python"],
+  "content": "April 2026 — Aman built the Jarvis harness from scratch over multiple sessions. Architecture decisions: 5-layer memory (L0 identity always loaded, L1 semantic keyword search with recency decay, L2 episodic time-indexed, L3 working session dict, L4 private vault stub). Module router with keyword-overlap scoring and ceiling normalization (hits/2.0 — 1 word match = 0.50 MEDIUM, 2+ = 1.0 HIGH). Context assembler with anti-contamination: interview packs load ONLY when routing.primary.module_id == 'interview_intel', not when interview.mode is true (the OR bug was the critical fix). Modules: InterviewIntel, TechAssist, StrategyOS, CareerOS, DailyOS, MemoryManager, General fallback. Key insight: Jarvis is NOT an interview simulator — it is a personal AI OS where InterviewIntel is one conditional module. The benchmark is personalized utility over raw Claude.",
+  "outcome": "Harness built and verified. 9/9 smoke tests passing. Zero interview pack leaks in non-interview queries. Architecture validated. Blocked only on API key for live model calls."
+}
