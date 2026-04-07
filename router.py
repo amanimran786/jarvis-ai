@@ -203,7 +203,19 @@ def _is_personal_interest_query(lower: str) -> bool:
     )
 
 
+def _is_engineering_specialist_query(lower: str) -> bool:
+    if "race condition" in lower and any(term in lower for term in ("python", "worker", "thread", "reproducible", "reproduce")):
+        return True
+    if any(term in lower for term in ("stale data", "cache invalidation", "replica lag", "read-after-write")):
+        return True
+    if all(term in lower for term in ("fastapi", "nginx", "502")):
+        return True
+    return False
+
+
 def _is_interview_profile_query(lower: str) -> bool:
+    if _is_engineering_specialist_query(lower):
+        return False
     return (
         interview_profile.is_career_narrative_query(lower)
         or interview_profile.is_tell_me_about_yourself_query(lower)
@@ -553,6 +565,9 @@ def route_stream(user_input: str) -> tuple:
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
     if _is_specialized_agent_query(lower):
+        result = specialized_agents.run(user_input)
+        return _s(specialized_agents.result_text(result)), "Specialized Agents"
+    if _is_engineering_specialist_query(lower):
         result = specialized_agents.run(user_input)
         return _s(specialized_agents.result_text(result)), "Specialized Agents"
     if _is_self_review_query(lower):

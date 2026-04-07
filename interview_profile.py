@@ -8,6 +8,85 @@ from the user's resumes, stored memory, and interview playbook notes.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+from config import INTERVIEW_ACTIVE_COMPANY, INTERVIEW_ACTIVE_ROLE, KB_ROOT
+
+
+CAREER_KB_ROOT = KB_ROOT / "career"
+UNIVERSAL_BASE_POINTER = CAREER_KB_ROOT / "universal_base.md"
+UNIVERSAL_BASE_SOURCE = CAREER_KB_ROOT / "Jarvis_Universal_Interview_Context.md"
+PACKS_DIR = CAREER_KB_ROOT / "packs"
+
+
+def _read_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _available_pack_ids() -> list[str]:
+    if not PACKS_DIR.exists():
+        return []
+    return sorted(
+        p.stem
+        for p in PACKS_DIR.glob("*.md")
+        if p.is_file() and p.stem != "_template"
+    )
+
+
+def _active_pack_id() -> str | None:
+    if INTERVIEW_ACTIVE_COMPANY and INTERVIEW_ACTIVE_ROLE:
+        candidate = f"{INTERVIEW_ACTIVE_COMPANY}_{INTERVIEW_ACTIVE_ROLE}"
+        if (PACKS_DIR / f"{candidate}.md").exists():
+            return candidate
+    return None
+
+
+def _pack_id_for_query(user_input: str) -> str | None:
+    lower = user_input.lower()
+    if "youtube" in lower and any(term in lower for term in ("pem", "policy enforcement manager", "age appropriateness")):
+        return "youtube_pem_2026"
+    return _active_pack_id()
+
+
+def _extract_metadata_value(markdown: str, key: str) -> str:
+    match = re.search(rf"^\s*{re.escape(key)}:\s*\"?(.+?)\"?\s*$", markdown, flags=re.M)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_markdown_block(markdown: str, heading: str) -> str:
+    pattern = rf"{re.escape(heading)}\n+(.*?)(?=\n---\n|\n##\s|\Z)"
+    match = re.search(pattern, markdown, flags=re.S)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_markdown_subheading(markdown: str, heading: str) -> str:
+    pattern = rf"{re.escape(heading)}\n+(.*?)(?=\n###\s|\n##\s|\n---\n|\Z)"
+    match = re.search(pattern, markdown, flags=re.S)
+    return match.group(1).strip() if match else ""
+
+
+def _clean_markdown_excerpt(text: str, max_chars: int = 520) -> str:
+    text = re.sub(r"`{3}.*?`{3}", " ", text, flags=re.S)
+    text = re.sub(r"^\s*[-*]\s*", "", text, flags=re.M)
+    text = re.sub(r"\|\s*[-:]+\s*\|", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "..."
+    return text
+
+
+def _load_pack_text(pack_id: str) -> str:
+    return _read_text(PACKS_DIR / f"{pack_id}.md")
+
+
+def _load_universal_base_text() -> str:
+    source = _read_text(UNIVERSAL_BASE_SOURCE)
+    if source:
+        return source
+    pointer = _read_text(UNIVERSAL_BASE_POINTER)
+    return pointer
 
 
 PROFILE = {
@@ -357,6 +436,8 @@ def _role_family(user_input: str) -> str:
 
 def _is_youtube_age_role(user_input: str) -> bool:
     lower = user_input.lower()
+    if _pack_id_for_query(user_input) == "youtube_pem_2026":
+        return True
     if "youtube" in lower and any(term in lower for term in ("age appropriateness", "policy enforcement manager", "made for kids", "kids and teens")):
         return True
     if "google" in lower and any(term in lower for term in ("age appropriateness", "youtube", "policy enforcement manager")):
@@ -365,10 +446,13 @@ def _is_youtube_age_role(user_input: str) -> bool:
 
 
 def supported_role_families_text() -> str:
+    packs = _available_pack_ids()
+    pack_text = f" Active imported packs: {', '.join(packs)}." if packs else ""
     return (
         "Jarvis can now tailor your interview story for four main role families: "
         "AI Trust and Safety, AI Safety, Cybersecurity, and Software Engineering, plus a hybrid technical safety default. "
         "Underneath that, it can also reuse your strongest behavioral stories and diagnostic frameworks across those domains instead of treating each interview like a fresh script."
+        f"{pack_text}"
     )
 
 
@@ -386,6 +470,24 @@ def _pack_key(user_input: str) -> str:
 
 
 def target_role_pack_text(user_input: str = "") -> str:
+    requested_pack_id = _pack_id_for_query(user_input)
+    if requested_pack_id:
+        markdown = _load_pack_text(requested_pack_id)
+        if markdown:
+            company = _extract_metadata_value(markdown, "company")
+            role_title = _extract_metadata_value(markdown, "role_title")
+            section1 = _clean_markdown_excerpt(
+                _extract_markdown_block(markdown, "## SECTION 1: WHY AMAN FITS THIS ROLE"),
+                max_chars=520,
+            )
+            stories = re.findall(r"\|\s*\d+\s*\|\s*([^|]+?)\s*\|", markdown)
+            story_text = ", ".join(s.strip() for s in stories[:4]) if stories else "use the strongest relevant stories for the role"
+            return (
+                f"Target role pack: {company} — {role_title}. "
+                f"The best positioning is: {section1} "
+                f"The lead stories for this pack are {story_text}."
+            )
+
     pack = TARGET_ROLE_PACKS[_pack_key(user_input)]
     stories = ", ".join(UNIVERSAL_STORIES[key].split(". ", 1)[0] for key in pack["best_stories"])
     frameworks = ", ".join(pack["best_frameworks"])
@@ -448,6 +550,11 @@ def why_this_direction_text() -> str:
 
 def why_company_text(user_input: str) -> str:
     if _is_youtube_age_role(user_input) or any(term in user_input.lower() for term in ("why youtube", "why google")):
+        markdown = _load_pack_text("youtube_pem_2026")
+        if markdown:
+            excerpt = _extract_markdown_subheading(markdown, "### Why YouTube specifically (Aman's genuine angle)")
+            if excerpt:
+                return _clean_markdown_excerpt(excerpt, max_chars=650)
         return YOUTUBE_AGE_ROLE["why_youtube"]
     return (
         "The strongest reason is fit between the problems the company is solving and the way I work. "

@@ -5,10 +5,26 @@ No API keys, no external servers, no restrictions, completely private.
 
 import ollama as _ollama
 import re
+import os
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
+
+try:
+    import httpx
+except Exception:
+    httpx = None
+
+
+_OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "25"))
+
+
+def _client():
+    if httpx is None:
+        return _ollama.Client(timeout=_OLLAMA_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(connect=5.0, read=_OLLAMA_TIMEOUT_SECONDS, write=15.0, pool=5.0)
+    return _ollama.Client(timeout=timeout)
 
 def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts because Jarvis responses are spoken aloud."""
@@ -24,7 +40,7 @@ def _strip_markdown(text: str) -> str:
 def _is_available(model: str) -> bool:
     """Check if a model is pulled and available."""
     try:
-        models = [m.model for m in _ollama.list().models]
+        models = [m.model for m in _client().list().models]
         return any(model in m for m in models)
     except Exception:
         return False
@@ -33,7 +49,7 @@ def _is_available(model: str) -> bool:
 def get_best_available(preferred: str) -> str:
     """Return preferred model if available, else fall back to first available."""
     try:
-        models = [m.model for m in _ollama.list().models]
+        models = [m.model for m in _client().list().models]
         if not models:
             raise RuntimeError("No Ollama models found. Run: ollama pull llama3.1:8b")
         if LOCAL_TUNED and any(LOCAL_TUNED in m for m in models):
@@ -69,7 +85,7 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
     prompt_eval_count = None
     eval_count = None
     try:
-        stream = _ollama.chat(
+        stream = _client().chat(
             model=model,
             messages=messages,
             stream=True
@@ -87,7 +103,11 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
         if buffer:
             yield _strip_markdown(buffer)
     except Exception as e:
-        error = f"Local model error: {e}. Make sure Ollama is running: ollama serve"
+        error = (
+            f"Local model error: {e}. "
+            f"If Ollama is stalled, restart it with: ollama serve. "
+            "You can also switch Jarvis to auto mode for cloud fallback."
+        )
         yield error
         full_reply = error
 
@@ -113,6 +133,6 @@ def ask_local_stream(user_input: str, model: str = LOCAL_DEFAULT, system_extra: 
 def list_local_models() -> list[str]:
     """Return names of all pulled local models."""
     try:
-        return [m.model for m in _ollama.list().models]
+        return [m.model for m in _client().list().models]
     except Exception:
         return []

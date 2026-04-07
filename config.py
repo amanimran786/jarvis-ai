@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -7,6 +8,11 @@ OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+REPO_ROOT = Path(__file__).resolve().parent
+KB_ROOT = REPO_ROOT / "kb"
+INTERVIEW_ACTIVE_COMPANY = os.getenv("JARVIS_ACTIVE_COMPANY", "").strip().lower()
+INTERVIEW_ACTIVE_ROLE = os.getenv("JARVIS_ACTIVE_ROLE", "").strip().lower()
 
 # ElevenLabs voice — "George": British, authoritative, perfect for JARVIS
 # Swap voice_id for any ElevenLabs voice you prefer
