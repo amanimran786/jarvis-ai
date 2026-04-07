@@ -24,7 +24,6 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 # Ensure the repo root is on the path so module imports resolve correctly.
@@ -41,20 +40,16 @@ class MemoryModuleTests(unittest.TestCase):
     """Tests for memory.py — isolated using a per-test temporary file."""
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        import memory
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._memory_file = os.path.join(self._tmpdir.name, "memory.json")
-        # Pre-create the file with empty defaults so that load() reads from disk
-        # rather than returning dict(_DEFAULTS), which is a shallow copy sharing
-        # mutable list/dict containers across tests.
+        # Pre-create the file using memory._DEFAULTS so the structure stays in
+        # sync with the module and load() reads from disk — rather than returning
+        # dict(_DEFAULTS), which is a shallow copy sharing mutable list/dict
+        # containers across tests.
         with open(self._memory_file, "w") as f:
-            # Mirror memory._DEFAULTS structure so load() reads from disk rather
-            # than returning dict(_DEFAULTS), which is a shallow copy sharing
-            # mutable list/dict containers across tests.
-            json.dump({
-                "facts": [], "preferences": {}, "conversation_history": [],
-                "projects": [], "topic_counts": {}, "working_memory": {},
-                "long_term_profile": {}, "last_updated": None,
-            }, f)
+            json.dump({k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+                       for k, v in memory._DEFAULTS.items()}, f)
 
     def tearDown(self):
         self._tmpdir.cleanup()
@@ -214,6 +209,9 @@ class MemoryModuleTests(unittest.TestCase):
         self.assertIn("Aman builds AI systems.", ctx)
 
     # ── Private helpers ───────────────────────────────────────────────────
+    # The public-API counterpart test_add_fact_deduplicates already verifies
+    # that deduplication works through the production code path. The tests below
+    # exercise the helper directly to cover its edge-case branches in isolation.
 
     def test_dedupe_keep_order_removes_case_insensitive_duplicates(self):
         import memory
@@ -261,7 +259,7 @@ class MemoryModuleTests(unittest.TestCase):
 class NotesModuleTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._notes_file = os.path.join(self._tmpdir.name, "notes.json")
 
     def tearDown(self):
@@ -427,7 +425,7 @@ class TerminalFileTests(unittest.TestCase):
 
     def test_list_directory_lists_entries(self):
         import terminal
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "myfile.txt").write_text("content")
             Path(tmp, "subdir").mkdir()
             result = terminal.list_directory(tmp)
@@ -436,7 +434,7 @@ class TerminalFileTests(unittest.TestCase):
 
     def test_list_directory_separates_dirs_and_files(self):
         import terminal
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "z_file.txt").write_text("f")
             Path(tmp, "a_dir").mkdir()
             result = terminal.list_directory(tmp)
@@ -486,7 +484,7 @@ class TerminalWriteTests(unittest.TestCase):
 
     def test_write_file_writes_and_returns_confirmation(self):
         import terminal
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "output.txt")
             with patch("terminal.hooks.pre_file_write", return_value={"ok": True, "reason": ""}), \
                  patch("terminal.hooks.post_file_write", return_value={"ok": True, "reason": ""}):
@@ -497,7 +495,7 @@ class TerminalWriteTests(unittest.TestCase):
 
     def test_write_file_blocked_by_post_hook(self):
         import terminal
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "bad.py")
             with patch("terminal.hooks.pre_file_write", return_value={"ok": True, "reason": ""}), \
                  patch("terminal.hooks.post_file_write", return_value={"ok": False, "reason": "Syntax error."}):
@@ -983,7 +981,7 @@ class UsageTrackerCostTests(unittest.TestCase):
 class UsageTrackerRecordTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         tmp = Path(self._tmpdir.name)
         self._log_path = tmp / "usage_log.jsonl"
         self._state_path = tmp / "usage_state.json"
@@ -1166,7 +1164,7 @@ class BehaviorHooksProtectedPathTests(unittest.TestCase):
 class BehaviorHooksShellGatingTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._hook_log = Path(self._tmpdir.name) / "hook_events.jsonl"
 
     def tearDown(self):
@@ -1229,7 +1227,7 @@ class BehaviorHooksShellGatingTests(unittest.TestCase):
 class BehaviorHooksFileWriteTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._hook_log = Path(self._tmpdir.name) / "hook_events.jsonl"
 
     def tearDown(self):
@@ -1300,7 +1298,7 @@ class BehaviorHooksFileWriteTests(unittest.TestCase):
 class BehaviorHooksSelfImproveTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._hook_log = Path(self._tmpdir.name) / "hook_events.jsonl"
 
     def tearDown(self):
@@ -1345,7 +1343,7 @@ class BehaviorHooksSelfImproveTests(unittest.TestCase):
 class BehaviorHooksSummaryTests(unittest.TestCase):
 
     def setUp(self):
-        self._tmpdir = TemporaryDirectory()
+        self._tmpdir = tempfile.TemporaryDirectory()
         self._hook_log = Path(self._tmpdir.name) / "hook_events.jsonl"
 
     def tearDown(self):
@@ -1463,7 +1461,7 @@ class SemanticMemoryWriteTests(unittest.TestCase):
 
     def test_write_creates_json_file_in_correct_dir(self):
         import semantic_memory
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             sem_dir = Path(tmp) / "semantic"
             with patch.object(semantic_memory, "SEMANTIC_DIR", sem_dir):
                 path = semantic_memory.write("public", {
@@ -1478,7 +1476,7 @@ class SemanticMemoryWriteTests(unittest.TestCase):
 
     def test_write_sets_default_fields(self):
         import semantic_memory
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             sem_dir = Path(tmp) / "semantic"
             with patch.object(semantic_memory, "SEMANTIC_DIR", sem_dir):
                 path = semantic_memory.write("semi_private", {"content": "Entry."})
@@ -1490,7 +1488,7 @@ class SemanticMemoryWriteTests(unittest.TestCase):
 
     def test_write_episodic_creates_json_file(self):
         import semantic_memory
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             epi_dir = Path(tmp) / "episodic"
             with patch.object(semantic_memory, "EPISODIC_DIR", epi_dir):
                 path = semantic_memory.write_episodic("professional", {
@@ -1504,7 +1502,7 @@ class SemanticMemoryWriteTests(unittest.TestCase):
 
     def test_write_episodic_sets_default_fields(self):
         import semantic_memory
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             epi_dir = Path(tmp) / "episodic"
             with patch.object(semantic_memory, "EPISODIC_DIR", epi_dir):
                 path = semantic_memory.write_episodic("technical", {"content": "Build log."})
@@ -1548,7 +1546,7 @@ class SemanticMemoryRetrievalTests(unittest.TestCase):
 
     def test_write_and_retrieve_finds_entry(self):
         import semantic_memory
-        with TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp:
             sem_dir = Path(tmp) / "semantic"
             epi_dir = Path(tmp) / "episodic"
             with patch.object(semantic_memory, "SEMANTIC_DIR", sem_dir), \
