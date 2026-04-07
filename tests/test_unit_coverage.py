@@ -25,7 +25,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # Ensure the repo root is on the path so module imports resolve correctly.
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -47,6 +47,9 @@ class MemoryModuleTests(unittest.TestCase):
         # rather than returning dict(_DEFAULTS), which is a shallow copy sharing
         # mutable list/dict containers across tests.
         with open(self._memory_file, "w") as f:
+            # Mirror memory._DEFAULTS structure so load() reads from disk rather
+            # than returning dict(_DEFAULTS), which is a shallow copy sharing
+            # mutable list/dict containers across tests.
             json.dump({
                 "facts": [], "preferences": {}, "conversation_history": [],
                 "projects": [], "topic_counts": {}, "working_memory": {},
@@ -406,6 +409,7 @@ class TerminalFileTests(unittest.TestCase):
     def test_read_file_truncates_large_content(self):
         import terminal
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            # terminal.read_file() truncates at 8000 chars; write well beyond that.
             f.write("x" * 10_000)
             path = f.name
         try:
@@ -413,6 +417,7 @@ class TerminalFileTests(unittest.TestCase):
         finally:
             os.unlink(path)
         self.assertIn("truncated", result)
+        # 8000 chars content + small "truncated" suffix message
         self.assertLessEqual(len(result), 8_300)
 
     def test_list_directory_not_found(self):
@@ -885,12 +890,14 @@ class ConversationContextTests(unittest.TestCase):
 
     def test_compact_if_needed_compacts_overflow(self):
         import conversation_context as cc
-        # MAX_ACTIVE_TURNS = 4 → max_messages = 8; add 6 full turns (12 messages)
+        # MAX_ACTIVE_TURNS (from conversation_context) = 4, so max_messages = 8.
+        # Add 6 full turns (12 messages) to force compaction.
+        max_messages = cc.MAX_ACTIVE_TURNS * 2
         with patch("conversation_context.mem.save_conversation"):
             for i in range(6):
                 cc.begin_turn(f"User question about databases {i}")
                 cc.end_turn(f"Assistant reply about databases {i}")
-        self.assertLessEqual(len(cc._STATE["messages"]), 8)
+        self.assertLessEqual(len(cc._STATE["messages"]), max_messages)
         self.assertTrue(cc._STATE["summary"])
 
     # ── Stats ─────────────────────────────────────────────────────────────
