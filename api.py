@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import json
+import os
 import threading
 import uvicorn
 from fastapi import FastAPI
@@ -39,6 +40,7 @@ import local_beta
 import behavior_hooks
 import cost_policy
 import usage_tracker
+import runtime_state
 
 
 def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
@@ -240,14 +242,32 @@ def eval_summary(hours: int = 24 * 7):
 
 @app.get("/status")
 def status():
+    call_assist = runtime_state.refresh_call_assist(force_refresh=True)
     return {
         "status": "online",
         "mode": model_router.get_mode(),
+        "api_host": get_host(),
+        "api_urls": get_base_urls(),
         "local_available": model_router._has_local(),
         "context": ctx.get_stats(),
         "usage_24h": usage_tracker.summarize(hours=24, include_recent=0),
         "cost_policy": cost_policy.policy_status(),
+        "call_assist": call_assist,
     }
+
+
+@app.get("/runtime/state")
+def get_runtime_state():
+    try:
+        runtime_state.refresh_call_assist(force_refresh=True)
+        return {"ok": True, "state": runtime_state.snapshot()}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "state": {}}
+
+
+@app.get("/bridge/status")
+def bridge_status():
+    return hw.bridge_status(api_host=get_host(), api_port=get_port())
 
 
 @app.get("/context")
@@ -495,14 +515,16 @@ def set_mode(req: ModeRequest):
 # ── Server startup ─────────────────────────────────────────────────────────────
 
 _port: int = 8765  # actual port after binding
+_host: str = "127.0.0.1"
 
 
-def _find_free_port(start: int = 8765, attempts: int = 10) -> int:
+def _find_free_port(start: int = 8765, attempts: int = 10, host: str = "127.0.0.1") -> int:
     import socket
     for port in range(start, start + attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("127.0.0.1", port))
+                bind_host = "" if host in {"0.0.0.0", "::", "*"} else host
+                s.bind((bind_host, port))
                 return port
             except OSError:
                 continue
@@ -513,23 +535,41 @@ def get_port() -> int:
     return _port
 
 
+def get_host() -> str:
+    return _host
+
+
+def get_base_urls() -> list[str]:
+    return hw.bridge_status(api_host=_host, api_port=_port).get("urls", [])
+
+
+def get_base_url() -> str:
+    urls = get_base_urls()
+    return urls[0] if urls else f"http://{_host}:{_port}"
+
+
 hw.register_api_routes(app)
 
 
 def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     """Start the API server in a background daemon thread."""
-    global _port
-    _port = _find_free_port(port)
+    global _host, _port
+    _host = host or "127.0.0.1"
+    _port = _find_free_port(port, host=_host)
 
     def _run():
-        uvicorn.run(app, host=host, port=_port, log_level="warning")
+        uvicorn.run(app, host=_host, port=_port, log_level="warning")
 
     t = threading.Thread(target=_run, daemon=True, name="JarvisAPI")
     t.start()
     # Write port to file so jarvis_cli.py can find it
-    import os
-    port_file = os.path.join(os.path.dirname(__file__), ".jarvis_port")
-    with open(port_file, "w") as f:
-        f.write(str(_port))
-    print(f"[API] Jarvis API running at http://{host}:{_port}")
+    try:
+        port_file = runtime_state.port_file_path()
+        port_file.write_text(str(_port), encoding="utf-8")
+    except Exception as exc:
+        try:
+            runtime_state.update(last_error=f"port file write failed: {exc}")
+        except Exception:
+            pass
+    print(f"[API] Jarvis API running at http://{_host}:{_port}")
     return t

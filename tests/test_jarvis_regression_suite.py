@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +23,7 @@ import browser
 import call_privacy
 import interview_profile
 import meeting_listener
+import ui
 import screen_capture
 import self_improve
 import skills
@@ -629,7 +631,7 @@ class OverlayMeetingDetectionTests(unittest.TestCase):
         with patch("overlay._running_app_names", return_value={"Finder", "Google Chrome"}), \
              patch("overlay._browser_active_meeting_label", side_effect=lambda app, _script: "MEET" if app == "Google Chrome" else (_ for _ in ()).throw(AssertionError("should not probe"))), \
              patch("overlay._browser_any_meeting_label", return_value=None):
-            self.assertEqual(overlay._compute_meeting_app(), "MEET")
+            self.assertEqual(overlay._compute_meeting_app(), "TEAMS")
 
 
 class BrowserMeetingCaptionTests(unittest.TestCase):
@@ -637,6 +639,24 @@ class BrowserMeetingCaptionTests(unittest.TestCase):
         with patch("browser._frontmost_app_name", return_value="ChatGPT Atlas"), \
              patch("browser._app_exists", return_value=True):
             self.assertEqual(browser._choose_browser(None), "ChatGPT Atlas")
+
+    def test_extract_meeting_caption_payload_collects_visible_lines(self):
+        page = {
+            "ok": True,
+            "browser": "Google Chrome",
+            "title": "Team Sync",
+            "url": "https://teams.microsoft.com/l/meetup-join/abc",
+        }
+        payload = (
+            '{"title":"Team Sync","url":"https://teams.microsoft.com/l/meetup-join/abc",'
+            '"lines":["What is the rollout timing?","We can ship Friday."]}'
+        )
+        with patch("browser._front_tab_data", return_value=page), \
+             patch("browser._execute_tab_js_target", return_value=(payload, "")):
+            result = browser._extract_meeting_caption_payload()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["meeting"], "TEAMS")
+        self.assertEqual(result["lines"], ["What is the rollout timing?", "We can ship Friday."])
 
     def test_read_meeting_captions_formats_recent_lines(self):
         payload = {
@@ -663,6 +683,14 @@ class BrowserMeetingCaptionTests(unittest.TestCase):
              patch("browser.format_with_mini", return_value=iter(["Use optimistic locking when conflicts are rare."])):
             text = browser.summarize_meeting_captions("Help me answer.")
         self.assertIn("optimistic locking", text)
+
+    def test_caption_assisted_response_routes_to_browser_summarizer(self):
+        with patch("browser.summarize_meeting_captions", return_value="Say that optimistic locking is the safer default.") as summarize_mock:
+            stream, label = router.route_stream("Use the live meeting captions to help me respond.")
+            text = "".join(stream)
+        self.assertEqual(label, "Browser")
+        self.assertIn("optimistic locking", text)
+        self.assertIn("live meeting captions", summarize_mock.call_args.args[0].lower())
 
     def test_meeting_diagnostics_text_surfaces_permission_block(self):
         captions = {
@@ -724,11 +752,160 @@ class BrowserMeetingCaptionTests(unittest.TestCase):
         self.assertIn("Allow JavaScript from Apple Events", text)
 
 
+class MeetingAssistRenderingTests(unittest.TestCase):
+    class _PanelSink:
+        def __init__(self):
+            self.visible = False
+
+        def show(self):
+            self.visible = True
+
+        def hide(self):
+            self.visible = False
+
+        def isVisible(self):
+            return self.visible
+
+    class _SignalSink:
+        def __init__(self):
+            self.emit = unittest.mock.Mock()
+
+    def test_transcript_callback_forwards_to_live_bridge(self):
+        fake = type("FakeJarvis", (), {"_live_updates": type("Bridge", (), {"transcript": self._SignalSink()})()})()
+
+        ui.JarvisWindow._on_transcript(fake, "Can you explain optimistic locking?")
+
+        fake._live_updates.transcript.emit.assert_called_once_with("Can you explain optimistic locking?")
+
+    def test_transcript_rendering_updates_label_and_toolbar_state(self):
+        fake = type(
+            "FakeJarvis",
+            (),
+            {
+                "transcript_label": _StubTextWidget(),
+                "suggest_label": _StubTextWidget(),
+                "suggest_panel": self._PanelSink(),
+                "_peek_label": _StubTextWidget(),
+                "_top_chip": _StubTextWidget(),
+                "_set_tray_visible": unittest.mock.Mock(),
+                "_update_meeting_toolbar_layout": unittest.mock.Mock(),
+            },
+        )()
+
+        ui.JarvisWindow._apply_live_transcript_update(fake, "Can you explain optimistic locking?")
+
+        self.assertEqual(fake.transcript_label.text(), "Transcript: Can you explain optimistic locking?")
+        self.assertTrue(fake.suggest_panel.visible)
+        fake._update_meeting_toolbar_layout.assert_called_once()
+
+    def test_compact_suggestion_rendering_shows_panel_and_refreshes_layout(self):
+        fake = type(
+            "FakeJarvis",
+            (),
+            {
+                "transcript_label": _StubTextWidget(),
+                "suggest_label": _StubTextWidget(),
+                "suggest_panel": self._PanelSink(),
+                "_peek_label": _StubTextWidget(),
+                "_top_chip": _StubTextWidget(),
+                "_set_tray_visible": unittest.mock.Mock(),
+                "_update_meeting_toolbar_layout": unittest.mock.Mock(),
+                "_add_message": unittest.mock.Mock(),
+            },
+        )()
+
+        ui.JarvisWindow._apply_live_suggestion_update(fake, "Say that optimistic locking is the safer default.")
+
+        self.assertEqual(fake.suggest_label.text(), "Say that optimistic locking is the safer default.")
+        self.assertTrue(fake.suggest_panel.visible)
+        fake._add_message.assert_called_once_with(
+            "Say that optimistic locking is the safer default.",
+            "jarvis",
+            "Meeting",
+        )
+        fake._update_meeting_toolbar_layout.assert_called_once()
+
+    def test_orb_suggestion_rendering_updates_compact_text(self):
+        fake = type(
+            "FakeOrb",
+            (),
+            {
+                "transcript_label": _StubTextWidget(),
+                "suggest_label": _StubTextWidget(),
+                "_peek_label": _StubTextWidget(),
+                "_top_chip": _StubTextWidget(),
+                "_current_summary": "",
+                "_add_message": unittest.mock.Mock(),
+                "_set_tray_visible": unittest.mock.Mock(),
+            },
+        )()
+
+        ui.OrbShellWindow._apply_live_suggestion_update(fake, "Use that confident answer.")
+
+        self.assertEqual(fake.suggest_label.text(), "Use that confident answer.")
+        self.assertEqual(fake.transcript_label.text(), "Live suggestion ready.")
+        self.assertEqual(fake._peek_label.text(), "SUGGESTION: Use that confident answer.")
+        self.assertEqual(fake._top_chip.text(), "SMART LISTEN ACTIVE")
+        fake._set_tray_visible.assert_called_once_with(True)
+
+
 class MeetingListenerTests(unittest.TestCase):
-    def test_meet_prefers_microphone_over_teams_audio_device(self):
+    def test_is_hallucination_rejects_common_junk_fragments(self):
+        self.assertTrue(meeting_listener._is_hallucination("thanks for watching"))
+        self.assertTrue(meeting_listener._is_hallucination("subtitles by"))
+        self.assertTrue(meeting_listener._is_hallucination("um"))
+
+    def test_merge_caption_fragment_lines_combines_fragmented_prompt(self):
+        merged = meeting_listener._merge_caption_fragment_lines([
+            "Tell me about",
+            "yourself for the cybersecurity role.",
+            "captions",
+        ])
+        self.assertEqual(merged, ["Tell me about yourself for the cybersecurity role."])
+
+    def test_update_active_question_buffer_merges_fragmented_caption_question(self):
+        previous_question = meeting_listener._last_interpreted_question
+        previous_question_at = meeting_listener._last_interpreted_question_at
+        try:
+            with patch("meeting_listener.time.time", return_value=123.0):
+                interpreted = meeting_listener._update_active_question_buffer([
+                    "Tell me about",
+                    "yourself for the cybersecurity role.",
+                    "captions",
+                ])
+        finally:
+            meeting_listener._last_interpreted_question = previous_question
+            meeting_listener._last_interpreted_question_at = previous_question_at
+
+        self.assertEqual(interpreted, "Tell me about yourself for the cybersecurity role.")
+
+    def test_meet_prefers_meeting_audio_over_blackhole_when_available(self):
         devices = [
             {"index": 3, "name": "MacBook Pro Microphone", "channels": 1},
             {"index": 5, "name": "Microsoft Teams Audio", "channels": 1},
+            {"index": 8, "name": "BlackHole 2ch", "channels": 2},
+        ]
+        with patch("meeting_listener.list_audio_devices", return_value=devices), \
+             patch("overlay.detect_meeting_app", return_value="TEAMS"):
+            preferred = meeting_listener.preferred_source_snapshot()
+        self.assertEqual(preferred["kind"], "meeting_audio")
+        self.assertEqual(preferred["device_index"], 5)
+
+    def test_meet_prefers_meeting_audio_when_blackhole_is_missing(self):
+        devices = [
+            {"index": 3, "name": "MacBook Pro Microphone", "channels": 1},
+            {"index": 5, "name": "Microsoft Teams Audio", "channels": 1},
+        ]
+        with patch("meeting_listener.list_audio_devices", return_value=devices), \
+             patch("overlay.detect_meeting_app", return_value="TEAMS"):
+            self.assertEqual(meeting_listener.get_virtual_meeting_audio_device(), 5)
+            preferred = meeting_listener.preferred_source_snapshot()
+        self.assertEqual(preferred["kind"], "meeting_audio")
+        self.assertEqual(preferred["device_index"], 5)
+
+    def test_meet_prefers_microphone_when_no_call_audio_source_is_available(self):
+        devices = [
+            {"index": 3, "name": "MacBook Pro Microphone", "channels": 1},
         ]
         with patch("meeting_listener.list_audio_devices", return_value=devices), \
              patch("overlay.detect_meeting_app", return_value="MEET"):
@@ -737,20 +914,68 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertEqual(preferred["kind"], "microphone")
         self.assertEqual(preferred["device_index"], 3)
 
-    def test_generate_suggestion_uses_strong_tier_for_direct_question(self):
-        meeting_listener._transcript_history[:] = ["Interviewer: What is a variable?"]
-        with patch("meeting_listener.ask_with_priority", return_value="A variable is a named reference to a value, so you can store and reuse data in a program.") as ask_mock:
-            text = meeting_listener._generate_suggestion("What is a variable?")
-        self.assertIn("named reference", text)
+    def test_caption_fallback_uses_structured_snapshot_line(self):
+        snapshot = {
+            "ok": True,
+            "lines": ["Can you explain optimistic locking?"],
+        }
+        with patch("browser.meeting_caption_snapshot", return_value=snapshot):
+            line = meeting_listener._try_caption_fallback()
+        self.assertEqual(line, "Can you explain optimistic locking?")
+
+    def test_generate_suggestion_uses_strong_tier_for_interview_style_prompt(self):
+        previous_history = list(meeting_listener._transcript_history)
+        try:
+            meeting_listener._transcript_history[:] = ["Interviewer: Tell me about yourself for a cybersecurity role."]
+            with patch(
+                "meeting_listener.ask_with_priority",
+                return_value="Start with your role, then name one concrete result and one tool you used.",
+            ) as ask_mock:
+                text = meeting_listener._generate_suggestion("Tell me about yourself for a cybersecurity role.")
+        finally:
+            meeting_listener._transcript_history[:] = previous_history
+        self.assertIn("one concrete result", text)
         self.assertEqual(ask_mock.call_args.kwargs["tier"], "strong")
         self.assertIn("Return exactly what Aman should say next", ask_mock.call_args.args[0])
 
     def test_generate_suggestion_uses_cheap_tier_for_nontechnical_statement(self):
-        meeting_listener._transcript_history[:] = ["Speaker: Thanks everyone for joining."]
-        with patch("meeting_listener.ask_with_priority", return_value="Thanks for the overview. The main thing I’m tracking is the rollout timing.") as ask_mock:
-            text = meeting_listener._generate_suggestion("Thanks everyone for joining.")
+        previous_history = list(meeting_listener._transcript_history)
+        try:
+            meeting_listener._transcript_history[:] = ["Speaker: Thanks everyone for joining."]
+            with patch("meeting_listener.ask_with_priority", return_value="Thanks for the overview. The main thing I’m tracking is the rollout timing.") as ask_mock:
+                text = meeting_listener._generate_suggestion("Thanks everyone for joining.")
+        finally:
+            meeting_listener._transcript_history[:] = previous_history
         self.assertIn("rollout timing", text)
         self.assertEqual(ask_mock.call_args.kwargs["tier"], "cheap")
+
+    def test_try_caption_fallback_suppresses_duplicate_caption_line(self):
+        snapshot = {
+            "ok": True,
+            "lines": ["Tell me about yourself for a cybersecurity interview."],
+        }
+        previous_caption = meeting_listener._last_caption
+        previous_caption_at = meeting_listener._last_caption_at
+        previous_suggestion_at = meeting_listener._last_suggestion_at
+        previous_active = meeting_listener._caption_fallback_active
+        duplicate_snapshot = None
+        try:
+            meeting_listener._last_caption = "Tell me about yourself for a cybersecurity interview."
+            meeting_listener._last_caption_at = 10.0
+            meeting_listener._last_suggestion_at = 11.0
+            meeting_listener._caption_fallback_active = True
+            with patch("browser.meeting_caption_snapshot", return_value=snapshot):
+                line = meeting_listener._try_caption_fallback()
+                duplicate_snapshot = meeting_listener.status_snapshot()
+        finally:
+            meeting_listener._last_caption = previous_caption
+            meeting_listener._last_caption_at = previous_caption_at
+            meeting_listener._last_suggestion_at = previous_suggestion_at
+            meeting_listener._caption_fallback_active = previous_active
+
+        self.assertEqual(line, "")
+        self.assertIsNotNone(duplicate_snapshot)
+        self.assertFalse(duplicate_snapshot["caption_fallback_active"])
 
 
 class ModelRouterFallbackTests(unittest.TestCase):
@@ -965,6 +1190,220 @@ class MemoryConsolidationTests(unittest.TestCase):
         self.assertIn("Jarvis AI", " ".join(status["working_memory"].get("active_projects", [])))
         self.assertIn("Durable user profile", context)
         self.assertIn("Working memory", context)
+
+
+class _StubPanel:
+    def __init__(self, visible=False):
+        self.visible = visible
+
+    def isVisible(self):
+        return self.visible
+
+    def show(self):
+        self.visible = True
+
+    def hide(self):
+        self.visible = False
+
+
+class _StubTextWidget:
+    def __init__(self, text=""):
+        self._text = text
+        self.style = ""
+
+    def setText(self, text):
+        self._text = text
+
+    def setPlainText(self, text):
+        self._text = text
+
+    def setStyleSheet(self, style):
+        self.style = style
+
+    def text(self):
+        return self._text
+
+    def moveCursor(self, *args, **kwargs):
+        return None
+
+
+class _StubButton:
+    def __init__(self):
+        self.text = ""
+        self.style = ""
+
+    def setText(self, text):
+        self.text = text
+
+    def setStyleSheet(self, style):
+        self.style = style
+
+
+class LiveAssistRenderingTests(unittest.TestCase):
+    def test_toolbar_manual_prompt_renders_when_surface_is_visible(self):
+        window = SimpleNamespace(
+            _meeting_toolbar_mode=False,
+            suggest_panel=_StubPanel(visible=True),
+            suggest_label=_StubTextWidget("Listening to call..."),
+            transcript_label=_StubTextWidget(""),
+            _update_meeting_toolbar_layout=lambda: None,
+        )
+
+        ui.JarvisWindow._show_toolbar_message(window, "Tell me about yourself for a cybersecurity role", "user", "")
+        self.assertEqual(window.suggest_label.text(), "Working on: Tell me about yourself for a cybersecurity role")
+        self.assertEqual(window.transcript_label.text(), "Generating response...")
+        self.assertTrue(window.suggest_panel.isVisible())
+
+        ui.JarvisWindow._show_toolbar_message(window, "Give a brief summary of your role, what you have been working on, and one concrete result.", "jarvis", "gpt-4o-mini")
+        self.assertEqual(
+            window.suggest_label.text(),
+            "Give a brief summary of your role, what you have been working on, and one concrete result.",
+        )
+        self.assertEqual(window.transcript_label.text(), "[gpt-4o-mini] Manual response ready.")
+
+    def test_live_snapshot_refresh_updates_visible_labels(self):
+        live_snapshot = {
+            "running": True,
+            "preferred": {"kind": "meeting_audio", "device_name": "Microsoft Teams Audio"},
+            "active_device_name": "Microsoft Teams Audio",
+            "last_transcript": "What is a variable?",
+            "last_transcript_at": 10.0,
+            "last_suggestion": "A variable is a named storage location that can change during program execution.",
+            "last_suggestion_at": 11.0,
+            "started_at": 9.0,
+        }
+        window = SimpleNamespace(
+            _last_live_listener_started_at=0.0,
+            _last_live_transcript_at=0.0,
+            _last_live_suggestion_at=0.0,
+            suggest_panel=_StubPanel(),
+            suggest_label=_StubTextWidget(),
+            transcript_label=_StubTextWidget(),
+            _peek_label=_StubTextWidget(),
+            _top_chip=_StubTextWidget(),
+            listen_btn=_StubButton(),
+            privacy_btn=_StubButton(),
+            _call_status_label=_StubTextWidget(),
+            _update_meeting_toolbar_layout=lambda: setattr(window, "layout_refreshed", True),
+            _set_tray_visible=lambda visible: setattr(window, "tray_visible", visible),
+            _add_message=lambda *args, **kwargs: None,
+            _apply_live_transcript_update=lambda text: (
+                setattr(window, "transcript_hook_called", True),
+                window.transcript_label.setText(f"Transcript: {text[:240]}"),
+                window._set_tray_visible(True),
+            ),
+            _action_btn_css=lambda color: f"button:{color}",
+            _call_status_css=lambda tone: f"tone:{tone}",
+            _apply_live_suggestion_update=lambda suggestion: (
+                window.suggest_label.setPlainText(suggestion),
+                window.transcript_label.setText("Live suggestion ready."),
+                window._set_tray_visible(True),
+            ),
+        )
+
+        with patch("ui._overlay_mod.detect_meeting_app", return_value="TEAMS"), \
+             patch("ui._meeting_status_snapshot", return_value=live_snapshot), \
+             patch("ui._live_listener_snapshot", return_value=live_snapshot), \
+             patch("ui.call_privacy.snapshot", return_value={"suppressing_audio": False, "enabled": False}), \
+             patch("ui.shutil.which", return_value="/usr/bin/screencapture"):
+            ui.OrbShellWindow._refresh_live_call_status(window)
+
+        self.assertTrue(getattr(window, "transcript_hook_called", False))
+        self.assertEqual(window.transcript_label.text(), "Live suggestion ready.")
+        self.assertIn("A variable is a named storage location", window.suggest_label.text())
+        self.assertEqual(window.listen_btn.text, "■")
+        self.assertTrue(getattr(window, "tray_visible", False))
+
+    def test_orb_transcript_update_shows_partial_heard_question(self):
+        window = SimpleNamespace(
+            transcript_label=_StubTextWidget(),
+            suggest_label=_StubTextWidget(),
+            _peek_label=_StubTextWidget(),
+            _top_chip=_StubTextWidget(),
+            _call_status_label=_StubTextWidget("Meeting: TEAMS"),
+            _current_summary="",
+            _set_tray_visible=unittest.mock.Mock(),
+        )
+
+        ui.OrbShellWindow._apply_live_transcript_update(
+            window,
+            "Tell me about yourself for the cybersecurity role.",
+        )
+
+        self.assertEqual(
+            window.transcript_label.text(),
+            "Transcript: Tell me about yourself for the cybersecurity role.",
+        )
+        self.assertEqual(
+            window._current_summary,
+            "TRANSCRIPT: Tell me about yourself for the cybersecurity role.",
+        )
+        self.assertEqual(
+            window._peek_label.text(),
+            "TRANSCRIPT: Tell me about yourself for the cybersecurity role.",
+        )
+        self.assertEqual(window._top_chip.text(), "SMART LISTEN ACTIVE")
+        window._set_tray_visible.assert_called_once_with(True)
+
+
+class UnderstandingQualitySmokeTests(unittest.TestCase):
+    def _make_orb_window(self):
+        window = SimpleNamespace(
+            _last_live_listener_started_at=0.0,
+            _last_live_transcript_at=0.0,
+            _last_live_suggestion_at=0.0,
+            suggest_panel=_StubPanel(),
+            suggest_label=_StubTextWidget(),
+            transcript_label=_StubTextWidget(),
+            _peek_label=_StubTextWidget(),
+            _top_chip=_StubTextWidget(),
+            listen_btn=_StubButton(),
+            privacy_btn=_StubButton(),
+            _call_status_label=_StubTextWidget(),
+            _update_meeting_toolbar_layout=lambda: None,
+            _add_message=lambda *args, **kwargs: None,
+            _action_btn_css=lambda color: f"button:{color}",
+            _call_status_css=lambda tone: f"tone:{tone}",
+        )
+        window.tray_visible = False
+        window._set_tray_visible = lambda visible: setattr(window, "tray_visible", visible)
+        return window
+
+    def test_fragmented_captions_build_a_coherent_prompt_and_update_visible_assist(self):
+        previous_history = list(meeting_listener._transcript_history)
+        meeting_listener._transcript_history[:] = ["tell me about yourself"]
+        captured = {}
+
+        def fake_ask(prompt, tier):
+            captured["prompt"] = prompt
+            captured["tier"] = tier
+            return "A variable is a named storage location used to hold changing data."
+
+        try:
+            with patch("meeting_listener.ask_with_priority", side_effect=fake_ask):
+                suggestion = meeting_listener._generate_suggestion("what is a variable")
+        finally:
+            meeting_listener._transcript_history[:] = previous_history
+
+        prompt = captured["prompt"]
+        self.assertEqual(captured["tier"], "strong")
+        self.assertIn("Recent conversation transcript:", prompt)
+        self.assertIn("tell me about yourself", prompt.lower())
+        self.assertIn("what is a variable", prompt.lower())
+        self.assertLess(prompt.lower().index("tell me about yourself"), prompt.lower().index("what is a variable"))
+        self.assertIn("variable", suggestion.lower())
+
+        window = self._make_orb_window()
+        ui.OrbShellWindow._apply_live_transcript_update(window, "tell me about yourself")
+        self.assertEqual(window.transcript_label.text(), "Transcript: tell me about yourself")
+        ui.OrbShellWindow._apply_live_transcript_update(window, "what is a variable")
+        self.assertEqual(window.transcript_label.text(), "Transcript: what is a variable")
+        ui.OrbShellWindow._apply_live_suggestion_update(window, suggestion)
+
+        self.assertEqual(window.suggest_label.text(), suggestion)
+        self.assertEqual(window.transcript_label.text(), "Live suggestion ready.")
+        self.assertTrue(window.tray_visible)
+        self.assertIn("SUGGESTION:", window._peek_label.text())
 
 
 if __name__ == "__main__":

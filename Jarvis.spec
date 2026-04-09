@@ -25,6 +25,9 @@ EXCLUDE_EXTS = {
 
 def iter_datas():
     datas = []
+    env_path = ROOT / ".env"
+    if env_path.is_file():
+        datas.append((str(env_path), "."))
     for path in ROOT.rglob("*"):
         rel = path.relative_to(ROOT)
         if any(part in EXCLUDE_DIRS for part in rel.parts):
@@ -52,20 +55,24 @@ hiddenimports = sorted(set(
         "browser",
         "call_privacy",
         "camera",
+        "bridge",
         "config",
         "conversation_context",
         "cost_policy",
+        "device_panel",
         "evals",
         "google_services",
         "hardware",
         "hotkeys",
         "interview_profile",
+        "jarvis_daemon",
         "learner",
         "local_beta",
         "local_model_automation",
         "local_model_eval",
         "local_training",
         "meeting_listener",
+        "meeting_controller",
         "memory",
         "messages",
         "model_router",
@@ -79,6 +86,7 @@ hiddenimports = sorted(set(
         "router",
         "screen_capture",
         "self_improve",
+        "runtime_state",
         "semantic_memory",
         "skill_factory",
         "skills",

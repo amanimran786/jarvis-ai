@@ -1,8 +1,40 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+def _load_jarvis_dotenv() -> None:
+    candidates: list[Path] = []
+    cwd = Path.cwd()
+    here = Path(__file__).resolve().parent
+
+    candidates.extend([
+        cwd / ".env",
+        here / ".env",
+        Path.home() / "jarvis-ai" / ".env",
+    ])
+
+    if getattr(sys, "frozen", False):
+        exe = Path(sys.executable).resolve()
+        candidates.extend([
+            exe.parent / ".env",
+            exe.parent.parent / "Resources" / ".env",
+        ])
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except Exception:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if candidate.is_file():
+            load_dotenv(candidate, override=False)
+
+
+_load_jarvis_dotenv()
 
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")

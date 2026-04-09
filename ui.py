@@ -12,6 +12,7 @@ import model_router
 import self_improve as si
 import hotkeys
 import meeting_listener
+import api
 import agents
 import evals
 import conversation_context as ctx
@@ -21,7 +22,7 @@ from PyQt6.QtWidgets import (
     QScrollArea, QFrame, QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import (
-    Qt, QThread, pyqtSignal, QTimer, QSize, QPropertyAnimation,
+    Qt, QObject, QThread, pyqtSignal, QTimer, QSize, QPropertyAnimation,
     QRect, QPoint, QEasingCurve, QRectF
 )
 from PyQt6.QtGui import (
@@ -38,8 +39,25 @@ import tools
 import google_services as gs
 import terminal
 import stealth
+import hardware as hw
+import browser
 import overlay as _overlay_mod
 import call_privacy
+
+try:
+    import meeting_controller as _meeting_controller_mod
+except Exception:
+    _meeting_controller_mod = None
+
+try:
+    import device_panel as _device_panel_mod
+except Exception:
+    _device_panel_mod = None
+
+try:
+    import bridge as _bridge_mod
+except Exception:
+    _bridge_mod = None
 
 try:
     from Foundation import NSBundle, NSProcessInfo
@@ -86,6 +104,170 @@ def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
         border: 1px solid {border};
         border-radius: {radius}px;
     """
+
+
+def _call_optional(module, names, *args, **kwargs):
+    if module is None:
+        return False, None
+    for name in names:
+        fn = getattr(module, name, None)
+        if not callable(fn):
+            continue
+        try:
+            return True, fn(*args, **kwargs)
+        except TypeError:
+            try:
+                return True, fn()
+            except TypeError:
+                continue
+    return False, None
+
+
+def _meeting_is_running() -> bool:
+    handled, value = _call_optional(_meeting_controller_mod, ("is_running", "running"))
+    if handled:
+        return bool(value)
+    return meeting_listener.is_running()
+
+
+def _meeting_start(on_transcript=None, on_suggestion=None) -> str:
+    handled, value = _call_optional(
+        _meeting_controller_mod,
+        ("start_listening", "start"),
+        on_transcript=on_transcript,
+        on_suggestion=on_suggestion,
+    )
+    if handled:
+        return value if isinstance(value, str) else str(value or "")
+    return meeting_listener.start(
+        on_transcript=on_transcript,
+        on_suggestion=on_suggestion,
+    )
+
+
+def _meeting_stop() -> str:
+    handled, value = _call_optional(_meeting_controller_mod, ("stop_listening", "stop"))
+    if handled:
+        return value if isinstance(value, str) else str(value or "")
+    return meeting_listener.stop()
+
+
+def _meeting_status_snapshot() -> dict:
+    handled, value = _call_optional(
+        _meeting_controller_mod,
+        ("status_snapshot", "refresh_status", "snapshot"),
+        force_refresh=True,
+    )
+    if handled and isinstance(value, dict):
+        return value
+    return meeting_listener.status_snapshot()
+
+
+def _live_listener_snapshot(snapshot: dict) -> dict:
+    listener = snapshot.get("listener")
+    if isinstance(listener, dict):
+        return listener
+    return snapshot
+
+
+def _force_text_widget_update(widget, text: str):
+    """
+    Force Qt to repaint even when the visible text is identical to the current value.
+    """
+    current = None
+    if hasattr(widget, "toPlainText"):
+        try:
+            current = widget.toPlainText()
+        except Exception:
+            current = None
+    elif hasattr(widget, "text"):
+        try:
+            current = widget.text()
+        except Exception:
+            current = None
+
+    if current == text:
+        try:
+            widget.clear()
+        except Exception:
+            pass
+    if hasattr(widget, "setPlainText"):
+        widget.setPlainText(text)
+    else:
+        widget.setText(text)
+
+
+class LiveUpdateBridge(QObject):
+    transcript = pyqtSignal(str)
+    suggestion = pyqtSignal(str)
+
+
+def _trace_ui_event(window, surface: str, event: str, text: str = "", **fields):
+    snippet = text.strip().replace("\n", " ")
+    if len(snippet) > 160:
+        snippet = snippet[:157].rstrip() + "..."
+    extras = " ".join(f"{key}={value}" for key, value in fields.items() if value not in (None, ""))
+    visible = int(bool(getattr(window, "isVisible", lambda: False)()))
+    tray = int(bool(getattr(window, "suggest_panel", None) and window.suggest_panel.isVisible()))
+    stamp = datetime.now().strftime("%H:%M:%S")
+    line = f"[jarvis-ui] {stamp} window={window.__class__.__name__} surface={surface} event={event} visible={visible} tray={tray}"
+    if snippet:
+        line += f" text={snippet}"
+    if extras:
+        line += f" {extras}"
+    print(line, file=sys.stderr, flush=True)
+
+
+def _device_refresh_snapshot(timeout: float = 1.2) -> dict:
+    handled, value = _call_optional(
+        _device_panel_mod,
+        ("refresh_devices", "refresh_nearby_devices", "refresh"),
+        timeout=timeout,
+    )
+    if handled and isinstance(value, dict):
+        return value
+    return hw.discover_nearby(timeout=timeout)
+
+
+def _device_open_settings(target: str) -> str:
+    handled, value = _call_optional(
+        _device_panel_mod,
+        ("open_device_settings", "open_system_settings", "open_settings"),
+        target,
+    )
+    if handled and isinstance(value, str):
+        return value
+    return hw.open_system_settings(target)
+
+
+def _bridge_snapshot_data() -> dict:
+    handled, value = _call_optional(
+        _bridge_mod,
+        ("refresh_bridge", "bridge_status", "status_snapshot", "status"),
+    )
+    if handled and isinstance(value, dict):
+        return value
+    return hw.bridge_status(api_host=api.get_host(), api_port=api.get_port())
+
+
+def _device_copy_bridge_url() -> str | None:
+    handled, value = _call_optional(
+        _device_panel_mod,
+        ("copy_bridge_url", "copy_bridge_link", "copy_bridge_uri"),
+    )
+    if handled:
+        return value if isinstance(value, str) else None
+    return None
+
+
+def _device_copy_current_page_url() -> str | None:
+    handled, value = _call_optional(
+        _device_panel_mod,
+        ("copy_current_page_url", "copy_current_url", "copy_page_url"),
+    )
+    if handled:
+        return value if isinstance(value, str) else None
+    return None
 
 
 def _build_runtime_app_icon(size: int = 512) -> QIcon:
@@ -1004,6 +1186,9 @@ class MessageBubble(QFrame):
 # ── Main Window ────────────────────────────────────────────────────────────────
 
 class JarvisWindow(QMainWindow):
+    _live_transcript_signal = pyqtSignal(str)
+    _live_suggestion_signal = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("J.A.R.V.I.S")
@@ -1016,8 +1201,33 @@ class JarvisWindow(QMainWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._auto_listen_suppressed_meeting = None
+        self._auto_listen_engaged_meeting = None
+        self._meeting_toolbar_mode = False
+        self._meeting_toolbar_auto = False
+        self._normal_geometry = None
+        self._last_live_listener_started_at = 0.0
+        self._last_live_transcript_at = 0.0
+        self._last_live_suggestion_at = 0.0
         self._build_ui()
+        self._live_updates = LiveUpdateBridge(self)
+        self._bind_live_update_signals()
         self._start_voice()
+
+    def _bind_live_update_signals(self):
+        if getattr(self, "_live_signals_bound", False):
+            return
+        if not hasattr(self, "_live_updates"):
+            self._live_updates = LiveUpdateBridge(self)
+        self._live_updates.transcript.connect(self._apply_live_transcript_update)
+        self._live_updates.suggestion.connect(self._apply_live_suggestion_update)
+        self._live_signals_bound = True
+
+    def _on_transcript(self, text: str):
+        self._live_updates.transcript.emit(text)
+
+    def _on_suggestion(self, suggestion: str):
+        self._live_updates.suggestion.emit(suggestion)
 
     # ── Build UI ───────────────────────────────────────────────────────────────
 
@@ -1040,6 +1250,7 @@ class JarvisWindow(QMainWindow):
 
         # ── Header ──────────────────────────────────────────────────────────
         header = QWidget()
+        self._header = header
         header.setFixedHeight(70)
         header.setAutoFillBackground(True)
         hp = header.palette()
@@ -1065,6 +1276,8 @@ class JarvisWindow(QMainWindow):
         _glow(title, C_CYAN, 14)
 
         subtitle = QLabel("Just A Rather Very Intelligent System")
+        self._subtitle = subtitle
+        self._base_subtitle_text = subtitle.text()
         subtitle.setFont(QFont("Courier New", 7))
         subtitle.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 1px;")
 
@@ -1097,10 +1310,10 @@ class JarvisWindow(QMainWindow):
         h_layout.addLayout(status_block)
 
         # Overlay launch button
-        overlay_btn = QPushButton("⬡ ASSIST")
-        overlay_btn.setFixedHeight(28)
-        overlay_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        overlay_btn.setStyleSheet(f"""
+        self.overlay_btn = QPushButton("⬡ ASSIST")
+        self.overlay_btn.setFixedHeight(28)
+        self.overlay_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.overlay_btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {C_CYAN};
@@ -1111,20 +1324,64 @@ class JarvisWindow(QMainWindow):
             }}
             QPushButton:hover {{ background: {C_BLUE}; }}
         """)
-        overlay_btn.setToolTip("Toggle Meeting Assist overlay (Cmd+Opt+O)")
-        overlay_btn.clicked.connect(_overlay_mod.toggle)
-        h_layout.addWidget(overlay_btn)
+        self.overlay_btn.setToolTip("Toggle Meeting Assist overlay (Cmd+Opt+O)")
+        self.overlay_btn.clicked.connect(_overlay_mod.toggle)
+        h_layout.addWidget(self.overlay_btn)
+
+        self.devices_btn = QPushButton("◎ DEVICES")
+        self.devices_btn.setFixedHeight(28)
+        self.devices_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.devices_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {C_TEXT_DIM};
+                border: 1px solid {C_BORDER};
+                border-radius: 3px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                color: {C_CYAN};
+                border-color: {C_CYAN};
+                background: {C_BLUE};
+            }}
+        """)
+        self.devices_btn.setToolTip("Show nearby devices and bridge actions")
+        self.devices_btn.clicked.connect(self._toggle_device_panel)
+        h_layout.addWidget(self.devices_btn)
+
+        self.compact_btn = QPushButton("▁")
+        self.compact_btn.setFixedSize(28, 28)
+        self.compact_btn.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+        self.compact_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {C_TEXT_DIM};
+                border: 1px solid {C_BORDER};
+                border-radius: 3px;
+            }}
+            QPushButton:hover {{
+                color: {C_CYAN};
+                border-color: {C_CYAN};
+                background: {C_BLUE};
+            }}
+        """)
+        self.compact_btn.setToolTip("Toggle compact meeting bar")
+        self.compact_btn.clicked.connect(self._toggle_meeting_toolbar_mode)
+        h_layout.addWidget(self.compact_btn)
 
         root.addWidget(header)
 
         # ── Divider ──────────────────────────────────────────────────────────
         div = QLabel()
+        self._div_top = div
         div.setFixedHeight(1)
         div.setStyleSheet(f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 transparent, stop:0.3 {C_CYAN}, stop:0.7 {C_CYAN}, stop:1 transparent);")
         root.addWidget(div)
 
         # ── Orb panel ────────────────────────────────────────────────────────
         orb_panel = QWidget()
+        self._orb_panel = orb_panel
         orb_panel.setFixedHeight(340)
         orb_panel.setStyleSheet("background: transparent;")
         orb_layout = QHBoxLayout(orb_panel)
@@ -1160,6 +1417,7 @@ class JarvisWindow(QMainWindow):
 
         # Divider below orb
         div1b = QLabel()
+        self._div_after_orb = div1b
         div1b.setFixedHeight(1)
         div1b.setStyleSheet(div.styleSheet())
         root.addWidget(div1b)
@@ -1193,12 +1451,14 @@ class JarvisWindow(QMainWindow):
 
         # ── Divider ──────────────────────────────────────────────────────────
         div2 = QLabel()
+        self._div_before_input = div2
         div2.setFixedHeight(1)
         div2.setStyleSheet(div.styleSheet())
         root.addWidget(div2)
 
         # ── Input area ───────────────────────────────────────────────────────
         input_bar = QWidget()
+        self._input_bar = input_bar
         input_bar.setFixedHeight(68)
         input_bar.setAutoFillBackground(True)
         ip = input_bar.palette()
@@ -1217,6 +1477,14 @@ class JarvisWindow(QMainWindow):
         self.listen_btn = self._hud_btn("🎧")
         self.listen_btn.setToolTip("Smart Listen — tap into call audio (Cmd+Shift+M)")
         self.listen_btn.clicked.connect(self._toggle_smart_listen)
+
+        self.scan_btn = self._hud_btn("⌁")
+        self.scan_btn.setToolTip("Analyze the current screen")
+        self.scan_btn.clicked.connect(self._hotkey_screen)
+
+        self.cam_btn = self._hud_btn("◉")
+        self.cam_btn.setToolTip("Analyze the current camera frame")
+        self.cam_btn.clicked.connect(self._hotkey_webcam)
 
         self.flag_btn = self._hud_btn("⚑")
         self.flag_btn.setToolTip("Flag the last Jarvis answer for evals")
@@ -1264,6 +1532,8 @@ class JarvisWindow(QMainWindow):
 
         i_layout.addWidget(self.attach_btn)
         i_layout.addWidget(self.listen_btn)
+        i_layout.addWidget(self.scan_btn)
+        i_layout.addWidget(self.cam_btn)
         i_layout.addWidget(self.flag_btn)
         i_layout.addWidget(self.input_field, stretch=1)
         i_layout.addWidget(self.send_btn)
@@ -1313,10 +1583,97 @@ class JarvisWindow(QMainWindow):
 
         root.addWidget(self.suggest_panel)
 
+        # ── Nearby devices panel ────────────────────────────────────────────
+        self.device_panel = QWidget()
+        self.device_panel.setAutoFillBackground(True)
+        dp = self.device_panel.palette()
+        dp.setColor(QPalette.ColorRole.Window, QColor("#010C14"))
+        self.device_panel.setPalette(dp)
+        self.device_panel.setStyleSheet(
+            _glass_panel_css(fill="rgba(1, 12, 20, 228)", radius=0) +
+            f"border-top: 1px solid {C_BORDER};"
+        )
+        self.device_panel.hide()
+
+        dl = QVBoxLayout(self.device_panel)
+        dl.setContentsMargins(14, 8, 14, 10)
+        dl.setSpacing(6)
+
+        dh = QHBoxLayout()
+        dh.setSpacing(6)
+        dlbl = QLabel("◎  NEARBY DEVICES  —  BRIDGE")
+        dlbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        dlbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
+        dh.addWidget(dlbl)
+        dh.addStretch()
+
+        self.device_refresh_btn = self._hud_btn("↻")
+        self.device_refresh_btn.setFixedSize(34, 34)
+        self.device_refresh_btn.setToolTip("Refresh nearby devices")
+        self.device_refresh_btn.clicked.connect(self._refresh_nearby_devices)
+        dh.addWidget(self.device_refresh_btn)
+        dl.addLayout(dh)
+
+        self.device_summary = QTextEdit()
+        self.device_summary.setReadOnly(True)
+        self.device_summary.setMinimumHeight(140)
+        self.device_summary.setMaximumHeight(220)
+        self.device_summary.setFont(QFont("Courier New", 9))
+        self.device_summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.device_summary.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.device_summary.setStyleSheet(f"""
+            QTextEdit {{
+                background: {C_PANEL};
+                color: {C_TEXT};
+                border: 1px solid {C_BORDER};
+                border-radius: 2px;
+                padding: 8px 10px;
+            }}
+        """)
+        dl.addWidget(self.device_summary)
+
+        self.device_action_row = QHBoxLayout()
+        self.device_action_row.setSpacing(8)
+
+        self.device_bt_btn = self._hud_btn("BT")
+        self.device_bt_btn.setToolTip("Open Bluetooth settings")
+        self.device_bt_btn.clicked.connect(lambda: self._open_device_settings("bluetooth"))
+        self.device_action_row.addWidget(self.device_bt_btn)
+
+        self.device_sound_btn = self._hud_btn("AIR")
+        self.device_sound_btn.setToolTip("Open Sound / AirPlay settings")
+        self.device_sound_btn.clicked.connect(lambda: self._open_device_settings("sound"))
+        self.device_action_row.addWidget(self.device_sound_btn)
+
+        self.device_display_btn = self._hud_btn("DSP")
+        self.device_display_btn.setToolTip("Open Displays settings")
+        self.device_display_btn.clicked.connect(lambda: self._open_device_settings("displays"))
+        self.device_action_row.addWidget(self.device_display_btn)
+
+        self.device_bridge_btn = self._hud_btn("URL")
+        self.device_bridge_btn.setToolTip("Copy Jarvis bridge URL")
+        self.device_bridge_btn.clicked.connect(self._copy_bridge_url)
+        self.device_action_row.addWidget(self.device_bridge_btn)
+
+        self.device_page_btn = self._hud_btn("TAB")
+        self.device_page_btn.setToolTip("Copy current browser page URL")
+        self.device_page_btn.clicked.connect(self._copy_current_page_url)
+        self.device_action_row.addWidget(self.device_page_btn)
+
+        self.device_action_row.addStretch()
+        dl.addLayout(self.device_action_row)
+
+        root.addWidget(self.device_panel)
+
         self._telemetry_timer = QTimer(self)
         self._telemetry_timer.timeout.connect(self._refresh_telemetry)
         self._telemetry_timer.start(1200)
+        self._device_timer = QTimer(self)
+        self._device_timer.timeout.connect(self._refresh_nearby_devices)
+        self._device_timer.start(15000)
         self._refresh_telemetry()
+        self._refresh_nearby_devices()
+        self._update_meeting_toolbar_layout()
 
     def _hud_btn(self, label: str) -> QPushButton:
         btn = QPushButton(label)
@@ -1334,6 +1691,108 @@ class JarvisWindow(QMainWindow):
             }}
         """)
         return btn
+
+    def _set_device_panel_visible(self, visible: bool):
+        if self._meeting_toolbar_mode and visible:
+            self._add_message("Nearby Devices stays hidden while meeting toolbar mode is active.", "jarvis", "Hardware")
+            return
+        self.device_panel.setVisible(visible)
+        self.devices_btn.setText("◉ DEVICES" if visible else "◎ DEVICES")
+        self.devices_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {C_CYAN if visible else C_TEXT_DIM};
+                border: 1px solid {C_CYAN if visible else C_BORDER};
+                border-radius: 3px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                color: {C_CYAN};
+                border-color: {C_CYAN};
+                background: {C_BLUE};
+            }}
+        """)
+        if visible:
+            self._refresh_nearby_devices()
+
+    def _toggle_device_panel(self):
+        self._set_device_panel_visible(not self.device_panel.isVisible())
+
+    def _bridge_snapshot(self) -> dict:
+        return _bridge_snapshot_data()
+
+    def _format_nearby_snapshot(self, snapshot: dict) -> str:
+        bluetooth = snapshot.get("bluetooth", {})
+        network = snapshot.get("network", {}).get("services", {})
+        bridge = self._bridge_snapshot()
+
+        connected_bt = [item.get("name", "") for item in bluetooth.get("connected", []) if item.get("name")]
+        known_bt = [item.get("name", "") for item in bluetooth.get("known", []) if item.get("name")]
+        airplay = [item.get("name", "") for item in network.get("airplay", []) if item.get("name")]
+        raop = [item.get("name", "") for item in network.get("raop", []) if item.get("name")]
+        companion = [item.get("name", "") for item in network.get("companion", []) if item.get("name")]
+        cast = [item.get("name", "") for item in network.get("googlecast", []) if item.get("name")]
+
+        lines = [
+            f"Bridge: {'LAN enabled' if bridge.get('enabled') else 'Local only'}",
+            f"Primary URL: {bridge.get('primary_url', 'unavailable')}",
+        ]
+        if bridge.get("ips"):
+            lines.append("LAN IPs: " + ", ".join(bridge["ips"]))
+
+        lines.extend([
+            "",
+            "Bluetooth connected: " + (", ".join(connected_bt[:4]) if connected_bt else "none active"),
+            "Bluetooth known: " + (", ".join(known_bt[:6]) if known_bt else "none found"),
+            "AirPlay targets: " + (", ".join(airplay[:6]) if airplay else "none found"),
+            "Audio targets: " + (", ".join(raop[:6]) if raop else "none found"),
+            "Nearby Apple devices: " + (", ".join(companion[:6]) if companion else "none found"),
+            "Google Cast: " + (", ".join(cast[:6]) if cast else "none found"),
+            "",
+            "Actions:",
+            "BT = Bluetooth settings   AIR = Sound/AirPlay   DSP = Displays",
+            "URL = copy bridge URL     TAB = copy current page URL",
+        ])
+        return "\n".join(lines)
+
+    def _refresh_nearby_devices(self):
+        if not hasattr(self, "device_summary"):
+            return
+        try:
+            snapshot = _device_refresh_snapshot(timeout=1.2)
+            text = self._format_nearby_snapshot(snapshot)
+        except Exception as e:
+            text = f"Nearby device scan failed: {e}"
+        self.device_summary.setPlainText(text)
+        self.device_summary.moveCursor(QTextCursor.MoveOperation.Start)
+
+    def _open_device_settings(self, target: str):
+        msg = _device_open_settings(target)
+        self._add_message(msg, "jarvis", "Hardware")
+
+    def _copy_bridge_url(self):
+        bridge = self._bridge_snapshot()
+        url = bridge.get("primary_url", "")
+        if not url:
+            self._add_message("No bridge URL is available yet.", "jarvis", "Hardware")
+            return
+        handled_msg = _device_copy_bridge_url()
+        if handled_msg is None:
+            terminal.set_clipboard(url)
+        mode = "LAN" if bridge.get("enabled") else "local-only"
+        self._add_message(handled_msg or f"Copied the {mode} Jarvis URL: {url}", "jarvis", "Hardware")
+
+    def _copy_current_page_url(self):
+        page = browser.get_current_page_info()
+        if not page.get("ok") or not page.get("url"):
+            self._add_message(page.get("error", "I couldn't read the current browser page."), "jarvis", "Browser")
+            return
+        handled_msg = _device_copy_current_page_url()
+        if handled_msg is None:
+            terminal.set_clipboard(page["url"])
+        title = page.get("title") or "Current page"
+        self._add_message(handled_msg or f"Copied page URL for {title}: {page['url']}", "jarvis", "Browser")
 
     # ── Resize: keep HUD background covering full window ──────────────────────
 
@@ -1385,6 +1844,11 @@ class JarvisWindow(QMainWindow):
             on_overlay=_overlay_mod.toggle,
         )
         hotkeys.start()
+
+        self._meeting_watchdog_timer = QTimer(self)
+        self._meeting_watchdog_timer.timeout.connect(self._meeting_watchdog_tick)
+        self._meeting_watchdog_tick()
+        self._meeting_watchdog_timer.start(1000)
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
@@ -1444,33 +1908,201 @@ class JarvisWindow(QMainWindow):
     # ── Smart Listen ───────────────────────────────────────────────────────────
 
     def _toggle_smart_listen(self):
-        if meeting_listener.is_running():
-            msg = meeting_listener.stop()
+        if _meeting_is_running():
+            msg = _meeting_stop()
             self.suggest_panel.hide()
             self._add_message(msg, "jarvis", "")
+            meeting = _overlay_mod.detect_meeting_app() or "NONE"
+            self._auto_listen_suppressed_meeting = meeting if meeting != "NONE" else None
+            self._auto_listen_engaged_meeting = None
+            self._last_live_listener_started_at = 0.0
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
+            self.transcript_label.setText("Smart Listen offline.")
+            self._subtitle.setText(self._base_subtitle_text)
+            self.listen_btn.setText("🎧")
+            self._set_status("ONLINE")
         else:
-            msg = meeting_listener.start(
+            msg = _meeting_start(
                 on_transcript=self._on_transcript,
                 on_suggestion=self._on_suggestion,
             )
             self.suggest_panel.show()
             self._add_message(msg, "jarvis", "")
+            meeting = _overlay_mod.detect_meeting_app() or "NONE"
+            self._auto_listen_suppressed_meeting = None
+            self._auto_listen_engaged_meeting = meeting if meeting != "NONE" else None
+            self._last_live_listener_started_at = 0.0
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
+            self.transcript_label.setText("Live call transcript incoming...")
+            self._subtitle.setText("Smart Listen active")
+            self.listen_btn.setText("■")
+            self._set_status("LISTENING")
+        self._update_meeting_toolbar_layout()
 
-    def _on_transcript(self, text: str):
-        QTimer.singleShot(0, lambda: self.transcript_label.setText(f'» {text}'))
+    def _apply_live_transcript_update(self, text: str):
+        _trace_ui_event(self, "classic-toolbar", "live_transcript", text)
+        _force_text_widget_update(self.transcript_label, f"Transcript: {text[:240]}")
+        self.suggest_panel.show()
+        self._update_meeting_toolbar_layout()
 
-    def _on_suggestion(self, suggestion: str):
-        QTimer.singleShot(0, lambda: self._show_suggestion(suggestion))
+    def _apply_live_suggestion_update(self, suggestion: str):
+        _trace_ui_event(self, "classic-toolbar", "live_suggestion", suggestion)
+        _force_text_widget_update(self.suggest_label, suggestion)
+        self.suggest_panel.show()
+        if suggestion:
+            self._add_message(suggestion, "jarvis", "Meeting")
+        self._update_meeting_toolbar_layout()
 
     def _show_suggestion(self, suggestion: str):
-        self.suggest_label.setText(suggestion)
-        self.suggest_panel.show()
+        self._apply_live_suggestion_update(suggestion)
 
     # ── Briefing ───────────────────────────────────────────────────────────────
 
     def _maybe_brief(self):
         learner.reflect()
         self._set_status("ONLINE")
+
+    def _meeting_watchdog_tick(self):
+        meeting = _overlay_mod.detect_meeting_app() or "NONE"
+        snapshot = _meeting_status_snapshot()
+        live = _live_listener_snapshot(snapshot)
+        preferred = live.get("preferred", {}) or snapshot.get("preferred_source", {}) or snapshot.get("preferred", {})
+        listener_started_at = float(live.get("started_at") or snapshot.get("started_at") or 0.0)
+        if listener_started_at > self._last_live_listener_started_at:
+            self._last_live_listener_started_at = listener_started_at
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
+        last_transcript = (live.get("last_transcript") or snapshot.get("last_transcript") or "").strip()
+        last_suggestion = (live.get("last_suggestion") or snapshot.get("last_suggestion") or "").strip()
+        last_transcript_at = float(live.get("last_transcript_at") or snapshot.get("last_transcript_at") or 0.0)
+        last_suggestion_at = float(live.get("last_suggestion_at") or snapshot.get("last_suggestion_at") or 0.0)
+
+        if last_transcript and last_transcript_at > self._last_live_transcript_at:
+            self._last_live_transcript_at = last_transcript_at
+            self._apply_live_transcript_update(last_transcript)
+        if last_suggestion and last_suggestion_at > self._last_live_suggestion_at:
+            self._last_live_suggestion_at = last_suggestion_at
+            self._apply_live_suggestion_update(last_suggestion)
+
+        if meeting == "NONE":
+            if self._meeting_toolbar_mode and self._meeting_toolbar_auto:
+                self._set_meeting_toolbar_mode(False, auto=True)
+            if not bool(live.get("running", snapshot.get("running", False))):
+                self._auto_listen_suppressed_meeting = None
+                self._auto_listen_engaged_meeting = None
+                self._subtitle.setText(self._base_subtitle_text)
+                self.listen_btn.setText("🎧")
+                self._set_status("ONLINE")
+                self._last_live_listener_started_at = 0.0
+                self._last_live_transcript_at = 0.0
+                self._last_live_suggestion_at = 0.0
+            return
+
+        if not self._meeting_toolbar_mode:
+            self._set_meeting_toolbar_mode(True, auto=True)
+
+        if bool(live.get("running", snapshot.get("running", False))):
+            self._auto_listen_engaged_meeting = meeting
+            self._subtitle.setText("Smart Listen active")
+            self.listen_btn.setText("■")
+            return
+
+        if self._auto_listen_suppressed_meeting == meeting:
+            return
+
+        if preferred.get("kind") == "microphone":
+            return
+
+        self._last_live_listener_started_at = 0.0
+        self._last_live_transcript_at = 0.0
+        self._last_live_suggestion_at = 0.0
+        msg = _meeting_start(
+            on_transcript=self._on_transcript,
+            on_suggestion=self._on_suggestion,
+        )
+        self.suggest_panel.show()
+        self._add_message(msg, "jarvis", "")
+        self.transcript_label.setText("Live call transcript incoming...")
+        self._subtitle.setText("Smart Listen active")
+        self.listen_btn.setText("■")
+        self._set_status("LISTENING")
+        self._auto_listen_engaged_meeting = meeting
+        self._update_meeting_toolbar_layout()
+
+    def _toggle_meeting_toolbar_mode(self):
+        self._set_meeting_toolbar_mode(not self._meeting_toolbar_mode, auto=False)
+
+    def _position_meeting_toolbar(self):
+        screen = QApplication.screenAt(self.frameGeometry().center()) or QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        target_x = geo.x() + max(16, geo.width() - self.width() - 20)
+        target_y = geo.y() + 22
+        self.move(target_x, target_y)
+
+    def _update_meeting_toolbar_layout(self):
+        if not self._meeting_toolbar_mode:
+            return
+        panel_height = 112 if self.suggest_panel.isVisible() else 0
+        target_height = 146 + panel_height
+        self.resize(max(self.width(), 560), target_height)
+        self._position_meeting_toolbar()
+
+    def _set_meeting_toolbar_mode(self, enabled: bool, auto: bool):
+        if enabled == self._meeting_toolbar_mode:
+            if enabled:
+                self._meeting_toolbar_auto = auto
+                self._update_meeting_toolbar_layout()
+            return
+
+        self._meeting_toolbar_mode = enabled
+        self._meeting_toolbar_auto = auto
+
+        if enabled:
+            self._normal_geometry = self.geometry()
+            self.setMinimumSize(560, 146)
+            self.device_panel.hide()
+            self.devices_btn.setText("◎ DEVICES")
+            self.devices_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    color: {C_TEXT_DIM};
+                    border: 1px solid {C_BORDER};
+                    border-radius: 3px;
+                    padding: 0 10px;
+                    letter-spacing: 1px;
+                }}
+                QPushButton:hover {{
+                    color: {C_CYAN};
+                    border-color: {C_CYAN};
+                    background: {C_BLUE};
+                }}
+            """)
+            self._orb_panel.hide()
+            self._div_after_orb.hide()
+            self.scroll.hide()
+            self._div_before_input.hide()
+            self._subtitle.setText("Meeting toolbar mode")
+            self.compact_btn.setText("▣")
+            self.compact_btn.setToolTip("Restore full Jarvis window")
+            self._update_meeting_toolbar_layout()
+            self.raise_()
+            self.activateWindow()
+            return
+
+        self.setMinimumSize(400, 500)
+        self._orb_panel.show()
+        self._div_after_orb.show()
+        self.scroll.show()
+        self._div_before_input.show()
+        self._subtitle.setText("Just A Rather Very Intelligent System")
+        self.compact_btn.setText("▁")
+        self.compact_btn.setToolTip("Toggle compact meeting bar")
+        if self._normal_geometry is not None:
+            self.setGeometry(self._normal_geometry)
 
     def _sync_orb_to_voice(self):
         """Keep orb state in sync with actual TTS playback."""
@@ -1527,10 +2159,34 @@ class JarvisWindow(QMainWindow):
 
     # ── Chat ───────────────────────────────────────────────────────────────────
 
+    def _show_toolbar_message(self, text: str, sender: str, model: str):
+        surface_visible = self._meeting_toolbar_mode or self.suggest_panel.isVisible()
+        event = "manual_prompt" if sender == "user" else "manual_response"
+        _trace_ui_event(self, "classic-toolbar", event, text, model=model, toolbar=surface_visible)
+
+        if sender == "user":
+            preview = text.strip()
+            if len(preview) > 220:
+                preview = preview[:217].rstrip() + "..."
+            self.suggest_label.setText(f"Working on: {preview}")
+            self.transcript_label.setText("Generating response...")
+            self.suggest_panel.show()
+        else:
+            self.suggest_label.setText(text)
+            if model:
+                self.transcript_label.setText(f"[{model}] Manual response ready.")
+            else:
+                self.transcript_label.setText("Manual response ready.")
+
+            self.suggest_panel.show()
+        if self._meeting_toolbar_mode:
+            self._update_meeting_toolbar_layout()
+
     def _add_message(self, text: str, sender: str, model: str):
         bubble = MessageBubble(text, sender, model)
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
+        self._show_toolbar_message(text, sender, model)
         QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
             self.scroll.verticalScrollBar().maximum()
         ))
@@ -1686,9 +2342,9 @@ class OrbShellWindow(JarvisWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setWindowFlags(
+            Qt.WindowType.Window |
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.WindowStaysOnTopHint
         )
         self._workers = []
         self._last_jarvis_interaction = None
@@ -1704,8 +2360,20 @@ class OrbShellWindow(JarvisWindow):
         self._front_focus_refreshing = False
         self._move_anim = None
         self._bootstrapped = False
+        self._last_live_listener_started_at = 0.0
+        self._last_live_transcript_at = 0.0
+        self._last_live_suggestion_at = 0.0
+        # Attributes from JarvisWindow.__init__ not inherited because
+        # OrbShellWindow calls QMainWindow.__init__ directly (skips super)
+        self._meeting_toolbar_mode = False
+        self._meeting_toolbar_auto = False
+        self._auto_listen_suppressed_meeting = None
+        self._auto_listen_engaged_meeting = None
+        self._normal_geometry = None
         self.resize(320, 340)
         self._build_ui()
+        self._live_updates = LiveUpdateBridge(self)
+        self._bind_live_update_signals()
         self._position_initial()
         self._adaptive_timer = QTimer(self)
         self._adaptive_timer.timeout.connect(self._adaptive_tick)
@@ -1725,9 +2393,10 @@ class OrbShellWindow(JarvisWindow):
             return
         self._bootstrapped = True
         self._refresh_live_call_status()
+        self._bind_live_update_signals()
         self._start_voice()
         self._adaptive_timer.start(340)
-        self._call_status_timer.start(2200)
+        self._call_status_timer.start(1000)
 
     def _build_ui(self):
         central = QWidget()
@@ -1770,6 +2439,7 @@ class OrbShellWindow(JarvisWindow):
         self._mode_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
         self._mode_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 2px;")
         orb_layout.addWidget(self._mode_lbl)
+        self._default_top_chip_text = "JARVIS ORBITAL SHELL"
 
         self._orb = JarvisOrb(size=164)
         orb_layout.addWidget(self._orb, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -2143,7 +2813,7 @@ end tell
                     self._collapse_timer.start(1200)
                 return
 
-        self._top_chip.setText("JARVIS ORBITAL SHELL")
+        self._top_chip.setText(self._default_top_chip_text)
 
         if shell_rect.contains(cursor):
             self.setWindowOpacity(0.96)
@@ -2165,9 +2835,16 @@ end tell
         snippet = text.strip().replace("\n", " ")
         if len(snippet) > 220:
             snippet = snippet[:217].rstrip() + "..."
+        event = "manual_prompt" if sender == "user" else "manual_response"
+        _trace_ui_event(self, "orb-tray", event, text, model=model)
         self._current_summary = f"{prefix}: {snippet}"
         self._peek_label.setText(self._current_summary)
-        if sender != "user":
+        if sender == "user":
+            self.suggest_label.setPlainText(f"Working on: {snippet}")
+            self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
+            self.transcript_label.setText("Generating response...")
+            self._set_tray_visible(True)
+        else:
             self.suggest_label.setPlainText(text)
             self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
             self._set_tray_visible(True)
@@ -2175,24 +2852,46 @@ end tell
 
     def _refresh_live_call_status(self):
         meeting = _overlay_mod.detect_meeting_app() or "NONE"
-        snapshot = meeting_listener.status_snapshot()
+        snapshot = _meeting_status_snapshot()
+        live = _live_listener_snapshot(snapshot)
         privacy = call_privacy.snapshot()
-        preferred = snapshot.get("preferred", {})
-        device_name = snapshot.get("active_device_name") or preferred.get("device_name") or "unknown"
+        preferred = live.get("preferred", {}) or snapshot.get("preferred_source", {}) or snapshot.get("preferred", {})
+        listener_started_at = float(live.get("started_at") or snapshot.get("started_at") or 0.0)
+        if listener_started_at > self._last_live_listener_started_at:
+            self._last_live_listener_started_at = listener_started_at
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
+        last_transcript = (live.get("last_transcript") or snapshot.get("last_transcript") or "").strip()
+        last_suggestion = (live.get("last_suggestion") or snapshot.get("last_suggestion") or "").strip()
+        last_transcript_at = float(live.get("last_transcript_at") or snapshot.get("last_transcript_at") or 0.0)
+        last_suggestion_at = float(live.get("last_suggestion_at") or snapshot.get("last_suggestion_at") or 0.0)
+        device_name = live.get("active_device_name") or snapshot.get("active_device_name") or preferred.get("device_name") or "unknown"
         scan_ready = "READY" if shutil.which("screencapture") else "UNAVAILABLE"
 
-        if snapshot.get("running"):
+        if last_transcript and last_transcript_at > self._last_live_transcript_at:
+            self._last_live_transcript_at = last_transcript_at
+            self._apply_live_transcript_update(last_transcript)
+        if last_suggestion and last_suggestion_at > self._last_live_suggestion_at:
+            self._last_live_suggestion_at = last_suggestion_at
+            self._apply_live_suggestion_update(last_suggestion)
+
+        if bool(live.get("running", snapshot.get("running", False))):
             audio_line = f"Audio: live via {device_name}"
             tone = "live"
+            self.listen_btn.setText("■")
+            self._top_chip.setText("SMART LISTEN ACTIVE")
         elif preferred.get("kind") == "microphone":
             audio_line = f"Audio: mic fallback {device_name}"
             tone = "fallback"
+            self.listen_btn.setText("🎧")
         elif meeting != "NONE":
             audio_line = f"Audio: ready via {device_name}"
             tone = "meeting"
+            self.listen_btn.setText("🎧")
         else:
             audio_line = f"Audio: ready via {device_name}"
             tone = "idle"
+            self.listen_btn.setText("🎧")
 
         meeting_line = f"Meeting: {meeting}" if meeting != "NONE" else "Meeting: no active call detected"
         if privacy.get("suppressing_audio"):
@@ -2217,18 +2916,24 @@ end tell
         self._refresh_live_call_status()
 
     def _toggle_smart_listen(self):
-        if meeting_listener.is_running():
-            msg = meeting_listener.stop()
+        if _meeting_is_running():
+            msg = _meeting_stop()
             self._add_message(msg, "jarvis", "")
+            self._last_live_listener_started_at = 0.0
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
             self.transcript_label.setText("Smart Listen offline.")
             self.listen_btn.setText("🎧")
             self._set_status("ONLINE")
         else:
-            msg = meeting_listener.start(
+            msg = _meeting_start(
                 on_transcript=self._on_transcript,
                 on_suggestion=self._on_suggestion,
             )
             self._add_message(msg, "jarvis", "")
+            self._last_live_listener_started_at = 0.0
+            self._last_live_transcript_at = 0.0
+            self._last_live_suggestion_at = 0.0
             self.transcript_label.setText("Live call transcript incoming...")
             self.listen_btn.setText("■")
             self._set_status("LISTENING")
@@ -2236,15 +2941,39 @@ end tell
         self._refresh_live_call_status()
 
     def _on_transcript(self, text: str):
-        QTimer.singleShot(0, lambda: self.transcript_label.setText(f"Transcript: {text[:240]}"))
+        self._live_updates.transcript.emit(text)
+
+    def _apply_live_transcript_update(self, text: str):
+        _trace_ui_event(self, "orb-tray", "live_transcript", text)
+        preview = text.strip().replace("\n", " ")
+        if len(preview) > 180:
+            preview = preview[:177].rstrip() + "..."
+        _force_text_widget_update(self.transcript_label, f"Transcript: {text[:240]}")
+        self._current_summary = f"TRANSCRIPT: {preview}"
+        self._peek_label.setText(self._current_summary)
+        self._top_chip.setText("SMART LISTEN ACTIVE")
+        self._set_tray_visible(True)
 
     def _show_suggestion(self, suggestion: str):
-        self.suggest_label.setPlainText(suggestion)
+        self._apply_live_suggestion_update(suggestion)
+
+    def _apply_live_suggestion_update(self, suggestion: str):
+        _trace_ui_event(self, "orb-tray", "live_suggestion", suggestion)
+        preview = suggestion.strip().replace("\n", " ")
+        if len(preview) > 180:
+            preview = preview[:177].rstrip() + "..."
+        _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
+        if suggestion:
+            self._add_message(suggestion, "jarvis", "Meeting")
+        self._current_summary = f"SUGGESTION: {preview}"
+        self._peek_label.setText(self._current_summary)
+        self._top_chip.setText("SMART LISTEN ACTIVE")
+        self.transcript_label.setText("Live suggestion ready.")
         self._set_tray_visible(True)
 
     def _on_suggestion(self, suggestion: str):
-        QTimer.singleShot(0, lambda: self._show_suggestion(suggestion))
+        self._live_updates.suggestion.emit(suggestion)
 
     def mouseDoubleClickEvent(self, event):
         self._set_tray_visible(not self.suggest_panel.isVisible())
@@ -2309,7 +3038,13 @@ def run():
         }}
     """)
 
-    use_classic = "--classic-ui" in sys.argv or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"
+    bundled_launch = bool(getattr(sys, "frozen", False)) or os.getenv("JARVIS_BUNDLED_APP", "").lower() in {"1", "true", "yes", "on"}
+    default_classic = sys.platform == "darwin" and bundled_launch
+    use_classic = (
+        "--classic-ui" in sys.argv
+        or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"
+        or default_classic
+    )
     window = JarvisWindow() if use_classic else OrbShellWindow()
     window.setWindowIcon(runtime_icon)
     window.show()

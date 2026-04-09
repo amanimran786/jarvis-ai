@@ -16,13 +16,27 @@ import urllib.error
 
 def _base() -> str:
     import os
-    port_file = os.path.join(os.path.dirname(__file__), ".jarvis_port")
+    from pathlib import Path
+
+    candidates = []
     try:
-        with open(port_file) as f:
-            port = f.read().strip()
-        return f"http://127.0.0.1:{port}"
-    except FileNotFoundError:
-        return "http://127.0.0.1:8765"
+        import runtime_state
+        candidates.append(runtime_state.port_file_path())
+    except Exception:
+        pass
+    candidates.append(Path(os.path.dirname(__file__)) / ".jarvis_port")
+
+    for candidate in candidates:
+        try:
+            with open(candidate, encoding="utf-8") as f:
+                port = f.read().strip()
+            if port:
+                return f"http://127.0.0.1:{port}"
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    return "http://127.0.0.1:8765"
 
 BASE = _base()
 

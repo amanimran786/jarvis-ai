@@ -23,6 +23,9 @@ import threading
 import time
 import glob
 import logging
+import os
+import socket
+import subprocess
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
@@ -406,6 +409,276 @@ def get_log(n: int = 20) -> list[dict]:
     return _command_log[-n:]
 
 
+# ── Nearby discovery (macOS-native) ───────────────────────────────────────────
+
+_BONJOUR_SERVICE_TYPES: dict[str, str] = {
+    "airplay": "_airplay._tcp",
+    "raop": "_raop._tcp",
+    "companion": "_companion-link._tcp",
+    "googlecast": "_googlecast._tcp",
+}
+
+
+def _run_json_command(args: list[str]) -> dict:
+    try:
+        proc = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=8,
+            check=False,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return {}
+        return json.loads(proc.stdout)
+    except Exception:
+        return {}
+
+
+def discover_bluetooth_devices() -> dict:
+    """
+    Return Bluetooth controller state plus connected and known nearby devices.
+    macOS-only for now, via system_profiler.
+    """
+    data = _run_json_command(["/usr/sbin/system_profiler", "SPBluetoothDataType", "-json"])
+    entries = data.get("SPBluetoothDataType", [])
+    if not entries:
+        return {"available": False, "controller": {}, "connected": [], "known": []}
+
+    root = entries[0]
+    controller = root.get("controller_properties", {}) or {}
+
+    def _flatten(items: list[dict]) -> list[dict]:
+        flat: list[dict] = []
+        for item in items or []:
+            for name, payload in item.items():
+                payload = payload or {}
+                flat.append({
+                    "name": name,
+                    "address": payload.get("device_address", ""),
+                    "type": payload.get("device_minorType", ""),
+                    "rssi": payload.get("device_rssi", ""),
+                    "services": payload.get("device_services", ""),
+                    "firmware": payload.get("device_firmwareVersion", ""),
+                    "vendor_id": payload.get("device_vendorID", ""),
+                    "product_id": payload.get("device_productID", ""),
+                })
+        return flat
+
+    return {
+        "available": True,
+        "controller": {
+            "state": controller.get("controller_state", ""),
+            "address": controller.get("controller_address", ""),
+            "discoverable": controller.get("controller_discoverable", ""),
+            "chipset": controller.get("controller_chipset", ""),
+            "services": controller.get("controller_supportedServices", ""),
+        },
+        "connected": _flatten(root.get("device_connected", [])),
+        "known": _flatten(root.get("device_not_connected", [])),
+    }
+
+
+def _browse_bonjour_service(service_type: str, timeout: float = 2.5) -> list[dict]:
+    """
+    Browse a Bonjour service for a few seconds and return discovered instances.
+    Uses dns-sd, which is present on macOS by default.
+    """
+    try:
+        proc = subprocess.Popen(
+            ["/usr/bin/dns-sd", "-B", service_type, "local."],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        time.sleep(timeout)
+        proc.terminate()
+        output, _ = proc.communicate(timeout=2)
+    except Exception:
+        return []
+
+    instances: dict[tuple[str, str], dict] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line or "Instance Name" in line or "...STARTING..." in line or line.startswith("Browsing for ") or line.startswith("DATE:"):
+            continue
+        parts = line.split()
+        if len(parts) < 7:
+            continue
+        if parts[1] not in {"Add", "Rmv"}:
+            continue
+        action = parts[1]
+        interface = parts[3]
+        domain = parts[4]
+        instance_name = " ".join(parts[6:])
+        key = (instance_name, interface)
+        instances[key] = {
+            "name": instance_name,
+            "interface": interface,
+            "domain": domain,
+            "service_type": service_type,
+            "present": action == "Add",
+        }
+
+    return [item for item in instances.values() if item.get("present")]
+
+
+def discover_network_services(timeout: float = 2.5) -> dict:
+    services = {
+        label: _browse_bonjour_service(service_type, timeout=timeout)
+        for label, service_type in _BONJOUR_SERVICE_TYPES.items()
+    }
+    return {
+        "available": True,
+        "services": services,
+    }
+
+
+def discover_nearby(timeout: float = 2.5) -> dict:
+    """
+    Unified nearby-device snapshot for Jarvis.
+    Includes Bluetooth plus common local-network services like AirPlay/RAOP.
+    """
+    bluetooth = discover_bluetooth_devices()
+    network = discover_network_services(timeout=timeout)
+    return {
+        "ts": datetime.now().isoformat(),
+        "bluetooth": bluetooth,
+        "network": network,
+    }
+
+
+def local_ipv4_addresses() -> list[str]:
+    """
+    Best-effort list of local IPv4 addresses for same-Wi-Fi handoff.
+    Keeps loopback out so the UI shows copyable device-facing addresses.
+    """
+    addresses: set[str] = set()
+
+    try:
+        hostname = socket.gethostname()
+        for family, *_rest, sockaddr in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            if family == socket.AF_INET:
+                ip = sockaddr[0]
+                if ip and not ip.startswith("127."):
+                    addresses.add(ip)
+    except Exception:
+        pass
+
+    for iface in ("en0", "en1", "bridge0"):
+        try:
+            proc = subprocess.run(
+                ["/usr/sbin/ipconfig", "getifaddr", iface],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            ip = (proc.stdout or "").strip()
+            if ip and not ip.startswith("127."):
+                addresses.add(ip)
+        except Exception:
+            pass
+
+    return sorted(addresses)
+
+
+def bridge_status(api_host: str = "127.0.0.1", api_port: int = 8765) -> dict:
+    """
+    Describe whether Jarvis is exposed only locally or to the local network.
+    """
+    host = (api_host or "127.0.0.1").strip()
+    lan_enabled = host in {"0.0.0.0", "::", "*"} or (
+        host not in {"127.0.0.1", "localhost", "::1"}
+    )
+    ips = local_ipv4_addresses()
+
+    if host in {"0.0.0.0", "::", "*"}:
+        urls = [f"http://{ip}:{api_port}" for ip in ips]
+    elif host in {"127.0.0.1", "localhost", "::1"}:
+        urls = [f"http://127.0.0.1:{api_port}"]
+    else:
+        urls = [f"http://{host}:{api_port}"]
+
+    return {
+        "enabled": lan_enabled,
+        "host": host,
+        "port": int(api_port),
+        "local_only": not lan_enabled,
+        "ips": ips,
+        "urls": urls,
+        "primary_url": urls[0] if urls else f"http://127.0.0.1:{api_port}",
+    }
+
+
+_SETTINGS_TARGETS: dict[str, list[str]] = {
+    "bluetooth": [
+        "x-apple.systempreferences:com.apple.BluetoothSettings",
+        "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Bluetooth",
+    ],
+    "sound": [
+        "x-apple.systempreferences:com.apple.Sound-Settings.extension",
+        "x-apple.systempreferences:com.apple.preference.sound",
+    ],
+    "displays": [
+        "x-apple.systempreferences:com.apple.Displays-Settings.extension",
+        "x-apple.systempreferences:com.apple.preference.displays",
+    ],
+    "airplay": [
+        "x-apple.systempreferences:com.apple.Displays-Settings.extension",
+        "x-apple.systempreferences:com.apple.preference.displays",
+    ],
+}
+
+
+def open_system_settings(target: str) -> str:
+    """
+    Open a supported System Settings pane with graceful fallbacks.
+    """
+    key = (target or "").strip().lower()
+    candidates = _SETTINGS_TARGETS.get(key, [])
+    for candidate in candidates:
+        try:
+            proc = subprocess.run(
+                ["open", candidate],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return f"Opened {key} settings."
+        except Exception:
+            continue
+
+    try:
+        proc = subprocess.run(
+            ["open", "-a", "System Settings"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return f"Opened System Settings. Navigate to {key} from there."
+    except Exception:
+        pass
+
+    return f"Couldn't open {key} settings."
+
+
+def open_system_settings_result(target: str) -> dict:
+    """
+    Structured wrapper for API/UI callers.
+    """
+    message = open_system_settings(target)
+    return {
+        "ok": message.startswith("Opened "),
+        "target": (target or "").strip().lower(),
+        "message": message,
+    }
+
+
 # ── Auto-scan serial ports ────────────────────────────────────────────────────
 
 def scan_serial_ports() -> list[str]:
@@ -466,3 +739,19 @@ def register_api_routes(app):
     @app.get("/hardware/ports")
     def hw_ports():
         return {"ports": scan_serial_ports()}
+
+    @app.get("/hardware/discover")
+    def hw_discover(timeout: float = 2.5):
+        return discover_nearby(timeout=timeout)
+
+    @app.get("/hardware/discover/bluetooth")
+    def hw_discover_bluetooth():
+        return discover_bluetooth_devices()
+
+    @app.get("/hardware/discover/network")
+    def hw_discover_network(timeout: float = 2.5):
+        return discover_network_services(timeout=timeout)
+
+    @app.post("/hardware/settings/{target}")
+    def hw_open_settings(target: str):
+        return open_system_settings_result(target)
