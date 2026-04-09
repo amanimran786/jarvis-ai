@@ -18,11 +18,12 @@ import sounddevice as sd
 import wave
 from openai import OpenAI
 from config import OPENAI_API_KEY
+import local_stt
 from provider_priority import ask_with_priority
 import semantic_memory as _smem
 import interview_profile as _ip
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 SAMPLE_RATE    = 16000
 CHUNK_SECONDS  = 8     # transcribe every 8 seconds
@@ -62,6 +63,8 @@ _source_rotation_count = 0
 _listen_started_at = 0.0
 _suggestion_model_failures = 0
 _suggestion_fallbacks = 0
+_last_stt_backend = ""
+_last_stt_backend_detail = ""
 _event_log: list[str] = []
 
 _SILENCE_FAILOVER_CHUNKS = 3
@@ -450,6 +453,8 @@ def preferred_source_snapshot() -> dict:
 def status_snapshot() -> dict:
     preferred = preferred_source_snapshot()
     active_index = _device_index if _device_index is not None else preferred["device_index"]
+    local_stt_status = local_stt.status()
+    local_available = bool(local_stt_status.get("available", local_stt_status.get("local_available", False)))
     return {
         "running": _running,
         "started_at": _listen_started_at,
@@ -477,6 +482,10 @@ def status_snapshot() -> dict:
         "last_error": _last_error,
         "sample_rate": _actual_sample_rate,
         "meeting_label": _last_meeting_label,
+        "stt_backend": _last_stt_backend,
+        "stt_backend_detail": _last_stt_backend_detail,
+        "local_stt_available": local_available,
+        "local_stt_status": local_stt_status,
         "suggestion_model_failures": _suggestion_model_failures,
         "suggestion_fallbacks": _suggestion_fallbacks,
         "events": list(_event_log[-10:]),
@@ -538,19 +547,51 @@ def _is_hallucination(text: str) -> bool:
 
 
 def _transcribe(path: str) -> str:
-    """Transcribe audio file with Whisper."""
+    """Transcribe audio file, preferring local STT before API fallback."""
+    global _last_stt_backend, _last_stt_backend_detail, _last_error
     try:
+        local_status = local_stt.status()
+        local_available = bool(local_status.get("local_available", False))
+        openai_fallback_allowed = bool(local_status.get("openai_fallback_allowed", True))
+        local_result = local_stt.transcribe_file(path, language="en")
+        if local_result.get("ok"):
+            _last_stt_backend = local_result.get("engine") or "faster-whisper"
+            _last_stt_backend_detail = local_result.get("engine") or "faster-whisper"
+            text = (local_result.get("text") or "").strip()
+            if _is_hallucination(text):
+                return ""
+            return text
+
+        local_error = (local_result.get("error") or "").strip()
+        if local_error and local_available:
+            _last_error = local_error
+            _log_event(f"Local STT failed, falling back to API: {local_error}")
+        elif local_error and not openai_fallback_allowed:
+            _last_error = local_error
+            _last_stt_backend = local_status.get("active_engine") or "unavailable"
+            _last_stt_backend_detail = local_result.get("engine") or _last_stt_backend
+            return ""
+
+        if client is None:
+            _last_error = "OpenAI STT fallback is not configured."
+            _last_stt_backend = "unavailable"
+            _last_stt_backend_detail = "openai-whisper-1"
+            return ""
+
         with open(path, 'rb') as f:
             result = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=f,
                 language="en"
             )
+        _last_stt_backend = "openai"
+        _last_stt_backend_detail = "whisper-1"
         text = result.text.strip()
         if _is_hallucination(text):
             return ""
         return text
-    except Exception as e:
+    except Exception as exc:
+        _last_error = str(exc)
         return ""
     finally:
         if os.path.exists(path):
@@ -960,7 +1001,7 @@ def _listen_loop():
             text = _transcribe(path)
             if not text:
                 _empty_transcript_streak += 1
-                _last_error = "whisper returned empty transcript"
+                _last_error = "transcription returned empty transcript"
                 if _empty_transcript_streak >= _EMPTY_TRANSCRIPT_FAILOVER_CHUNKS:
                     if _maybe_rotate_source(force_refresh=True, reason="empty transcripts"):
                         overlap_audio = np.array([], dtype='int16')
@@ -1043,6 +1084,7 @@ def start(on_transcript=None, on_suggestion=None) -> str:
     global _source_rotation_count, _listen_started_at, _device_index
     global _last_suggestion_source, _suggestion_model_failures, _suggestion_fallbacks
     global _last_interpreted_question, _last_interpreted_question_at
+    global _last_stt_backend, _last_stt_backend_detail
 
     if _running:
         return "Smart listening is already active."
@@ -1074,6 +1116,8 @@ def start(on_transcript=None, on_suggestion=None) -> str:
     _listen_started_at = time.time()
     _suggestion_model_failures = 0
     _suggestion_fallbacks = 0
+    _last_stt_backend = ""
+    _last_stt_backend_detail = ""
 
     preferred = _select_source_snapshot(force_refresh=True)
     _activate_source(preferred, reason="start")

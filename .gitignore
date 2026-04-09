@@ -48,3 +48,14 @@ build/
 
 # macOS
 .DS_Store
+
+# Graphify build artifacts
+graphify-out/.graphify_*
+graphify-out/cache/
+graphify-out/memory/
+graphify-out/obsidian/
+graphify-out/wiki/
+graphify-out/graph.html
+graphify-out/graph.svg
+graphify-out/graph.graphml
+graphify-out/cypher.txt

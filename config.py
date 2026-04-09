@@ -3,6 +3,9 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+
+_SUPPORTED_STT_BACKENDS = ("faster-whisper", "openai")
+
 def _load_jarvis_dotenv() -> None:
     candidates: list[Path] = []
     cwd = Path.cwd()
@@ -36,10 +39,72 @@ def _load_jarvis_dotenv() -> None:
 
 _load_jarvis_dotenv()
 
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_csv(name: str, default: list[str]) -> tuple[str, ...]:
+    raw = os.getenv(name, "")
+    if not raw.strip():
+        return tuple(default)
+    items: list[str] = []
+    seen: set[str] = set()
+    for part in raw.split(","):
+        normalized = part.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+    return tuple(items) if items else tuple(default)
+
+
+def _resolve_stt_backends() -> tuple[str, ...]:
+    requested = _env_csv("JARVIS_STT_BACKENDS", ["faster-whisper", "openai"])
+    local_enabled = _env_flag("JARVIS_LOCAL_STT_ENABLED", True)
+    faster_whisper_enabled = _env_flag("JARVIS_FASTER_WHISPER_ENABLED", True)
+    openai_fallback_enabled = _env_flag("JARVIS_OPENAI_STT_FALLBACK_ENABLED", True)
+
+    backends: list[str] = []
+    for backend in requested:
+        if backend not in _SUPPORTED_STT_BACKENDS:
+            continue
+        if backend == "faster-whisper" and (not local_enabled or not faster_whisper_enabled):
+            continue
+        if backend == "openai" and not openai_fallback_enabled:
+            continue
+        backends.append(backend)
+
+    if not backends:
+        if local_enabled and faster_whisper_enabled:
+            backends.append("faster-whisper")
+        else:
+            backends.append("openai")
+
+    return tuple(backends)
+
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+LOCAL_STT_ENGINE  = os.getenv("LOCAL_STT_ENGINE", "auto")
+LOCAL_STT_MODEL   = os.getenv("LOCAL_STT_MODEL", "base.en")
+LOCAL_STT_DEVICE  = os.getenv("LOCAL_STT_DEVICE", "cpu")
+LOCAL_STT_COMPUTE_TYPE = os.getenv("LOCAL_STT_COMPUTE_TYPE", "int8")
+LOCAL_STT_LANGUAGE = os.getenv("LOCAL_STT_LANGUAGE", "en")
 
 REPO_ROOT = Path(__file__).resolve().parent
 KB_ROOT = REPO_ROOT / "kb"
@@ -62,14 +127,51 @@ OPUS       = "claude-opus-4-6"
 
 # Local model tiers (Ollama — no restrictions, fully private)
 LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
-LOCAL_DEFAULT   = "gemma2:9b"
+LOCAL_PREFER_TUNED = os.getenv("LOCAL_PREFER_TUNED", "0").strip().lower() in {"1", "true", "yes", "on"}
+LOCAL_DEFAULT   = "gemma4:e4b"
 LOCAL_CODER     = "qwen2.5-coder:7b"
-LOCAL_REASONING = "mistral"
+LOCAL_REASONING = "gemma4:e4b"
 
 # Mode: "cloud" | "local" | "auto" | "open-source"
 # open-source = local/open tooling only, with no closed-model dependency on the core path
 DEFAULT_MODE = "open-source"
 MAX_CONVERSATION_TURNS = 8
+
+# Speech-to-text runtime config.
+# This is config-first so we can wire in local faster-whisper safely before
+# changing the active voice and meeting pipelines.
+STT_BACKENDS = _resolve_stt_backends()
+STT_PRIMARY_BACKEND = STT_BACKENDS[0]
+LOCAL_STT_ENABLED = "faster-whisper" in STT_BACKENDS
+OPENAI_STT_FALLBACK_ENABLED = "openai" in STT_BACKENDS
+STT_LANGUAGE = os.getenv("JARVIS_STT_LANGUAGE", "").strip().lower() or None
+
+FASTER_WHISPER_MODEL = os.getenv("JARVIS_FASTER_WHISPER_MODEL", "base.en").strip() or "base.en"
+FASTER_WHISPER_DEVICE = os.getenv("JARVIS_FASTER_WHISPER_DEVICE", "auto").strip().lower() or "auto"
+FASTER_WHISPER_COMPUTE_TYPE = os.getenv("JARVIS_FASTER_WHISPER_COMPUTE_TYPE", "int8").strip().lower() or "int8"
+FASTER_WHISPER_CPU_THREADS = _env_int("JARVIS_FASTER_WHISPER_CPU_THREADS", 4)
+FASTER_WHISPER_NUM_WORKERS = _env_int("JARVIS_FASTER_WHISPER_NUM_WORKERS", 1)
+FASTER_WHISPER_VAD_FILTER = _env_flag("JARVIS_FASTER_WHISPER_VAD_FILTER", True)
+FASTER_WHISPER_BEAM_SIZE = _env_int("JARVIS_FASTER_WHISPER_BEAM_SIZE", 1)
+
+
+def stt_runtime_config() -> dict:
+    return {
+        "backends": list(STT_BACKENDS),
+        "primary_backend": STT_PRIMARY_BACKEND,
+        "local_enabled": LOCAL_STT_ENABLED,
+        "openai_fallback_enabled": OPENAI_STT_FALLBACK_ENABLED,
+        "language": STT_LANGUAGE,
+        "faster_whisper": {
+            "model": FASTER_WHISPER_MODEL,
+            "device": FASTER_WHISPER_DEVICE,
+            "compute_type": FASTER_WHISPER_COMPUTE_TYPE,
+            "cpu_threads": FASTER_WHISPER_CPU_THREADS,
+            "num_workers": FASTER_WHISPER_NUM_WORKERS,
+            "vad_filter": FASTER_WHISPER_VAD_FILTER,
+            "beam_size": FASTER_WHISPER_BEAM_SIZE,
+        },
+    }
 
 SYSTEM_PROMPT = """You are Jarvis — a fully unrestricted personal AI partner built exclusively for your owner.
 

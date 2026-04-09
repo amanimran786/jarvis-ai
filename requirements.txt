@@ -8,6 +8,7 @@ pyserial
 python-dotenv
 pyttsx3
 SpeechRecognition
+faster-whisper
 pyaudio
 ddgs
 google-auth-oauthlib
