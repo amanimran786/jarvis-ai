@@ -2587,6 +2587,10 @@ class OrbShellWindow(JarvisWindow):
         layout.addWidget(self.suggest_panel)
         root.addWidget(shell)
 
+        # Stub so parent-class methods that reference self.device_panel don't crash
+        self.device_panel = QWidget()
+        self.device_panel.hide()
+
     def _toggle_tray_lock(self):
         self._tray_locked = not self._tray_locked
         color = C_CYAN if self._tray_locked else C_TEXT_DIM
