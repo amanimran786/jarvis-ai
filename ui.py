@@ -3043,7 +3043,9 @@ def run():
     """)
 
     bundled_launch = bool(getattr(sys, "frozen", False)) or os.getenv("JARVIS_BUNDLED_APP", "").lower() in {"1", "true", "yes", "on"}
-    default_classic = sys.platform == "darwin" and bundled_launch
+    # On macOS the classic shell is currently the stable path for both Finder
+    # launches and direct source launches from tools like PyCharm.
+    default_classic = sys.platform == "darwin"
     use_classic = (
         "--classic-ui" in sys.argv
         or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"

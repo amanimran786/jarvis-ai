@@ -12,6 +12,9 @@ Supports Safari and Chromium-style browsers via AppleScript for:
 """
 
 import json
+import sqlite3
+import shutil
+from pathlib import Path
 import terminal
 import subprocess
 import time
@@ -1040,3 +1043,97 @@ def click_text(target_text: str, browser: str | None = None) -> str:
             )
         return f"I couldn't find a visible link or button matching '{target_text}' on the current page."
     return f"Clicked '{target_text}' in {app}."
+
+
+# ── Chrome DevTools Protocol (CDP) & SQLite History ────────────────────────────
+
+def launch_chrome_cdp(port: int = 9222) -> str:
+    """Relaunches Google Chrome with remote debugging enabled to allow deep CDP access."""
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1)
+        return "Chrome is already running with CDP enabled."
+    except Exception:
+        pass
+    
+    script = f'''
+    tell application "Google Chrome" to quit
+    delay 1
+    do shell script "open -a 'Google Chrome' --args --remote-debugging-port={port} --restore-last-session"
+    '''
+    out, err = _run_applescript(script)
+    if err:
+        return f"Failed to relaunch Chrome with CDP: {err}"
+    return f"Relaunched Chrome with CDP enabled on port {port}."
+
+def get_cdp_tabs(port: int = 9222) -> list[dict]:
+    """Get all open Chrome tabs directly via CDP HTTP API, including background tabs."""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/json")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read())
+            
+        tabs = []
+        for item in data:
+            if item.get("type") == "page":
+                tabs.append({
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "url": item.get("url"),
+                    "webSocketDebuggerUrl": item.get("webSocketDebuggerUrl")
+                })
+        return tabs
+    except Exception as e:
+        return [{"error": f"CDP connection failed: {e}. Run launch_chrome_cdp() first."}]
+
+def get_chrome_history(query: str = "", limit: int = 50) -> list[dict]:
+    """Extract Chrome browsing history directly from the internal SQLite database."""
+    chrome_history_path = Path.home() / "Library" / "Application Support" / "Google" / "Chrome" / "Default" / "History"
+    if not chrome_history_path.exists():
+        return [{"error": "Chrome History database not found."}]
+
+    cache_dir = Path(__file__).resolve().parent / ".jarvis_cache"
+    cache_dir.mkdir(exist_ok=True)
+    temp_db_path = cache_dir / "History.sqlite"
+
+    try:
+        shutil.copy2(chrome_history_path, temp_db_path)
+    except Exception as e:
+        return [{"error": f"Failed to copy History DB: {e}"}]
+
+    results = []
+    try:
+        conn = sqlite3.connect(temp_db_path)
+        cursor = conn.cursor()
+        
+        if query:
+            sql = '''
+                SELECT title, url, last_visit_time
+                FROM urls
+                WHERE title LIKE ? OR url LIKE ?
+                ORDER BY last_visit_time DESC
+                LIMIT ?
+            '''
+            cursor.execute(sql, (f'%{query}%', f'%{query}%', limit))
+        else:
+            sql = '''
+                SELECT title, url, last_visit_time
+                FROM urls
+                ORDER BY last_visit_time DESC
+                LIMIT ?
+            '''
+            cursor.execute(sql, (limit,))
+            
+        for row in cursor.fetchall():
+            results.append({
+                "title": row[0],
+                "url": row[1],
+                "last_visit_time": row[2]
+            })
+        conn.close()
+    except Exception as e:
+        return [{"error": f"Failed to query History DB: {e}"}]
+    finally:
+        if temp_db_path.exists():
+            temp_db_path.unlink()
+
+    return results

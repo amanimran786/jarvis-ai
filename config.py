@@ -62,7 +62,7 @@ OPUS       = "claude-opus-4-6"
 
 # Local model tiers (Ollama — no restrictions, fully private)
 LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
-LOCAL_DEFAULT   = "llama3.1:8b"
+LOCAL_DEFAULT   = "gemma2:9b"
 LOCAL_CODER     = "qwen2.5-coder:7b"
 LOCAL_REASONING = "mistral"
 
