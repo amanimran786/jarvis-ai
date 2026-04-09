@@ -21,6 +21,7 @@ import prompt_modifiers
 import router
 import browser
 import call_privacy
+import config
 import interview_profile
 import meeting_listener
 import ui
@@ -850,6 +851,12 @@ class MeetingAssistRenderingTests(unittest.TestCase):
 
 
 class MeetingListenerTests(unittest.TestCase):
+    def test_system_prompt_forbids_fabricated_system_actions_and_specs(self):
+        prompt = config.SYSTEM_PROMPT
+        self.assertIn("Never claim that you scanned, checked, accessed, opened, confirmed", prompt)
+        self.assertIn("Never invent hardware specs, network details, router access", prompt)
+        self.assertIn("Never simulate background work, hidden integrations, system administration, or tool use", prompt)
+
     def test_is_hallucination_rejects_common_junk_fragments(self):
         self.assertTrue(meeting_listener._is_hallucination("thanks for watching"))
         self.assertTrue(meeting_listener._is_hallucination("subtitles by"))
@@ -949,6 +956,23 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertIn("rollout timing", text)
         self.assertEqual(ask_mock.call_args.kwargs["tier"], "cheap")
 
+    def test_generate_suggestion_prompt_forbids_fake_hearing_and_vague_clarification(self):
+        previous_history = list(meeting_listener._transcript_history)
+        try:
+            meeting_listener._transcript_history[:] = [
+                "Hello, Aman, can you tell me about yourself?",
+                "And can you tell me what is a variable?",
+            ]
+            with patch("meeting_listener.ask_with_priority", return_value="A variable is a named storage location that holds a value, and it matters because it lets your program keep track of changing data.") as ask_mock:
+                meeting_listener._generate_suggestion("what is a variable")
+        finally:
+            meeting_listener._transcript_history[:] = previous_history
+
+        prompt = ask_mock.call_args.args[0]
+        self.assertIn("Do not claim to have heard or verified details that are not present there.", prompt)
+        self.assertIn("answer it directly instead of asking for vague clarification", prompt)
+        self.assertIn("ask one short clarification question instead of inventing missing details", prompt)
+
     def test_try_caption_fallback_suppresses_duplicate_caption_line(self):
         snapshot = {
             "ok": True,
@@ -979,6 +1003,25 @@ class MeetingListenerTests(unittest.TestCase):
 
 
 class ModelRouterFallbackTests(unittest.TestCase):
+    def test_smart_stream_injects_general_grounding_rules(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("Scan my system and tell me what you find.", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Treat the current user message as primary truth.", injected)
+        self.assertIn("Do not claim you performed actions, scans, checks, or integrations", injected)
+        self.assertIn("Do not invent system specs, network details, permissions, account access, device state, or completed work.", injected)
+
     def test_open_source_mode_prefers_local_label(self):
         previous = model_router.get_mode()
         try:
