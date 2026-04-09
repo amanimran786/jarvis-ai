@@ -1205,6 +1205,7 @@ class JarvisWindow(QMainWindow):
         self._auto_listen_engaged_meeting = None
         self._meeting_toolbar_mode = False
         self._meeting_toolbar_auto = False
+        self._meeting_toolbar_manual_expand_meeting = None
         self._normal_geometry = None
         self._last_live_listener_started_at = 0.0
         self._last_live_transcript_at = 0.0
@@ -1992,6 +1993,7 @@ class JarvisWindow(QMainWindow):
             if not bool(live.get("running", snapshot.get("running", False))):
                 self._auto_listen_suppressed_meeting = None
                 self._auto_listen_engaged_meeting = None
+                self._meeting_toolbar_manual_expand_meeting = None
                 self._subtitle.setText(self._base_subtitle_text)
                 self.listen_btn.setText("🎧")
                 self._set_status("ONLINE")
@@ -2000,7 +2002,7 @@ class JarvisWindow(QMainWindow):
                 self._last_live_suggestion_at = 0.0
             return
 
-        if not self._meeting_toolbar_mode:
+        if not self._meeting_toolbar_mode and self._meeting_toolbar_manual_expand_meeting != meeting:
             self._set_meeting_toolbar_mode(True, auto=True)
 
         if bool(live.get("running", snapshot.get("running", False))):
@@ -2058,10 +2060,12 @@ class JarvisWindow(QMainWindow):
                 self._update_meeting_toolbar_layout()
             return
 
+        current_meeting = _overlay_mod.detect_meeting_app() or "NONE"
         self._meeting_toolbar_mode = enabled
         self._meeting_toolbar_auto = auto
 
         if enabled:
+            self._meeting_toolbar_manual_expand_meeting = None
             self._normal_geometry = self.geometry()
             self.setMinimumSize(560, 146)
             self.device_panel.hide()
@@ -2093,6 +2097,8 @@ class JarvisWindow(QMainWindow):
             self.activateWindow()
             return
 
+        if not auto and current_meeting != "NONE":
+            self._meeting_toolbar_manual_expand_meeting = current_meeting
         self.setMinimumSize(400, 500)
         self._orb_panel.show()
         self._div_after_orb.show()
