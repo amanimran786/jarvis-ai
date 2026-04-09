@@ -35,6 +35,7 @@ import local_model_eval
 import local_model_automation
 import local_beta
 import interview_profile
+import semantic_memory as _smem
 import specialized_agents
 import behavior_hooks
 import cost_policy
@@ -419,7 +420,12 @@ def _personal_interest_reply() -> str:
 
 
 def _interview_profile_reply(user_input: str) -> str:
-    return interview_profile.answer_for_query(user_input)
+    base = interview_profile.answer_for_query(user_input)
+    # Enrich with any relevant semantic KB hits not already covered by the profile
+    smem_ctx = _smem.context_for_query(user_input, top_k=2, max_chars=600)
+    if smem_ctx:
+        return base + "\n\n" + smem_ctx
+    return base
 
 
 def _is_meta_improvement_query(lower: str) -> bool:
@@ -892,6 +898,8 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         )
         click_target = params.get("link_text") or params.get("text") or params.get("label") or _parse_browser_click_target(user_input) or ""
 
+        if any(term in lower for term in ("copy current page url", "copy page url", "copy page link", "send this page", "share this page")):
+            return _s(browser.copy_current_page_url()), "Browser"
         if "caption" in action or _is_meeting_captions_query(lower):
             if any(term in lower for term in ("read", "show", "what are", "display", "copy")):
                 return _s(browser.read_meeting_captions()), "Browser"
@@ -1140,6 +1148,68 @@ _HW_ROUTES = [
 
 def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
     devices = hw.list_devices()
+
+    if any(p in lower for p in [
+        "bridge status", "jarvis bridge", "lan status", "same wifi bridge", "local network bridge",
+        "what is my bridge url", "what's my bridge url", "copy bridge url", "show bridge url"
+    ]):
+        bridge_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        try:
+            bridge_port = int(os.getenv("JARVIS_API_PORT", "8765"))
+        except ValueError:
+            bridge_port = 8765
+        bridge = hw.bridge_status(api_host=bridge_host, api_port=bridge_port)
+        urls = bridge.get("urls", [])
+        ips = bridge.get("ips", [])
+        local_only = bridge.get("local_only", True)
+        primary = bridge.get("primary_url") or (urls[0] if urls else "http://127.0.0.1:8765")
+        mode = "local-only" if local_only else "LAN-enabled"
+        ip_text = f" Local IPs: {', '.join(ips)}." if ips else ""
+        return _s(f"Bridge status: {mode}. Primary URL: {primary}.{ip_text}"), "Hardware"
+
+    if any(p in lower for p in [
+        "open bluetooth settings", "bluetooth settings", "pair a device",
+        "open sound settings", "sound settings", "airplay settings",
+        "open displays settings", "displays settings", "open display settings"
+    ]):
+        if "bluetooth" in lower:
+            return _s(hw.open_system_settings("bluetooth")), "Hardware"
+        if "sound" in lower or "airplay" in lower:
+            return _s(hw.open_system_settings("sound")), "Hardware"
+        if "display" in lower or "displays" in lower:
+            return _s(hw.open_system_settings("displays")), "Hardware"
+
+    if any(p in lower for p in [
+        "nearby devices", "nearby device", "what devices are near me", "discover devices",
+        "bluetooth devices", "airplay devices", "same wifi devices", "nearby airplay",
+        "network devices near me", "what can you connect to"
+    ]):
+        snapshot = hw.discover_nearby(timeout=1.5)
+        bt = snapshot.get("bluetooth", {})
+        net = snapshot.get("network", {}).get("services", {})
+        connected_bt = bt.get("connected", [])
+        known_bt = bt.get("known", [])
+        airplay = net.get("airplay", [])
+        companion = net.get("companion", [])
+        googlecast = net.get("googlecast", [])
+
+        bt_connected_names = ", ".join(d.get("name", "unknown") for d in connected_bt[:4]) or "none"
+        bt_known_names = ", ".join(d.get("name", "unknown") for d in known_bt[:5]) or "none"
+        airplay_names = ", ".join(d.get("name", "unknown") for d in airplay[:5]) or "none"
+        companion_names = ", ".join(d.get("name", "unknown") for d in companion[:5]) or "none"
+        cast_names = ", ".join(d.get("name", "unknown") for d in googlecast[:5]) or "none"
+
+        summary = (
+            f"Bluetooth connected: {bt_connected_names}. "
+            f"Known Bluetooth devices: {bt_known_names}. "
+            f"AirPlay targets: {airplay_names}. "
+            f"Nearby companion devices: {companion_names}. "
+            f"Google Cast targets: {cast_names}."
+        )
+        return format_with_mini(
+            f"Report this nearby device snapshot in Jarvis voice, naturally and concisely: {summary}",
+            extra_system=modifier_system,
+        ), "Hardware"
 
     if any(p in lower for p in ["hardware status", "device status", "check devices", "show hardware"]):
         s = hw.status()

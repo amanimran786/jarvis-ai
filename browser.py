@@ -12,6 +12,7 @@ Supports Safari and Chromium-style browsers via AppleScript for:
 """
 
 import json
+import terminal
 import subprocess
 import time
 import urllib.parse
@@ -26,11 +27,69 @@ _MAX_PAGE_TEXT = 12000
 _MEETING_URL_PATTERNS = {
     "meet.google.com": "MEET",
     "teams.microsoft.com": "TEAMS",
+    "teams.live.com": "TEAMS",
+    "teams.cloud.microsoft": "TEAMS",
+    "teams.microsoft365.com": "TEAMS",
     "app.zoom.us": "ZOOM",
     "zoom.us/wc": "ZOOM",
     "zoom.us/j/": "ZOOM",
     "webex.com": "WEBEX",
 }
+
+_MEETING_CAPTION_SELECTORS = [
+    '[aria-live="polite"]',
+    '[aria-live="assertive"]',
+    '[aria-live="off"]',
+    '[role="log"]',
+    '[role="status"]',
+    '[role="alert"]',
+    '[data-subtitle-text]',
+    '[data-caption-text]',
+    '[data-testid*="caption"]',
+    '[data-testid*="subtitle"]',
+    '[data-tid*="caption"]',
+    '[data-tid*="subtitle"]',
+    '[class*="caption"]',
+    '[class*="captions"]',
+    '[class*="subtitle"]',
+    '[class*="subtitles"]',
+    '[class*="live-transcript"]',
+    '[id*="caption"]',
+    '[id*="captions"]',
+    '[id*="subtitle"]',
+    '[id*="subtitles"]',
+    '[aria-label*="caption"]',
+    '[aria-label*="Caption"]',
+    '[aria-label*="captions"]',
+    '[aria-label*="subtitle"]',
+    '[aria-label*="Subtitle"]',
+    '[aria-label*="subtitles"]',
+]
+
+_MEETING_CAPTION_BLOCKLIST = [
+    "mute",
+    "unmute",
+    "camera",
+    "turn on captions",
+    "turn off captions",
+    "captions",
+    "subtitle",
+    "subtitles",
+    "participants",
+    "chat",
+    "reactions",
+    "share screen",
+    "present now",
+    "raise hand",
+    "leave",
+    "meeting details",
+    "more options",
+    "recording",
+    "connected",
+    "reconnecting",
+    "join audio",
+    "go to current",
+]
 
 
 def _run_applescript(script: str) -> tuple[str, str]:
@@ -219,6 +278,202 @@ def _clean_browser_js_error(err: str, browser: str) -> str:
     if cleaned:
         return cleaned
     return raw
+
+
+def _meeting_caption_extraction_script() -> str:
+    selectors_json = json.dumps(_MEETING_CAPTION_SELECTORS)
+    blocklist_json = json.dumps(_MEETING_CAPTION_BLOCKLIST)
+    return f"""
+    (() => {{
+      const selectors = {selectors_json};
+      const blocklist = {blocklist_json};
+      const cleaned = [];
+      const seen = new Set();
+      const visitedRoots = new Set();
+      let sourceMode = "selector";
+
+      const normalize = (text) => (text || "").replace(/\\s+/g, " ").trim();
+      const wordsFor = (text) => normalize(text).match(/\\b[\\w'’-]+\\b/g) || [];
+      const startsLikeContinuation = (text) => {{
+        const normalized = normalize(text);
+        if (!normalized) return false;
+        const lower = normalized.toLowerCase();
+        const starters = ["and ", "but ", "so ", "because ", "to ", "of ", "in ", "for ", "with ", "that ", "which ", "who ", "what ", "why ", "how ", "can ", "could ", "would ", "should ", "do ", "does ", "did ", "is ", "are ", "am "];
+        return normalized.startsWith('"') || normalized.startsWith("'") || normalized.startsWith("(") || normalized.startsWith("[") || /^[a-z]/.test(normalized) || starters.some((prefix) => lower.startsWith(prefix));
+      }};
+
+      const visible = (el) => {{
+        if (!el) return false;
+        try {{
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          return style && style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+        }} catch {{
+          return false;
+        }}
+      }};
+
+      const looksLikeCaptionText = (text) => {{
+        const normalized = normalize(text);
+        if (!normalized) return false;
+        if (normalized.length < 8 || normalized.length > 240) return false;
+        if (!/[A-Za-z]/.test(normalized)) return false;
+        const lower = normalized.toLowerCase();
+        if (blocklist.some((phrase) => lower === phrase || lower.includes(phrase))) return false;
+        const words = wordsFor(normalized);
+        if (words.length >= 3) return true;
+        return words.length >= 2 && /[.!?]/.test(normalized);
+      }};
+
+      const looksLikeNoise = (text) => {{
+        const normalized = normalize(text);
+        if (!normalized) return true;
+        if (normalized.length < 2 || normalized.length > 240) return true;
+        if (!/[A-Za-z]/.test(normalized)) return true;
+        const lower = normalized.toLowerCase();
+        if (blocklist.some((phrase) => lower === phrase || lower.includes(phrase))) return true;
+        const words = normalized.match(/\\b[\\w'’-]+\\b/g) || [];
+        if (!words.length) return true;
+        if (words.length === 1 && normalized.length < 4) return true;
+        return false;
+      }};
+
+      const looksLikeCaptionFragment = (text) => {{
+        const normalized = normalize(text);
+        if (!normalized) return false;
+        if (looksLikeNoise(normalized)) return false;
+        if (blocklist.some((phrase) => normalized.toLowerCase() === phrase || normalized.toLowerCase().includes(phrase))) return false;
+        const words = wordsFor(normalized);
+        if (words.length <= 2) return true;
+        if (!/[.!?]$/.test(normalized) && words.length <= 6) return true;
+        return false;
+      }};
+
+      const pushLine = (text, fallback = false) => {{
+        const normalized = normalize(text);
+        if (!normalized || seen.has(normalized)) return;
+        if (fallback && !looksLikeCaptionText(normalized)) return;
+        if (!fallback && looksLikeNoise(normalized)) return;
+        seen.add(normalized);
+        cleaned.push(normalized);
+      }};
+
+      const collectTextBlock = (text, fallback = false) => {{
+        (text || "").split(/\\n+/).forEach((line) => pushLine(line, fallback));
+      }};
+
+      const mergeCaptionFragments = (items) => {{
+        const merged = [];
+        (items || []).forEach((raw) => {{
+          const line = normalize(raw);
+          if (!line || seen.has(line)) return;
+          if (!merged.length) {{
+            merged.push(line);
+            return;
+          }}
+          const prev = merged[merged.length - 1];
+          const prevEndsOpen = !/[.!?]$/.test(prev) || /[,;:]$/.test(prev);
+          const currLooksFragment = looksLikeCaptionFragment(line);
+          const prevLooksFragment = looksLikeCaptionFragment(prev);
+          if (prevEndsOpen && (currLooksFragment || prevLooksFragment || startsLikeContinuation(line))) {{
+            const joined = normalize(prev + " " + line);
+            merged[merged.length - 1] = joined;
+            return;
+          }}
+          merged.push(line);
+        }});
+        return merged.filter(Boolean);
+      }};
+
+      const scoreLine = (line, index, total) => {{
+        const normalized = normalize(line);
+        if (!normalized) return -1;
+        const words = wordsFor(normalized);
+        let score = 0;
+        if (/[?]$/.test(normalized) || /^(what|why|how|when|where|which|who|can you|could you|would you|do you|did you|is it|are you|tell me|walk me through|explain)\b/i.test(normalized)) score += 6;
+        if (/[.!?]$/.test(normalized)) score += 2;
+        if (words.length >= 4) score += 2;
+        if (words.length >= 8) score += 1;
+        if (looksLikeCaptionFragment(normalized)) score += 1;
+        score += Math.floor(((index + 1) / Math.max(total, 1)) * 2);
+        return score;
+      }};
+
+      const inspectRoot = (root, depth = 0) => {{
+        if (!root || visitedRoots.has(root) || depth > 3) return;
+        visitedRoots.add(root);
+
+        try {{
+          root.querySelectorAll("*").forEach((el) => {{
+            if (el.shadowRoot) inspectRoot(el.shadowRoot, depth + 1);
+            if (el.tagName === "IFRAME" && el.contentDocument) {{
+              try {{
+                inspectRoot(el.contentDocument, depth + 1);
+              }} catch {{}}
+            }}
+          }});
+        }} catch {{}}
+
+        selectors.forEach((selector) => {{
+          try {{
+            root.querySelectorAll(selector).forEach((el) => {{
+              if (!visible(el)) return;
+              collectTextBlock(el.innerText || el.textContent || "");
+              if (el.shadowRoot) inspectRoot(el.shadowRoot, depth + 1);
+              if (el.tagName === "IFRAME" && el.contentDocument) {{
+                try {{
+                  inspectRoot(el.contentDocument, depth + 1);
+                }} catch {{}}
+              }}
+            }});
+          }} catch {{}}
+        }});
+
+        try {{
+          root.querySelectorAll("iframe").forEach((frame) => {{
+            try {{
+              if (frame.contentDocument) inspectRoot(frame.contentDocument, depth + 1);
+            }} catch {{}}
+          }});
+        }} catch {{}}
+      }};
+
+      const fallbackRoots = [document.body, document.documentElement];
+      inspectRoot(document, 0);
+
+      if (cleaned.length < 2) {{
+        sourceMode = "innerText";
+        fallbackRoots.forEach((root) => {{
+          if (!root) return;
+          collectTextBlock(root.innerText || root.textContent || "", true);
+        }});
+      }}
+
+      const merged = mergeCaptionFragments(cleaned);
+      let focusLine = "";
+      let focusScore = -1;
+      merged.forEach((line, index) => {{
+        const score = scoreLine(line, index, merged.length);
+        if (score > focusScore) {{
+          focusScore = score;
+          focusLine = line;
+        }}
+      }});
+      if (!focusLine && merged.length) {{
+        focusLine = merged[merged.length - 1];
+      }}
+
+      return JSON.stringify({{
+        title: document.title,
+        url: location.href,
+        lines: cleaned.slice(-12),
+        merged_lines: merged.slice(-12),
+        focus_line: focusLine,
+        fragment_count: Math.max(0, cleaned.length - merged.length),
+        source_mode: sourceMode,
+      }});
+    }})()
+    """.strip()
 
 
 def _list_browser_tabs(browser: str | None = None) -> list[dict]:
@@ -411,71 +666,43 @@ def _extract_meeting_caption_payload(browser: str | None = None) -> dict:
         }
 
     meeting_label = target["meeting"]
-
-    js = """
-    (() => {
-      const selectors = [
-        '[aria-live="polite"]',
-        '[aria-live="assertive"]',
-        '[role="log"]',
-        '[data-subtitle-text]',
-        '[data-caption-text]',
-        '[class*="caption"]',
-        '[class*="subtitle"]',
-        '[id*="caption"]',
-        '[id*="subtitle"]',
-        '[aria-label*="caption"]',
-        '[aria-label*="Caption"]',
-        '[aria-label*="subtitle"]',
-        '[aria-label*="Subtitle"]',
-        '[aria-label*="captions"]',
-        '[aria-label*="subtitles"]'
-      ];
-      const visible = (el) => {
-        if (!el) return false;
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return style && style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-      };
-      const cleaned = [];
-      const seen = new Set();
-      const pushLine = (text) => {
-        const normalized = (text || '').replace(/\\s+/g, ' ').trim();
-        if (!normalized || normalized.length < 2 || normalized.length > 220) return;
-        if (seen.has(normalized)) return;
-        seen.add(normalized);
-        cleaned.push(normalized);
-      };
-      selectors.forEach((selector) => {
-        document.querySelectorAll(selector).forEach((el) => {
-          if (!visible(el)) return;
-          const text = el.innerText || el.textContent || '';
-          text.split('\\n').forEach(pushLine);
-        });
-      });
-      return JSON.stringify({
-        title: document.title,
-        url: location.href,
-        lines: cleaned.slice(-12)
-      });
-    })()
-    """.strip()
+    js = _meeting_caption_extraction_script()
     out, err = _execute_tab_js_target(target, js)
     if err:
-        return {"ok": False, "browser": target["browser"], "error": _clean_browser_js_error(err, target["browser"])}
+        return {
+            "ok": False,
+            "browser": target["browser"],
+            "meeting": meeting_label,
+            "title": target.get("title", ""),
+            "url": target.get("url", ""),
+            "error": _clean_browser_js_error(err, target["browser"]),
+        }
     try:
         payload = json.loads(out)
     except Exception:
-        return {"ok": False, "browser": target["browser"], "error": "Couldn't parse meeting captions from the meeting tab."}
+        return {
+            "ok": False,
+            "browser": target["browser"],
+            "meeting": meeting_label,
+            "title": target.get("title", ""),
+            "url": target.get("url", ""),
+            "error": "Couldn't parse meeting captions from the meeting tab.",
+        }
     lines = payload.get("lines") or []
-    if not lines:
+    merged_lines = payload.get("merged_lines") or []
+    source_mode = payload.get("source_mode", "selector")
+    if not lines and not merged_lines:
         return {
             "ok": False,
             "browser": target["browser"],
             "meeting": meeting_label,
             "title": payload.get("title", target["title"]),
             "url": payload.get("url", target["url"]),
-            "error": "I found the meeting tab but could not find visible live captions. Turn captions on in the meeting and try again.",
+            "source_mode": source_mode,
+            "error": (
+                "I found the meeting tab but could not find visible live captions. "
+                "Turn captions on in the meeting and try again."
+            ),
         }
     return {
         "ok": True,
@@ -484,6 +711,36 @@ def _extract_meeting_caption_payload(browser: str | None = None) -> dict:
         "title": payload.get("title", target["title"]),
         "url": payload.get("url", target["url"]),
         "lines": lines,
+        "merged_lines": merged_lines,
+        "focus_line": payload.get("focus_line", ""),
+        "fragment_count": payload.get("fragment_count", 0),
+        "source_mode": source_mode,
+    }
+
+
+def meeting_caption_snapshot(browser: str | None = None) -> dict:
+    """
+    Structured caption status for live assist and diagnostics.
+    Returns meeting/browser metadata plus the latest caption lines when available.
+    """
+    payload = _extract_meeting_caption_payload(browser=browser)
+    lines = payload.get("lines") or []
+    merged_lines = payload.get("merged_lines") or []
+    return {
+        "ok": bool(payload.get("ok", False)),
+        "ready": bool(payload.get("ok", False) and (lines or merged_lines)),
+        "browser": payload.get("browser", ""),
+        "meeting": payload.get("meeting", ""),
+        "title": payload.get("title", ""),
+        "url": payload.get("url", ""),
+        "lines": lines,
+        "merged_lines": merged_lines,
+        "focus_line": payload.get("focus_line", ""),
+        "fragment_count": payload.get("fragment_count", 0),
+        "line_count": len(lines),
+        "merged_line_count": len(merged_lines),
+        "source_mode": payload.get("source_mode", ""),
+        "error": payload.get("error", ""),
     }
 
 
@@ -552,9 +809,11 @@ def meeting_diagnostics_text(browser: str | None = None) -> str:
         meeting_text = "Meeting detected: none."
 
     if captions.get("ok"):
+        line_count = len(captions.get("lines", []))
+        source_mode = captions.get("source_mode", "selector")
         caption_text = (
             f"Captions: accessible in {captions.get('browser')}. "
-            f"I can currently read {len(captions.get('lines', []))} recent caption lines."
+            f"I can currently read {line_count} recent caption lines via {source_mode}."
         )
     else:
         caption_text = f"Captions: blocked or unavailable. {captions.get('error', 'Unknown reason.')}"
@@ -653,6 +912,34 @@ def get_current_page(browser: str | None = None) -> str:
     title = page["title"] or "Untitled page"
     url = page["url"] or "unknown URL"
     return f"Current page in {page['browser']}: {title}. URL: {url}."
+
+
+def get_current_page_info(browser: str | None = None) -> dict:
+    page = _front_tab_data(browser)
+    if not page.get("ok"):
+        return {
+            "ok": False,
+            "browser": page.get("browser", _choose_browser(browser)),
+            "title": "",
+            "url": "",
+            "error": page.get("error", "Couldn't read the current page."),
+        }
+    return {
+        "ok": True,
+        "browser": page.get("browser", ""),
+        "title": page.get("title", ""),
+        "url": page.get("url", ""),
+        "meeting": _meeting_label_for_url(page.get("url", "")),
+    }
+
+
+def copy_current_page_url(browser: str | None = None) -> str:
+    page = get_current_page_info(browser)
+    if not page.get("ok") or not page.get("url"):
+        return f"I couldn't read the current browser page: {page.get('error', 'unknown error')}."
+    terminal.set_clipboard(page["url"])
+    title = page.get("title") or "current page"
+    return f"Copied the URL for {title}."
 
 
 def summarize_current_page(request: str = "", browser: str | None = None) -> str:

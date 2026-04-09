@@ -53,6 +53,10 @@ C_RED      = "#FF4444"
 MEETING_APPS = {
     "zoom":          "ZOOM",
     "teams":         "TEAMS",
+    "msteams":       "TEAMS",
+    "microsoft teams": "TEAMS",
+    "microsoft teams webview": "TEAMS",
+    "teams webview": "TEAMS",
     "meet":          "MEET",
     "facetime":      "FACETIME",
     "webex":         "WEBEX",
@@ -66,6 +70,9 @@ MEETING_APPS = {
 MEETING_URL_PATTERNS = {
     "meet.google.com": "MEET",
     "teams.microsoft.com": "TEAMS",
+    "teams.live.com": "TEAMS",
+    "teams.cloud.microsoft": "TEAMS",
+    "teams.microsoft365.com": "TEAMS",
     "app.zoom.us": "ZOOM",
     "zoom.us/wc": "ZOOM",
     "zoom.us/j/": "ZOOM",
@@ -87,6 +94,20 @@ def _running_app_names() -> set[str]:
             ["osascript", "-e",
              'tell application "System Events" to get name of every process whose background only is false'],
             capture_output=True, text=True, timeout=3
+        )
+        raw = (result.stdout or "").strip()
+        return {name.strip() for name in raw.split(",") if name.strip()}
+    except Exception:
+        return set()
+
+
+def _all_process_names() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to get name of every process'],
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         raw = (result.stdout or "").strip()
         return {name.strip() for name in raw.split(",") if name.strip()}
@@ -149,7 +170,8 @@ _meeting_refresh_in_flight = False
 
 def _compute_meeting_app() -> str | None:
     running_names = _running_app_names()
-    running = ", ".join(sorted(running_names)).lower()
+    process_names = running_names | _all_process_names()
+    running = ", ".join(sorted(process_names)).lower()
     for proc, label in MEETING_APPS.items():
         if proc in running:
             return label

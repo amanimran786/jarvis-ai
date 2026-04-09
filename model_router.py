@@ -28,6 +28,7 @@ import local_model_eval
 import cost_policy
 import skills
 import vault
+import semantic_memory as _smem
 
 _current_mode = DEFAULT_MODE
 
@@ -316,6 +317,11 @@ def smart_stream(
     vault_extra = vault.build_context(user_input, tool=tool)
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
+
+    # Semantic KB: inject relevant facts from memory/ (TF-IDF over structured JSON)
+    smem_ctx = _smem.context_for_query(user_input, top_k=3, max_chars=1200)
+    if smem_ctx:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + smem_ctx
 
     def _resilient_stream(primary_factory, fallback_factories):
         def _stream():

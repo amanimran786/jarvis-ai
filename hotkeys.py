@@ -11,6 +11,8 @@ Default hotkeys:
 """
 
 import threading
+import os
+import platform
 from pynput import keyboard
 
 # Callbacks set by ui.py
@@ -74,6 +76,9 @@ def _fire(action: str):
 
 def start():
     """Start the global hotkey listener in a background thread."""
+    if platform.system() == "Darwin" and os.getenv("JARVIS_ENABLE_GLOBAL_HOTKEYS", "").lower() not in {"1", "true", "yes", "on"}:
+        print("[Hotkeys] Disabled on macOS by default for stability. Set JARVIS_ENABLE_GLOBAL_HOTKEYS=1 to re-enable.")
+        return None
     listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
     listener.daemon = True
     listener.start()

@@ -4,13 +4,13 @@ import traceback
 import threading
 import faulthandler
 
-import api
 import agents
 import evals
+import jarvis_daemon
+import runtime_state
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CRASH_LOG = os.path.join(BASE_DIR, ".jarvis_crash.log")
+CRASH_LOG = str(runtime_state.crash_log_path())
 _CRASH_STREAM = None
 
 
@@ -59,6 +59,14 @@ def _install_crash_logging() -> None:
 
     sys.excepthook = _handle_exception
     threading.excepthook = _handle_thread_exception
+
+
+def _resolve_api_port() -> int:
+    raw = os.getenv("JARVIS_API_PORT", "8765")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 8765
 
 
 def _run_headless():
@@ -139,7 +147,9 @@ def _run_headless():
 
 def _run():
     _install_crash_logging()
-    api.start()
+    api_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    api_port = _resolve_api_port()
+    jarvis_daemon.start_daemon(host=api_host, port=api_port)
 
     if "--no-ui" in sys.argv:
         _run_headless()
