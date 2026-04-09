@@ -6,8 +6,9 @@ import speech_recognition as sr
 from openai import OpenAI
 from config import OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL
 import call_privacy
+import local_stt
 
-_openai_client = OpenAI(api_key=OPENAI_API_KEY)
+_openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
 
 WAKE_WORDS = {"hey jarvis", "ok jarvis"}
@@ -68,6 +69,8 @@ def _speak_elevenlabs(text: str) -> bool:
 
 def _speak_openai(text: str):
     """Speak via OpenAI TTS (fallback)."""
+    if _openai_client is None:
+        raise RuntimeError("OpenAI TTS is not configured.")
     response = _openai_client.audio.speech.create(
         model="tts-1",
         voice=OPENAI_TTS_VOICE,
@@ -96,6 +99,38 @@ def speak(text: str) -> None:
             _speak_openai(text)
     finally:
         _done_speaking.set()
+
+
+def _transcribe_audio_file(path: str) -> str | None:
+    local_result = local_stt.transcribe_file(path, language="en")
+    if local_result.get("ok"):
+        text = (local_result.get("text") or "").strip()
+        if text:
+            print(f"[STT] Transcribed locally via {local_result.get('engine')}.")
+            return text
+
+    local_error = local_result.get("error", "local transcription failed")
+    if not local_stt.openai_fallback_allowed():
+        print(f"[Local STT] {local_error}")
+        return None
+    if _openai_client is None:
+        print(f"[Local STT] {local_error}")
+        print("[Whisper Error] OpenAI STT fallback is not configured.")
+        return None
+
+    if local_result.get("engine") == "faster-whisper":
+        print(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
+
+    try:
+        with open(path, "rb") as audio_file:
+            transcript = _openai_client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+        return transcript.text.strip() or None
+    except Exception as e:
+        print(f"[Whisper Error] {e}")
+        return None
 
 
 def speak_stream(text_chunks) -> str:
@@ -148,7 +183,7 @@ def speak_stream(text_chunks) -> str:
 # ── Listen / STT ────────────────────────────���─────────────────────────────────
 
 def listen() -> str | None:
-    """Record audio and transcribe with OpenAI Whisper."""
+    """Record audio and transcribe with local faster-whisper when available."""
     # Wait until Jarvis finishes speaking — prevents TTS feedback loop
     _done_speaking.wait(timeout=30)
     import time; time.sleep(0.3)
@@ -166,18 +201,10 @@ def listen() -> str | None:
         tmp_path = f.name
 
     try:
-        with open(tmp_path, "rb") as audio_file:
-            transcript = _openai_client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
-        text = transcript.text.strip()
+        text = _transcribe_audio_file(tmp_path)
         if text:
             print(f"You: {text}")
         return text or None
-    except Exception as e:
-        print(f"[Whisper Error] {e}")
-        return None
     finally:
         os.unlink(tmp_path)
 
@@ -208,3 +235,9 @@ def wait_for_wake_word() -> None:
 def tts_engine() -> str:
     """Return which TTS engine is active."""
     return "ElevenLabs" if _get_eleven() else "OpenAI TTS"
+
+
+def stt_engine() -> str:
+    """Return which STT engine is active right now."""
+    snap = local_stt.status()
+    return snap.get("active_engine", "openai")

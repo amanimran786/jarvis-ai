@@ -1,4 +1,5 @@
 import unittest
+import json
 from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,6 +23,7 @@ import router
 import browser
 import call_privacy
 import config
+import graph_context
 import interview_profile
 import meeting_listener
 import ui
@@ -29,6 +31,7 @@ import screen_capture
 import self_improve
 import skills
 import specialized_agents
+import voice
 from tests.jarvis_golden_cases import ENGINEERING_GOLDEN_CASES
 
 
@@ -46,6 +49,83 @@ class PromptModifierTests(unittest.TestCase):
         self.assertEqual(result.clean_text, "review this auth flow")
         self.assertIn("security reviewer", result.system_extra.lower())
         self.assertIn("json", result.system_extra.lower())
+
+
+class LocalSttTests(unittest.TestCase):
+    def test_voice_transcribe_prefers_local_before_openai(self):
+        with TemporaryDirectory() as td:
+            path = Path(td) / "sample.wav"
+            path.write_bytes(b"fake wav")
+            fake_openai = SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=lambda **_: (_ for _ in ()).throw(AssertionError("should not call openai")))))
+            with patch(
+                "voice.local_stt.transcribe_file",
+                return_value={"ok": True, "text": "hello from local stt", "engine": "faster-whisper"},
+            ), patch("voice._openai_client", fake_openai):
+                text = voice._transcribe_audio_file(str(path))
+        self.assertEqual(text, "hello from local stt")
+
+    def test_voice_transcribe_does_not_fallback_to_openai_when_disallowed(self):
+        with TemporaryDirectory() as td:
+            path = Path(td) / "sample.wav"
+            path.write_bytes(b"fake wav")
+            fake_openai = SimpleNamespace(audio=SimpleNamespace(transcriptions=SimpleNamespace(create=lambda **_: (_ for _ in ()).throw(AssertionError("should not call openai")))))
+            with patch(
+                "voice.local_stt.transcribe_file",
+                return_value={"ok": False, "text": "", "engine": "faster-whisper", "error": "local unavailable"},
+            ), patch("voice.local_stt.openai_fallback_allowed", return_value=False), patch("voice._openai_client", fake_openai):
+                text = voice._transcribe_audio_file(str(path))
+        self.assertIsNone(text)
+
+    def test_meeting_transcribe_prefers_local_before_openai(self):
+        prev_backend = meeting_listener._last_stt_backend
+        prev_detail = meeting_listener._last_stt_backend_detail
+        try:
+            with TemporaryDirectory() as td:
+                path = Path(td) / "meeting.wav"
+                path.write_bytes(b"fake wav")
+                with patch(
+                    "meeting_listener.local_stt.transcribe_file",
+                    return_value={"ok": True, "text": "Can you explain caching clearly?", "engine": "faster-whisper"},
+                ):
+                    text = meeting_listener._transcribe(str(path))
+        finally:
+            backend = meeting_listener._last_stt_backend
+            detail = meeting_listener._last_stt_backend_detail
+            meeting_listener._last_stt_backend = prev_backend
+            meeting_listener._last_stt_backend_detail = prev_detail
+
+        self.assertEqual(text, "Can you explain caching clearly?")
+        self.assertEqual(backend, "faster-whisper")
+        self.assertEqual(detail, "faster-whisper")
+
+    def test_meeting_transcribe_skips_openai_when_fallback_disallowed(self):
+        prev_backend = meeting_listener._last_stt_backend
+        prev_detail = meeting_listener._last_stt_backend_detail
+        prev_error = meeting_listener._last_error
+        try:
+            with TemporaryDirectory() as td:
+                path = Path(td) / "meeting.wav"
+                path.write_bytes(b"fake wav")
+                with patch(
+                    "meeting_listener.local_stt.transcribe_file",
+                    return_value={"ok": False, "text": "", "engine": "faster-whisper", "error": "local unavailable"},
+                ), patch(
+                    "meeting_listener.local_stt.status",
+                    return_value={"local_available": False, "active_engine": "unavailable", "openai_fallback_allowed": False},
+                ):
+                    text = meeting_listener._transcribe(str(path))
+                    backend = meeting_listener._last_stt_backend
+                    detail = meeting_listener._last_stt_backend_detail
+                    error = meeting_listener._last_error
+        finally:
+            meeting_listener._last_stt_backend = prev_backend
+            meeting_listener._last_stt_backend_detail = prev_detail
+            meeting_listener._last_error = prev_error
+
+        self.assertEqual(text, "")
+        self.assertEqual(backend, "unavailable")
+        self.assertEqual(detail, "faster-whisper")
+        self.assertEqual(error, "local unavailable")
 
 
 class SkillAndAgentTests(unittest.TestCase):
@@ -930,6 +1010,55 @@ class MeetingListenerTests(unittest.TestCase):
             line = meeting_listener._try_caption_fallback()
         self.assertEqual(line, "Can you explain optimistic locking?")
 
+    def test_transcribe_prefers_local_stt_when_available(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "meeting.wav"
+            path.write_bytes(b"fake-wav")
+            with patch("meeting_listener.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
+                 patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": True, "engine": "faster-whisper", "text": "What is a variable?", "error": ""}), \
+                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should not run")):
+                text = meeting_listener._transcribe(str(path))
+        self.assertEqual(text, "What is a variable?")
+        self.assertEqual(meeting_listener._last_stt_backend, "faster-whisper")
+
+    def test_transcribe_falls_back_to_openai_when_local_stt_is_unavailable(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "meeting.wav"
+            path.write_bytes(b"fake-wav")
+            with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "openai", "openai_fallback_allowed": True, "model": "small.en"}), \
+                 patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
+                 patch.object(meeting_listener.client.audio.transcriptions, "create", return_value=SimpleNamespace(text="What is a variable?")):
+                text = meeting_listener._transcribe(str(path))
+        self.assertEqual(text, "What is a variable?")
+        self.assertEqual(meeting_listener._last_stt_backend, "openai")
+        self.assertEqual(meeting_listener._last_stt_backend_detail, "whisper-1")
+
+    def test_transcribe_skips_openai_when_fallback_is_disabled(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "meeting.wav"
+            path.write_bytes(b"fake-wav")
+            with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "unavailable", "openai_fallback_allowed": False, "model": "small.en"}), \
+                 patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
+                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should stay disabled")):
+                text = meeting_listener._transcribe(str(path))
+        self.assertEqual(text, "")
+        self.assertEqual(meeting_listener._last_stt_backend, "unavailable")
+
+    def test_status_snapshot_exposes_stt_backend_state(self):
+        previous_backend = meeting_listener._last_stt_backend
+        previous_detail = meeting_listener._last_stt_backend_detail
+        try:
+            meeting_listener._last_stt_backend = "faster-whisper"
+            meeting_listener._last_stt_backend_detail = "faster-whisper"
+            with patch("meeting_listener.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper", "model": "small.en"}):
+                snapshot = meeting_listener.status_snapshot()
+        finally:
+            meeting_listener._last_stt_backend = previous_backend
+            meeting_listener._last_stt_backend_detail = previous_detail
+        self.assertEqual(snapshot["stt_backend"], "faster-whisper")
+        self.assertTrue(snapshot["local_stt_available"])
+        self.assertEqual(snapshot["local_stt_status"]["model"], "small.en")
+
     def test_generate_suggestion_uses_strong_tier_for_interview_style_prompt(self):
         previous_history = list(meeting_listener._transcript_history)
         try:
@@ -1021,6 +1150,115 @@ class ModelRouterFallbackTests(unittest.TestCase):
         self.assertIn("Treat the current user message as primary truth.", injected)
         self.assertIn("Do not claim you performed actions, scans, checks, or integrations", injected)
         self.assertIn("Do not invent system specs, network details, permissions, account access, device state, or completed work.", injected)
+
+    def test_smart_stream_injects_graphify_context_for_repo_questions(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._gctx.context_for_query", return_value="Relevant Graphify repo context:\n- JarvisWindow [ui.py:L1]"), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("Where is JarvisWindow defined in this repo?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Relevant Graphify repo context", injected)
+        self.assertIn("JarvisWindow [ui.py:L1]", injected)
+
+
+class GraphContextTests(unittest.TestCase):
+    def test_context_for_query_returns_repo_grounding_from_graphify_artifacts(self):
+        graph_context.invalidate()
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            graph_path = tmp / "graph.json"
+            report_path = tmp / "GRAPH_REPORT.md"
+            analysis_path = tmp / "analysis.json"
+
+            graph_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {
+                                "id": "JarvisWindow",
+                                "label": "JarvisWindow",
+                                "file_type": "code",
+                                "source_file": str(Path("/Users/truthseeker/jarvis-ai/ui.py")),
+                                "source_location": "L100",
+                                "community": 0,
+                            },
+                            {
+                                "id": "_meeting_watchdog_tick",
+                                "label": "_meeting_watchdog_tick()",
+                                "file_type": "code",
+                                "source_file": str(Path("/Users/truthseeker/jarvis-ai/ui.py")),
+                                "source_location": "L2400",
+                                "community": 0,
+                            },
+                        ],
+                        "links": [
+                            {
+                                "source": "JarvisWindow",
+                                "target": "_meeting_watchdog_tick",
+                                "relation": "contains",
+                                "confidence": "EXTRACTED",
+                                "source_file": str(Path("/Users/truthseeker/jarvis-ai/ui.py")),
+                                "source_location": "L2400",
+                                "confidence_score": 1.0,
+                            }
+                        ],
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            report_path.write_text(
+                "# Graph Report\n\n## Summary\n- 2 nodes · 1 edge · 1 communities detected\n- Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS\n",
+                encoding="utf-8",
+            )
+            analysis_path.write_text(
+                json.dumps({"labels": {"0": "Ui / Toolbar"}}),
+                encoding="utf-8",
+            )
+
+            with patch.object(graph_context, "GRAPH_PATH", graph_path), \
+                 patch.object(graph_context, "REPORT_PATH", report_path), \
+                 patch.object(graph_context, "ANALYSIS_PATH", analysis_path):
+                graph_context.invalidate()
+                text = graph_context.context_for_query(
+                    "Where is the meeting watchdog in this repo?",
+                    tool="chat",
+                )
+
+        self.assertIn("Relevant Graphify repo context", text)
+        self.assertIn("JarvisWindow", text)
+        self.assertIn("_meeting_watchdog_tick()", text)
+        self.assertIn("ui.py", text)
+
+    def test_context_for_query_skips_non_repo_questions(self):
+        graph_context.invalidate()
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            graph_path = tmp / "graph.json"
+            report_path = tmp / "GRAPH_REPORT.md"
+            analysis_path = tmp / "analysis.json"
+
+            graph_path.write_text(json.dumps({"nodes": [], "links": []}), encoding="utf-8")
+            report_path.write_text("", encoding="utf-8")
+            analysis_path.write_text(json.dumps({}), encoding="utf-8")
+
+            with patch.object(graph_context, "GRAPH_PATH", graph_path), \
+                 patch.object(graph_context, "REPORT_PATH", report_path), \
+                 patch.object(graph_context, "ANALYSIS_PATH", analysis_path):
+                graph_context.invalidate()
+                text = graph_context.context_for_query("What is a variable?", tool="chat")
+
+        self.assertEqual(text, "")
 
     def test_open_source_mode_prefers_local_label(self):
         previous = model_router.get_mode()

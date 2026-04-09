@@ -42,6 +42,31 @@
       ]
     },
     {
+      "id": "career_interview_ops",
+      "name": "Career Interview Ops",
+      "description": "Handle company-specific interview prep, story-bank building, and application-state tracking using Aman's real context and sourced evidence.",
+      "tool": "chat",
+      "cost_hint": "haiku",
+      "triggers": [
+        "interview prep",
+        "tell me about yourself",
+        "behavioral story",
+        "star story",
+        "job application",
+        "application status",
+        "why are you a fit",
+        "interview questions",
+        "salary negotiation"
+      ],
+      "path": "career_interview_ops/SKILL.md",
+      "resources": [
+        "../kb/career/career_ops_interview_playbook.md",
+        "../kb/career/story_bank_template.md",
+        "../kb/career/application_states.md",
+        "../kb/career/candidate_profile_template.md"
+      ]
+    },
+    {
       "id": "code_implementation",
       "name": "Code Implementation",
       "description": "Write and modify code with focused diffs, explicit assumptions, and minimal breakage risk.",

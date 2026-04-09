@@ -9,6 +9,7 @@ simple append-only JSONL log for later analysis.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -62,7 +63,7 @@ def _ensure_state() -> dict:
 
 
 def _save_state(state: dict) -> None:
-    tmp = USAGE_STATE.with_suffix(".tmp")
+    tmp = USAGE_STATE.with_name(f"{USAGE_STATE.stem}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     tmp.replace(USAGE_STATE)
 

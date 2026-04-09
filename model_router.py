@@ -19,7 +19,7 @@ Mode commands:
 """
 
 from config import GPT_MINI, GPT_FULL, GEMINI_FLASH, GEMINI_PRO, HAIKU, SONNET, OPUS
-from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, DEFAULT_MODE
+from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED, DEFAULT_MODE
 from brain import ask_stream
 from brain_gemini import ask_gemini_stream
 from brain_claude import ask_claude_stream
@@ -28,6 +28,7 @@ import local_model_eval
 import cost_policy
 import skills
 import vault
+import graph_context as _gctx
 import semantic_memory as _smem
 
 _current_mode = DEFAULT_MODE
@@ -147,7 +148,7 @@ def _best_local(text: str) -> str:
         if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
             return promoted
 
-    if LOCAL_TUNED and any(LOCAL_TUNED in m for m in available):
+    if LOCAL_PREFER_TUNED and LOCAL_TUNED and any(LOCAL_TUNED in m for m in available):
         if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
             return LOCAL_TUNED
 
@@ -160,7 +161,12 @@ def _best_local(text: str) -> str:
             return LOCAL_REASONING
 
     # Return first available
-    for preferred in (promoted, LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING):
+    fallback_preferred = [promoted]
+    if LOCAL_PREFER_TUNED:
+        fallback_preferred.append(LOCAL_TUNED)
+    fallback_preferred.extend([LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING])
+
+    for preferred in fallback_preferred:
         if not preferred:
             continue
         if any(preferred.split(":")[0] in m for m in available):
@@ -326,6 +332,10 @@ def smart_stream(
     vault_extra = vault.build_context(user_input, tool=tool)
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
+
+    graph_extra = _gctx.context_for_query(user_input, tool=tool)
+    if graph_extra:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + graph_extra
 
     # Semantic KB: inject relevant facts from memory/ (TF-IDF over structured JSON)
     smem_ctx = _smem.context_for_query(user_input, top_k=3, max_chars=1200)

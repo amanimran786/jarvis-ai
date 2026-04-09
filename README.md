@@ -14,6 +14,7 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
 - **Scoped prompt modifiers** — request-local shorthands like `ELI5:`, `/BRIEFLY`, `TONE formal:`, or `ROLE: ... TASK: ... FORMAT: ...` shape only the current answer instead of bloating the global system prompt
 - **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary
 - **Local markdown vault** — indexed markdown files in `vault/` can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward, with citations to exact local files and headings
+- **Graphify repo grounding** — a generated code graph under `graphify-out/` can be injected as supporting context for repo and codebase questions, so Jarvis can answer from the project structure instead of rereading raw files every time
 - **Wiki compiler** — raw markdown in `vault/raw/` can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval
 - **Structured source ingestion** — PDFs keep page boundaries, PowerPoint decks keep slide boundaries, and Google Drive sources can be pulled into the vault before indexing
 - **Self-learning** — background knowledge feed, fact extraction, and daily reflection
@@ -78,6 +79,13 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
    - Contacts, so first-run iMessage contact lookup can succeed
    - Microphone, camera, and screen recording as needed for voice, webcam, and screen analysis
    - Automation permissions for controlling apps like Safari, Messages, and Terminal
+
+8. Optional: build Graphify repo artifacts for stronger codebase grounding:
+   ```bash
+   venv/bin/python -m pip install graphifyy
+   venv/bin/python scripts/build_graphify_repo.py
+   ```
+   This writes `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md`, and `graphify-out/analysis.json`.
 
 ## Running
 
