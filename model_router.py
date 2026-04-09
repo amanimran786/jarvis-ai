@@ -102,8 +102,7 @@ NEEDS_CLOUD_MID = {
 # Tasks that a local model handles perfectly
 LOCAL_CAPABLE = {
     # Conversation
-    "how are you", "what's up", "tell me", "who is", "what is",
-    "what time", "what day", "help me", "can you",
+    "how are you", "what's up", "what time", "what day", "help me",
     # Simple coding
     "write a function", "write a script", "fix this", "debug",
     "what does this code", "explain this code",
@@ -310,8 +309,18 @@ def smart_stream(
     Strategy: local → mini → haiku → sonnet → opus
     Only escalates when the task genuinely requires it.
     """
+    grounding_extra = (
+        "Grounding rules:\n"
+        "- Treat the current user message as primary truth.\n"
+        "- Treat tool output and runtime facts as stronger than memory or inference.\n"
+        "- Treat vault and semantic memory as supporting context that may be stale.\n"
+        "- Do not claim you performed actions, scans, checks, or integrations unless the current context explicitly shows the result.\n"
+        "- Do not invent system specs, network details, permissions, account access, device state, or completed work.\n"
+        "- If evidence is missing, say what you can verify next instead of presenting guesses as facts."
+    )
     mode = _current_mode
     system_extra, resolved_skills = skills.build_system_extra(user_input, skill_id=skill_id, tool=tool)
+    system_extra = grounding_extra + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     vault_extra = vault.build_context(user_input, tool=tool)
