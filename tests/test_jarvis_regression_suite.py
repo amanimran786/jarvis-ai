@@ -1283,6 +1283,46 @@ class _StubButton:
 
 
 class LiveAssistRenderingTests(unittest.TestCase):
+    def test_meeting_watchdog_respects_manual_full_window_restore(self):
+        window = SimpleNamespace(
+            _last_live_listener_started_at=0.0,
+            _last_live_transcript_at=0.0,
+            _last_live_suggestion_at=0.0,
+            _meeting_toolbar_mode=False,
+            _meeting_toolbar_auto=False,
+            _meeting_toolbar_manual_expand_meeting="TEAMS",
+            _auto_listen_suppressed_meeting=None,
+            _auto_listen_engaged_meeting=None,
+            _subtitle=_StubTextWidget(""),
+            _base_subtitle_text="Just A Rather Very Intelligent System",
+            listen_btn=_StubButton(),
+            suggest_panel=_StubPanel(),
+            transcript_label=_StubTextWidget(),
+            suggest_label=_StubTextWidget(),
+            _set_status=lambda value: setattr(window, "status_value", value),
+            _set_meeting_toolbar_mode=unittest.mock.Mock(),
+            _apply_live_transcript_update=lambda text: None,
+            _apply_live_suggestion_update=lambda text: None,
+            _add_message=lambda *args, **kwargs: None,
+            _on_transcript=lambda text: None,
+            _on_suggestion=lambda text: None,
+            _update_meeting_toolbar_layout=lambda: None,
+        )
+
+        snapshot = {
+            "running": False,
+            "preferred": {"kind": "meeting_audio", "device_name": "Microsoft Teams Audio"},
+            "preferred_source": {"kind": "meeting_audio", "device_name": "Microsoft Teams Audio"},
+        }
+
+        with patch("ui._overlay_mod.detect_meeting_app", return_value="TEAMS"), \
+             patch("ui._meeting_status_snapshot", return_value=snapshot), \
+             patch("ui._live_listener_snapshot", return_value=snapshot), \
+             patch("ui._meeting_start", return_value="Smart listening is active via Microsoft Teams Audio at 48000Hz."):
+            ui.JarvisWindow._meeting_watchdog_tick(window)
+
+        window._set_meeting_toolbar_mode.assert_not_called()
+
     def test_toolbar_manual_prompt_renders_when_surface_is_visible(self):
         window = SimpleNamespace(
             _meeting_toolbar_mode=False,
