@@ -6,7 +6,7 @@ No API keys, no external servers, no restrictions, completely private.
 import ollama as _ollama
 import re
 import os
-from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED
+from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
@@ -52,7 +52,7 @@ def get_best_available(preferred: str) -> str:
         models = [m.model for m in _client().list().models]
         if not models:
             raise RuntimeError("No Ollama models found. Run: ollama pull llama3.1:8b")
-        if LOCAL_TUNED and any(LOCAL_TUNED in m for m in models):
+        if LOCAL_PREFER_TUNED and LOCAL_TUNED and any(LOCAL_TUNED in m for m in models):
             if preferred == LOCAL_DEFAULT:
                 return LOCAL_TUNED
         if any(preferred in m for m in models):
