@@ -46,6 +46,8 @@ import usage_tracker
 import runtime_state
 import provider_router
 import task_runtime
+import semantic_memory
+import graph_context as gctx
 
 
 def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
@@ -267,6 +269,10 @@ def chat(req: ChatRequest):
                 context_stats = ctx.record_request_stats(model, source="api_stream")
                 interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
                 evals.maybe_log_automatic_failure(interaction)
+                try:
+                    semantic_memory.log_conversation_turn(req.message, response, model=model, source="api_stream")
+                except Exception:
+                    pass
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
         return StreamingResponse(generate(), media_type="text/event-stream")
@@ -279,6 +285,10 @@ def chat(req: ChatRequest):
         context_stats = ctx.record_request_stats(model, source="api")
         interaction = evals.log_interaction(req.message, response, model, context=context_stats)
         evals.maybe_log_automatic_failure(interaction)
+        try:
+            semantic_memory.log_conversation_turn(req.message, response, model=model, source="api")
+        except Exception:
+            pass
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
 
 
@@ -383,6 +393,19 @@ def get_plugin(plugin_id: str):
     if not plugin:
         return JSONResponse(status_code=404, content={"ok": False, "error": "plugin_not_found"})
     return {"ok": True, "plugin": plugin}
+
+
+@app.get("/graph/query")
+def graph_query(q: str, topn: int = 8):
+    result = gctx.query_graph(q, topn=topn)
+    return {"ok": bool(result.get("ready", False)), "result": result}
+
+
+@app.get("/graph/path")
+def graph_path(source: str, target: str, max_depth: int = 6):
+    result = gctx.shortest_path(source, target, max_depth=max_depth)
+    status = 200 if result.get("ok") else 404
+    return JSONResponse(status_code=status, content={"ok": bool(result.get("ok")), "result": result})
 
 
 @app.get("/tasks")

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import deque
 from functools import lru_cache
 from pathlib import Path
 
@@ -283,6 +284,105 @@ def search(query: str, topn: int = 5) -> dict:
 
     ranked_edges = [link for _, link in sorted(edge_scores, key=lambda item: item[0], reverse=True)[:topn]]
     return {"nodes": top_nodes, "edges": ranked_edges}
+
+
+def query_graph(query: str, topn: int = 8) -> dict:
+    payload = _load_payload()
+    if not payload:
+        return {"ready": False, "nodes": [], "edges": [], "stats": {}}
+    results = search(query, topn=max(1, topn))
+    return {
+        "ready": True,
+        "query": query,
+        "stats": payload["stats"],
+        "nodes": results.get("nodes", []),
+        "edges": results.get("edges", []),
+    }
+
+
+def _resolve_nodes(term: str, payload: dict, limit: int = 5) -> list[dict]:
+    needle = (term or "").strip().lower()
+    if not needle:
+        return []
+    exact = []
+    fuzzy = []
+    for node in payload["nodes"].values():
+        node_id = str(node.get("id", "")).lower()
+        label = str(node.get("label", "")).lower()
+        hay = f"{node_id} {label} {node.get('source_file', '').lower()}"
+        if needle == node_id or needle == label:
+            exact.append(node)
+        elif needle in hay:
+            fuzzy.append(node)
+    if exact:
+        return exact[:limit]
+    return fuzzy[:limit]
+
+
+def _find_link_between(payload: dict, src_id: str, tgt_id: str) -> dict | None:
+    for link in payload["adjacency"].get(src_id, []):
+        a = str(link.get("source", ""))
+        b = str(link.get("target", ""))
+        if {a, b} == {src_id, tgt_id}:
+            return link
+    return None
+
+
+def shortest_path(source_term: str, target_term: str, max_depth: int = 6) -> dict:
+    payload = _load_payload()
+    if not payload:
+        return {"ok": False, "error": "graph_not_ready", "path": []}
+
+    sources = _resolve_nodes(source_term, payload, limit=3)
+    targets = _resolve_nodes(target_term, payload, limit=3)
+    if not sources:
+        return {"ok": False, "error": "source_not_found", "path": [], "source_matches": []}
+    if not targets:
+        return {"ok": False, "error": "target_not_found", "path": [], "target_matches": []}
+
+    target_ids = {node["id"] for node in targets}
+    queue = deque([(src["id"], [src["id"]]) for src in sources])
+    visited = {src["id"] for src in sources}
+
+    best_path: list[str] | None = None
+    while queue:
+        node_id, path = queue.popleft()
+        if node_id in target_ids:
+            best_path = path
+            break
+        if len(path) > max_depth:
+            continue
+        for link in payload["adjacency"].get(node_id, []):
+            nxt = str(link.get("target")) if str(link.get("source")) == node_id else str(link.get("source"))
+            if not nxt or nxt in visited:
+                continue
+            visited.add(nxt)
+            queue.append((nxt, path + [nxt]))
+
+    if not best_path:
+        return {
+            "ok": False,
+            "error": "path_not_found",
+            "path": [],
+            "source_matches": [n.get("id", "") for n in sources],
+            "target_matches": [n.get("id", "") for n in targets],
+        }
+
+    nodes = [payload["nodes"].get(node_id, {"id": node_id, "label": node_id}) for node_id in best_path]
+    edges = []
+    for left, right in zip(best_path, best_path[1:]):
+        link = _find_link_between(payload, left, right)
+        if link:
+            edges.append(link)
+
+    return {
+        "ok": True,
+        "path": best_path,
+        "nodes": nodes,
+        "edges": edges,
+        "source_matches": [n.get("id", "") for n in sources],
+        "target_matches": [n.get("id", "") for n in targets],
+    }
 
 
 def context_for_query(query: str, tool: str | None = None, topn: int = 5, max_chars: int = 1400) -> str:
