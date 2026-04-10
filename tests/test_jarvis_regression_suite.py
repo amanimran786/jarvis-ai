@@ -886,6 +886,47 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["plugin"]["skills_detail"])
         self.assertTrue(payload["plugin"]["connectors_detail"])
 
+    def test_osint_status_endpoint(self):
+        with patch("api.osint_tools.status", return_value={"maigret": {"available": True}, "dnstwist": {"available": False}}):
+            response = self.client.get("/osint/status")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("maigret", payload["status"])
+        self.assertIn("dnstwist", payload["status"])
+
+    def test_osint_username_endpoint(self):
+        mocked = {
+            "ok": True,
+            "provider": "maigret",
+            "username": "aman",
+            "profiles": [{"site": "github", "url": "https://github.com/aman"}],
+            "found_count": 1,
+        }
+        with patch("api.osint_tools.username_lookup", return_value=mocked):
+            response = self.client.post("/osint/username", json={"username": "aman"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["provider"], "maigret")
+        self.assertEqual(payload["found_count"], 1)
+
+    def test_osint_domain_typos_endpoint(self):
+        mocked = {
+            "ok": True,
+            "provider": "dnstwist",
+            "domain": "example.com",
+            "candidates": [{"domain": "examp1e.com", "risk_score": 3}],
+            "candidate_count": 1,
+        }
+        with patch("api.osint_tools.domain_typo_scan", return_value=mocked):
+            response = self.client.post("/osint/domain-typos", json={"domain": "example.com"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["provider"], "dnstwist")
+        self.assertEqual(payload["candidate_count"], 1)
+
     def test_graph_query_endpoint_returns_graph_results(self):
         with patch("api.gctx.query_graph", return_value={"ready": True, "query": "watchdog", "nodes": [{"id": "JarvisWindow"}], "edges": []}):
             response = self.client.get("/graph/query?q=watchdog")

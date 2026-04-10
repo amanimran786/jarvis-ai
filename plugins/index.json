@@ -55,6 +55,17 @@
       "connectors": ["managed_runtime", "terminal_operator"],
       "agents": ["planner", "executor", "reviewer", "security_reviewer"],
       "entrypoints": ["api", "cli", "desktop"]
+    },
+    {
+      "id": "osint_ops",
+      "name": "OSINT Ops",
+      "description": "Open-source investigation helpers for handle pivoting and domain typo-squat monitoring.",
+      "category": "workflow",
+      "local_only": true,
+      "skills": ["research_synthesis", "source_grounding"],
+      "connectors": ["osint_local", "knowledge_vault"],
+      "agents": ["planner", "reviewer"],
+      "entrypoints": ["api", "desktop"]
     }
   ]
 }
