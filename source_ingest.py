@@ -14,7 +14,10 @@ Supported sources:
 from __future__ import annotations
 
 import io
+import ipaddress
+import os
 import re
+import socket
 import zipfile
 from pathlib import Path
 from urllib.parse import urlparse
@@ -45,6 +48,46 @@ def _safe_text(text: str) -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def _private_url_ingest_allowed() -> bool:
+    return os.getenv("JARVIS_ALLOW_PRIVATE_URL_INGEST", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _assert_safe_remote_url(source: str) -> None:
+    parsed = urlparse(source)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Only http and https URLs are supported for remote ingest.")
+
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("The URL is missing a hostname.")
+    if _private_url_ingest_allowed():
+        return
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("Refusing to ingest localhost URLs. Set JARVIS_ALLOW_PRIVATE_URL_INGEST=1 to override.")
+
+    candidates: set[ipaddress._BaseAddress] = set()
+    try:
+        candidates.add(ipaddress.ip_address(host))
+    except ValueError:
+        try:
+            for family, *_rest, sockaddr in socket.getaddrinfo(host, None):
+                if family not in {socket.AF_INET, socket.AF_INET6}:
+                    continue
+                ip = sockaddr[0]
+                if "%" in ip:
+                    ip = ip.split("%", 1)[0]
+                candidates.add(ipaddress.ip_address(ip))
+        except socket.gaierror:
+            return
+
+    for addr in candidates:
+        if any((addr.is_private, addr.is_loopback, addr.is_link_local, addr.is_multicast, addr.is_reserved)):
+            raise ValueError(
+                "Refusing to ingest private or local-network URLs by default. "
+                "Set JARVIS_ALLOW_PRIVATE_URL_INGEST=1 to override."
+            )
 
 
 def _write_raw_markdown(name: str, body: str) -> Path:
@@ -319,6 +362,7 @@ def ingest_url(source: str, auto_build: bool = True, dry_run: bool = False) -> d
     if _is_google_drive_source(source):
         return ingest_google_drive(source, auto_build=auto_build, dry_run=dry_run)
 
+    _assert_safe_remote_url(source)
     response = requests.get(source, timeout=20, headers={"User-Agent": "Jarvis/1.0"})
     response.raise_for_status()
 

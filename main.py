@@ -226,13 +226,15 @@ def _run_deferred_startup_tasks() -> None:
         except Exception:
             traceback.print_exc()
 
-    try:
-        import terminal
+    request_admin = os.getenv("JARVIS_REQUEST_STARTUP_ADMIN", "").lower() in {"1", "true", "yes", "on"}
+    if request_admin:
+        try:
+            import terminal
 
-        print("[System] Requesting administrative access for this session...")
-        terminal.run_admin_command("echo 'Jarvis Administrator Privileges Granted'")
-    except Exception:
-        traceback.print_exc()
+            print("[System] Requesting administrative access for this session...")
+            terminal.run_admin_command("echo 'Jarvis Administrator Privileges Granted'")
+        except Exception:
+            traceback.print_exc()
 
 
 def _start_deferred_startup_tasks() -> None:

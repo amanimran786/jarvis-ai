@@ -1639,6 +1639,24 @@ class MainStartupGuardTests(unittest.TestCase):
 
 
 class RuntimeEndpointDiscoveryTests(unittest.TestCase):
+    def test_read_api_endpoint_preserves_token(self):
+        import runtime_state
+
+        payload = {
+            "host": "127.0.0.1",
+            "port": 8766,
+            "pid": 123,
+            "token": "secret-token",
+            "written_at": "2026-04-09T00:00:00+00:00",
+        }
+
+        with patch("runtime_state.runtime_meta_path") as meta_path:
+            meta_path.return_value.read_text.return_value = json.dumps(payload)
+            result = runtime_state.read_api_endpoint()
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["token"], "secret-token")
+
     def test_discover_api_endpoint_prefers_runtime_metadata(self):
         import runtime_state
 
@@ -1700,6 +1718,15 @@ class RuntimeEndpointDiscoveryTests(unittest.TestCase):
 
 
 class JarvisCliEndpointTests(unittest.TestCase):
+    def test_auth_headers_use_runtime_token_when_present(self):
+        import jarvis_cli
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("runtime_state.read_api_endpoint", return_value={"token": "runtime-token"}):
+            headers = jarvis_cli._auth_headers()
+
+        self.assertEqual(headers["Authorization"], "Bearer runtime-token")
+
     def test_get_uses_runtime_discovery_each_call(self):
         import jarvis_cli
 
@@ -1725,6 +1752,23 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(payload["status"], "online")
         self.assertEqual(captured, ["http://127.0.0.1:8766/status"])
+
+
+class SourceIngestSafetyTests(unittest.TestCase):
+    def test_rejects_localhost_urls_by_default(self):
+        import source_ingest
+
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError) as exc:
+                source_ingest._assert_safe_remote_url("http://127.0.0.1:8000/private")
+
+        self.assertIn("Refusing to ingest", str(exc.exception))
+
+    def test_allows_private_urls_when_override_is_enabled(self):
+        import source_ingest
+
+        with patch.dict(os.environ, {"JARVIS_ALLOW_PRIVATE_URL_INGEST": "1"}, clear=True):
+            source_ingest._assert_safe_remote_url("http://127.0.0.1:8000/private")
 
 
 if __name__ == "__main__":

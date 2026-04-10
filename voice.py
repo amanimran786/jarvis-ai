@@ -27,6 +27,16 @@ _last_tts_engine = ""
 # Cleared while Jarvis is speaking; listen() blocks until set again.
 _done_speaking = threading.Event()
 _done_speaking.set()  # initially not speaking
+_stop_requested = threading.Event()
+
+
+def request_stop() -> None:
+    _stop_requested.set()
+    _done_speaking.set()
+
+
+def clear_stop_request() -> None:
+    _stop_requested.clear()
 
 # ── ElevenLabs setup ──────────────────────────���───────────────────────────────
 
@@ -223,8 +233,12 @@ def speak_stream(text_chunks) -> str:
 
 def listen() -> str | None:
     """Record audio and transcribe with local faster-whisper when available."""
+    if _stop_requested.is_set():
+        return None
     # Wait until Jarvis finishes speaking — prevents TTS feedback loop
     _done_speaking.wait(timeout=30)
+    if _stop_requested.is_set():
+        return None
     import time; time.sleep(0.3)
 
     with sr.Microphone() as source:
@@ -293,8 +307,12 @@ def wait_for_wake_word() -> None:
     """Listen for wake word using local STT first, with optional remote fallback."""
     print("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
     while True:
+        if _stop_requested.is_set():
+            return
         # Also wait here if Jarvis is speaking
         _done_speaking.wait(timeout=10)
+        if _stop_requested.is_set():
+            return
         with sr.Microphone() as source:
             _recognizer.adjust_for_ambient_noise(source, duration=0.2)
             try:
