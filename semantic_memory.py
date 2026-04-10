@@ -236,12 +236,16 @@ def _ensure_index() -> None:
 
 def invalidate() -> None:
     """Force index rebuild on next retrieval. Call after writing new entries."""
-    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready
+    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready, _embed_matrix
     _vectorizer = None
     _matrix = None
     _entries = []
     _embed_vecs = []
     _embed_ready = False
+    _embed_matrix = None
+    # Clear the query embedding LRU cache since the index is being rebuilt
+    with _embed_cache_lock:
+        _embed_cache.clear()
 
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
