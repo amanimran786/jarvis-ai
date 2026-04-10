@@ -7,13 +7,21 @@ INSTALL_SCRIPT="$ROOT/scripts/install_jarvis_app.sh"
 STAMP_FILE="$ROOT/.jarvis_build_stamp"
 LOCKFILE="/tmp/jarvis_launcher.lock"
 
-# Ensure only one launcher invocation at a time (prevent race conditions)
-exec 9>"$LOCKFILE"
-if ! flock -n 9; then
-  # Another launcher is already running, wait briefly then exit
+# Ensure only one launcher invocation at a time (macOS-compatible approach)
+# Try to create a lock file - if we can't, another instance is running
+if ! mkdir -p "$(dirname "$LOCKFILE")" 2>/dev/null; then
   sleep 1
   exit 0
 fi
+
+# Use a directory as a lock (atomic on all filesystems)
+LOCK_DIR="${LOCKFILE}.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  # Lock file exists, another launcher is running
+  sleep 1
+  exit 0
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
 latest_source_stamp() {
   /usr/bin/find "$ROOT" \
