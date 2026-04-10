@@ -1,0 +1,67 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="118" y1="72" x2="1110" y2="596" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07111F"/>
+      <stop offset="0.52" stop-color="#0C1C32"/>
+      <stop offset="1" stop-color="#091725"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="168" y1="142" x2="995" y2="600" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#122740" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#09111A" stop-opacity="0.98"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="883" y1="119" x2="1096" y2="355" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41D1FF" stop-opacity="0.82"/>
+      <stop offset="1" stop-color="#41D1FF" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="orb" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(943 266) rotate(90) scale(96)">
+      <stop stop-color="#81F2FF"/>
+      <stop offset="0.58" stop-color="#25A8E4"/>
+      <stop offset="1" stop-color="#0B335A"/>
+    </radialGradient>
+    <filter id="shadow" x="98" y="58" width="1084" height="564" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="18"/>
+      <feGaussianBlur stdDeviation="22"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.00784314 0 0 0 0 0.0352941 0 0 0 0 0.0745098 0 0 0 0.52 0"/>
+      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_2"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_2" result="shape"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="640" rx="36" fill="url(#bg)"/>
+  <circle cx="1118" cy="116" r="160" fill="url(#glow)"/>
+  <circle cx="160" cy="536" r="136" fill="#0F2A45" fill-opacity="0.55"/>
+  <g filter="url(#shadow)">
+    <rect x="142" y="102" width="996" height="476" rx="28" fill="url(#panel)" stroke="#224E76" stroke-opacity="0.72"/>
+    <rect x="142" y="102" width="996" height="76" rx="28" fill="#0D2237"/>
+    <circle cx="190" cy="140" r="10" fill="#2B4D6D"/>
+    <circle cx="224" cy="140" r="10" fill="#2B4D6D"/>
+    <circle cx="258" cy="140" r="10" fill="#2B4D6D"/>
+    <text x="302" y="147" fill="#B7D6F0" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="22" font-weight="600">JARVIS // LOCAL RUNTIME</text>
+
+    <text x="196" y="264" fill="#EEF7FF" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="74" font-weight="700">Jarvis AI</text>
+    <text x="198" y="318" fill="#7FD9FF" font-family="SF Mono, Menlo, monospace" font-size="22" letter-spacing="0.18em">OPEN-SOURCE-FIRST  •  MACOS DESKTOP  •  LOCAL-FIRST</text>
+    <text x="198" y="388" fill="#D6E8F7" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="30" font-weight="500">A private desktop assistant built to think, speak, see, remember,</text>
+    <text x="198" y="426" fill="#D6E8F7" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="30" font-weight="500">and act on your Mac before it ever reaches for a paid model.</text>
+
+    <rect x="198" y="472" width="178" height="42" rx="21" fill="#103558" stroke="#2C6C96"/>
+    <text x="228" y="499" fill="#DDF5FF" font-family="SF Mono, Menlo, monospace" font-size="18">DeepSeek R1</text>
+    <rect x="392" y="472" width="178" height="42" rx="21" fill="#103558" stroke="#2C6C96"/>
+    <text x="438" y="499" fill="#DDF5FF" font-family="SF Mono, Menlo, monospace" font-size="18">Gemma 4</text>
+    <rect x="586" y="472" width="212" height="42" rx="21" fill="#103558" stroke="#2C6C96"/>
+    <text x="626" y="499" fill="#DDF5FF" font-family="SF Mono, Menlo, monospace" font-size="18">faster-whisper</text>
+
+    <circle cx="943" cy="266" r="112" fill="url(#orb)"/>
+    <circle cx="943" cy="266" r="72" fill="#041728" stroke="#9BE9FF" stroke-opacity="0.68" stroke-width="3"/>
+    <path d="M943 218C966.748 218 986 237.252 986 261V270C986 293.748 966.748 313 943 313C919.252 313 900 293.748 900 270V261C900 237.252 919.252 218 943 218Z" fill="#8DEEFF" fill-opacity="0.88"/>
+    <path d="M906 342C919.348 323.34 940.637 312 963.557 312H972C986.911 312 1001.05 316.726 1012.6 325.497C993.922 350.826 963.877 367.25 930 367.25C921.631 367.25 913.492 366.248 905.704 364.355L906 342Z" fill="#8DEEFF" fill-opacity="0.68"/>
+    <rect x="834" y="168" width="218" height="218" rx="109" stroke="#7FD9FF" stroke-opacity="0.35" stroke-width="2"/>
+    <rect x="807" y="141" width="272" height="272" rx="136" stroke="#7FD9FF" stroke-opacity="0.18" stroke-width="2"/>
+
+    <rect x="830" y="454" width="226" height="82" rx="18" fill="#0A1E31" stroke="#21496D"/>
+    <text x="858" y="486" fill="#7FD9FF" font-family="SF Mono, Menlo, monospace" font-size="18">DESKTOP APP</text>
+    <text x="858" y="518" fill="#DCEBFA" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="22">Desktop + Applications stay</text>
+    <text x="858" y="544" fill="#DCEBFA" font-family="SF Pro Display, Inter, Arial, sans-serif" font-size="22">in sync on every rebuild.</text>
+  </g>
+</svg>

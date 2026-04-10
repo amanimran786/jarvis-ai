@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import urllib.request
+import urllib.error
 
 
 @dataclass
@@ -99,6 +102,89 @@ def crash_log_path() -> Path:
 
 def port_file_path() -> Path:
     return app_data_dir() / ".jarvis_port"
+
+
+def runtime_meta_path() -> Path:
+    return app_data_dir() / ".jarvis_runtime.json"
+
+
+def write_api_endpoint(host: str, port: int, *, pid: int | None = None) -> None:
+    metadata = {
+        "host": host,
+        "port": int(port),
+        "pid": int(pid or os.getpid()),
+        "written_at": datetime.now(timezone.utc).isoformat(),
+    }
+    runtime_meta_path().write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def read_api_endpoint() -> dict[str, Any] | None:
+    try:
+        payload = json.loads(runtime_meta_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    host = str(payload.get("host") or "").strip() or "127.0.0.1"
+    try:
+        port = int(payload.get("port"))
+    except (TypeError, ValueError):
+        return None
+    return {
+        "host": host,
+        "port": port,
+        "pid": payload.get("pid"),
+        "written_at": payload.get("written_at"),
+        "base_url": f"http://{host}:{port}",
+    }
+
+
+def discover_api_endpoint() -> dict[str, Any] | None:
+    candidates: list[tuple[str, int]] = []
+    seen: set[tuple[str, int]] = set()
+
+    def add_candidate(host: str, port: int) -> None:
+        key = (host.strip() or "127.0.0.1", int(port))
+        if key not in seen:
+            seen.add(key)
+            candidates.append(key)
+
+    env_host = (os.getenv("JARVIS_API_HOST", "127.0.0.1") or "").strip() or "127.0.0.1"
+    env_port = os.getenv("JARVIS_API_PORT", "").strip()
+    if env_port:
+        try:
+            add_candidate(env_host, int(env_port))
+        except ValueError:
+            pass
+
+    metadata = read_api_endpoint()
+    if metadata:
+        add_candidate(str(metadata["host"]), int(metadata["port"]))
+
+    try:
+        raw_port = port_file_path().read_text(encoding="utf-8").strip()
+        if raw_port:
+            add_candidate("127.0.0.1", int(raw_port))
+    except (FileNotFoundError, OSError, ValueError):
+        pass
+
+    for port in range(8765, 8775):
+        add_candidate("127.0.0.1", port)
+
+    for host, port in candidates:
+        base_url = f"http://{host}:{port}"
+        req = urllib.request.Request(base_url + "/status")
+        try:
+            with urllib.request.urlopen(req, timeout=0.5) as resp:
+                payload = json.load(resp)
+            if payload.get("status") == "online":
+                return {
+                    "host": host,
+                    "port": port,
+                    "base_url": base_url,
+                    "status": payload,
+                }
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, json.JSONDecodeError):
+            continue
+    return None
 
 
 def _summarize_call_assist(snapshot: dict[str, Any] | None) -> dict[str, Any]:
