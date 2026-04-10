@@ -9,6 +9,7 @@ from typing import Any
 import conversation_context as ctx
 import evals
 from router import route_stream
+import task_persistence
 import usage_tracker
 import worktree_manager
 
@@ -28,6 +29,8 @@ _TERSE_PREFIXES = {
     "full": "CAVEMAN FULL",
     "ultra": "CAVEMAN ULTRA",
 }
+
+_BOOTSTRAPPED = False
 
 
 def _now() -> str:
@@ -95,17 +98,59 @@ def _default_agents() -> list[dict[str, Any]]:
     ]
 
 
+def _drain_task_threads(timeout: float = 0.4) -> None:
+    with _LOCK:
+        threads = list(_TASK_THREADS.values())
+        _TASK_THREADS.clear()
+    current = threading.current_thread()
+    for thread in threads:
+        if not thread or thread is current:
+            continue
+        if thread.is_alive():
+            try:
+                thread.join(timeout=timeout)
+            except Exception:
+                pass
+
+
 def bootstrap(force_reset: bool = False) -> None:
+    global _BOOTSTRAPPED
+    if force_reset:
+        _drain_task_threads()
     with _LOCK:
         if force_reset:
             _AGENTS.clear()
             _TASKS.clear()
             _TASK_EVENTS.clear()
-            _TASK_THREADS.clear()
-        if _AGENTS:
+            _BOOTSTRAPPED = False
+            task_persistence.reset_for_tests()
+        if _BOOTSTRAPPED:
             return
         for agent in _default_agents():
             _AGENTS[agent["id"]] = agent
+        persisted = task_persistence.load_snapshot()
+        for task in persisted.get("tasks", []):
+            task_id = str(task.get("id") or "")
+            if not task_id:
+                continue
+            _TASKS[task_id] = task
+            _TASK_EVENTS[task_id] = [_copy(event) for event in persisted.get("events", {}).get(task_id, [])]
+
+        for task_id, task in list(_TASKS.items()):
+            if task.get("status") in _TERMINAL_TASK_STATUSES:
+                continue
+            task.update(
+                status="failed",
+                error="daemon_restart",
+                finished_at=_now(),
+                updated_at=_now(),
+            )
+            _persist_task(task_id)
+            _append_event(task_id, "error", status="failed", error="daemon_restart", reason="daemon_restart")
+            agent_id = task.get("assigned_agent_id", "")
+            if agent_id:
+                _touch_agent(agent_id, status="idle", current_task_id="", last_error="daemon_restart")
+        _BOOTSTRAPPED = True
 
 
 def reset_for_tests() -> None:
@@ -113,14 +158,23 @@ def reset_for_tests() -> None:
 
 
 def _append_event(task_id: str, event_type: str, **payload: Any) -> dict[str, Any]:
+    events = _TASK_EVENTS.setdefault(task_id, [])
     event = {
         "task_id": task_id,
         "type": event_type,
         "ts": _now(),
         **payload,
     }
-    _TASK_EVENTS.setdefault(task_id, []).append(event)
+    events.append(event)
+    task_persistence.append_event(event, len(events) - 1)
     return event
+
+
+def _persist_task(task_id: str) -> None:
+    task = _TASKS.get(task_id)
+    if not task:
+        return
+    task_persistence.upsert_task(_copy(task))
 
 
 def _touch_agent(agent_id: str, *, status: str | None = None, current_task_id: str | None = None, last_error: str | None = None) -> None:
@@ -219,6 +273,7 @@ def _set_task_status(task_id: str, status: str, **updates: Any) -> None:
     task.update(updates)
     task["updated_at"] = _now()
     _append_event(task_id, "status", status=status, updates=updates)
+    _persist_task(task_id)
 
 
 def _complete_task(task_id: str, *, response: str, model: str, usage: dict[str, Any], interaction_id: str, source: str) -> None:
@@ -242,6 +297,7 @@ def _complete_task(task_id: str, *, response: str, model: str, usage: dict[str, 
         interaction_id=interaction_id,
         usage=_copy(usage),
     )
+    _persist_task(task_id)
 
 
 def _fail_task(task_id: str, error: str) -> None:
@@ -253,6 +309,7 @@ def _fail_task(task_id: str, error: str) -> None:
         updated_at=_now(),
     )
     _append_event(task_id, "error", status="failed", error=error)
+    _persist_task(task_id)
 
 
 def _run_task(task_id: str) -> None:
@@ -315,6 +372,7 @@ def _run_task(task_id: str) -> None:
             if agent_id:
                 error = task.get("error", "") if task.get("status") == "failed" else ""
                 _touch_agent(agent_id, status="idle", current_task_id="", last_error=error)
+            _TASK_THREADS.pop(task_id, None)
 
 
 def submit_task(
@@ -364,6 +422,7 @@ def submit_task(
     with _LOCK:
         _TASKS[task_id] = task
         _TASK_EVENTS[task_id] = []
+        _persist_task(task_id)
         _append_event(
             task_id,
             "status",
@@ -391,6 +450,7 @@ def cancel_task(task_id: str) -> dict[str, Any] | None:
             return _copy(task)
         task["cancel_requested"] = True
         _append_event(task_id, "status", status="cancel_requested")
+        _persist_task(task_id)
         if task["status"] == "queued":
             _set_task_status(task_id, "cancelled", finished_at=_now())
             agent_id = task.get("assigned_agent_id", "")
