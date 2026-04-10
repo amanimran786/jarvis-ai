@@ -2611,6 +2611,35 @@ class OrbShellWindow(JarvisWindow):
         self.setWindowOpacity(self._preferred_opacity)
         QTimer.singleShot(120, self._finish_startup)
 
+    def _action_btn_css(self, color: str) -> str:
+        c = QColor(color)
+        r, g, b = c.red(), c.green(), c.blue()
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {color};
+                border: 1px solid {color};
+                border-radius: 10px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{ background: rgba({r},{g},{b},0.14); }}
+            QPushButton:pressed {{ background: rgba({r},{g},{b},0.28); }}
+        """
+
+    def _call_status_css(self, tone: str) -> str:
+        palette = {
+            "live": (C_GREEN, "rgba(0, 255, 136, 0.12)"),
+            "meeting": (C_CYAN, "rgba(0, 212, 255, 0.12)"),
+            "fallback": (C_WARNING, "rgba(255, 170, 0, 0.12)"),
+            "idle": (C_TEXT_DIM, "rgba(3, 18, 28, 155)"),
+        }
+        border, fill = palette.get(tone, palette["idle"])
+        return (
+            _glass_panel_css(fill=fill, radius=10, border=border) +
+            f"color: {border}; padding: 8px 10px;"
+        )
+
     def _finish_startup(self):
         if self._bootstrapped:
             return
@@ -2976,35 +3005,6 @@ end tell
         elif not self._tray_locked:
             self.suggest_panel.hide()
         self.adjustSize()
-
-    def _action_btn_css(self, color: str) -> str:
-        c = QColor(color)
-        r, g, b = c.red(), c.green(), c.blue()
-        return f"""
-            QPushButton {{
-                background: transparent;
-                color: {color};
-                border: 1px solid {color};
-                border-radius: 10px;
-                padding: 0 10px;
-                letter-spacing: 1px;
-            }}
-            QPushButton:hover {{ background: rgba({r},{g},{b},0.14); }}
-            QPushButton:pressed {{ background: rgba({r},{g},{b},0.28); }}
-        """
-
-    def _call_status_css(self, tone: str) -> str:
-        palette = {
-            "live": (C_GREEN, "rgba(0, 255, 136, 0.12)"),
-            "meeting": (C_CYAN, "rgba(0, 212, 255, 0.12)"),
-            "fallback": (C_WARNING, "rgba(255, 170, 0, 0.12)"),
-            "idle": (C_TEXT_DIM, "rgba(3, 18, 28, 155)"),
-        }
-        border, fill = palette.get(tone, palette["idle"])
-        return (
-            _glass_panel_css(fill=fill, radius=10, border=border) +
-            f"color: {border}; padding: 8px 10px;"
-        )
 
     def _adaptive_tick(self):
         if self._drag_pos is not None:
