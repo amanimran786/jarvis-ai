@@ -26,6 +26,40 @@ CRASH_LOG = str(runtime_state.crash_log_path())
 _CRASH_STREAM = None
 
 
+def _is_conda_python() -> bool:
+    exe = (sys.executable or "").lower()
+    return bool(os.getenv("CONDA_PREFIX")) or "anaconda" in exe or "miniconda" in exe or "/conda/" in exe
+
+
+def _project_venv_python() -> str:
+    return os.path.join(os.path.dirname(__file__), "venv", "bin", "python")
+
+
+def _ensure_supported_gui_runtime() -> None:
+    """Avoid hard Qt aborts when the GUI is launched from a conda interpreter.
+
+    If the repo venv exists, transparently re-exec into it. Otherwise exit with a
+    clear message instead of letting Qt abort on plugin initialization.
+    """
+    if "--no-ui" in sys.argv:
+        return
+    if not _is_conda_python():
+        return
+
+    target = _project_venv_python()
+    current = os.path.realpath(sys.executable)
+    target_real = os.path.realpath(target) if os.path.exists(target) else ""
+    if target_real and current != target_real:
+        print("[Startup] GUI launch requested from conda Python. Re-launching Jarvis with the project venv to avoid Qt plugin crashes...")
+        os.execv(target_real, [target_real] + sys.argv)
+
+    if not target_real:
+        raise SystemExit(
+            "[Startup] Jarvis GUI should not be launched from conda on this machine. "
+            "Use ./venv/bin/python main.py, python main.py --no-ui, or the packaged Jarvis.app."
+        )
+
+
 def _append_crash_log(label: str, exc_type, exc_value, exc_traceback) -> None:
     timestamp = __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     stack = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
@@ -207,6 +241,7 @@ def _start_deferred_startup_tasks() -> None:
     ).start()
 
 def _run():
+    _ensure_supported_gui_runtime()
     _install_crash_logging()
     api_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
     api_port = _resolve_api_port()

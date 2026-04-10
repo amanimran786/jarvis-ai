@@ -80,6 +80,7 @@ _AUDIO_DEVICES_CACHE: list[dict] | None = None
 _AUDIO_DEVICES_CACHE_UNTIL = 0.0
 _PREFERRED_SOURCE_CACHE: dict | None = None
 _PREFERRED_SOURCE_CACHE_UNTIL = 0.0
+_PREFERRED_SOURCE_CACHE_KEY: tuple[str | None, int | None] | None = None
 
 
 def list_audio_devices(force_refresh: bool = False) -> list[dict]:
@@ -212,14 +213,15 @@ def _source_snapshot(kind: str, device_index: int | None, device_name: str, fall
     }
 
 
-def _build_source_candidates(force_refresh: bool = False) -> list[dict]:
+def _build_source_candidates(force_refresh: bool = False, meeting_label: str | None = None) -> list[dict]:
     """
     Build an ordered list of audio sources to try.
     Meeting-specific sources outrank BlackHole, and BlackHole outranks mic only
     if nothing better is available. This keeps us from getting stuck on an
     installed but unrouted loopback device.
     """
-    meeting_label = _meeting_label(force_refresh=force_refresh)
+    if meeting_label is None:
+        meeting_label = _meeting_label(force_refresh=force_refresh)
     candidates: list[dict] = []
 
     meeting_audio = get_virtual_meeting_audio_device(meeting_label=meeting_label, force_refresh=force_refresh)
@@ -268,8 +270,8 @@ def _build_source_candidates(force_refresh: bool = False) -> list[dict]:
     return ordered
 
 
-def _select_source_snapshot(force_refresh: bool = False) -> dict:
-    candidates = _build_source_candidates(force_refresh=force_refresh)
+def _select_source_snapshot(force_refresh: bool = False, meeting_label: str | None = None) -> dict:
+    candidates = _build_source_candidates(force_refresh=force_refresh, meeting_label=meeting_label)
     if not candidates:
         return _source_snapshot("microphone", None, "default input", True, reason="no candidates")
 
@@ -463,20 +465,29 @@ def _maybe_rotate_source(force_refresh: bool = False, reason: str = "") -> bool:
 
 
 def preferred_source_snapshot(force_refresh: bool = False) -> dict:
-    global _PREFERRED_SOURCE_CACHE, _PREFERRED_SOURCE_CACHE_UNTIL
+    global _PREFERRED_SOURCE_CACHE, _PREFERRED_SOURCE_CACHE_UNTIL, _PREFERRED_SOURCE_CACHE_KEY
     now = time.monotonic()
+    meeting_label = _meeting_label(force_refresh=force_refresh)
+    cache_key = (meeting_label, _device_index)
     with _CACHE_LOCK:
-        if not force_refresh and _PREFERRED_SOURCE_CACHE is not None and now < _PREFERRED_SOURCE_CACHE_UNTIL:
+        if (
+            not force_refresh
+            and _PREFERRED_SOURCE_CACHE is not None
+            and now < _PREFERRED_SOURCE_CACHE_UNTIL
+            and _PREFERRED_SOURCE_CACHE_KEY == cache_key
+        ):
             return dict(_PREFERRED_SOURCE_CACHE)
 
-    source = _select_source_snapshot(force_refresh=force_refresh)
+    source = _select_source_snapshot(force_refresh=force_refresh, meeting_label=meeting_label)
     snapshot = {
         **source,
-        "candidates": _build_source_candidates(force_refresh=force_refresh),
+        "meeting_label": meeting_label,
+        "candidates": _build_source_candidates(force_refresh=force_refresh, meeting_label=meeting_label),
     }
     with _CACHE_LOCK:
         _PREFERRED_SOURCE_CACHE = dict(snapshot)
         _PREFERRED_SOURCE_CACHE_UNTIL = time.monotonic() + _SOURCE_CACHE_TTL
+        _PREFERRED_SOURCE_CACHE_KEY = cache_key
     return snapshot
 
 

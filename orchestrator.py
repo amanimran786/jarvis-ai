@@ -99,12 +99,11 @@ def classify(user_input: str) -> ToolDecision:
     if fast:
         return _attach_skill(user_input, fast)
 
-    # In open-source mode, skip the multi-pass specialized pipeline — the single
-    # local model with reasoning-boost prompt handles these queries better and faster.
-    if not model_router.is_open_source_mode():
-        auto_specialized = _auto_specialized_classify(user_input.lower().strip())
-        if auto_specialized:
-            return _attach_skill(user_input, auto_specialized)
+    # Use the fast heuristic specialist classifier in every mode.
+    # This is local and deterministic, unlike the cloud classifier below.
+    auto_specialized = _auto_specialized_classify(user_input.lower().strip())
+    if auto_specialized:
+        return _attach_skill(user_input, auto_specialized)
 
     if model_router.is_open_source_mode():
         return _attach_skill(user_input, _FALLBACK)
