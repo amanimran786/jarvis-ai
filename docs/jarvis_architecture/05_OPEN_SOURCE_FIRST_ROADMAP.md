@@ -80,7 +80,7 @@ Jarvis should not get "smarter" by intuition alone. Improvements need replayable
 
 Implication for this repo:
 
-- keep [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py), [local_beta.py](/Users/truthseeker/jarvis-ai/local_beta.py), and [jarvis_beta.py](/Users/truthseeker/jarvis-ai/jarvis_beta.py)
+- keep [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py) and [local_beta.py](/Users/truthseeker/jarvis-ai/local_beta.py)
 - make them more local, cheaper, and more representative of actual Jarvis tasks
 
 ## Open-Source Model Stack By Function
@@ -215,7 +215,6 @@ Existing:
 - [self_improve.py](/Users/truthseeker/jarvis-ai/self_improve.py)
 - [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py)
 - [local_beta.py](/Users/truthseeker/jarvis-ai/local_beta.py)
-- [jarvis_beta.py](/Users/truthseeker/jarvis-ai/jarvis_beta.py)
 
 Still needed:
 

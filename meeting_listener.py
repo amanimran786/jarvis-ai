@@ -72,14 +72,31 @@ _EMPTY_TRANSCRIPT_FAILOVER_CHUNKS = 2
 _CAPTION_FALLBACK_AFTER_SILENCE = 2
 _CAPTION_PROBE_COOLDOWN = 4.0
 _EVENT_LOG_LIMIT = 30
+_DEVICE_CACHE_TTL = 1.5
+_SOURCE_CACHE_TTL = 1.0
+
+_CACHE_LOCK = threading.Lock()
+_AUDIO_DEVICES_CACHE: list[dict] | None = None
+_AUDIO_DEVICES_CACHE_UNTIL = 0.0
+_PREFERRED_SOURCE_CACHE: dict | None = None
+_PREFERRED_SOURCE_CACHE_UNTIL = 0.0
 
 
-def list_audio_devices() -> list[dict]:
+def list_audio_devices(force_refresh: bool = False) -> list[dict]:
     """Return all available audio input devices."""
+    global _AUDIO_DEVICES_CACHE, _AUDIO_DEVICES_CACHE_UNTIL
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        if not force_refresh and _AUDIO_DEVICES_CACHE is not None and now < _AUDIO_DEVICES_CACHE_UNTIL:
+            return [dict(item) for item in _AUDIO_DEVICES_CACHE]
+
     devices = []
     for i, d in enumerate(sd.query_devices()):
         if d['max_input_channels'] > 0:
             devices.append({"index": i, "name": d['name'], "channels": d['max_input_channels']})
+    with _CACHE_LOCK:
+        _AUDIO_DEVICES_CACHE = [dict(item) for item in devices]
+        _AUDIO_DEVICES_CACHE_UNTIL = time.monotonic() + _DEVICE_CACHE_TTL
     return devices
 
 
@@ -111,12 +128,12 @@ def get_virtual_meeting_audio_device(meeting_label: str | None = None, force_ref
     if not preferred_markers:
         preferred_markers = generic_markers
 
-    for d in list_audio_devices():
+    for d in list_audio_devices(force_refresh=force_refresh):
         name = d["name"].lower()
         if any(marker in name for marker in preferred_markers):
             return d["index"]
     if preferred_markers != generic_markers:
-        for d in list_audio_devices():
+        for d in list_audio_devices(force_refresh=force_refresh):
             name = d["name"].lower()
             if any(marker in name for marker in generic_markers):
                 return d["index"]
@@ -160,6 +177,9 @@ def _resolve_device_sample_rate(device_index) -> int:
 def _device_name(device_index: int | None) -> str:
     try:
         idx = device_index if device_index is not None else sd.default.device[0]
+        for item in list_audio_devices():
+            if item.get("index") == idx:
+                return str(item.get("name") or "default input")
         info = sd.query_devices(idx)
         return str(info["name"])
     except Exception:
@@ -442,12 +462,22 @@ def _maybe_rotate_source(force_refresh: bool = False, reason: str = "") -> bool:
     return False
 
 
-def preferred_source_snapshot() -> dict:
-    source = _select_source_snapshot()
-    return {
+def preferred_source_snapshot(force_refresh: bool = False) -> dict:
+    global _PREFERRED_SOURCE_CACHE, _PREFERRED_SOURCE_CACHE_UNTIL
+    now = time.monotonic()
+    with _CACHE_LOCK:
+        if not force_refresh and _PREFERRED_SOURCE_CACHE is not None and now < _PREFERRED_SOURCE_CACHE_UNTIL:
+            return dict(_PREFERRED_SOURCE_CACHE)
+
+    source = _select_source_snapshot(force_refresh=force_refresh)
+    snapshot = {
         **source,
-        "candidates": _build_source_candidates(),
+        "candidates": _build_source_candidates(force_refresh=force_refresh),
     }
+    with _CACHE_LOCK:
+        _PREFERRED_SOURCE_CACHE = dict(snapshot)
+        _PREFERRED_SOURCE_CACHE_UNTIL = time.monotonic() + _SOURCE_CACHE_TTL
+    return snapshot
 
 
 def status_snapshot() -> dict:

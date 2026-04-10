@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import behavior_hooks as hooks
+import safety_permissions as perms
 
 
 _DESTRUCTIVE_PATTERNS = [
@@ -27,7 +28,7 @@ def _escape_applescript(text: str) -> str:
 
 def run_command(command: str, cwd: str = None) -> str:
     """Run a shell command and return its output."""
-    gate = hooks.pre_shell_command(command, cwd=cwd, admin=False)
+    gate = perms.can_run_shell(command, cwd=cwd, admin=False)
     if not gate["ok"]:
         return gate["reason"]
     pattern = _contains_blocked_pattern(command)
@@ -53,7 +54,7 @@ def run_admin_command(command: str) -> str:
     Run a shell command through macOS's admin prompt.
     The user must approve with their password in the native dialog.
     """
-    gate = hooks.pre_shell_command(command, admin=True)
+    gate = perms.can_run_shell(command, admin=True)
     if not gate["ok"]:
         return gate["reason"]
     pattern = _contains_blocked_pattern(command)
@@ -99,7 +100,7 @@ def read_file(path: str) -> str:
 def write_file(path: str, content: str) -> str:
     """Write content to a file."""
     path = os.path.expanduser(path)
-    gate = hooks.pre_file_write(path, source="terminal.write_file")
+    gate = perms.can_write_file(path, source="terminal.write_file")
     if not gate["ok"]:
         return gate["reason"]
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -109,7 +110,7 @@ def write_file(path: str, content: str) -> str:
         fd, tmp = tempfile.mkstemp(prefix="jarvis-write.", suffix=suffix, dir=os.path.dirname(path) or ".")
         with os.fdopen(fd, "w") as f:
             f.write(content)
-        post = hooks.post_file_write(tmp, source="terminal.write_file")
+        post = perms.after_write(tmp, source="terminal.write_file")
         if not post["ok"]:
             os.unlink(tmp)
             return post["reason"]

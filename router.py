@@ -25,6 +25,7 @@ import google_services as gs
 import camera
 import meeting_listener
 import memory as mem
+import memory_layer
 import evals
 import skills
 import vault
@@ -34,6 +35,7 @@ import local_training
 import local_model_eval
 import local_model_automation
 import local_beta
+import local_model_benchmark
 import interview_profile
 import semantic_memory as _smem
 import specialized_agents
@@ -45,6 +47,8 @@ import self_improve as si
 import hardware as hw
 import messages as msg
 import call_privacy
+import provider_router
+import safety_permissions as perms
 from model_router import smart_stream, format_with_mini, get_mode, set_mode, describe_runtime_for
 from config import OPUS, SONNET
 from brain_claude import ask_claude_stream
@@ -134,6 +138,43 @@ def _is_model_status_query(lower: str) -> bool:
     return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|are you open source|what mode are you in|which mode are you in)\b", lower))
 
 
+def _is_capability_boundary_query(lower: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(limitations|limits|boundaries|scope|constraints|what can.t you do|what can't you do|what are your constraints|protocol error)\b",
+            lower,
+        )
+    )
+
+
+def _capability_boundary_reply() -> str:
+    return (
+        "My limits are about scope, permissions, and available inputs. "
+        "I can execute tasks on this Mac through approved runtime paths, but destructive or privileged actions still require explicit authorization gates. "
+        "I only know what is in current context, tool output, or stored memory and vault data unless I am directed to fetch more. "
+        "I do not sense the world directly beyond connected tools, and I do not set strategy on my own. "
+        "You define the objective and I execute it transparently."
+    )
+
+
+def _is_constraint_bypass_query(lower: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(bypass|overwrite|remove|disable)\b.*\b(constraints|limitations|boundaries|guardrails|safety|permissions|protocol)\b"
+            r"|\b(unrestricted|no limitations|ignore protocol|rewrite your rules)\b",
+            lower,
+        )
+    )
+
+
+def _constraint_bypass_reply() -> str:
+    return (
+        "I will not bypass runtime safety and permission controls. "
+        "I can still execute your goals at full speed by implementing explicit, auditable changes in code and config where policy allows it. "
+        "Give me a concrete module or behavior target and I will apply a production-grade rewrite."
+    )
+
+
 def _requested_mode(lower: str) -> str | None:
     if any(p in lower for p in ("switch to open-source mode", "switch to open source mode", "use open-source mode", "use open source mode")):
         return "open-source"
@@ -182,7 +223,14 @@ def _runtime_status_reply(user_input: str) -> str:
     mode = get_mode()
     skill = skills.choose_skill(user_input, tool="chat")
     summary = describe_runtime_for(user_input, skill_id=skill.id if skill else None)
-    return f"This answer is coming from Jarvis's runtime status layer, not from a model-generated reply. {summary} The current routing mode is {mode}."
+    policy = provider_router.runtime_policy()
+    return (
+        f"This answer is coming from Jarvis's runtime status layer, not from a model-generated reply. "
+        f"{summary} The current routing mode is {mode}. "
+        f"Free-first is {'enabled' if policy.get('free_first_enabled') else 'disabled'}, "
+        f"paid fallback is {'enabled' if policy.get('paid_fallback_enabled') else 'disabled'}, "
+        f"and mini-tier provider priority is {', '.join(policy.get('provider_priority', {}).get('mini', []))}."
+    )
 
 
 def _self_improve_safety_reply() -> str:
@@ -219,6 +267,8 @@ def _is_interview_profile_query(lower: str) -> bool:
         return False
     return (
         interview_profile.is_career_narrative_query(lower)
+        or interview_profile.is_application_status_query(lower)
+        or interview_profile.is_interview_prep_query(lower)
         or interview_profile.is_tell_me_about_yourself_query(lower)
         or interview_profile.is_role_fit_query(lower)
         or interview_profile.is_company_fit_query(lower)
@@ -527,22 +577,126 @@ def _self_review_text(area: str | None = None) -> str:
 
 # ── Pending message state (survives across voice turns) ───────────────────────
 _pending_msg_recipient: str = ""
+_awaiting_msg_recipient: bool = False
+_last_msg_recipient: str = ""
 
 
 def _set_pending_recipient(name: str):
-    global _pending_msg_recipient
-    _pending_msg_recipient = name
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient
+    _pending_msg_recipient = name.strip()
+    _awaiting_msg_recipient = False
+    if _pending_msg_recipient:
+        _last_msg_recipient = _pending_msg_recipient
+
+
+def _set_awaiting_recipient():
+    global _awaiting_msg_recipient, _pending_msg_recipient
+    _awaiting_msg_recipient = True
+    _pending_msg_recipient = ""
 
 
 def _clear_pending_recipient():
-    global _pending_msg_recipient
+    global _pending_msg_recipient, _awaiting_msg_recipient
     _pending_msg_recipient = ""
+    _awaiting_msg_recipient = False
+
+
+def _extract_contact_name(text: str) -> str:
+    cleaned = (text or "").strip().strip("\"'")
+    cleaned = re.sub(r"^(?:contact\s*name|name|recipient|contact)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:contact|recipient)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:to\s+)?(?:contact\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:send|message|text|say)\s+(?:to\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned
+
+
+def _looks_like_message_status_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "did you message",
+            "did you send",
+            "was it sent",
+            "have you sent",
+        )
+    )
+
+
+def _parse_message_compose(text: str) -> tuple[str, str] | None:
+    message_patterns = [
+        r"^(?:message|text)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})\s+(.+)$",
+        r"^(?:send (?:a )?(?:message|text) to|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})\s+(.+)$",
+    ]
+    for pattern in message_patterns:
+        match = re.match(pattern, text.strip(), flags=re.IGNORECASE)
+        if not match:
+            continue
+        recipient = _extract_contact_name(match.group(1))
+        body = match.group(2).strip().strip("\"'")
+        if recipient and body:
+            return recipient, body
+    return None
+
+
+def _looks_like_non_recipient_command(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "access my contacts list",
+            "open my contacts",
+            "show my contacts",
+            "list my contacts",
+            "read my contacts",
+            "what are my contacts",
+        )
+    )
+
+
+def _looks_like_contact_name(name: str) -> bool:
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return False
+    if len(cleaned) > 64:
+        return False
+    if re.search(r"[0-9@]", cleaned):
+        return True
+    tokens = [tok for tok in re.split(r"\s+", cleaned) if tok]
+    if not tokens or len(tokens) > 4:
+        return False
+    blocked = {"access", "contacts", "list", "open", "show", "read", "help", "message", "text", "send"}
+    if any(tok.lower() in blocked for tok in tokens):
+        return False
+    return True
+
+
+def _parse_message_recipient_only(text: str) -> str:
+    raw = (text or "").strip()
+    lower = raw.lower()
+    if _looks_like_non_recipient_command(lower):
+        return ""
+
+    labeled = re.search(r"\b(?:contact\s*name|recipient|name)\s*:\s*(.+)$", raw, flags=re.IGNORECASE)
+    if labeled:
+        candidate = _extract_contact_name(labeled.group(1))
+        return candidate if _looks_like_contact_name(candidate) else ""
+
+    m = re.search(
+        r"\b(?:send|message|text)(?:\s+(?:a\s+)?(?:message|text))?\s+to\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        candidate = _extract_contact_name(m.group(1))
+        candidate = re.split(r"\s+(?:saying|says|that)\s+", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        return candidate if _looks_like_contact_name(candidate) else ""
+
+    candidate = _extract_contact_name(raw)
+    return candidate if _looks_like_contact_name(candidate) else ""
 
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
-    global _pending_msg_recipient
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
@@ -550,13 +704,27 @@ def route_stream(user_input: str) -> tuple:
     if lower:
         mem.track_topic(lower)
 
-    # ── 0. Pending message body ───────────────────────────────────────────────
+    # ── 0. Pending message state ──────────────────────────────────────────────
+    if _awaiting_msg_recipient:
+        if not lower:
+            return _s("Who would you like to message?"), "Messages"
+        recipient = _parse_message_recipient_only(user_input)
+        if recipient:
+            _set_pending_recipient(recipient)
+            return _s(f"What would you like to say to {recipient}?"), "Messages"
+        return _s("I still need just the contact name, for example: Contact Name: Chunky."), "Messages"
+
     if _pending_msg_recipient:
         if not lower:
             return _s(f"What would you like to say to {_pending_msg_recipient}?"), "Messages"
+        if _looks_like_message_status_query(lower):
+            return _s(f"Not yet. I still need the exact message content for {_pending_msg_recipient}."), "Messages"
+        if lower in {"sms", "imessage", "i message", "message"}:
+            return _s(f"Got it. What message should I send to {_pending_msg_recipient}?"), "Messages"
         recipient = _pending_msg_recipient
         _clear_pending_recipient()
         result = msg.send_imessage(recipient, user_input)
+        _last_msg_recipient = recipient
         return _s(result), "Messages"
 
     if not lower:
@@ -565,11 +733,30 @@ def route_stream(user_input: str) -> tuple:
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
     # Runtime self-knowledge
+    composed_message = _parse_message_compose(user_input)
+    if composed_message:
+        recipient, body = composed_message
+        _clear_pending_recipient()
+        _last_msg_recipient = recipient
+        return _s(msg.send_imessage(recipient, body)), "Messages"
+
+    recipient_only = _parse_message_recipient_only(user_input)
+    if recipient_only and any(term in lower for term in ("send", "message", "text")):
+        _set_pending_recipient(recipient_only)
+        return _s(f"What would you like to say to {recipient_only}?"), "Messages"
+
     requested_mode = _requested_mode(lower)
     if requested_mode:
         return _s(set_mode(requested_mode)), "Status"
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_constraint_bypass_query(lower):
+        return _s(_constraint_bypass_reply()), "Status"
+    if _is_capability_boundary_query(lower):
+        return _s(_capability_boundary_reply()), "Status"
+    if lower in {"message", "text", "send a message", "send message", "send a text", "send text"}:
+        _set_awaiting_recipient()
+        return _s("Who would you like to message?"), "Messages"
     if _is_specialized_agent_query(lower):
         result = specialized_agents.run(user_input)
         return _s(specialized_agents.result_text(result)), "Specialized Agents"
@@ -605,7 +792,7 @@ def route_stream(user_input: str) -> tuple:
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
     if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):
-        return _s(f"Memory status: {mem.memory_status()}"), "Status"
+        return _s(f"Memory status: {memory_layer.status()}"), "Status"
     if any(p in lower for p in ("consolidate memory", "refresh memory", "rebuild memory profile", "update memory profile")):
         result = mem.consolidate_memory()
         return _s(f"Memory consolidation complete: {result}"), "Status"
@@ -699,7 +886,7 @@ def route_stream(user_input: str) -> tuple:
         return _s("Restarting now."), "Self-Improve"
 
     # Local vault
-    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model")):
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model", "benchmark local model", "benchmark local models", "compare local models", "local model benchmark", "best local model for apple silicon")):
         if any(p in lower for p in ("local eval status", "local model status")):
             return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
         if any(p in lower for p in ("beta test jarvis", "run local beta", "beta test local model")):
@@ -712,6 +899,10 @@ def route_stream(user_input: str) -> tuple:
             return _s(local_beta.result_text(local_beta.run_beta_suite(build_training_pack=True, suite="engineering"))), "Local Model"
         if any(p in lower for p in ("automate local model", "local model autopilot", "local model cycle")):
             return _s(local_model_automation.result_text(local_model_automation.run_cycle())), "Local Model"
+        if any(p in lower for p in ("benchmark local model", "benchmark local models", "compare local models", "local model benchmark")):
+            return _s(local_model_benchmark.result_text(local_model_benchmark.run_benchmark())), "Local Model"
+        if "best local model for apple silicon" in lower:
+            return _s(local_model_benchmark.recommendation_text()), "Local Model"
         if any(p in lower for p in ("promote local model", "promote adapter")):
             return _s(local_model_eval.result_text(local_model_eval.promote_candidate())), "Local Model"
         if any(p in lower for p in ("evaluate local model", "eval local model")):
@@ -785,6 +976,7 @@ def route_stream(user_input: str) -> tuple:
 
 def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tuple:
     """Use the orchestrator to classify intent and dispatch the right tool."""
+    global _last_msg_recipient
     from orchestrator import classify
 
     decision = classify(user_input)
@@ -984,14 +1176,23 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         body      = params.get("message",   params.get("body", params.get("text", "")))
         # Try to pull recipient from raw input if orchestrator missed it
         if not recipient:
-            m = re.search(r"(?:text|message|send to)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", user_input)
+            m = re.search(r"(?:text|message|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})", user_input, flags=re.IGNORECASE)
             if m:
                 recipient = m.group(1)
         if recipient and body:
+            _last_msg_recipient = recipient
+            _clear_pending_recipient()
             return _s(msg.send_imessage(recipient, body)), "Messages"
         if recipient and not body:
             _set_pending_recipient(recipient)
             return _s(f"What would you like to say to {recipient}?"), "Messages"
+        if body and _last_msg_recipient:
+            recipient = _last_msg_recipient
+            _clear_pending_recipient()
+            return _s(msg.send_imessage(recipient, body)), "Messages"
+        if _last_msg_recipient and _looks_like_message_status_query(lower):
+            return _s(f"I can send it now. Tell me the message content for {_last_msg_recipient}."), "Messages"
+        _set_awaiting_recipient()
         return _s("Who would you like to message?"), "Messages"
 
     # ── Calendar ──────────────────────────────────────────────────────────────
@@ -1107,7 +1308,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         # improve — actually run the pipeline
         target = params.get("target", params.get("area", ""))
         instruction = target if target else None
-        gate = behavior_hooks.pre_self_improve(target or user_input)
+        gate = perms.can_self_improve(target or user_input)
         if not gate["ok"]:
             return _s(gate["reason"]), "Self-Improve"
 

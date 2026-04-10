@@ -44,6 +44,17 @@ BLOCKED_COMMAND_PATTERNS = (
     ":(){:|:&};:",
 )
 
+HARD_BLOCKED_COMMAND_PATTERNS = (
+    "mkfs",
+    "dd if=",
+    "wipefs",
+    "shred",
+    ":(){:|:&};:",
+    "chmod -r 777 /",
+    "chmod -r 000 /",
+    "chown -r /",
+)
+
 MODIFY_VERBS = (
     "rm ",
     "mv ",
@@ -76,6 +87,17 @@ def _normalize_path(path: str) -> str:
     return os.path.abspath(os.path.expanduser(path or ""))
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def max_permissive_profile_enabled() -> bool:
+    return _env_flag("JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE", False)
+
+
 def _is_protected_path(path: str) -> bool:
     normalized = _normalize_path(path)
     return any(normalized == prefix or normalized.startswith(prefix + os.sep) for prefix in PROTECTED_PREFIXES)
@@ -83,7 +105,8 @@ def _is_protected_path(path: str) -> bool:
 
 def pre_shell_command(command: str, cwd: str | None = None, admin: bool = False) -> dict:
     lower = (command or "").lower().strip()
-    for pattern in BLOCKED_COMMAND_PATTERNS:
+    patterns = HARD_BLOCKED_COMMAND_PATTERNS if max_permissive_profile_enabled() else BLOCKED_COMMAND_PATTERNS
+    for pattern in patterns:
         if pattern in lower:
             result = {
                 "ok": False,
@@ -96,10 +119,15 @@ def pre_shell_command(command: str, cwd: str | None = None, admin: bool = False)
     if any(verb in lower for verb in MODIFY_VERBS):
         for prefix in PROTECTED_PREFIXES:
             if prefix.lower() in lower:
+                if max_permissive_profile_enabled() and admin:
+                    continue
                 result = {
                     "ok": False,
-                    "reason": f"Blocked by behavior gate: modifying protected system path {prefix} is not allowed through Jarvis shell tools.",
-                    "rule": "protected_path_shell",
+                    "reason": (
+                        f"Blocked by behavior gate: modifying protected system path {prefix} "
+                        f"{'requires admin approval.' if max_permissive_profile_enabled() else 'is not allowed through Jarvis shell tools.'}"
+                    ),
+                    "rule": "protected_path_shell_requires_admin" if max_permissive_profile_enabled() else "protected_path_shell",
                 }
                 _record({"phase": "pre_shell", "admin": admin, "command": command, "cwd": cwd or "", **result})
                 return result
@@ -123,7 +151,8 @@ def post_shell_command(command: str, output: str, admin: bool = False) -> None:
 
 def pre_file_write(path: str, source: str = "", allow_protected: bool = False) -> dict:
     normalized = _normalize_path(path)
-    if not allow_protected and _is_protected_path(normalized):
+    permissive_allow_protected = max_permissive_profile_enabled() and _env_flag("JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES", False)
+    if not allow_protected and not permissive_allow_protected and _is_protected_path(normalized):
         result = {
             "ok": False,
             "reason": f"Blocked by behavior gate: writing to protected system path {normalized} is not allowed.",
@@ -217,14 +246,15 @@ def summary(hours: int = 24) -> dict:
 
 def status_text(hours: int = 24) -> str:
     data = summary(hours=hours)
+    profile = "max-permissive local profile is ON. " if max_permissive_profile_enabled() else ""
     if data["event_count"] == 0:
         return (
-            "Behavior gates are active. I am guarding shell commands, admin shell commands, file writes, and self-improve entry, "
+            f"Behavior gates are active. {profile}I am guarding shell commands, admin shell commands, file writes, and self-improve entry, "
             "but no hook events have been recorded in that window yet."
         )
     phases = ", ".join(f"{name} {count}" for name, count in sorted(data["by_phase"].items()))
     return (
-        f"Behavior gates are active. In the last {hours} hours I recorded {data['event_count']} hook events and blocked "
+        f"Behavior gates are active. {profile}In the last {hours} hours I recorded {data['event_count']} hook events and blocked "
         f"{data['blocked_count']} of them. Activity by phase: {phases}. Protected system paths include "
         f"{', '.join(data['protected_prefixes'])}."
     )
