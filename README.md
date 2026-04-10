@@ -506,6 +506,7 @@ For the deeper system docs, start here:
 - [docs/jarvis_architecture/05_OPEN_SOURCE_FIRST_ROADMAP.md](docs/jarvis_architecture/05_OPEN_SOURCE_FIRST_ROADMAP.md)
 - [docs/jarvis_architecture/06_PROJECT_AUDIT_2026_04_09.md](docs/jarvis_architecture/06_PROJECT_AUDIT_2026_04_09.md)
 - [docs/jarvis_architecture/07_MEMPALACE_GRAPHIFY_ADOPTION.md](docs/jarvis_architecture/07_MEMPALACE_GRAPHIFY_ADOPTION.md)
+- [docs/persistent-jarvis-v1.md](docs/persistent-jarvis-v1.md)
 
 ## Final Mental Model
 

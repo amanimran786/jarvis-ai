@@ -50,6 +50,16 @@ def snapshot() -> dict[str, Any]:
         managed_runtime = task_runtime.runtime_snapshot()
     except Exception as exc:
         managed_runtime = {"ok": False, "error": str(exc)}
+    persisted_api_endpoint = read_api_endpoint()
+    public_endpoint = None
+    if persisted_api_endpoint:
+        public_endpoint = {
+            "host": persisted_api_endpoint.get("host"),
+            "port": persisted_api_endpoint.get("port"),
+            "pid": persisted_api_endpoint.get("pid"),
+            "written_at": persisted_api_endpoint.get("written_at"),
+            "base_url": persisted_api_endpoint.get("base_url"),
+        }
     return {
         "started_at": _STATE.started_at,
         "status": _STATE.status,
@@ -63,6 +73,12 @@ def snapshot() -> dict[str, Any]:
         "call_assist": dict(_STATE.call_assist),
         "call_assist_updated_at": _STATE.call_assist_updated_at,
         "managed_runtime": managed_runtime,
+        "persistence": {
+            "app_data_dir": str(app_data_dir()),
+            "port_file": str(port_file_path()),
+            "runtime_meta_file": str(runtime_meta_path()),
+            "persisted_api_endpoint": public_endpoint,
+        },
         "meta": dict(_STATE.meta),
     }
 
@@ -116,7 +132,12 @@ def write_api_endpoint(host: str, port: int, *, pid: int | None = None) -> None:
         "token": os.getenv("JARVIS_API_TOKEN", "").strip(),
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
-    runtime_meta_path().write_text(json.dumps(metadata), encoding="utf-8")
+    path = runtime_meta_path()
+    path.write_text(json.dumps(metadata), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def clear_api_endpoint() -> None:
