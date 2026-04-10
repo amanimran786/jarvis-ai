@@ -1660,6 +1660,19 @@ class MainStartupGuardTests(unittest.TestCase):
 
         self.assertIn("should not be launched from conda", str(exc.exception))
 
+    def test_startup_permission_request_does_not_probe_or_open_apps(self):
+        import main
+
+        with patch("builtins.print") as print_mock:
+            main._request_macos_permissions()
+
+        joined = " ".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in print_mock.call_args_list
+        )
+        self.assertIn("disabled", joined.lower())
+        self.assertIn("avoid opening user apps", joined.lower())
+
 
 class RuntimeEndpointDiscoveryTests(unittest.TestCase):
     def test_read_api_endpoint_preserves_token(self):

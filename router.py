@@ -619,6 +619,7 @@ def _self_review_text(area: str | None = None) -> str:
 _pending_msg_recipient: str = ""
 _awaiting_msg_recipient: bool = False
 _last_msg_recipient: str = ""
+_pending_message_draft: dict | None = None
 
 # ── Pending self-improvement (approval gate) ──────────────────────────────────
 # Uses a list so inner functions can mutate it without `global` keyword.
@@ -643,6 +644,58 @@ def _clear_pending_recipient():
     global _pending_msg_recipient, _awaiting_msg_recipient
     _pending_msg_recipient = ""
     _awaiting_msg_recipient = False
+
+
+def _set_pending_message_draft(recipient: str, body: str):
+    global _pending_message_draft, _last_msg_recipient
+    _pending_message_draft = {
+        "recipient": recipient.strip(),
+        "body": body.strip(),
+    }
+    if recipient.strip():
+        _last_msg_recipient = recipient.strip()
+
+
+def _clear_pending_message_draft():
+    global _pending_message_draft
+    _pending_message_draft = None
+
+
+def _has_pending_message_draft() -> bool:
+    return bool(_pending_message_draft and _pending_message_draft.get("recipient") and _pending_message_draft.get("body"))
+
+
+def _message_confirmation_prompt(recipient: str, body: str) -> str:
+    return (
+        f"Draft ready for {recipient}: \"{body}\". "
+        f"Say confirm send to send it, or cancel message to stop."
+    )
+
+
+def _is_message_confirm_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "confirm send",
+            "send it",
+            "yes send",
+            "send now",
+            "go ahead and send",
+            "approve send",
+        )
+    )
+
+
+def _is_message_cancel_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "cancel message",
+            "don't send",
+            "do not send",
+            "never mind",
+            "cancel it",
+            "stop message",
+        )
+    )
 
 
 def _extract_contact_name(text: str) -> str:
@@ -740,7 +793,7 @@ def _parse_message_recipient_only(text: str) -> str:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
-    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _pending_message_draft
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
@@ -749,6 +802,20 @@ def route_stream(user_input: str) -> tuple:
         mem.track_topic(lower)
 
     # ── 0. Pending message state ──────────────────────────────────────────────
+    if _has_pending_message_draft():
+        recipient = _pending_message_draft["recipient"]
+        body = _pending_message_draft["body"]
+        if _is_message_cancel_query(lower):
+            _clear_pending_message_draft()
+            _clear_pending_recipient()
+            return _s(f"Canceled the draft to {recipient}."), "Messages"
+        if _is_message_confirm_query(lower):
+            _clear_pending_message_draft()
+            _clear_pending_recipient()
+            _last_msg_recipient = recipient
+            return _s(msg.send_imessage(recipient, body)), "Messages"
+        return _s(_message_confirmation_prompt(recipient, body)), "Messages"
+
     if _awaiting_msg_recipient:
         if not lower:
             return _s("Who would you like to message?"), "Messages"
@@ -767,9 +834,8 @@ def route_stream(user_input: str) -> tuple:
             return _s(f"Got it. What message should I send to {_pending_msg_recipient}?"), "Messages"
         recipient = _pending_msg_recipient
         _clear_pending_recipient()
-        result = msg.send_imessage(recipient, user_input)
-        _last_msg_recipient = recipient
-        return _s(result), "Messages"
+        _set_pending_message_draft(recipient, user_input)
+        return _s(_message_confirmation_prompt(recipient, user_input)), "Messages"
 
     if not lower:
         return _s("Tell me what you want me to do."), "Chat"
@@ -781,8 +847,8 @@ def route_stream(user_input: str) -> tuple:
     if composed_message:
         recipient, body = composed_message
         _clear_pending_recipient()
-        _last_msg_recipient = recipient
-        return _s(msg.send_imessage(recipient, body)), "Messages"
+        _set_pending_message_draft(recipient, body)
+        return _s(_message_confirmation_prompt(recipient, body)), "Messages"
 
     recipient_only = _parse_message_recipient_only(user_input)
     if recipient_only and any(term in lower for term in ("send", "message", "text")):
@@ -1251,16 +1317,14 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             if m:
                 recipient = m.group(1)
         if recipient and body:
-            _last_msg_recipient = recipient
             _clear_pending_recipient()
-            return _s(msg.send_imessage(recipient, body)), "Messages"
+            _set_pending_message_draft(recipient, body)
+            return _s(_message_confirmation_prompt(recipient, body)), "Messages"
         if recipient and not body:
             _set_pending_recipient(recipient)
             return _s(f"What would you like to say to {recipient}?"), "Messages"
         if body and _last_msg_recipient:
-            recipient = _last_msg_recipient
-            _clear_pending_recipient()
-            return _s(msg.send_imessage(recipient, body)), "Messages"
+            return _s("I need you to restate the recipient before I draft that message."), "Messages"
         if _last_msg_recipient and _looks_like_message_status_query(lower):
             return _s(f"I can send it now. Tell me the message content for {_last_msg_recipient}."), "Messages"
         _set_awaiting_recipient()

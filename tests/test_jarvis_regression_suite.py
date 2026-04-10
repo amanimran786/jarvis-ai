@@ -506,6 +506,7 @@ class InterviewProfileTests(unittest.TestCase):
 class RouterTests(unittest.TestCase):
     def setUp(self):
         router._clear_pending_recipient()
+        router._clear_pending_message_draft()
         router._awaiting_msg_recipient = False
         router._last_msg_recipient = ""
 
@@ -547,13 +548,17 @@ class RouterTests(unittest.TestCase):
             text2 = "".join(stream2)
             stream3, label3 = router.route_stream("hello")
             text3 = "".join(stream3)
+            stream4, label4 = router.route_stream("confirm send")
+            text4 = "".join(stream4)
 
         self.assertEqual(label1, "Messages")
         self.assertIn("who would you like to message", text1.lower())
         self.assertEqual(label2, "Messages")
         self.assertIn("what would you like to say to aman imran", text2.lower())
         self.assertEqual(label3, "Messages")
-        self.assertIn("sent to aman imran", text3.lower())
+        self.assertIn("draft ready for aman imran", text3.lower())
+        self.assertEqual(label4, "Messages")
+        self.assertIn("sent to aman imran", text4.lower())
         send_mock.assert_called_once_with("Aman Imran", "hello")
 
     def test_message_single_turn_parses_recipient_and_body(self):
@@ -561,8 +566,50 @@ class RouterTests(unittest.TestCase):
             stream, label = router.route_stream("message Aman Imran Hello")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn("sent to aman imran", text.lower())
-        send_mock.assert_called_once_with("Aman Imran", "Hello")
+        self.assertIn("draft ready for aman imran", text.lower())
+        send_mock.assert_not_called()
+
+    def test_message_requires_confirmation_before_sending(self):
+        with patch("router.msg.send_imessage", return_value="Sent to Harry Singh.") as send_mock:
+            stream1, label1 = router.route_stream("message Harry Singh What's the difference between git merge and git rebase?")
+            text1 = "".join(stream1)
+            stream2, label2 = router.route_stream("confirm send")
+            text2 = "".join(stream2)
+
+        self.assertEqual(label1, "Messages")
+        self.assertIn("draft ready for harry singh", text1.lower())
+        self.assertEqual(label2, "Messages")
+        self.assertIn("sent to harry singh", text2.lower())
+        send_mock.assert_called_once_with("Harry Singh", "What's the difference between git merge and git rebase?")
+
+    def test_message_draft_can_be_canceled(self):
+        with patch("router.msg.send_imessage", return_value="Sent to Harry Singh.") as send_mock:
+            stream1, label1 = router.route_stream("message Harry Singh Hello there")
+            text1 = "".join(stream1)
+            stream2, label2 = router.route_stream("cancel message")
+            text2 = "".join(stream2)
+
+        self.assertEqual(label1, "Messages")
+        self.assertIn("draft ready for harry singh", text1.lower())
+        self.assertEqual(label2, "Messages")
+        self.assertIn("canceled the draft to harry singh", text2.lower())
+        send_mock.assert_not_called()
+
+    def test_message_tool_does_not_reuse_last_recipient_for_body_only(self):
+        router._last_msg_recipient = "Harry Singh"
+        import orchestrator
+        decision = orchestrator.ToolDecision(
+            tool="message",
+            confidence=0.99,
+            action="send",
+            params={"body": "hello again"},
+            raw='{"tool":"message"}',
+        )
+        with patch("orchestrator.classify", return_value=decision):
+            stream, label = router._orchestrate("hello again", "hello again")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("restate the recipient", text.lower())
 
     def test_message_request_with_recipient_prompts_for_body(self):
         stream, label = router.route_stream("Can you help me send a message to Chunky")
