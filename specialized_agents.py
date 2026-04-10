@@ -37,6 +37,17 @@ AGENTS = {
     "self_improve_critic": AgentSpec("self_improve_critic", AGENTS_DIR / "self_improve_critic.md", HAIKU),
 }
 
+# Local model assignment per role — planner/reviewer need speed, executor needs depth.
+# Keeps multi-pass pipeline latency manageable on a Mac.
+_LOCAL_ROLE_MODELS = {
+    "planner":            LOCAL_DEFAULT,    # fast outline pass
+    "executor":           LOCAL_REASONING,  # deep answer pass — worth the wait
+    "reviewer":           LOCAL_DEFAULT,    # fast verification pass
+    "science_expert":     LOCAL_REASONING,  # needs depth
+    "security_reviewer":  LOCAL_REASONING,  # needs depth
+    "self_improve_critic": LOCAL_DEFAULT,   # lightweight check
+}
+
 
 def _load_agent_instructions(role: str) -> str:
     spec = AGENTS[role]
@@ -312,10 +323,11 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
 
     # In open-source mode skip the cloud attempt entirely — go local immediately
     if model_router.is_open_source_mode():
+        preferred = _LOCAL_ROLE_MODELS.get(role, LOCAL_REASONING)
         try:
-            local_model = get_best_available(LOCAL_REASONING)
+            local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = ask_local(prompt, model=local_model, system_extra=full_system).strip()
+            output = ask_local(prompt, model=local_model, system_extra=full_system, raise_on_error=True).strip()
             return {"role": role, "model": f"local/{local_model}", "output": output}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()
@@ -332,10 +344,11 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         return {"role": role, "model": spec.model, "output": output}
     except Exception as exc:
         # Cloud failed — fall back to local instead of stub text
+        preferred = _LOCAL_ROLE_MODELS.get(role, LOCAL_REASONING)
         try:
-            local_model = get_best_available(LOCAL_REASONING)
+            local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = ask_local(prompt, model=local_model, system_extra=full_system).strip()
+            output = ask_local(prompt, model=local_model, system_extra=full_system, raise_on_error=True).strip()
             return {"role": role, "model": f"local/{local_model}", "output": output, "fallback": True}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()

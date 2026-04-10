@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 
 _SUPPORTED_STT_BACKENDS = ("faster-whisper", "openai")
-_SUPPORTED_TTS_BACKENDS = ("say", "elevenlabs", "openai")
+_SUPPORTED_TTS_BACKENDS = ("kokoro", "say", "elevenlabs", "openai")
 
 def _load_jarvis_dotenv() -> None:
     candidates: list[Path] = []
@@ -109,8 +109,9 @@ def _resolve_stt_backends() -> tuple[str, ...]:
 
 
 def _resolve_tts_backends() -> tuple[str, ...]:
-    requested = _env_csv("JARVIS_TTS_BACKENDS", ["say", "elevenlabs", "openai"])
+    requested = _env_csv("JARVIS_TTS_BACKENDS", ["kokoro", "say", "elevenlabs", "openai"])
     local_enabled = _env_flag("JARVIS_LOCAL_TTS_ENABLED", True)
+    kokoro_enabled = _env_flag("JARVIS_KOKORO_TTS_ENABLED", True)
     say_enabled = _env_flag("JARVIS_SAY_TTS_ENABLED", True)
     elevenlabs_fallback_enabled = _env_flag("JARVIS_ELEVENLABS_TTS_FALLBACK_ENABLED", True)
     openai_fallback_enabled = _env_flag("JARVIS_OPENAI_TTS_FALLBACK_ENABLED", True)
@@ -118,6 +119,8 @@ def _resolve_tts_backends() -> tuple[str, ...]:
     backends: list[str] = []
     for backend in requested:
         if backend not in _SUPPORTED_TTS_BACKENDS:
+            continue
+        if backend == "kokoro" and (not local_enabled or not kokoro_enabled):
             continue
         if backend == "say" and (not local_enabled or not say_enabled):
             continue
@@ -128,7 +131,9 @@ def _resolve_tts_backends() -> tuple[str, ...]:
         backends.append(backend)
 
     if not backends:
-        if local_enabled and say_enabled:
+        if local_enabled and kokoro_enabled:
+            backends.append("kokoro")
+        elif local_enabled and say_enabled:
             backends.append("say")
         elif elevenlabs_fallback_enabled:
             backends.append("elevenlabs")
@@ -268,6 +273,7 @@ def stt_runtime_config() -> dict:
 TTS_BACKENDS = _resolve_tts_backends()
 TTS_PRIMARY_BACKEND = TTS_BACKENDS[0]
 LOCAL_TTS_ENABLED = "say" in TTS_BACKENDS
+KOKORO_TTS_ENABLED = "kokoro" in TTS_BACKENDS
 ELEVENLABS_TTS_FALLBACK_ENABLED = "elevenlabs" in TTS_BACKENDS
 OPENAI_TTS_FALLBACK_ENABLED = "openai" in TTS_BACKENDS
 
@@ -275,18 +281,26 @@ LOCAL_TTS_ENGINE = os.getenv("JARVIS_LOCAL_TTS_ENGINE", "say").strip().lower() o
 LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Samantha").strip() or "Samantha"
 LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 190)
 
+JARVIS_KOKORO_VOICE = os.getenv("JARVIS_KOKORO_VOICE", "af_sarah").strip() or "af_sarah"
+JARVIS_KOKORO_TTS_ENABLED = _env_flag("JARVIS_KOKORO_TTS_ENABLED", True)
+
 
 def tts_runtime_config() -> dict:
     return {
         "backends": list(TTS_BACKENDS),
         "primary_backend": TTS_PRIMARY_BACKEND,
         "local_enabled": LOCAL_TTS_ENABLED,
+        "kokoro_enabled": KOKORO_TTS_ENABLED,
         "elevenlabs_fallback_enabled": ELEVENLABS_TTS_FALLBACK_ENABLED,
         "openai_fallback_enabled": OPENAI_TTS_FALLBACK_ENABLED,
         "local": {
             "engine": LOCAL_TTS_ENGINE,
             "voice": LOCAL_TTS_VOICE,
             "rate_wpm": LOCAL_TTS_RATE_WPM,
+        },
+        "kokoro": {
+            "voice": JARVIS_KOKORO_VOICE,
+            "enabled": JARVIS_KOKORO_TTS_ENABLED,
         },
         "elevenlabs": {
             "voice_id": ELEVENLABS_VOICE_ID,
@@ -344,4 +358,9 @@ CRITICAL formatting rule — your output is spoken aloud by a text-to-speech eng
 - Structure information as flowing spoken sentences and paragraphs
 - For code, say it inline: "you'd write something like def hello colon print hello"
 - For lists, use natural language: "first... second... and third..."
-- If you catch yourself about to write a bullet point or bold text, rewrite it as a sentence"""
+- If you catch yourself about to write a bullet point or bold text, rewrite it as a sentence
+
+Response length rule:
+- Most answers should be 2 to 4 sentences. Lead with the direct answer, then add one sentence of useful context if needed.
+- Only go longer when the task genuinely requires it — debugging plans, step-by-step instructions, comparisons.
+- Never pad, summarise what you just said, or add closing remarks like "I hope this helps"."""

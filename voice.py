@@ -16,6 +16,7 @@ from config import (
 import call_privacy
 from local_runtime import local_stt
 from local_runtime import local_tts
+from local_runtime import local_kokoro_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
@@ -148,10 +149,23 @@ def _speak_local(text: str) -> bool:
     return True
 
 
+def _speak_kokoro(text: str) -> bool:
+    result = local_kokoro_tts.speak(text)
+    if not result.get("ok"):
+        error = result.get("error")
+        if error:
+            print(f"[Kokoro TTS] {error}")
+        return False
+    return True
+
+
 def _speak_with_fallbacks(text: str) -> str:
     global _last_tts_engine
     for backend in TTS_BACKENDS:
         try:
+            if backend == "kokoro" and _speak_kokoro(text):
+                _last_tts_engine = "Kokoro TTS"
+                return _last_tts_engine
             if backend == "say" and _speak_local(text):
                 _last_tts_engine = "Local TTS (say)"
                 return _last_tts_engine

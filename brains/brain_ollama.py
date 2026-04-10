@@ -63,6 +63,52 @@ def _close_client():
 
 atexit.register(_close_client)
 
+
+# ── Ollama keepalive ──────────────────────────────────────────────────────────
+# Ollama unloads a model from RAM after 5 minutes of inactivity.
+# Sending a zero-token "keep-alive" ping every 3 minutes prevents that eviction
+# and eliminates the 20–40 second cold-reload on the next real query.
+
+_KEEPALIVE_INTERVAL = 180  # seconds — well inside Ollama's 5-min eviction window
+_keepalive_model: str | None = None
+_keepalive_thread: threading.Thread | None = None
+_keepalive_stop = threading.Event()
+
+
+def _keepalive_loop() -> None:
+    while not _keepalive_stop.wait(_KEEPALIVE_INTERVAL):
+        model = _keepalive_model
+        if not model:
+            continue
+        try:
+            # keep_alive="5m" resets Ollama's internal eviction timer without generating tokens
+            _client().generate(model=model, prompt="", keep_alive="5m")
+        except Exception:
+            pass  # Ollama may be temporarily unavailable — just try again next cycle
+
+
+def start_keepalive(model: str) -> None:
+    """Pin `model` in Ollama RAM. Safe to call multiple times — updates the target model."""
+    global _keepalive_model, _keepalive_thread
+    _keepalive_model = model
+    if _keepalive_thread is not None and _keepalive_thread.is_alive():
+        return
+    _keepalive_stop.clear()
+    _keepalive_thread = threading.Thread(
+        target=_keepalive_loop,
+        daemon=True,
+        name="OllamaKeepalive",
+    )
+    _keepalive_thread.start()
+
+
+def stop_keepalive() -> None:
+    _keepalive_stop.set()
+
+
+atexit.register(stop_keepalive)
+
+
 def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts because Jarvis responses are spoken aloud."""
     # Strip DeepSeek R1 internal thinking blocks — not for TTS
@@ -104,8 +150,8 @@ def get_best_available(preferred: str) -> str:
         raise RuntimeError(f"Ollama not running. Start it with: ollama serve\n{e}")
 
 
-def ask_local(user_input: str, model: str = LOCAL_DEFAULT, system_extra: str = "", track_context: bool = False) -> str:
-    return "".join(ask_local_stream(user_input, model, system_extra=system_extra, track_context=track_context))
+def ask_local(user_input: str, model: str = LOCAL_DEFAULT, system_extra: str = "", track_context: bool = False, raise_on_error: bool = False) -> str:
+    return "".join(ask_local_stream(user_input, model, system_extra=system_extra, track_context=track_context, raise_on_error=raise_on_error))
 
 
 def ask_local_stream(
@@ -188,13 +234,10 @@ def ask_local_stream(
             if cleaned:
                 yield cleaned
     except Exception as e:
-        error = (
-            f"Local model error: {e}. "
-            f"If Ollama is stalled, restart it with: ollama serve. "
-            "You can also switch Jarvis to auto mode for cloud fallback."
-        )
         if raise_on_error:
-            raise RuntimeError(error) from e
+            raise RuntimeError(str(e)) from e
+        # Voice-friendly fallback — don't expose internal restart instructions to the speaker
+        error = "I wasn't able to complete that one. The local model took too long to respond. Try again or ask something simpler."
         yield error
         full_reply = error
 
