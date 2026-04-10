@@ -176,11 +176,13 @@ def _run_headless():
     import google_services as gs
     import memory as mem
     import tools
+    from local_runtime import local_stt
     from router import route_stream, set_timer_callback
     from voice import speak, speak_stream, listen, wait_for_wake_word
 
     END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
     QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
+    WAKE_ACK = "I'm here. Go ahead."
 
     def on_timer_done(label):
         speak(f"Time's up. Your {label} timer is done.")
@@ -211,7 +213,7 @@ def _run_headless():
         return False
 
     def conversation_loop():
-        speak("Yes?")
+        speak(WAKE_ACK)
         misses = 0
         while True:
             user_input = listen()
@@ -244,6 +246,11 @@ def _run_headless():
                 speak("Sorry, something went wrong.")
 
     set_timer_callback(on_timer_done)
+    stt_status = local_stt.status()
+    if stt_status.get("active_engine") == "unavailable":
+        reason = stt_status.get("import_error") or "No speech-to-text backend is available."
+        print(f"[Voice] Voice input unavailable: {reason} Launch with ./venv/bin/python main.py")
+        return
     speak("Online.")
     while True:
         wait_for_wake_word()
