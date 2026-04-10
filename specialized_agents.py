@@ -11,8 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from brain_claude import ask_claude
-from brain_ollama import ask_local, get_best_available
+from brains.brain_claude import ask_claude
+from brains.brain_ollama import ask_local, get_best_available
 from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING
 import model_router
 import skills

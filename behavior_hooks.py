@@ -189,10 +189,12 @@ def pre_self_improve(target: str = "") -> dict:
         mentioned = re.findall(r"\b[a-zA-Z0-9_/-]+\.py\b", text)
         disallowed = [name for name in mentioned if os.path.basename(name) not in {
             "router.py", "model_router.py", "memory.py", "learner.py", "brain.py",
-            "brain_claude.py", "brain_ollama.py", "tools.py", "voice.py", "config.py",
+            "brain_claude.py", "brain_ollama.py", "brain_gemini.py", "tools.py", "voice.py", "config.py",
             "briefing.py", "notes.py", "terminal.py", "google_services.py", "camera.py",
             "vault.py", "wiki_builder.py", "source_ingest.py", "skill_factory.py",
             "skills.py", "ui.py", "self_improve.py", "stealth.py", "main.py",
+            "local_beta.py", "local_model_automation.py", "local_model_benchmark.py",
+            "local_model_eval.py", "local_stt.py", "local_training.py", "local_tts.py",
         }]
         if disallowed:
             result = {

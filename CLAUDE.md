@@ -13,6 +13,7 @@ python main.py --no-ui
 ```
 
 Requires a `.env` file with `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`. Google Calendar/Gmail credentials live in `credentials.json` and `token.json` (OAuth2 flow from `google_services.py`).
+Open-source mode now works without paid API keys. Cloud keys are optional fallbacks.
 
 ## Dependencies
 
@@ -31,9 +32,15 @@ Jarvis is a personal voice+text AI assistant for macOS. All requests flow throug
 **Layer 2 — `model_router.py` (model selection):** Classifies task complexity and routes to the cheapest viable model: Local (Ollama) → GPT-mini → Haiku → Sonnet → Opus. Three modes: `auto` (default, local-first), `cloud`, `local`. Mode is runtime-switchable via natural language.
 
 **LLM backends:**
-- `brain.py` — OpenAI GPT via streaming
-- `brain_claude.py` — Anthropic Claude via streaming
-- `brain_ollama.py` — local Ollama models via streaming
+- `brains/brain.py` — OpenAI GPT via streaming
+- `brains/brain_claude.py` — Anthropic Claude via streaming
+- `brains/brain_ollama.py` — local Ollama models via streaming
+
+**Local runtime helpers:**
+- `local_runtime/local_stt.py` — local speech-to-text
+- `local_runtime/local_tts.py` — local text-to-speech
+- `local_runtime/local_model_eval.py` — eval harness
+- `local_runtime/local_beta.py` — beta test harness
 
 **Memory & learning:**
 - `memory.py` — persistent JSON store (`memory.json`) for facts, preferences, projects, conversation summaries, and topic frequency. Thread-safe with atomic writes.
@@ -49,7 +56,7 @@ Jarvis is a personal voice+text AI assistant for macOS. All requests flow throug
 - `terminal.py` — file read/write, shell command execution, clipboard
 - `camera.py` — webcam capture + screenshot analysis via Claude vision
 - `meeting_listener.py` — taps meeting audio via BlackHole virtual audio device; generates real-time suggestions
-- `hotkeys.py` — global macOS hotkeys (Cmd+Shift+J/K/L/; and Cmd+Shift+M)
+- `desktop/hotkeys.py` — global macOS hotkeys (Cmd+Shift+J/K/L/; and Cmd+Shift+M)
 - `stealth.py` — hides the window from screen share using macOS private APIs (`pyobjc-framework-Cocoa`)
 - `self_improve.py` — Jarvis reads its own source, asks Opus to rewrite a file, backs up the original to `.jarvis_backups/`, applies the change, then restarts
 

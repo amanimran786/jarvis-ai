@@ -10,7 +10,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import SONNET
 import skills
 import tool_registry

@@ -20,11 +20,11 @@ Mode commands:
 
 from config import GPT_MINI
 from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED, DEFAULT_MODE
-from brain import ask_stream
-from brain_gemini import ask_gemini_stream
-from brain_claude import ask_claude_stream
-from brain_ollama import ask_local_stream, list_local_models
-import local_model_eval
+from brains.brain import ask_stream
+from brains.brain_gemini import ask_gemini_stream
+from brains.brain_claude import ask_claude_stream
+from brains.brain_ollama import ask_local_stream, list_local_models
+from local_runtime import local_model_eval
 import cost_policy
 import skills
 import vault
@@ -158,23 +158,27 @@ def _best_local(text: str) -> str:
         if any(LOCAL_CODER in m for m in available):
             return LOCAL_CODER
 
-    # Reasoning tasks — prefer DeepSeek R1 if available (built-in chain-of-thought)
-    reasoning_triggers = (
-        "analyze", "plan", "explain", "why", "how", "reason", "think",
-        "compare", "evaluate", "decide", "best approach", "tradeoff",
-        "step by step", "walk me through", "research", "summarize",
-        "design", "architecture", "strategy", "understand",
+    # Reasoning tasks — only use DeepSeek R1 for genuinely complex multi-step problems.
+    # Too many triggers here tanks UX: R1:14b takes 3-10 min on Mac vs gemma4's 10-30s.
+    # Reserve R1 for: deep analysis, architecture, step-by-step walkthroughs, long queries.
+    _DEEP_REASONING_TRIGGERS = (
+        "step by step", "walk me through", "detailed analysis",
+        "compare and contrast", "system design", "architecture decision",
+        "evaluate tradeoffs", "research", "deep dive", "root cause",
+        "investigate", "comprehensive", "in depth",
     )
-    if any(t in lower for t in reasoning_triggers):
-        if any(LOCAL_REASONING in m for m in available):
-            return LOCAL_REASONING
+    word_count = len(lower.split())
+    uses_deep_trigger = any(t in lower for t in _DEEP_REASONING_TRIGGERS)
+    # Only use R1 if the query is explicitly requesting deep reasoning OR is a long complex question (25+ words)
+    if (uses_deep_trigger or word_count >= 25) and any(LOCAL_REASONING in m for m in available):
+        return LOCAL_REASONING
 
-    # Return first available
+    # Return first available — prefer fast default model over slow reasoning model
     fallback_preferred = [promoted]
     if LOCAL_PREFER_TUNED:
         fallback_preferred.append(LOCAL_TUNED)
-    # Prefer reasoning model as general fallback (DeepSeek R1 > Gemma for most tasks)
-    fallback_preferred.extend([LOCAL_REASONING, LOCAL_DEFAULT, LOCAL_CODER])
+    # Gemma4 first (10-30s), R1 only as last resort
+    fallback_preferred.extend([LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING])
 
     for preferred in fallback_preferred:
         if not preferred:

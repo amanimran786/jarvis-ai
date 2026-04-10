@@ -276,9 +276,33 @@ High-leverage modules:
 - `runtime_state.py` — live runtime metadata and endpoint discovery
 - `task_runtime.py` — managed tasks, agents, streams
 - `model_router.py` — model selection
-- `brain_ollama.py` — local inference, capability discovery, model warmup
+- `brains/brain_ollama.py` — local inference, capability discovery, model warmup
 - `voice.py` — local-first STT/TTS path
 - `router.py` — user intent routing and fast paths
+
+## Repository Layout
+
+The repo is intentionally split by responsibility so the root stays readable:
+
+- `brains/` — model-provider adapters and local inference backends
+- `desktop/` — dock, overlay, hotkey, bridge, and screenshot helpers
+- `local_runtime/` — local eval, training, benchmark, STT, and TTS helpers
+- `skills/` — specialist prompts, playbooks, and activation metadata
+- `docs/` — architecture notes, roadmap, and audits
+- `scripts/` — build, install, icon, graph, and maintenance scripts
+- `tests/` — regression, runtime, and packaging checks
+- repo root — the main runtime entrypoints and app subsystems
+
+If you are orienting quickly, start with:
+
+- `main.py`
+- `ui.py`
+- `api.py`
+- `router.py`
+- `model_router.py`
+- `desktop/overlay.py`
+- `brains/brain_ollama.py`
+- `task_runtime.py`
 
 ## macOS Permissions
 

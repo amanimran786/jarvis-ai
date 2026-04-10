@@ -23,7 +23,7 @@ Open models and local services should own the default path for chat, coding, spe
 Implication for this repo:
 
 - keep [model_router.py](/Users/truthseeker/jarvis-ai/model_router.py) policy-driven
-- treat [brain_ollama.py](/Users/truthseeker/jarvis-ai/brain_ollama.py) as the default backbone
+- treat [brain_ollama.py](/Users/truthseeker/jarvis-ai/brains/brain_ollama.py) as the default backbone
 - push [voice.py](/Users/truthseeker/jarvis-ai/voice.py), [meeting_listener.py](/Users/truthseeker/jarvis-ai/meeting_listener.py), and [camera.py](/Users/truthseeker/jarvis-ai/camera.py) toward local implementations
 
 ### 2. Runtime First, UI Second
@@ -80,7 +80,7 @@ Jarvis should not get "smarter" by intuition alone. Improvements need replayable
 
 Implication for this repo:
 
-- keep [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py) and [local_beta.py](/Users/truthseeker/jarvis-ai/local_beta.py)
+- keep [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_runtime/local_model_eval.py) and [local_beta.py](/Users/truthseeker/jarvis-ai/local_runtime/local_beta.py)
 - make them more local, cheaper, and more representative of actual Jarvis tasks
 
 ## Open-Source Model Stack By Function
@@ -99,7 +99,7 @@ The right model stack is not one model for everything. Jarvis should use a small
 | Vision understanding | GPT-4o path in [camera.py](/Users/truthseeker/jarvis-ai/camera.py) | `Qwen2.5-VL-7B-Instruct` | Local multimodal reasoning for screen/camera snapshots |
 | Embeddings | TF-IDF in [semantic_memory.py](/Users/truthseeker/jarvis-ai/semantic_memory.py) | `bge-small-en-v1.5` or `bge-base-en-v1.5` | Better retrieval quality without requiring a vector database-heavy architecture |
 | Reranking | None | `bge-reranker-base` | Improves grounded answer quality for vault and memory retrieval |
-| Judge/eval model | Cloud-heavy in [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py) | local rubric + pairwise scoring first | Keeps eval loops cheaper and aligned with the open-source goal |
+| Judge/eval model | Cloud-heavy in [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_runtime/local_model_eval.py) | local rubric + pairwise scoring first | Keeps eval loops cheaper and aligned with the open-source goal |
 
 ### External References
 
@@ -135,9 +135,9 @@ Still needed:
 Existing:
 
 - [ui.py](/Users/truthseeker/jarvis-ai/ui.py)
-- [overlay.py](/Users/truthseeker/jarvis-ai/overlay.py)
-- [device_panel.py](/Users/truthseeker/jarvis-ai/device_panel.py)
-- [bridge.py](/Users/truthseeker/jarvis-ai/bridge.py)
+- [overlay.py](/Users/truthseeker/jarvis-ai/desktop/overlay.py)
+- [device_panel.py](/Users/truthseeker/jarvis-ai/desktop/device_panel.py)
+- [bridge.py](/Users/truthseeker/jarvis-ai/desktop/bridge.py)
 
 Still needed:
 
@@ -199,8 +199,8 @@ Still needed:
 Existing:
 
 - [hardware.py](/Users/truthseeker/jarvis-ai/hardware.py)
-- [bridge.py](/Users/truthseeker/jarvis-ai/bridge.py)
-- [device_panel.py](/Users/truthseeker/jarvis-ai/device_panel.py)
+- [bridge.py](/Users/truthseeker/jarvis-ai/desktop/bridge.py)
+- [device_panel.py](/Users/truthseeker/jarvis-ai/desktop/device_panel.py)
 
 Still needed:
 
@@ -213,8 +213,8 @@ Still needed:
 Existing:
 
 - [self_improve.py](/Users/truthseeker/jarvis-ai/self_improve.py)
-- [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_model_eval.py)
-- [local_beta.py](/Users/truthseeker/jarvis-ai/local_beta.py)
+- [local_model_eval.py](/Users/truthseeker/jarvis-ai/local_runtime/local_model_eval.py)
+- [local_beta.py](/Users/truthseeker/jarvis-ai/local_runtime/local_beta.py)
 
 Still needed:
 
@@ -293,7 +293,7 @@ Primary work:
 - harden [meeting_listener.py](/Users/truthseeker/jarvis-ai/meeting_listener.py) for reliable speech/caption fusion
 - add local OCR and local VLM support to [camera.py](/Users/truthseeker/jarvis-ai/camera.py) and screen analysis flows
 - improve [browser.py](/Users/truthseeker/jarvis-ai/browser.py) for explicit current-task grounding
-- expand [hardware.py](/Users/truthseeker/jarvis-ai/hardware.py) and [bridge.py](/Users/truthseeker/jarvis-ai/bridge.py) into real cross-device assist primitives
+- expand [hardware.py](/Users/truthseeker/jarvis-ai/hardware.py) and [bridge.py](/Users/truthseeker/jarvis-ai/desktop/bridge.py) into real cross-device assist primitives
 
 Exit criteria:
 
@@ -327,7 +327,7 @@ Make Jarvis available across the desktop, phone, and trusted local network.
 
 Primary work:
 
-- build a real same-Wi-Fi remote client on top of [api.py](/Users/truthseeker/jarvis-ai/api.py) and [bridge.py](/Users/truthseeker/jarvis-ai/bridge.py)
+- build a real same-Wi-Fi remote client on top of [api.py](/Users/truthseeker/jarvis-ai/api.py) and [bridge.py](/Users/truthseeker/jarvis-ai/desktop/bridge.py)
 - support session handoff and current-task continuity
 - turn the assistant into an always-available runtime instead of a window you manually shepherd
 

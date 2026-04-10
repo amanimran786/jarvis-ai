@@ -14,8 +14,8 @@ from config import (
     TTS_BACKENDS,
 )
 import call_privacy
-import local_stt
-import local_tts
+from local_runtime import local_stt
+from local_runtime import local_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
