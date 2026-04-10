@@ -35,6 +35,7 @@ import conversation_context as ctx
 import vault
 import source_ingest
 import skill_factory
+import extension_registry
 from local_runtime import local_training
 from local_runtime import local_model_eval
 from local_runtime import local_model_automation
@@ -338,6 +339,50 @@ def get_agent(agent_id: str):
     if not agent:
         return JSONResponse(status_code=404, content={"ok": False, "error": "agent_not_found"})
     return {"ok": True, "agent": agent}
+
+
+@app.get("/extensions")
+def list_extensions():
+    return {"ok": True, "extensions": extension_registry.discovery_snapshot()}
+
+
+@app.get("/skills")
+def list_skills():
+    return {"ok": True, "skills": extension_registry.list_skills()}
+
+
+@app.get("/skills/{skill_id}")
+def get_skill(skill_id: str):
+    skill = extension_registry.get_skill_detail(skill_id)
+    if not skill:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "skill_not_found"})
+    return {"ok": True, "skill": skill}
+
+
+@app.get("/connectors")
+def list_connectors():
+    return {"ok": True, "connectors": extension_registry.list_connectors()}
+
+
+@app.get("/connectors/{connector_id}")
+def get_connector(connector_id: str):
+    connector = extension_registry.connector_detail(connector_id)
+    if not connector:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "connector_not_found"})
+    return {"ok": True, "connector": connector}
+
+
+@app.get("/plugins")
+def list_plugins():
+    return {"ok": True, "plugins": extension_registry.list_plugins()}
+
+
+@app.get("/plugins/{plugin_id}")
+def get_plugin(plugin_id: str):
+    plugin = extension_registry.plugin_detail(plugin_id)
+    if not plugin:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "plugin_not_found"})
+    return {"ok": True, "plugin": plugin}
 
 
 @app.get("/tasks")

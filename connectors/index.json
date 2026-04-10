@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "connectors": [
+    {
+      "id": "desktop_system",
+      "name": "Desktop System",
+      "description": "Native macOS control for apps, windows, screenshots, audio, and desktop actions.",
+      "transport": "native",
+      "auth": "local_runtime",
+      "local_only": true,
+      "tools": ["system", "app", "hardware", "camera"],
+      "capabilities": ["launch_apps", "take_screenshot", "set_volume", "inspect_devices"],
+      "status_hint": "ready_when_app_running"
+    },
+    {
+      "id": "browser_operator",
+      "name": "Browser Operator",
+      "description": "Live browser inspection, navigation, clicking, and page summarization.",
+      "transport": "local_browser_bridge",
+      "auth": "none",
+      "local_only": true,
+      "tools": ["browser"],
+      "capabilities": ["navigate", "summarize_page", "click_controls", "read_current_tab"],
+      "status_hint": "ready_when_browser_supported"
+    },
+    {
+      "id": "knowledge_vault",
+      "name": "Knowledge Vault",
+      "description": "Local markdown retrieval, memory inspection, note handling, and source-grounded recall.",
+      "transport": "filesystem_plus_api",
+      "auth": "local_token",
+      "local_only": true,
+      "tools": ["knowledge", "memory", "notes"],
+      "capabilities": ["vault_search", "memory_recall", "memory_write", "notes"],
+      "status_hint": "ready"
+    },
+    {
+      "id": "terminal_operator",
+      "name": "Terminal Operator",
+      "description": "Shell execution and file operations under the local Jarvis trust boundary.",
+      "transport": "local_subprocess",
+      "auth": "local_token",
+      "local_only": true,
+      "tools": ["terminal", "admin"],
+      "capabilities": ["run_commands", "inspect_files", "apply_changes"],
+      "status_hint": "high_trust_only"
+    },
+    {
+      "id": "google_workspace",
+      "name": "Google Workspace",
+      "description": "Gmail and Calendar integration for mail triage, meeting context, and scheduling.",
+      "transport": "google_oauth",
+      "auth": "oauth_file",
+      "local_only": false,
+      "tools": ["email", "calendar", "meeting"],
+      "capabilities": ["read_mail", "send_mail", "read_calendar", "meeting_briefing"],
+      "status_hint": "requires_credentials"
+    },
+    {
+      "id": "managed_runtime",
+      "name": "Managed Runtime",
+      "description": "Daemon-backed task execution, agent registry, task lifecycle, and isolated code workspaces.",
+      "transport": "local_api",
+      "auth": "local_token",
+      "local_only": true,
+      "tools": ["operative", "specialized_agent", "self_improve"],
+      "capabilities": ["submit_tasks", "stream_tasks", "inspect_agents", "isolated_worktrees"],
+      "status_hint": "ready_when_daemon_running"
+    }
+  ]
+}

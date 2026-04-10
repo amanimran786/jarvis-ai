@@ -9,70 +9,428 @@
 [![Platform](https://img.shields.io/badge/platform-macOS-111827?style=for-the-badge&logo=apple)](https://www.apple.com/macos/)
 [![Python](https://img.shields.io/badge/python-3.12+-1f6feb?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Ollama](https://img.shields.io/badge/local_models-Ollama-0f172a?style=for-the-badge)](https://ollama.com/)
-[![Desktop App](https://img.shields.io/badge/desktop-PyQt6-12324a?style=for-the-badge)](/Users/truthseeker/jarvis-ai/ui.py)
-[![Mode](https://img.shields.io/badge/default-open--source-0b7285?style=for-the-badge)](/Users/truthseeker/jarvis-ai/config.py)
+[![Desktop App](https://img.shields.io/badge/desktop-PyQt6-12324a?style=for-the-badge)](ui.py)
+[![Mode](https://img.shields.io/badge/default-open--source-0b7285?style=for-the-badge)](config.py)
 
 </div>
 
-Jarvis is a local-first desktop assistant for macOS. It is built to talk, listen, reason, remember, inspect your codebase, control your browser, and operate as a real desktop app before it ever needs a paid API.
+Jarvis is a local-first desktop AI assistant for macOS.
 
-The direction is simple:
+The simple version:
 
-- make the core path run locally
-- keep cloud providers as optional fallback, not the foundation
-- ship Jarvis as a real desktop product, not just a prompt loop
+- you talk to it
+- it understands your request
+- it looks up the right memory, tools, and context
+- it answers or acts on your Mac
 
-## Why Jarvis
+The ambitious version:
 
-Jarvis is aiming at a very specific experience: your own GPT-class desktop AI, running on your machine, grounded in your projects, and able to act across your Mac.
+Jarvis is trying to become your own private, open-source-first desktop intelligence layer. Not just a chat box. Not just a prompt wrapper. A real system that can think, listen, see, remember, inspect code, control tools, and keep improving over time.
 
-Today that means:
+## Start Here
 
-- local-first chat and reasoning with Ollama
-- local STT with `faster-whisper`
-- local TTS with macOS `say`
-- local codebase grounding through Graphify artifacts
-- a packaged desktop app that stays in sync in both `Applications` and `Desktop`
-- managed task runtime, agent registry, and task lifecycle inspection
+If you are new to this repo, read these sections in order:
 
-It also means being honest about the current state:
+1. `What Is Jarvis?`
+2. `How Jarvis Works`
+3. `Current State`
+4. `Roadmap`
+5. `Repo Map`
 
-- the core open-source path is real and usable now
-- some subsystems still keep paid fallbacks available
-- the project is actively moving those remaining paths to stronger local replacements
+## What Is Jarvis?
 
-## What It Can Do
+Imagine a helpful robot friend living on your computer.
 
-| Area | Current capability |
+That friend should be able to:
+
+- hear you
+- talk back
+- look at your screen
+- remember important things
+- help with coding
+- use tools on your Mac
+- stay private by running locally whenever possible
+
+That is what Jarvis is meant to be.
+
+For engineers, the more exact definition is:
+
+Jarvis is a local-first assistant runtime with:
+
+- a desktop app
+- a local API
+- model routing
+- memory and retrieval
+- skills, connectors, and plugins
+- a managed task runtime
+- multimodal perception
+- local-model tuning and eval loops
+
+## Why This Repo Exists
+
+Most AI products today depend on cloud models as the foundation.
+
+Jarvis is trying to invert that:
+
+- local by default
+- cloud only as fallback or explicit escalation
+- grounded in your files, tools, and environment
+- honest about what it knows and what it does not know
+
+## Jarvis In One Diagram
+
+```mermaid
+flowchart LR
+    User["You"] --> UI["Desktop UI / CLI"]
+    UI --> API["Local API"]
+    API --> Router["Router + Orchestrator"]
+    Router --> Skills["Skills"]
+    Router --> Memory["Memory + Vault + Graph Context"]
+    Router --> Tools["Tools + Connectors"]
+    Router --> Models["Local Models"]
+    Router --> Tasks["Managed Task Runtime"]
+    Tools --> Mac["Browser / Terminal / macOS / Devices"]
+```
+
+## How Jarvis Works
+
+Every request follows roughly this path:
+
+1. You ask Jarvis something.
+2. Jarvis decides what kind of request it is.
+3. Jarvis loads the right skills and context.
+4. Jarvis chooses the right model and tools.
+5. Jarvis answers, acts, or starts a managed task.
+6. Jarvis can store useful memory for later.
+
+## The Main Systems
+
+### 1. Desktop App
+
+This is the visible Jarvis window and compact shell.
+
+Main files:
+
+- [main.py](main.py)
+- [ui.py](ui.py)
+- [desktop/](desktop)
+
+What it does:
+
+- shows the UI
+- starts the local API/runtime
+- lets you talk to Jarvis like a desktop product instead of a terminal script
+
+### 2. Local API
+
+This is the shared runtime surface that both the desktop app and CLI can talk to.
+
+Main file:
+
+- [api.py](api.py)
+
+What it does:
+
+- exposes chat, memory, runtime, task, skills, connectors, and plugin endpoints
+- makes Jarvis act like a real local service instead of a one-off script
+
+### 3. Router and Orchestrator
+
+This is the decision-making layer before any model answers.
+
+Main files:
+
+- [router.py](router.py)
+- [orchestrator.py](orchestrator.py)
+- [model_router.py](model_router.py)
+
+What it does:
+
+- figures out what kind of request you made
+- decides whether Jarvis should answer directly, use a skill, or start a task
+- chooses the model path
+- attaches relevant context first
+
+### 4. Memory and Grounding
+
+This is how Jarvis avoids feeling generic.
+
+Main files:
+
+- [memory.py](memory.py)
+- [semantic_memory.py](semantic_memory.py)
+- [vault.py](vault.py)
+- [graph_context.py](graph_context.py)
+
+What it does:
+
+- stores facts and preferences
+- searches local markdown knowledge
+- grounds repo questions in generated graph artifacts
+- gives Jarvis durable context across sessions
+
+### 5. Skills, Connectors, and Plugins
+
+This is Jarvis's extensibility layer.
+
+Main files:
+
+- [skills/](skills)
+- [skills.py](skills.py)
+- [connectors/index.json](connectors/index.json)
+- [plugins/index.json](plugins/index.json)
+- [extension_registry.py](extension_registry.py)
+
+What each one means:
+
+- `Skills`: instruction packs for specific types of work
+- `Connectors`: integrations into real capabilities like browser, terminal, vault, and Google Workspace
+- `Plugins`: bundles of skills, connectors, and agents that feel like complete features
+
+### 6. Managed Task Runtime
+
+This is the part that lets Jarvis act more like an operator than a chatbot.
+
+Main files:
+
+- [task_runtime.py](task_runtime.py)
+- [jarvis_daemon.py](jarvis_daemon.py)
+- [worktree_manager.py](worktree_manager.py)
+
+What it does:
+
+- registers named agents
+- creates and tracks tasks
+- streams task output
+- prepares isolated code workspaces for code tasks
+
+### 7. Voice, Meetings, Vision, and Device Awareness
+
+This is the multimodal layer.
+
+Main files:
+
+- [voice.py](voice.py)
+- [meeting_listener.py](meeting_listener.py)
+- [camera.py](camera.py)
+- [browser.py](browser.py)
+- [hardware.py](hardware.py)
+
+What it does:
+
+- speech input
+- speech output
+- meeting assist
+- screen and camera understanding
+- browser control
+- nearby device awareness
+
+## Current Capability Overview
+
+| Area | What Jarvis can do now |
 |---|---|
-| Chat + reasoning | Local-first conversation, planning, debugging, architecture, and technical Q&A |
-| Coding | Local coder model routing, code-review paths, repo-aware answers, task runtime, and CLI execution |
-| Voice | Local speech-to-text, local text-to-speech, wake-word flow, and meeting-assist plumbing |
-| Memory | Persistent facts, preferences, projects, recent conversations, and tiered memory inspection |
-| Repo grounding | Graphify-powered codebase context and local vault-based retrieval |
-| Browser + Mac | Open sites, inspect current page, click visible controls, launch apps, change volume, take screenshots |
-| Desktop app | PyQt6 UI, meeting toolbar, compact shell, packaged `Jarvis.app`, Desktop launcher |
-| Agents + runtime | Managed tasks, streamed task output, isolated code-task workspaces, agent/task inspection endpoints |
+| Chat | Answer questions, explain concepts, plan work, and reason about technical topics |
+| Coding | Read the repo, explain code, debug problems, review code, and run managed coding tasks |
+| Voice | Use local STT and local TTS in the main path |
+| Memory | Remember facts, preferences, projects, and recent conversation summaries |
+| Repo grounding | Use Graphify and vault-based context instead of pure guesswork |
+| Browser + system | Read pages, click controls, open apps, change settings, and take screenshots |
+| Managed runtime | Inspect agents, create tasks, stream task output, and isolate code-task workspaces |
+| Extensions | Expose discoverable skills, connectors, and plugins through API and CLI |
 
-## Local Stack
+## Current Local Stack
 
-Jarvis is configured around a local-first model stack:
+Jarvis is configured around a local-first stack:
 
 - default local chat: `gemma4:e4b`
-- local reasoning: `deepseek-r1:14b`
-- local coding: `qwen2.5-coder:7b`
+- deeper local reasoning model: `deepseek-r1:14b`
+- local coding model: `qwen2.5-coder:7b`
 - local STT: `faster-whisper`
 - local TTS: macOS `say`
-- local embeddings: `nomic-embed-text`
-- local vision path available: `llava:7b` when installed
+- local embeddings model available: `nomic-embed-text`
+- local vision model available: `llava:7b`
 
-You can inspect the live local stack at runtime with:
+You can inspect the live runtime stack with:
 
 ```bash
 curl http://127.0.0.1:8765/local/capabilities
 ```
 
-If Jarvis moves to a different port because `8765` is taken, the packaged app and CLI now discover that automatically.
+## Honest Current State
+
+This project is strong enough to be useful now, but it is not done.
+
+Important truth:
+
+- Jarvis is local-first today
+- Jarvis is not yet perfectly 100 percent local across every subsystem
+- some cloud fallback paths still exist in code
+- the repo is actively moving those remaining paths behind stricter open-source-mode boundaries
+
+That honesty matters because the goal here is not marketing. The goal is to build the real thing.
+
+## Architecture Roadmap
+
+Jarvis is moving through a few clear stages.
+
+### Phase 1: Stable Runtime
+
+Goal:
+
+Make Jarvis a real long-lived assistant runtime, not just a window that happens to call a model.
+
+Main work:
+
+- move more ownership into [jarvis_daemon.py](jarvis_daemon.py)
+- keep [runtime_state.py](runtime_state.py) as the shared source of truth
+- make UI and CLI act like clients of the runtime
+
+### Phase 2: Strong Local Brain
+
+Goal:
+
+Make the default path local for chat, coding, speech, retrieval, and vision.
+
+Main work:
+
+- strengthen [model_router.py](model_router.py)
+- keep local models as the main path
+- reduce or remove cloud dependency from meeting, vision, and retrieval paths
+
+### Phase 3: Better Grounding
+
+Goal:
+
+Make Jarvis answer from memory, repo structure, and real observations instead of fluent guessing.
+
+Main work:
+
+- improve [semantic_memory.py](semantic_memory.py)
+- unify memory, vault, and graph grounding
+- add stronger retrieval and reranking
+
+### Phase 4: Better Tools and Actions
+
+Goal:
+
+Let Jarvis act safely and reliably on the machine.
+
+Main work:
+
+- cleaner connector boundaries
+- better verification for multi-step actions
+- clearer safe vs privileged tool categories
+
+### Phase 5: Multimodal Jarvis
+
+Goal:
+
+Make Jarvis feel like a real desktop assistant, not just a text engine.
+
+Main work:
+
+- better local meeting assist
+- stronger local screen and camera understanding
+- better device and environment awareness
+
+### Phase 6: Self-Improving Jarvis
+
+Goal:
+
+Let Jarvis get better through evals and controlled local-model improvement.
+
+Main work:
+
+- stronger eval suites
+- safer self-improvement loops
+- better local-model training and promotion workflows
+
+## Repo Map
+
+If the repo feels big, this is the shortest useful map:
+
+| Path | Purpose |
+|---|---|
+| [main.py](main.py) | App startup |
+| [ui.py](ui.py) | Main desktop UI |
+| [api.py](api.py) | Local API surface |
+| [router.py](router.py) | Main request routing |
+| [model_router.py](model_router.py) | Model choice and mode policy |
+| [memory.py](memory.py) | Stored facts and profile memory |
+| [semantic_memory.py](semantic_memory.py) | Retrieval over memory data |
+| [vault.py](vault.py) | Local markdown knowledge vault |
+| [graph_context.py](graph_context.py) | Repo graph grounding |
+| [voice.py](voice.py) | Speech in and speech out |
+| [meeting_listener.py](meeting_listener.py) | Meeting assist |
+| [camera.py](camera.py) | Screen and camera understanding |
+| [browser.py](browser.py) | Browser control |
+| [hardware.py](hardware.py) | Mac and device awareness |
+| [task_runtime.py](task_runtime.py) | Managed task system |
+| [skills/](skills) | Skill packs |
+| [connectors/](connectors) | Connector definitions |
+| [plugins/](plugins) | Plugin definitions |
+| [docs/jarvis_architecture/](docs/jarvis_architecture) | Architecture docs and roadmap |
+
+## Extension Surface
+
+Jarvis now exposes a Claude-style discovery layer:
+
+```bash
+./venv/bin/python jarvis_cli.py --skills
+./venv/bin/python jarvis_cli.py --connectors
+./venv/bin/python jarvis_cli.py --plugins
+curl http://127.0.0.1:8765/extensions
+```
+
+## API Surface
+
+Core runtime:
+
+- `GET /status`
+- `GET /runtime/state`
+- `POST /chat`
+- `GET /mode`
+- `POST /mode`
+
+Extensions:
+
+- `GET /extensions`
+- `GET /skills`
+- `GET /skills/{skill_id}`
+- `GET /connectors`
+- `GET /connectors/{connector_id}`
+- `GET /plugins`
+- `GET /plugins/{plugin_id}`
+
+Managed runtime:
+
+- `GET /agents`
+- `GET /tasks`
+- `POST /tasks`
+- `GET /tasks/{task_id}`
+- `GET /tasks/{task_id}/events`
+- `GET /tasks/{task_id}/stream`
+
+Memory and vault:
+
+- `GET /memory`
+- `GET /memory/status`
+- `POST /memory/add`
+- `POST /memory/forget`
+- `GET /vault`
+- `POST /vault/build`
+
+## CLI Examples
+
+```bash
+./venv/bin/python jarvis_cli.py --status
+./venv/bin/python jarvis_cli.py --skills
+./venv/bin/python jarvis_cli.py --connectors
+./venv/bin/python jarvis_cli.py --plugins
+./venv/bin/python jarvis_cli.py "explain optimistic locking like I'm 10"
+./venv/bin/python jarvis_cli.py --task "summarize the current repo architecture"
+./venv/bin/python jarvis_cli.py --task-code "refactor the auth middleware"
+```
 
 ## Quick Start
 
@@ -100,21 +458,18 @@ ollama pull gemma4:e4b
 ollama pull deepseek-r1:14b
 ollama pull qwen2.5-coder:7b
 ollama pull nomic-embed-text
-```
-
-Optional local vision:
-
-```bash
 ollama pull llava:7b
 ```
 
 ### 4. Run Jarvis
 
 ```bash
-# GUI mode
 ./run.sh
+```
 
-# Headless mode
+Headless:
+
+```bash
 ./run.sh --no-ui
 ```
 
@@ -124,239 +479,35 @@ ollama pull llava:7b
 bash scripts/install_jarvis_app.sh
 ```
 
-That one command rebuilds the latest packaged app and installs it to:
+That rebuilds the latest packaged app and installs it to both:
 
-- `/Users/truthseeker/Applications/Jarvis.app`
-- `/Users/truthseeker/Desktop/Jarvis.app`
+- `Applications/Jarvis.app`
+- `Desktop/Jarvis.app`
 
-So the Desktop icon and the Applications copy stay current with the latest build.
+## Architecture Docs
 
-## Desktop App Flow
+For the deeper system docs, start here:
 
-Jarvis now has a cleaner packaged-app path:
+- [docs/jarvis_architecture/00_ARCHITECTURE.md](docs/jarvis_architecture/00_ARCHITECTURE.md)
+- [docs/jarvis_architecture/02_MEMORY_ARCHITECTURE.md](docs/jarvis_architecture/02_MEMORY_ARCHITECTURE.md)
+- [docs/jarvis_architecture/03_CAPABILITY_MODULES.md](docs/jarvis_architecture/03_CAPABILITY_MODULES.md)
+- [docs/jarvis_architecture/05_OPEN_SOURCE_FIRST_ROADMAP.md](docs/jarvis_architecture/05_OPEN_SOURCE_FIRST_ROADMAP.md)
+- [docs/jarvis_architecture/06_PROJECT_AUDIT_2026_04_09.md](docs/jarvis_architecture/06_PROJECT_AUDIT_2026_04_09.md)
 
-- the app is built as a proper macOS `onedir` bundle
-- the Desktop launcher is a full app bundle, not a fragile symlink
-- the packaged app is protected from conda GUI-launch issues
-- the CLI discovers the live app port dynamically, even if `8765` is occupied
+## Final Mental Model
 
-That means this works reliably:
+If you remember only one thing, remember this:
 
-```bash
-open -na /Users/truthseeker/Desktop/Jarvis.app
-./venv/bin/python jarvis_cli.py --status
-```
+Jarvis is not one model.
 
-## Modes
+Jarvis is:
 
-Jarvis supports multiple routing modes:
+- a runtime
+- a memory system
+- a router
+- a tool layer
+- a desktop app
+- an extension surface
+- and a roadmap toward a real local AI assistant
 
-- `open-source` — local/open tooling only on the main path
-- `local` — prefer local models
-- `auto` — route based on task complexity and policy
-- `cloud` — prefer cloud providers
-
-The default mode is `open-source`.
-
-You can switch modes in-app or by request:
-
-- `switch to open-source mode`
-- `switch to local mode`
-- `switch to auto mode`
-- `switch to cloud mode`
-
-## Runtime API
-
-Jarvis exposes a local HTTP API while running.
-
-### Core
-
-- `GET /status`
-- `GET /runtime/state`
-- `GET /mode`
-- `POST /mode`
-- `POST /chat`
-
-### Local runtime inspection
-
-- `GET /local/capabilities`
-- `GET /local/training/status`
-- `GET /local/evals/status`
-- `GET /local/automation/status`
-- `GET /local/beta/status`
-
-### Memory and retrieval
-
-- `GET /memory`
-- `GET /memory/status`
-- `POST /memory/add`
-- `POST /memory/forget`
-- `POST /memory/consolidate`
-- `GET /vault`
-- `POST /vault/build`
-
-### Managed runtime
-
-- `GET /agents`
-- `GET /tasks`
-- `POST /tasks`
-- `GET /tasks/{task_id}`
-- `GET /tasks/{task_id}/events`
-- `GET /tasks/{task_id}/stream`
-
-## CLI
-
-While Jarvis is running, you can talk to it from the terminal:
-
-```bash
-./venv/bin/python jarvis_cli.py --status
-./venv/bin/python jarvis_cli.py what's the fastest way to debug a FastAPI 502?
-./venv/bin/python jarvis_cli.py --task "summarize the current repo architecture"
-./venv/bin/python jarvis_cli.py --task-code "refactor the auth middleware"
-```
-
-The CLI now resolves the live app endpoint per request, so it stays aligned with the packaged app after restarts and port fallback.
-
-## Repo Grounding
-
-Jarvis can answer questions about this codebase using prebuilt Graphify artifacts instead of rereading raw files every time.
-
-To build the graph:
-
-```bash
-venv/bin/python -m pip install graphifyy
-venv/bin/python scripts/build_graphify_repo.py
-```
-
-That generates:
-
-- `graphify-out/graph.json`
-- `graphify-out/GRAPH_REPORT.md`
-- `graphify-out/analysis.json`
-
-## Skills, Agents, and Tasks
-
-Jarvis is moving away from one giant always-loaded prompt and toward a managed runtime:
-
-- `skills/` contains lightweight skill metadata plus deeper `SKILL.md` instructions
-- `agents/` contains specialist role definitions
-- the task runtime manages agent registration, task state, task streaming, and isolated workspaces for code tasks
-
-Current built-in specialist roles include:
-
-- `planner`
-- `executor`
-- `reviewer`
-- `science_expert`
-- `security_reviewer`
-- `self_improve_critic`
-
-## Architecture
-
-```mermaid
-flowchart LR
-    UI["PyQt Desktop App"] --> API["Local API"]
-    CLI["jarvis_cli.py"] --> API
-    API --> Router["router.py"]
-    Router --> Runtime["task_runtime.py"]
-    Router --> Models["model_router.py"]
-    Models --> Ollama["Ollama local models"]
-    Router --> Vault["vault + Graphify"]
-    Router --> Browser["browser + hardware + system tools"]
-    Runtime --> Worktree["isolated worktree manager"]
-    API --> State["runtime_state.py"]
-```
-
-High-leverage modules:
-
-- `main.py` — boot path, GUI/runtime startup, crash logging
-- `ui.py` — desktop app UI
-- `api.py` — local HTTP surface
-- `jarvis_daemon.py` — daemon bootstrap
-- `runtime_state.py` — live runtime metadata and endpoint discovery
-- `task_runtime.py` — managed tasks, agents, streams
-- `model_router.py` — model selection
-- `brains/brain_ollama.py` — local inference, capability discovery, model warmup
-- `voice.py` — local-first STT/TTS path
-- `router.py` — user intent routing and fast paths
-
-## Repository Layout
-
-The repo is intentionally split by responsibility so the root stays readable:
-
-- `brains/` — model-provider adapters and local inference backends
-- `desktop/` — dock, overlay, hotkey, bridge, and screenshot helpers
-- `local_runtime/` — local eval, training, benchmark, STT, and TTS helpers
-- `skills/` — specialist prompts, playbooks, and activation metadata
-- `docs/` — architecture notes, roadmap, and audits
-- `scripts/` — build, install, icon, graph, and maintenance scripts
-- `tests/` — regression, runtime, and packaging checks
-- repo root — the main runtime entrypoints and app subsystems
-
-If you are orienting quickly, start with:
-
-- `main.py`
-- `ui.py`
-- `api.py`
-- `router.py`
-- `model_router.py`
-- `desktop/overlay.py`
-- `brains/brain_ollama.py`
-- `task_runtime.py`
-
-## macOS Permissions
-
-Depending on what you use, Jarvis may request:
-
-- Accessibility
-- Automation
-- Microphone
-- Camera
-- Screen Recording
-
-These are normal for the desktop-control, voice, meeting, and screen-analysis features.
-
-## Optional Cloud Fallbacks
-
-Jarvis keeps paid providers available as fallback, but they are no longer the center of the system.
-
-If you want that fallback path available, add a `.env` file with only the providers you want:
-
-```env
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-ELEVENLABS_API_KEY=
-```
-
-If you leave those unset, the main local path still works.
-
-## Current Development Direction
-
-The current push is:
-
-- make the desktop app path reliable
-- keep the core assistant usable with zero API cost
-- strengthen local vision and local memory quality
-- keep the Desktop app and Applications app updated together
-- improve the managed-agent runtime so Jarvis feels like a real desktop coworker
-
-## Contributing
-
-If you are working on Jarvis locally:
-
-```bash
-./venv/bin/python -m py_compile main.py api.py jarvis_cli.py
-./venv/bin/python -m unittest tests.test_jarvis_regression_suite
-```
-
-For packaged-app changes, rebuild and reinstall with:
-
-```bash
-bash scripts/install_jarvis_app.sh
-```
-
-## North Star
-
-Jarvis is being built toward one simple goal:
-
-> a private, open-source-first desktop AI that feels closer to a real teammate than a chat tab
+The model is just one part inside that machine.

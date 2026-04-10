@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "core_assistant",
+      "name": "Core Assistant",
+      "description": "Jarvis's main reasoning, planning, writing, and personalized response stack.",
+      "category": "core",
+      "local_only": true,
+      "skills": ["planning_execution", "engineering_reasoning", "writing_editor", "personal_context"],
+      "connectors": ["knowledge_vault", "managed_runtime"],
+      "agents": ["planner", "reviewer"],
+      "entrypoints": ["chat", "cli", "desktop"]
+    },
+    {
+      "id": "browser_ops",
+      "name": "Browser Ops",
+      "description": "A plugin pack for page understanding, browser actions, and live website execution.",
+      "category": "automation",
+      "local_only": true,
+      "skills": ["browser_execution", "source_grounding"],
+      "connectors": ["browser_operator"],
+      "agents": ["executor"],
+      "entrypoints": ["chat", "desktop"]
+    },
+    {
+      "id": "career_ops",
+      "name": "Career Ops",
+      "description": "Interview prep, application tracking, and story-bank coaching using Aman's local career assets.",
+      "category": "workflow",
+      "local_only": true,
+      "skills": ["career_interview_ops", "writing_editor", "personal_context"],
+      "connectors": ["knowledge_vault"],
+      "agents": ["planner", "reviewer"],
+      "entrypoints": ["chat"]
+    },
+    {
+      "id": "local_model_lab",
+      "name": "Local Model Lab",
+      "description": "Local-model tuning, evaluation, automation, and beta-test workflow for improving Jarvis itself.",
+      "category": "mlops",
+      "local_only": true,
+      "skills": ["local_model_tuning", "self_improvement", "eval-pattern-self-improve"],
+      "connectors": ["managed_runtime", "knowledge_vault"],
+      "agents": ["self_improve_critic", "reviewer"],
+      "entrypoints": ["api", "cli"]
+    },
+    {
+      "id": "managed_agents",
+      "name": "Managed Agents",
+      "description": "Task runtime, specialist execution, isolated coding workspaces, and agent lifecycle inspection.",
+      "category": "runtime",
+      "local_only": true,
+      "skills": ["code_implementation", "code_review", "debugging_diagnostics", "planning_execution"],
+      "connectors": ["managed_runtime", "terminal_operator"],
+      "agents": ["planner", "executor", "reviewer", "security_reviewer"],
+      "entrypoints": ["api", "cli", "desktop"]
+    }
+  ]
+}

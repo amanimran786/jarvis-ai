@@ -7,6 +7,9 @@ Usage:
   python jarvis_cli.py remember I prefer dark mode
   python jarvis_cli.py --memory
   python jarvis_cli.py --status
+  python jarvis_cli.py --skills
+  python jarvis_cli.py --connectors
+  python jarvis_cli.py --plugins
   python jarvis_cli.py --agents
   python jarvis_cli.py --tasks
   python jarvis_cli.py --task-status <task_id>
@@ -165,6 +168,12 @@ def main():
         print("Usage: python jarvis_cli.py <message>")
         print("       python jarvis_cli.py --status")
         print("       python jarvis_cli.py --memory")
+        print("       python jarvis_cli.py --skills")
+        print("       python jarvis_cli.py --skill <skill_id>")
+        print("       python jarvis_cli.py --connectors")
+        print("       python jarvis_cli.py --connector <connector_id>")
+        print("       python jarvis_cli.py --plugins")
+        print("       python jarvis_cli.py --plugin <plugin_id>")
         print("       python jarvis_cli.py --agents")
         print("       python jarvis_cli.py --tasks")
         print("       python jarvis_cli.py --task-status <task_id>")
@@ -194,6 +203,53 @@ def main():
         print(f"Status : {s['status'].upper()}")
         print(f"Mode   : {s['mode'].upper()}")
         print(f"Local  : {'available' if s['local_available'] else 'not available'}")
+        return
+
+    if flag == "--skills":
+        payload = get("/skills")
+        for skill in payload.get("skills", []):
+            print(f"{skill['id']}: {skill['tool']} [{skill['cost_hint']}]")
+            print(f"  {skill['description']}")
+        return
+
+    if flag == "--skill":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --skill <skill_id>", file=sys.stderr)
+            sys.exit(1)
+        payload = get(f"/skills/{sys.argv[2]}")
+        print(json.dumps(payload.get("skill", {}), indent=2))
+        return
+
+    if flag == "--connectors":
+        payload = get("/connectors")
+        for connector in payload.get("connectors", []):
+            scope = "local" if connector.get("local_only") else "hybrid"
+            print(f"{connector['id']}: {connector['transport']} [{scope}]")
+            print(f"  {connector['description']}")
+        return
+
+    if flag == "--connector":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --connector <connector_id>", file=sys.stderr)
+            sys.exit(1)
+        payload = get(f"/connectors/{sys.argv[2]}")
+        print(json.dumps(payload.get("connector", {}), indent=2))
+        return
+
+    if flag == "--plugins":
+        payload = get("/plugins")
+        for plugin in payload.get("plugins", []):
+            scope = "local" if plugin.get("local_only") else "hybrid"
+            print(f"{plugin['id']}: {plugin['category']} [{scope}]")
+            print(f"  {plugin['description']}")
+        return
+
+    if flag == "--plugin":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --plugin <plugin_id>", file=sys.stderr)
+            sys.exit(1)
+        payload = get(f"/plugins/{sys.argv[2]}")
+        print(json.dumps(payload.get("plugin", {}), indent=2))
         return
 
     if flag == "--agents":
