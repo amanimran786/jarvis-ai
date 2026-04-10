@@ -259,28 +259,8 @@ def _run_headless():
 
 
 def _request_macos_permissions():
-    import subprocess
-    import os
-    print("[System] Requesting macOS Accessibility and Automation permissions for Python and Terminal...")
-    
-    targets = [
-        'tell application "System Events" to get name of current user',
-        'tell application "Messages" to get name of first service',
-        'tell application "Mail" to get name of first account',
-        'tell application "Calendar" to get name of first calendar',
-        'tell application "Contacts" to get name of first person',
-        'tell application "Terminal" to get windows'
-    ]
-    
-    # Trigger requests for the current python process
-    for cmd in targets:
-        subprocess.run(["osascript", "-e", cmd], capture_output=True)
-        
-    # Trigger requests for the Terminal app by having it run osascript
-    term_script = " && ".join([f"osascript -e '{cmd}'" for cmd in targets])
-    term_script += " && exit"
-    apple_script = f'tell application "Terminal" to do script "{term_script}"'
-    subprocess.run(["osascript", "-e", apple_script], capture_output=True)
+    print("[System] Startup app-permission probing is disabled to avoid opening user apps on launch.")
+    print("[System] Grant permissions only when a feature first needs them: microphone, camera, screen recording, Contacts, Messages, or browser automation.")
 
 
 def _run_deferred_startup_tasks() -> None:
