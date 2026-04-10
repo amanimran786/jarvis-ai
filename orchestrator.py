@@ -217,10 +217,13 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Restart
     if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes|hit your restart|do a restart)\b", lower):
         return ToolDecision("self_improve", 0.99, "restart")
-    # Messaging
-    if re.search(r"\b(text|message|send a text|send a message|imessage)\b.*(to\s+\w+|\w+\s+imran|\w+\s+imran)", lower):
-        return ToolDecision("message", 0.95, "send")
-    if re.search(r"\b(text|send a text|send a message to|message)\s+\w+", lower):
+    # Messaging — require "to <name>" or an explicit send/message verb at the START
+    # to avoid false positives on phrases like "plain text in a database"
+    if re.search(r"\b(text|message|send a text|send a message|imessage)\b.*(to\s+\w+|\w+\s+imran)", lower):
+        # Exclude knowledge/technical sentences containing "text" as a noun
+        if not re.search(r"\b(plain text|cipher text|ciphertext|clear text|in a database|html|xml|json|csv|stored|encrypt|hash)\b", lower):
+            return ToolDecision("message", 0.95, "send")
+    if re.search(r"^(text|send a text to|send a message to|message)\s+\w+", lower):
         return ToolDecision("message", 0.95, "send")
     return None
 

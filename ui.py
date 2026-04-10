@@ -1603,7 +1603,9 @@ class JarvisWindow(QMainWindow):
         # ── Input area ───────────────────────────────────────────────────────
         input_bar = QWidget()
         self._input_bar = input_bar
-        input_bar.setFixedHeight(68)
+        input_bar.setMinimumHeight(68)
+        input_bar.setMaximumHeight(136)
+        input_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.MinimumExpanding)
         input_bar.setAutoFillBackground(True)
         ip = input_bar.palette()
         ip.setColor(QPalette.ColorRole.Window, QColor(C_BG2))
@@ -1638,7 +1640,7 @@ class JarvisWindow(QMainWindow):
         self.input_field.setPlaceholderText("ENTER COMMAND...")
         self.input_field.setFont(QFont("Courier New", 12))
         self.input_field.setStyleSheet(f"""
-            QLineEdit {{
+            QTextEdit {{
                 background: {C_BG};
                 color: {C_TEXT};
                 border: 1px solid {C_BORDER};
@@ -1646,11 +1648,11 @@ class JarvisWindow(QMainWindow):
                 padding: 7px 12px;
                 letter-spacing: 1px;
             }}
-            QLineEdit:focus {{
+            QTextEdit:focus {{
                 border: 1px solid {C_CYAN};
             }}
         """)
-        self.input_field.returnPressed.connect(self._send_text)
+        self.input_field.submitted.connect(self._send_text)
 
         self.send_btn = QPushButton("▶")
         self.send_btn.setFixedSize(40, 40)
@@ -2817,7 +2819,7 @@ class OrbShellWindow(JarvisWindow):
         self.input_field.setPlaceholderText("Type to Jarvis...")
         self.input_field.setFont(QFont("Courier New", 11))
         self.input_field.setStyleSheet(f"""
-            QLineEdit {{
+            QTextEdit {{
                 background: rgba(0, 8, 14, 220);
                 color: {C_TEXT};
                 border: 1px solid {C_BORDER};
@@ -2825,11 +2827,11 @@ class OrbShellWindow(JarvisWindow):
                 padding: 8px 12px;
                 letter-spacing: 1px;
             }}
-            QLineEdit:focus {{
+            QTextEdit:focus {{
                 border: 1px solid {C_CYAN};
             }}
         """)
-        self.input_field.returnPressed.connect(self._send_text)
+        self.input_field.submitted.connect(self._send_text)
         self.send_btn = QPushButton("SEND")
         self.send_btn.setFixedHeight(36)
         self.send_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
@@ -3231,8 +3233,43 @@ end tell
         QTimer.singleShot(120, lambda: stealth.apply_stealth(int(self.winId())))
 
 
-class EnterLineEdit(QLineEdit):
-    pass
+class EnterLineEdit(QTextEdit):
+    submitted = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.setTabChangesFocus(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setMinimumHeight(42)
+        self.setMaximumHeight(110)
+        self.textChanged.connect(self._sync_height)
+        self._sync_height()
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def clear(self) -> None:
+        super().clear()
+        self._sync_height()
+
+    def keyPressEvent(self, event: QKeyEvent):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                super().keyPressEvent(event)
+                return
+            self.submitted.emit()
+            return
+        super().keyPressEvent(event)
+
+    def _sync_height(self):
+        doc_height = self.document().size().height()
+        target = int(doc_height + 18)
+        target = max(42, min(110, target))
+        if self.height() != target:
+            self.setFixedHeight(target)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
