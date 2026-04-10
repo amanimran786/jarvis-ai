@@ -1541,6 +1541,27 @@ class SemanticMemoryWriteTests(unittest.TestCase):
         self.assertIn("id", data)
         self.assertIn("timestamp", data)
 
+    def test_log_conversation_turn_appends_jsonl_record(self):
+        import semantic_memory
+        with tempfile.TemporaryDirectory() as tmp:
+            convo_dir = Path(tmp) / "conversations"
+            log_path = convo_dir / "verbatim.jsonl"
+            with patch.object(semantic_memory, "CONVERSATIONS_DIR", convo_dir), \
+                 patch.object(semantic_memory, "VERBATIM_LOG_PATH", log_path):
+                semantic_memory.log_conversation_turn(
+                    "Why did we switch auth providers?",
+                    "We switched for better operational reliability and lower incident rate.",
+                    model="deepseek-r1:14b",
+                    source="api",
+                )
+            self.assertTrue(log_path.exists())
+            lines = log_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1)
+            entry = json.loads(lines[0])
+        self.assertEqual(entry["model"], "deepseek-r1:14b")
+        self.assertEqual(entry["source"], "api")
+        self.assertIn("switch auth providers", entry["user"])
+
 
 class SemanticMemoryStatusTests(unittest.TestCase):
 

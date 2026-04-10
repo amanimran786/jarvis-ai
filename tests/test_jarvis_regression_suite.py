@@ -886,6 +886,31 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["plugin"]["skills_detail"])
         self.assertTrue(payload["plugin"]["connectors_detail"])
 
+    def test_graph_query_endpoint_returns_graph_results(self):
+        with patch("api.gctx.query_graph", return_value={"ready": True, "query": "watchdog", "nodes": [{"id": "JarvisWindow"}], "edges": []}):
+            response = self.client.get("/graph/query?q=watchdog")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["result"]["query"], "watchdog")
+        self.assertEqual(payload["result"]["nodes"][0]["id"], "JarvisWindow")
+
+    def test_graph_path_endpoint_returns_404_when_path_missing(self):
+        with patch("api.gctx.shortest_path", return_value={"ok": False, "error": "path_not_found", "path": []}):
+            response = self.client.get("/graph/path?source=A&target=B")
+        self.assertEqual(response.status_code, 404)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["result"]["error"], "path_not_found")
+
+    def test_graph_path_endpoint_returns_path_when_found(self):
+        with patch("api.gctx.shortest_path", return_value={"ok": True, "path": ["JarvisWindow", "_meeting_watchdog_tick"], "nodes": [], "edges": []}):
+            response = self.client.get("/graph/path?source=JarvisWindow&target=_meeting_watchdog_tick")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["result"]["path"], ["JarvisWindow", "_meeting_watchdog_tick"])
+
     def test_memory_status_endpoint(self):
         response = self.client.get("/memory/status")
         self.assertEqual(response.status_code, 200)
@@ -1592,6 +1617,42 @@ class GraphContextTests(unittest.TestCase):
                 text = graph_context.context_for_query("What is a variable?", tool="chat")
 
         self.assertEqual(text, "")
+
+    def test_shortest_path_returns_expected_nodes(self):
+        graph_context.invalidate()
+        with TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            graph_path = tmp / "graph.json"
+            report_path = tmp / "GRAPH_REPORT.md"
+            analysis_path = tmp / "analysis.json"
+
+            graph_path.write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {"id": "A", "label": "A", "source_file": "/tmp/a.py"},
+                            {"id": "B", "label": "B", "source_file": "/tmp/b.py"},
+                            {"id": "C", "label": "C", "source_file": "/tmp/c.py"},
+                        ],
+                        "links": [
+                            {"source": "A", "target": "B", "relation": "calls", "confidence": "EXTRACTED"},
+                            {"source": "B", "target": "C", "relation": "uses", "confidence": "EXTRACTED"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            report_path.write_text("# Graph Report\n", encoding="utf-8")
+            analysis_path.write_text(json.dumps({}), encoding="utf-8")
+
+            with patch.object(graph_context, "GRAPH_PATH", graph_path), \
+                 patch.object(graph_context, "REPORT_PATH", report_path), \
+                 patch.object(graph_context, "ANALYSIS_PATH", analysis_path):
+                graph_context.invalidate()
+                result = graph_context.shortest_path("A", "C")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["path"], ["A", "B", "C"])
 
     def test_open_source_mode_prefers_local_label(self):
         previous = model_router.get_mode()
