@@ -219,6 +219,13 @@ def _request_macos_permissions():
 
 
 def _run_deferred_startup_tasks() -> None:
+    # Pre-warm faster-whisper so the first voice query has zero cold-start latency
+    try:
+        from local_runtime import local_stt
+        local_stt.preload()
+    except Exception:
+        pass
+
     request_permissions = os.getenv("JARVIS_REQUEST_STARTUP_PERMISSIONS", "").lower() in {"1", "true", "yes", "on"}
     if request_permissions:
         try:

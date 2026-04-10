@@ -184,12 +184,50 @@ def invalidate() -> None:
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    import math
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(x * x for x in b))
-    return dot / (na * nb) if na and nb else 0.0
+def _get_query_embedding(query: str) -> list[float] | None:
+    """Return query embedding with LRU cache — avoids Ollama roundtrip on repeat queries."""
+    with _embed_cache_lock:
+        if query in _embed_cache:
+            _embed_cache.move_to_end(query)
+            return _embed_cache[query]
+    try:
+        from brains.brain_ollama import embed
+        vec = embed(query)
+    except Exception:
+        return None
+    if vec is None:
+        return None
+    with _embed_cache_lock:
+        _embed_cache[query] = vec
+        if len(_embed_cache) > _EMBED_CACHE_SIZE:
+            _embed_cache.popitem(last=False)  # evict oldest
+    return vec
+
+
+def _scores_numpy(qvec: list[float], allowed_tiers: set) -> list[tuple[int, float]]:
+    """Vectorized cosine similarity using numpy — O(n) with BLAS, not a Python loop."""
+    import numpy as np
+    q = np.array(qvec, dtype=np.float32)
+    qn = np.linalg.norm(q)
+    if qn == 0:
+        return []
+    q_unit = q / qn
+
+    if _embed_matrix is not None:
+        # _embed_matrix rows are already unit-normalised
+        sims = _embed_matrix @ q_unit          # shape (n,)
+    else:
+        mat = np.array(_embed_vecs, dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1)
+        norms[norms == 0] = 1.0
+        sims = (mat / norms[:, None]) @ q_unit
+
+    results = []
+    for i, score in enumerate(sims):
+        if _entries[i].get("_tier") not in allowed_tiers:
+            continue
+        results.append((i, float(score)))
+    return results
 
 
 def retrieve(
@@ -201,7 +239,8 @@ def retrieve(
     """Return top-k memory entries most relevant to query.
 
     Uses Ollama embeddings (nomic-embed-text) when available for true semantic
-    similarity. Falls back to TF-IDF cosine similarity if embeddings aren't ready.
+    similarity — query vectors are LRU-cached, document matrix is numpy-vectorized.
+    Falls back to TF-IDF cosine similarity if embeddings aren't ready.
     """
     _ensure_index()
     allowed_tiers = set(tiers) if tiers else set(_TIERS)
@@ -209,17 +248,29 @@ def retrieve(
     # ── Embedding path (preferred) ────────────────────────────────────────────
     if _embed_ready and _embed_vecs:
         try:
-            from brains.brain_ollama import embed
-            qvec = embed(query)
+            qvec = _get_query_embedding(query)
             if qvec:
-                results = []
-                for i, vec in enumerate(_embed_vecs):
-                    e = _entries[i]
-                    if e.get("_tier") not in allowed_tiers:
-                        continue
-                    score = _cosine(qvec, vec)
-                    if score >= min_score:
-                        results.append({**e, "score": round(score, 4)})
+                try:
+                    import numpy as _np
+                    scored = _scores_numpy(qvec, allowed_tiers)
+                except ImportError:
+                    # Pure-Python fallback (no numpy)
+                    import math
+                    def _cos(a, b):
+                        dot = sum(x * y for x, y in zip(a, b))
+                        na = math.sqrt(sum(x*x for x in a))
+                        nb = math.sqrt(sum(x*x for x in b))
+                        return dot / (na * nb) if na and nb else 0.0
+                    scored = [
+                        (i, _cos(qvec, vec))
+                        for i, vec in enumerate(_embed_vecs)
+                        if _entries[i].get("_tier") in allowed_tiers
+                    ]
+                results = [
+                    {**_entries[i], "score": round(sc, 4)}
+                    for i, sc in scored
+                    if sc >= min_score
+                ]
                 results.sort(key=lambda x: x["score"], reverse=True)
                 return results[:top_k]
         except Exception:
