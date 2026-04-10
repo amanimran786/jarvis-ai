@@ -10,6 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
+import queue
+import threading
 
 from brains.brain_claude import ask_claude
 from brains.brain_ollama import ask_local, get_best_available
@@ -48,6 +51,11 @@ _LOCAL_ROLE_MODELS = {
     "self_improve_critic": LOCAL_DEFAULT,   # lightweight check
 }
 
+_LOCAL_SPECIALIST_TIMEOUT_SECONDS = max(
+    1.0,
+    float(os.getenv("JARVIS_SPECIALIST_LOCAL_TIMEOUT_SECONDS", "8")),
+)
+
 
 def _load_agent_instructions(role: str) -> str:
     spec = AGENTS[role]
@@ -56,6 +64,35 @@ def _load_agent_instructions(role: str) -> str:
 
 def available_roles() -> list[str]:
     return list(AGENTS)
+
+
+def _ask_local_with_timeout(prompt: str, *, model: str, system_extra: str) -> str:
+    result_queue: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1)
+
+    def _worker() -> None:
+        try:
+            output = ask_local(
+                prompt,
+                model=model,
+                system_extra=system_extra,
+                raise_on_error=True,
+            ).strip()
+            result_queue.put(("ok", output))
+        except Exception as exc:
+            result_queue.put(("error", str(exc)))
+
+    thread = threading.Thread(target=_worker, daemon=True, name=f"SpecialistLocal-{model}")
+    thread.start()
+    thread.join(_LOCAL_SPECIALIST_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        raise TimeoutError(f"local specialist timeout after {_LOCAL_SPECIALIST_TIMEOUT_SECONDS:.1f}s")
+    try:
+        status, payload = result_queue.get_nowait()
+    except queue.Empty as exc:
+        raise RuntimeError("local specialist returned no result") from exc
+    if status == "error":
+        raise RuntimeError(payload)
+    return payload
 
 
 def _entropy_fallback() -> str:
@@ -327,7 +364,7 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         try:
             local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = ask_local(prompt, model=local_model, system_extra=full_system, raise_on_error=True).strip()
+            output = _ask_local_with_timeout(prompt, model=local_model, system_extra=full_system)
             return {"role": role, "model": f"local/{local_model}", "output": output}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()
@@ -348,7 +385,7 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         try:
             local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = ask_local(prompt, model=local_model, system_extra=full_system, raise_on_error=True).strip()
+            output = _ask_local_with_timeout(prompt, model=local_model, system_extra=full_system)
             return {"role": role, "model": f"local/{local_model}", "output": output, "fallback": True}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()
