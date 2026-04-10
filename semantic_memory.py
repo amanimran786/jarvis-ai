@@ -56,6 +56,13 @@ _matrix = None
 _entries: list[dict[str, Any]] = []
 _TIERS = ("public", "semi_private")
 
+# ── Embedding index state (nomic-embed-text via Ollama) ──────────────────────
+# When available, replaces TF-IDF with real semantic embeddings.
+# Falls back to TF-IDF silently if Ollama embed isn't available.
+
+_embed_vecs: list[list[float]] = []
+_embed_ready: bool = False
+
 
 # ── Index management ─────────────────────────────────────────────────────────
 
@@ -91,8 +98,30 @@ def _load_all_entries() -> list[dict[str, Any]]:
     return all_entries
 
 
+def _doc_text(e: dict[str, Any]) -> str:
+    return f"{e.get('content', '')} {' '.join(e.get('tags', []))}"
+
+
+def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
+    """Try to build a real embedding index via Ollama. Returns True on success."""
+    global _embed_vecs, _embed_ready
+    try:
+        from brain_ollama import embed
+        vecs = []
+        for e in entries:
+            v = embed(_doc_text(e))
+            if v is None:
+                return False
+            vecs.append(v)
+        _embed_vecs = vecs
+        _embed_ready = True
+        return True
+    except Exception:
+        return False
+
+
 def _build_index() -> None:
-    global _vectorizer, _matrix, _entries
+    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready
     try:
         from sklearn.feature_extraction.text import TfidfVectorizer
     except ImportError:
@@ -104,10 +133,12 @@ def _build_index() -> None:
         _vectorizer = None
         return
 
-    docs = [
-        f"{e.get('content', '')} {' '.join(e.get('tags', []))}"
-        for e in _entries
-    ]
+    # Try real embeddings first — better semantic recall
+    if _build_embed_index(_entries):
+        # Still build TF-IDF as fallback so _vectorizer exists
+        pass
+
+    docs = [_doc_text(e) for e in _entries]
     _vectorizer = TfidfVectorizer(
         ngram_range=(1, 2),
         min_df=1,
@@ -124,13 +155,23 @@ def _ensure_index() -> None:
 
 def invalidate() -> None:
     """Force index rebuild on next retrieval. Call after writing new entries."""
-    global _vectorizer, _matrix, _entries
+    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready
     _vectorizer = None
     _matrix = None
     _entries = []
+    _embed_vecs = []
+    _embed_ready = False
 
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    return dot / (na * nb) if na and nb else 0.0
+
 
 def retrieve(
     query: str,
@@ -138,23 +179,40 @@ def retrieve(
     min_score: float = 0.05,
     tiers: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    """
-    Return top-k memory entries most relevant to query.
-    Each result has a 'score' field added.
-    Falls back to empty list if sklearn unavailable.
+    """Return top-k memory entries most relevant to query.
+
+    Uses Ollama embeddings (nomic-embed-text) when available for true semantic
+    similarity. Falls back to TF-IDF cosine similarity if embeddings aren't ready.
     """
     _ensure_index()
+    allowed_tiers = set(tiers) if tiers else set(_TIERS)
+
+    # ── Embedding path (preferred) ────────────────────────────────────────────
+    if _embed_ready and _embed_vecs:
+        try:
+            from brain_ollama import embed
+            qvec = embed(query)
+            if qvec:
+                results = []
+                for i, vec in enumerate(_embed_vecs):
+                    e = _entries[i]
+                    if e.get("_tier") not in allowed_tiers:
+                        continue
+                    score = _cosine(qvec, vec)
+                    if score >= min_score:
+                        results.append({**e, "score": round(score, 4)})
+                results.sort(key=lambda x: x["score"], reverse=True)
+                return results[:top_k]
+        except Exception:
+            pass  # fall through to TF-IDF
+
+    # ── TF-IDF fallback ───────────────────────────────────────────────────────
     if _vectorizer is None or _matrix is None:
         return []
-
     try:
         from sklearn.metrics.pairwise import cosine_similarity
-        import numpy as np
-
         qvec = _vectorizer.transform([query])
         scores = cosine_similarity(qvec, _matrix)[0]
-
-        allowed_tiers = set(tiers) if tiers else set(_TIERS)
         results = []
         for i, score in enumerate(scores):
             if score < min_score:
@@ -163,7 +221,6 @@ def retrieve(
             if e.get("_tier") not in allowed_tiers:
                 continue
             results.append({**e, "score": round(float(score), 4)})
-
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
     except Exception:
@@ -291,5 +348,6 @@ def status() -> dict[str, Any]:
         "semantic_entries": sum(1 for e in _entries if e.get("_source") == "semantic"),
         "episodic_entries": sum(1 for e in _entries if e.get("_source") == "episodic"),
         "index_ready": _vectorizer is not None,
+        "retrieval_backend": "ollama-embeddings" if _embed_ready else "tfidf",
         "memory_dir": str(MEMORY_DIR),
     }

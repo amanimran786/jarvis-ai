@@ -248,8 +248,49 @@ def listen() -> str | None:
         os.unlink(tmp_path)
 
 
+def _wake_word_match(text: str) -> bool:
+    normalized = " ".join((text or "").lower().split()).strip()
+    if not normalized:
+        return False
+    return any(
+        normalized == wake
+        or normalized.startswith(wake + " ")
+        or normalized.endswith(" " + wake)
+        for wake in WAKE_WORDS
+    )
+
+
+def _transcribe_wake_audio(audio) -> str | None:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        f.write(audio.get_wav_data())
+        tmp_path = f.name
+
+    try:
+        local_result = local_stt.transcribe_file(tmp_path, language="en")
+        text = (local_result.get("text") or "").strip().lower()
+        if text:
+            return text
+    finally:
+        os.unlink(tmp_path)
+
+    try:
+        import model_router
+
+        allow_remote_fallback = not model_router.is_open_source_mode()
+    except Exception:
+        allow_remote_fallback = True
+
+    if not allow_remote_fallback:
+        return None
+
+    try:
+        return _recognizer.recognize_google(audio).lower().strip()
+    except (sr.UnknownValueError, sr.RequestError):
+        return None
+
+
 def wait_for_wake_word() -> None:
-    """Listen for wake word using Google STT (fast, free, low-latency)."""
+    """Listen for wake word using local STT first, with optional remote fallback."""
     print("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
     while True:
         # Also wait here if Jarvis is speaking
@@ -262,13 +303,10 @@ def wait_for_wake_word() -> None:
                 print(".", end="", flush=True)
                 continue
 
-        try:
-            text = _recognizer.recognize_google(audio).lower().strip()
-            if any(text == w or text.startswith(w + " ") or text.endswith(" " + w) for w in WAKE_WORDS):
-                print(f"\n[Wake word detected: '{text}']")
-                return
-        except (sr.UnknownValueError, sr.RequestError):
-            pass
+        text = _transcribe_wake_audio(audio)
+        if _wake_word_match(text or ""):
+            print(f"\n[Wake word detected: '{text}']")
+            return
 
 
 def tts_engine() -> str:

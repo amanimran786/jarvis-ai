@@ -51,7 +51,6 @@ import provider_router
 import safety_permissions as perms
 from model_router import smart_stream, format_with_mini, get_mode, set_mode, describe_runtime_for
 from config import OPUS, SONNET
-from brain_claude import ask_claude_stream
 
 _on_timer_done = None
 
@@ -757,10 +756,12 @@ def route_stream(user_input: str) -> tuple:
     if lower in {"message", "text", "send a message", "send message", "send a text", "send text"}:
         _set_awaiting_recipient()
         return _s("Who would you like to message?"), "Messages"
+    # Explicit specialized-agent requests should always win over later fast paths.
+    # In open-source mode we only suppress automatic specialist escalation.
     if _is_specialized_agent_query(lower):
         result = specialized_agents.run(user_input)
         return _s(specialized_agents.result_text(result)), "Specialized Agents"
-    if _is_engineering_specialist_query(lower):
+    if get_mode() != "open-source" and _is_engineering_specialist_query(lower):
         result = specialized_agents.run(user_input)
         return _s(specialized_agents.result_text(result)), "Specialized Agents"
     if _is_self_review_query(lower):

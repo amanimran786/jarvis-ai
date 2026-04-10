@@ -118,7 +118,7 @@ class LocalVisionFallbackTests(unittest.TestCase):
                  patch("camera._local_vision_summary", return_value=""), \
                  patch("camera._get_openai_client", return_value=None):
                 text = camera.screenshot_and_describe("Describe what's on this screen.")
-        self.assertIn("couldn't extract enough local text", text.lower())
+        self.assertIn("no local vision model is available", text.lower())
 
     def test_speak_falls_back_to_elevenlabs_when_local_tts_fails(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -831,6 +831,17 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("status", payload)
 
+    def test_local_capabilities_endpoint(self):
+        response = self.client.get("/local/capabilities")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("capabilities", payload)
+        self.assertIn("reasoning_route", payload["capabilities"])
+        self.assertIn("stt", payload["capabilities"])
+        self.assertIn("tts", payload["capabilities"])
+        self.assertIn("semantic_memory", payload["capabilities"])
+
     def test_memory_status_endpoint(self):
         response = self.client.get("/memory/status")
         self.assertEqual(response.status_code, 200)
@@ -954,6 +965,7 @@ class OverlayMeetingDetectionTests(unittest.TestCase):
 
     def test_compute_meeting_app_skips_browsers_that_are_not_running(self):
         with patch("overlay._running_app_names", return_value={"Finder", "Google Chrome"}), \
+             patch("overlay._all_process_names", return_value={"Microsoft Teams"}), \
              patch("overlay._browser_active_meeting_label", side_effect=lambda app, _script: "MEET" if app == "Google Chrome" else (_ for _ in ()).throw(AssertionError("should not probe"))), \
              patch("overlay._browser_any_meeting_label", return_value=None):
             self.assertEqual(overlay._compute_meeting_app(), "TEAMS")
@@ -1939,7 +1951,7 @@ class UnderstandingQualitySmokeTests(unittest.TestCase):
         meeting_listener._transcript_history[:] = ["tell me about yourself"]
         captured = {}
 
-        def fake_ask(prompt, tier):
+        def fake_ask(prompt, tier, **_kwargs):
             captured["prompt"] = prompt
             captured["tier"] = tier
             return "A variable is a named storage location used to hold changing data."
