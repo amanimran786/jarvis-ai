@@ -1341,7 +1341,7 @@ class BehaviorHooksSelfImproveTests(unittest.TestCase):
 
     def test_pre_self_improve_allows_known_files(self):
         import behavior_hooks
-        known_files = ["memory.py", "router.py", "brain.py", "vault.py", "tools.py"]
+        known_files = ["memory.py", "router.py", "brains/brain.py", "vault.py", "tools.py"]
         for fname in known_files:
             with self._patch_log():
                 result = behavior_hooks.pre_self_improve(fname)

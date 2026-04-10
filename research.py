@@ -19,7 +19,7 @@ import urllib.request
 import urllib.error
 import html
 from ddgs import DDGS
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import SONNET, HAIKU
 import skills
 

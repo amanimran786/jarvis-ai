@@ -18,7 +18,7 @@ Usage:
 import threading
 from typing import Callable
 
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import HAIKU
 from task_planner import TaskStep as Step, plan_task
 from execution_engine import execute_step

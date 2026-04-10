@@ -11,7 +11,7 @@ from datetime import datetime
 import learner
 import model_router
 import self_improve as si
-import hotkeys
+from desktop import hotkeys
 import meeting_listener
 import api
 import agents
@@ -42,7 +42,7 @@ import terminal
 import stealth
 import hardware as hw
 import browser
-import overlay as _overlay_mod
+from desktop import overlay as _overlay_mod
 import call_privacy
 
 try:
@@ -51,12 +51,12 @@ except Exception:
     _meeting_controller_mod = None
 
 try:
-    import device_panel as _device_panel_mod
+    from desktop import device_panel as _device_panel_mod
 except Exception:
     _device_panel_mod = None
 
 try:
-    import bridge as _bridge_mod
+    from desktop import bridge as _bridge_mod
 except Exception:
     _bridge_mod = None
 
@@ -2518,7 +2518,7 @@ class JarvisWindow(QMainWindow):
             self._mode_lbl.setText("MODE: AUTO")
             return True
         if any(p in lower for p in ("what mode", "which mode", "what models", "local models")):
-            from brain_ollama import list_local_models
+            from brains.brain_ollama import list_local_models
             mode = model_router.get_mode()
             models = list_local_models()
             local_str = ", ".join(models) if models else "none pulled yet"

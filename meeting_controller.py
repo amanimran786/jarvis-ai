@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import meeting_listener
-import overlay
+from desktop import overlay
 
 
 def current_meeting_label(force_refresh: bool = False) -> str | None:
@@ -44,4 +44,3 @@ def is_running() -> bool:
 
 def listener_snapshot() -> dict[str, Any]:
     return meeting_listener.status_snapshot()
-

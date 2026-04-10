@@ -7,6 +7,7 @@ token.json
 .jarvis_port
 .jarvis_crash.log
 .jarvis_build_stamp
+.jarvis_runtime.json
 
 # Persistent runtime data
 memory.json
@@ -43,6 +44,7 @@ build/
 # IDE
 .idea/
 .vscode/
+.run/
 
 # Claude Code local settings
 .claude/
@@ -50,6 +52,9 @@ build/
 # macOS
 .DS_Store
 assets/icon.iconset/
+
+# Runtime logs
+routing_log.jsonl
 
 # Graphify build artifacts
 graphify-out/.graphify_*

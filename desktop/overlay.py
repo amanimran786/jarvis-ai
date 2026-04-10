@@ -33,7 +33,7 @@ import meeting_listener
 import camera
 import stealth
 from voice import speak
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import SONNET
 
 # ── Palette (matches main HUD) ────────────────────────────────────────────────

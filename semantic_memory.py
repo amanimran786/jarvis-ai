@@ -106,7 +106,7 @@ def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
     """Try to build a real embedding index via Ollama. Returns True on success."""
     global _embed_vecs, _embed_ready
     try:
-        from brain_ollama import embed
+        from brains.brain_ollama import embed
         vecs = []
         for e in entries:
             v = embed(_doc_text(e))
@@ -190,7 +190,7 @@ def retrieve(
     # ── Embedding path (preferred) ────────────────────────────────────────────
     if _embed_ready and _embed_vecs:
         try:
-            from brain_ollama import embed
+            from brains.brain_ollama import embed
             qvec = embed(query)
             if qvec:
                 results = []

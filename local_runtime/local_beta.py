@@ -5,11 +5,11 @@ from pathlib import Path
 import re
 
 import evals
-import local_training
-from tests.jarvis_golden_cases import GOLDEN_CASES, ENGINEERING_GOLDEN_CASES
+from local_runtime import local_training
+from tests.jarvis_golden_cases import GOLDEN_CASES
 
-
-ROOT = Path(__file__).resolve().parent / "training" / "beta"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ROOT = REPO_ROOT / "training" / "beta"
 RUNS_DIR = ROOT / "runs"
 
 

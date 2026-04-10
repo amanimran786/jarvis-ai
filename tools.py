@@ -6,7 +6,7 @@ import urllib.request
 import json
 from datetime import datetime
 from ddgs import DDGS
-from screen_capture import capture_screenshot
+from desktop.screen_capture import capture_screenshot
 
 
 # ── Weather ───────────────────────────────────────────────────────────────────

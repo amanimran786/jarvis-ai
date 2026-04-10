@@ -24,12 +24,12 @@ _CATEGORY_FILE_MAP = {
     "routing": ["router.py", "orchestrator.py", "model_router.py"],
     "browser": ["browser.py", "router.py"],
     "knowledge": ["vault.py", "wiki_builder.py", "source_ingest.py", "router.py", "model_router.py", "skill_factory.py"],
-    "formatting": ["brain.py", "brain_claude.py", "brain_ollama.py", "config.py"],
-    "memory": ["memory.py", "learner.py", "brain.py", "brain_claude.py", "brain_ollama.py"],
+    "formatting": ["brains/brain.py", "brains/brain_claude.py", "brains/brain_ollama.py", "config.py"],
+    "memory": ["memory.py", "learner.py", "brains/brain.py", "brains/brain_claude.py", "brains/brain_ollama.py"],
     "self_improve": ["self_improve.py"],
     "tool_execution": ["terminal.py", "tools.py", "router.py"],
-    "hallucination": ["config.py", "model_router.py", "brain.py", "brain_claude.py", "brain_ollama.py"],
-    "latency": ["model_router.py", "brain.py", "brain_claude.py", "brain_ollama.py"],
+    "hallucination": ["config.py", "model_router.py", "brains/brain.py", "brains/brain_claude.py", "brains/brain_ollama.py"],
+    "latency": ["model_router.py", "brains/brain.py", "brains/brain_claude.py", "brains/brain_ollama.py"],
     "general_quality": ["model_router.py", "router.py"],
 }
 

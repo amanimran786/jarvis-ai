@@ -6,7 +6,7 @@ import browser
 import hardware as hw
 import terminal
 
-import bridge
+from desktop import bridge
 
 
 def refresh_nearby_devices(timeout: float = 1.2) -> dict[str, Any]:
@@ -51,4 +51,3 @@ def nearby_summary(timeout: float = 1.2) -> dict[str, Any]:
         "bluetooth": bluetooth,
         "network": network,
     }
-

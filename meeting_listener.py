@@ -18,7 +18,7 @@ import sounddevice as sd
 import wave
 from openai import OpenAI
 from config import OPENAI_API_KEY
-import local_stt
+from local_runtime import local_stt
 from provider_priority import ask_with_priority
 import semantic_memory as _smem
 import interview_profile as _ip
@@ -113,7 +113,7 @@ def get_virtual_meeting_audio_device(meeting_label: str | None = None, force_ref
     """Prefer native meeting audio loopback devices when available."""
     if meeting_label is None:
         try:
-            import overlay
+            from desktop import overlay
             meeting_label = overlay.detect_meeting_app(force_refresh=force_refresh)
         except Exception:
             meeting_label = None
@@ -197,7 +197,7 @@ def _log_event(message: str) -> None:
 
 def _meeting_label(force_refresh: bool = False) -> str | None:
     try:
-        import overlay
+        from desktop import overlay
         return overlay.detect_meeting_app(force_refresh=force_refresh)
     except Exception:
         return None

@@ -19,7 +19,7 @@ import threading
 import tools
 import terminal
 import browser
-import overlay
+from desktop import overlay
 import notes
 import google_services as gs
 import camera
@@ -31,11 +31,11 @@ import skills
 import vault
 import source_ingest
 import skill_factory
-import local_training
-import local_model_eval
-import local_model_automation
-import local_beta
-import local_model_benchmark
+from local_runtime import local_training
+from local_runtime import local_model_eval
+from local_runtime import local_model_automation
+from local_runtime import local_beta
+from local_runtime import local_model_benchmark
 import interview_profile
 import semantic_memory as _smem
 import specialized_agents

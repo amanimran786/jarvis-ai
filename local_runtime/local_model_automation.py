@@ -15,14 +15,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from config import HAIKU, LOCAL_DEFAULT, LOCAL_TUNED, SONNET
-from brain_ollama import list_local_models
+from brains.brain_ollama import list_local_models
 import cost_policy
-import local_model_eval
-import local_training
+from local_runtime import local_model_eval
+from local_runtime import local_training
 import model_router
 
 
-ROOT = Path(__file__).resolve().parent / "training" / "automation"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ROOT = REPO_ROOT / "training" / "automation"
 CYCLES_DIR = ROOT / "cycles"
 
 

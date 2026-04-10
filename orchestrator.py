@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import HAIKU
 import skills
 import model_router

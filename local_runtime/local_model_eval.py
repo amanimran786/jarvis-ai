@@ -10,14 +10,15 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from brain_claude import ask_claude
-from brain_ollama import ask_local
+from brains.brain_claude import ask_claude
+from brains.brain_ollama import ask_local
 from config import LOCAL_DEFAULT, LOCAL_TUNED, SONNET, HAIKU
 import evals
 import skills
 
 
-ROOT = Path(__file__).resolve().parent / "training" / "model_evals"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ROOT = REPO_ROOT / "training" / "model_evals"
 RUNS_DIR = ROOT / "runs"
 STATE_FILE = ROOT / "promotion.json"
 

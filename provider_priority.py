@@ -1,6 +1,6 @@
-from brain import ask
-from brain_gemini import ask_gemini
-from brain_claude import ask_claude
+from brains.brain import ask
+from brains.brain_gemini import ask_gemini
+from brains.brain_claude import ask_claude
 from config import GPT_MINI, GPT_FULL, GEMINI_FLASH, GEMINI_PRO, HAIKU, SONNET, OPUS
 
 

@@ -33,10 +33,10 @@ import conversation_context as ctx
 import vault
 import source_ingest
 import skill_factory
-import local_training
-import local_model_eval
-import local_model_automation
-import local_beta
+from local_runtime import local_training
+from local_runtime import local_model_eval
+from local_runtime import local_model_automation
+from local_runtime import local_beta
 import behavior_hooks
 import cost_policy
 import usage_tracker
@@ -435,9 +435,8 @@ def get_local_beta_status():
 
 @app.get("/local/capabilities")
 def get_local_capabilities():
-    import brain_ollama
-    import local_stt
-    import local_tts
+    from brains import brain_ollama
+    from local_runtime import local_stt, local_tts
     import semantic_memory
 
     example_query = "Why does TCP have a three-way handshake and not a two-way handshake?"
@@ -689,7 +688,7 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     # Pre-load the reasoning model in the background so first query is instant
     import model_router as _mr
     if _mr.is_open_source_mode():
-        from brain_ollama import warm_model_cache
+        from brains.brain_ollama import warm_model_cache
         warm_thread = threading.Thread(target=warm_model_cache, daemon=True, name="OllamaWarm")
         warm_thread.start()
 
