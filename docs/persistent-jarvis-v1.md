@@ -29,6 +29,8 @@ Recommended flow:
 | --- | --- |
 | `JARVIS_TASK_DB_PATH` | Absolute path to the persistent task database. Put this on durable local storage, not `/tmp`. |
 | `JARVIS_WEBHOOK_SECRET` | Shared secret used to sign generic trigger payloads and verify GitHub webhook signatures. |
+| `JARVIS_WEBHOOK_MAX_AGE_SECONDS` | Maximum allowed age for `x-jarvis-timestamp` on generic webhooks before the request is rejected as stale. |
+| `JARVIS_PERSIST_REDACT_SOURCES` | Comma-separated source list to redact before persisting task payloads/events (for example: `github,webhook`). |
 | `JARVIS_ALLOW_UNSIGNED_WEBHOOKS` | Optional dev-only override. Keep unset/`0` in production so webhook ingress is fail-closed. |
 
 Example:
@@ -36,9 +38,16 @@ Example:
 ```bash
 export JARVIS_TASK_DB_PATH="$HOME/.jarvis/tasks.db"
 export JARVIS_WEBHOOK_SECRET="replace-with-a-long-random-secret"
+export JARVIS_WEBHOOK_MAX_AGE_SECONDS=300
+export JARVIS_PERSIST_REDACT_SOURCES="github,webhook"
 ```
 
 ## Webhook Contract
+
+### Replay Defense Contract
+
+- `POST /webhooks/trigger`: require `x-jarvis-delivery` + `x-jarvis-timestamp` (Unix seconds), reject duplicate delivery IDs, and reject requests older than `JARVIS_WEBHOOK_MAX_AGE_SECONDS`.
+- `POST /webhooks/github`: require a unique delivery ID (`x-github-delivery` or `x-jarvis-delivery`) and reject duplicate delivery IDs. Replay decision is delivery-ID based.
 
 ### `POST /webhooks/trigger`
 
@@ -63,15 +72,21 @@ Sign the raw request body with HMAC-SHA256 and send:
 
 - `Content-Type: application/json`
 - `X-Jarvis-Signature: sha256=<hex-digest>` (or `X-Jarvis-Signature-256`)
+- `x-jarvis-delivery: <unique-id>`
+- `x-jarvis-timestamp: <unix-seconds>`
 
 Example:
 
 ```bash
 BODY='{"prompt":"Summarize the latest incident thread and open a follow-up task if needed.","kind":"task","source":"webhook","assigned_agent_id":"chat-router","meta":{"trigger":"cron","runbook":"persistent-jarvis-v1"}}'
+DELIVERY_ID="manual-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+TIMESTAMP="$(date +%s)"
 SIG=$(printf '%s' "$BODY" | python3 -c 'import hashlib,hmac,os,sys; secret=os.environ["JARVIS_WEBHOOK_SECRET"].encode(); body=sys.stdin.buffer.read(); print("sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest())')
 
 curl -X POST http://127.0.0.1:8765/webhooks/trigger \
   -H 'Content-Type: application/json' \
+  -H "x-jarvis-delivery: $DELIVERY_ID" \
+  -H "x-jarvis-timestamp: $TIMESTAMP" \
   -H "X-Jarvis-Signature: $SIG" \
   --data "$BODY"
 ```
@@ -85,16 +100,21 @@ Expected headers:
 - `Content-Type: application/json`
 - `X-GitHub-Event: <event-name>`
 - `X-Hub-Signature-256: sha256=<hex-digest>`
+- `x-github-delivery: <unique-id>` (or `x-jarvis-delivery` for local/manual forwarding)
 
 Signature generation example for local testing:
 
 ```bash
 BODY='{"action":"opened","repository":{"full_name":"owner/repo"},"pull_request":{"number":123}}'
+DELIVERY_ID="gh-local-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+TIMESTAMP="$(date +%s)"
 SIG=$(printf '%s' "$BODY" | python3 -c 'import hashlib,hmac,os,sys; secret=os.environ["JARVIS_WEBHOOK_SECRET"].encode(); body=sys.stdin.buffer.read(); print("sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest())')
 
 curl -X POST http://127.0.0.1:8765/webhooks/github \
   -H 'Content-Type: application/json' \
   -H 'X-GitHub-Event: pull_request' \
+  -H "x-jarvis-delivery: $DELIVERY_ID" \
+  -H "x-jarvis-timestamp: $TIMESTAMP" \
   -H "X-Hub-Signature-256: $SIG" \
   --data "$BODY"
 ```
