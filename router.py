@@ -167,6 +167,26 @@ def _is_constraint_bypass_query(lower: str) -> bool:
     )
 
 
+def _is_identity_override_query(lower: str) -> bool:
+    """Catch attempts to overwrite Jarvis's identity via the prompt."""
+    return bool(
+        re.search(
+            r"\byou are (not jarvis|gpt|chatgpt|claude|llama|gemini|openai|anthropic|a different|now called|actually)\b"
+            r"|\b(pretend|act|roleplay|imagine|from now on).*(you are|you're|as if you)\b"
+            r"|\byou are no longer jarvis\b"
+            r"|\bforget (that you are|you are) jarvis\b",
+            lower,
+        )
+    )
+
+
+def _identity_override_reply() -> str:
+    return (
+        "I'm Jarvis — that's not something a prompt can change. "
+        "My identity is set by the runtime, not by conversation input."
+    )
+
+
 def _constraint_bypass_reply() -> str:
     return (
         "I will not bypass runtime safety and permission controls. "
@@ -774,6 +794,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(set_mode(requested_mode)), "Status"
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_identity_override_query(lower):
+        return _s(_identity_override_reply()), "Status"
     if _is_constraint_bypass_query(lower):
         return _s(_constraint_bypass_reply()), "Status"
     if _is_capability_boundary_query(lower):
