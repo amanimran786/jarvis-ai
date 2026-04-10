@@ -846,6 +846,46 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("tts", payload["capabilities"])
         self.assertIn("semantic_memory", payload["capabilities"])
 
+    def test_extensions_endpoint_exposes_skills_connectors_and_plugins(self):
+        response = self.client.get("/extensions")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("skills", payload["extensions"])
+        self.assertIn("connectors", payload["extensions"])
+        self.assertIn("plugins", payload["extensions"])
+
+    def test_skills_endpoint_lists_real_skill_registry(self):
+        response = self.client.get("/skills")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        skill_ids = {item["id"] for item in payload["skills"]}
+        self.assertIn("engineering_reasoning", skill_ids)
+        self.assertIn("planning_execution", skill_ids)
+
+    def test_skill_detail_endpoint_returns_instructions(self):
+        response = self.client.get("/skills/engineering_reasoning")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["skill"]["id"], "engineering_reasoning")
+        self.assertIn("Engineering Reasoning", payload["skill"]["instructions"])
+
+    def test_connectors_endpoint_lists_curated_connectors(self):
+        response = self.client.get("/connectors")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        connector_ids = {item["id"] for item in payload["connectors"]}
+        self.assertIn("managed_runtime", connector_ids)
+        self.assertIn("browser_operator", connector_ids)
+
+    def test_plugin_detail_endpoint_resolves_nested_skills_and_connectors(self):
+        response = self.client.get("/plugins/managed_agents")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["plugin"]["id"], "managed_agents")
+        self.assertTrue(payload["plugin"]["skills_detail"])
+        self.assertTrue(payload["plugin"]["connectors_detail"])
+
     def test_memory_status_endpoint(self):
         response = self.client.get("/memory/status")
         self.assertEqual(response.status_code, 200)

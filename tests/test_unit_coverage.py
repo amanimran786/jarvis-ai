@@ -1753,6 +1753,58 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(payload["status"], "online")
         self.assertEqual(captured, ["http://127.0.0.1:8766/status"])
 
+    def test_cli_can_fetch_skill_listing_endpoint(self):
+        import jarvis_cli
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"skills": [{"id": "engineering_reasoning"}]}).encode("utf-8")
+
+        captured = []
+
+        def _urlopen(req, timeout=10):
+            captured.append(getattr(req, "full_url", str(req)))
+            return _Resp()
+
+        with patch("runtime_state.discover_api_endpoint", return_value={"base_url": "http://127.0.0.1:8766"}), \
+             patch("jarvis_cli.urllib.request.urlopen", side_effect=_urlopen):
+            payload = jarvis_cli.get("/skills")
+
+        self.assertEqual(payload["skills"][0]["id"], "engineering_reasoning")
+        self.assertEqual(captured, ["http://127.0.0.1:8766/skills"])
+
+
+class ExtensionRegistryTests(unittest.TestCase):
+    def test_lists_connectors(self):
+        import extension_registry
+
+        items = extension_registry.list_connectors()
+        ids = {item["id"] for item in items}
+        self.assertIn("managed_runtime", ids)
+        self.assertIn("knowledge_vault", ids)
+
+    def test_plugin_detail_includes_nested_data(self):
+        import extension_registry
+
+        plugin = extension_registry.plugin_detail("managed_agents")
+        self.assertIsNotNone(plugin)
+        self.assertEqual(plugin["id"], "managed_agents")
+        self.assertTrue(plugin["skills_detail"])
+        self.assertTrue(plugin["connectors_detail"])
+
+    def test_skill_detail_includes_instructions(self):
+        import extension_registry
+
+        skill = extension_registry.get_skill_detail("engineering_reasoning")
+        self.assertIsNotNone(skill)
+        self.assertIn("Engineering Reasoning", skill["instructions"])
+
 
 class SourceIngestSafetyTests(unittest.TestCase):
     def test_rejects_localhost_urls_by_default(self):

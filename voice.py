@@ -29,6 +29,39 @@ _done_speaking = threading.Event()
 _done_speaking.set()  # initially not speaking
 _stop_requested = threading.Event()
 
+# ── Ambient noise calibration cache ──────────────────────────────────────────
+# Calibrate once per session and cache the energy threshold.
+# adjust_for_ambient_noise() costs 300ms per call — we call it once and reuse.
+import time as _time
+_CALIBRATION_LOCK = threading.Lock()
+_CALIBRATION_TTL = 120.0          # re-calibrate every 2 minutes
+_calibrated_at: float = 0.0
+_calibrated_threshold: float | None = None
+
+
+def _ensure_calibrated(source) -> None:
+    """Calibrate ambient noise once; reuse the threshold until TTL expires."""
+    global _calibrated_at, _calibrated_threshold
+    now = _time.monotonic()
+    if _calibrated_threshold is not None and (now - _calibrated_at) < _CALIBRATION_TTL:
+        _recognizer.energy_threshold = _calibrated_threshold
+        return
+    with _CALIBRATION_LOCK:
+        # Double-check after acquiring lock
+        now = _time.monotonic()
+        if _calibrated_threshold is not None and (now - _calibrated_at) < _CALIBRATION_TTL:
+            _recognizer.energy_threshold = _calibrated_threshold
+            return
+        _recognizer.adjust_for_ambient_noise(source, duration=0.3)
+        _calibrated_threshold = _recognizer.energy_threshold
+        _calibrated_at = _time.monotonic()
+
+
+def invalidate_noise_calibration() -> None:
+    """Force re-calibration on the next listen() call (e.g., after environment change)."""
+    global _calibrated_threshold
+    _calibrated_threshold = None
+
 
 def request_stop() -> None:
     _stop_requested.set()
@@ -150,7 +183,43 @@ def speak(text: str) -> None:
         _done_speaking.set()
 
 
+def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
+    """Transcribe WAV bytes in memory — no disk I/O."""
+    local_result = local_stt.transcribe_audio(wav_bytes, language="en")
+    if local_result.get("ok"):
+        text = (local_result.get("text") or "").strip()
+        if text:
+            print(f"[STT] Transcribed locally via {local_result.get('engine')}.")
+            return text
+
+    local_error = local_result.get("error", "local transcription failed")
+    if not local_stt.openai_fallback_allowed():
+        print(f"[Local STT] {local_error}")
+        return None
+    if _openai_client is None:
+        print(f"[Local STT] {local_error}")
+        print("[Whisper Error] OpenAI STT fallback is not configured.")
+        return None
+
+    if local_result.get("engine") == "faster-whisper":
+        print(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
+
+    try:
+        import io
+        audio_file = io.BytesIO(wav_bytes)
+        audio_file.name = "audio.wav"
+        transcript = _openai_client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+        )
+        return transcript.text.strip() or None
+    except Exception as e:
+        print(f"[Whisper Error] {e}")
+        return None
+
+
 def _transcribe_audio_file(path: str) -> str | None:
+    """Transcribe from a file path — used by wake-word and legacy callers."""
     local_result = local_stt.transcribe_file(path, language="en")
     if local_result.get("ok"):
         text = (local_result.get("text") or "").strip()
@@ -235,31 +304,27 @@ def listen() -> str | None:
     """Record audio and transcribe with local faster-whisper when available."""
     if _stop_requested.is_set():
         return None
-    # Wait until Jarvis finishes speaking — prevents TTS feedback loop
+    # Wait until Jarvis finishes speaking — prevents TTS feedback loop.
+    # A short dynamic pause after TTS is handled by the _done_speaking event;
+    # no hard-coded sleep needed.
     _done_speaking.wait(timeout=30)
     if _stop_requested.is_set():
         return None
-    import time; time.sleep(0.3)
 
     with sr.Microphone() as source:
         print("Listening...")
-        _recognizer.adjust_for_ambient_noise(source, duration=0.3)
+        _ensure_calibrated(source)   # 300ms → ~0ms on cached calls
         try:
             audio = _recognizer.listen(source, timeout=6, phrase_time_limit=60)
         except sr.WaitTimeoutError:
             return None
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        f.write(audio.get_wav_data())
-        tmp_path = f.name
-
-    try:
-        text = _transcribe_audio_file(tmp_path)
-        if text:
-            print(f"You: {text}")
-        return text or None
-    finally:
-        os.unlink(tmp_path)
+    # Transcribe in memory — no temp file write/read
+    wav_bytes = audio.get_wav_data()
+    text = _transcribe_wav_bytes(wav_bytes)
+    if text:
+        print(f"You: {text}")
+    return text or None
 
 
 def _wake_word_match(text: str) -> bool:
@@ -314,7 +379,7 @@ def wait_for_wake_word() -> None:
         if _stop_requested.is_set():
             return
         with sr.Microphone() as source:
-            _recognizer.adjust_for_ambient_noise(source, duration=0.2)
+            _ensure_calibrated(source)
             try:
                 audio = _recognizer.listen(source, timeout=3, phrase_time_limit=4)
             except sr.WaitTimeoutError:
