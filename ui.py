@@ -2562,7 +2562,7 @@ class OrbShellWindow(JarvisWindow):
     """Frameless orb-first shell that stays out of the way and reveals controls on demand."""
 
     def __init__(self):
-        QMainWindow.__init__(self)
+        super().__init__()
         self.setWindowTitle("J.A.R.V.I.S")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -2588,8 +2588,6 @@ class OrbShellWindow(JarvisWindow):
         self._last_live_listener_started_at = 0.0
         self._last_live_transcript_at = 0.0
         self._last_live_suggestion_at = 0.0
-        # Attributes from JarvisWindow.__init__ not inherited because
-        # OrbShellWindow calls QMainWindow.__init__ directly (skips super)
         self._meeting_toolbar_mode = False
         self._meeting_toolbar_auto = False
         self._auto_listen_suppressed_meeting = None

@@ -1,8 +1,44 @@
+import atexit
+import multiprocessing
 import os
+import signal
 import sys
 import traceback
 import threading
 import faulthandler
+
+# ── Clean shutdown — reap all multiprocessing children before exit ────────────
+def _reap_children() -> None:
+    """Terminate any live multiprocessing child processes (resource_tracker, etc.)."""
+    children = multiprocessing.active_children()
+    for child in children:
+        try:
+            child.terminate()
+        except Exception:
+            pass
+    for child in children:
+        try:
+            child.join(timeout=1.5)
+        except Exception:
+            pass
+    # Hard-kill any that ignored SIGTERM
+    for child in children:
+        try:
+            if child.is_alive():
+                child.kill()
+        except Exception:
+            pass
+
+
+def _signal_shutdown(signum, frame) -> None:
+    _reap_children()
+    sys.exit(0)
+
+
+atexit.register(_reap_children)
+signal.signal(signal.SIGTERM, _signal_shutdown)
+# SIGINT already raises KeyboardInterrupt which unwinds normally through atexit.
+
 
 # Fix Qt cocoa plugin path before any PyQt6 import.
 # Conda sometimes writes a corrupted Qt path registry ("plug3ins" typo).
@@ -48,12 +84,20 @@ def _ensure_supported_gui_runtime() -> None:
     if not _is_conda_python():
         return
 
+    # Prevent infinite re-execution loops if venv/bin/python is also conda python
+    _attempted_reexec = os.getenv("_JARVIS_GUI_REEXEC_ATTEMPTED", "").lower() in {"1", "true"}
+    if _attempted_reexec:
+        print("[Startup] Detected re-execution attempt with conda. Proceeding with current Python.")
+        return
+
     target = _project_venv_python()
     current = os.path.realpath(sys.executable)
     target_real = os.path.realpath(target) if os.path.exists(target) else ""
     if target_real and current != target_real:
         print("[Startup] GUI launch requested from conda Python. Re-launching Jarvis with the project venv to avoid Qt plugin crashes...")
-        os.execv(target_real, [target_real] + sys.argv)
+        env = os.environ.copy()
+        env["_JARVIS_GUI_REEXEC_ATTEMPTED"] = "1"
+        os.execve(target_real, [target_real] + sys.argv, env)
 
     if not target_real:
         raise SystemExit(
@@ -223,6 +267,22 @@ def _run_deferred_startup_tasks() -> None:
     try:
         from local_runtime import local_stt
         local_stt.preload()
+    except Exception:
+        pass
+
+    # Pin the default local model in Ollama RAM — eliminates 20-40s cold-load latency
+    try:
+        from brains.brain_ollama import start_keepalive, get_best_available
+        from config import LOCAL_DEFAULT
+        model = get_best_available(LOCAL_DEFAULT)
+        start_keepalive(model)
+    except Exception:
+        pass
+
+    # Pre-render common TTS phrases so acknowledgements play instantly
+    try:
+        from local_runtime.local_kokoro_tts import prewarm_phrase_cache
+        prewarm_phrase_cache()
     except Exception:
         pass
 
