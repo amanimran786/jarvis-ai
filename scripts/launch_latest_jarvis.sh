@@ -56,6 +56,8 @@ fi
 
 # Use 'open -a' (without -n) to reuse existing instance if running
 # or start a new one if not running (normal macOS behavior)
-# Run detached so the script can exit immediately
-open -a "$APPLICATIONS_APP" &
-disown $!
+# Keep the lock held during the entire launch sequence
+open -a "$APPLICATIONS_APP"
+
+# Wait a bit for the app to actually start before releasing the lock
+sleep 3
