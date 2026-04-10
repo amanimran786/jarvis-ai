@@ -22,93 +22,11 @@ from brain_claude import ask_claude
 from config import HAIKU
 import skills
 import model_router
+import tool_registry
 
 # ── Tool registry ─────────────────────────────────────────────────────────────
-
-TOOLS = {
-    "chat": "General conversation, questions, explanations, advice, opinions.",
-
-    "search": "Web search for current news, facts, prices, recent events. "
-              "Triggers: 'search for', 'look up', 'google', 'find information', 'what is X'.",
-
-    "knowledge": "Search or build Jarvis's local markdown vault and inspect indexed knowledge files. "
-                 "Use for requests about the local vault, knowledge base, wiki, indexed markdown context, or rebuilding the local wiki. "
-                 "Triggers: 'search the vault', 'refresh the vault', 'build the vault wiki', 'compile the wiki', 'what's in your local knowledge base'.",
-
-    "local_model": "Improve Jarvis's local-model stack by exporting training data, distilling failed examples, generating a tuned Ollama Modelfile, preparing offline fine-tune handoff folders, evaluating candidate local models, promoting a measured winner, or running the full automated local improvement cycle. "
-                   "Use for requests to train local models, improve Ollama quality, distill local examples, export local training data, build a local Jarvis model target, prepare LoRA fine-tune handoff assets, evaluate a candidate local model, promote a tested local model, or run the automated local model cycle.",
-
-    "skill": "Create or promote reusable Jarvis skills from vault knowledge or repeated eval failures. "
-             "Use for requests to create a skill, generate a skill from the vault, or promote repeated failures into a skill.",
-
-    "deep_research": "Multi-step research producing a cited report. Use when the user "
-                     "wants thorough, sourced research on a topic — not a quick lookup. "
-                     "Triggers: 'research', 'deep dive', 'full report', 'write a report on'.",
-
-    "operative": "Autonomous multi-step task execution. Use when the user describes a "
-                 "chained workflow involving multiple actions. "
-                 "Example: 'research X then write a report and email it to me', "
-                 "'find the best Python libraries for X, save a summary, and open VS Code'.",
-
-    "specialized_agent": "Run a scoped specialist-agent pass with isolated roles such as planner, executor, reviewer, science expert, security reviewer, or self-improve critic. "
-                         "Use when the user explicitly asks to use specialized agents, asks for a planner/executor/reviewer pass, asks for a science expert or security reviewer, "
-                         "or wants a multi-pass answer rather than a single direct reply.",
-
-    "calendar": "Google Calendar — read events, create events, check schedule. "
-                "Triggers: 'my schedule', 'calendar', 'what do I have today', 'create event'.",
-
-    "email": "Gmail — read unread emails, check inbox. "
-             "Triggers: 'check email', 'my inbox', 'unread emails', 'any emails'.",
-
-    "weather": "Current weather. Triggers: 'weather', 'temperature', 'forecast'.",
-
-    "timer": "Set a countdown timer or reminder. "
-             "Triggers: 'timer', 'remind me in', 'set a timer for'.",
-
-    "system": "macOS system control — volume, brightness, screenshot, lock screen, mute. "
-              "Triggers: 'volume', 'brightness', 'screenshot', 'mute', 'lock'.",
-
-    "app": "Launch a macOS application. "
-           "Triggers: 'open', 'launch', 'start' followed by app name.",
-
-    "browser": "Control Safari, Chrome-family browsers, or browser tabs and work with live pages. "
-               "Triggers: 'browse to', 'open website', 'go to this page', 'search the web', "
-               "'summarize this page', 'go back', 'reload page', 'click the link', 'read meeting captions', 'summarize live captions'.",
-
-    "terminal": "Run a shell command, read/write files, list directory. "
-                "Triggers: 'run', 'execute', 'terminal', 'command', 'read file', 'list files'.",
-
-    "admin": "Run a shell command with administrator privileges using the native macOS password prompt. "
-             "ONLY use when the user explicitly asks for admin, administrator, root, or sudo access.",
-
-    "notes": "Take, read, search personal notes. "
-             "Triggers: 'note', 'write this down', 'my notes', 'find a note'.",
-
-    "camera": "Webcam capture or screen analysis. "
-              "Triggers: 'what do you see', 'look at this', 'what's on my screen', 'read this'.",
-
-    "memory": "Save or recall personal facts. "
-              "Triggers: 'remember', 'forget', 'what do you know about me', 'briefing'.",
-
-    "hardware": "Control physical hardware devices via serial/USB or WiFi. "
-                "Triggers: device names, 'fire', 'activate', 'trigger', 'relay', 'hardware status'.",
-
-    "self_improve": "Modify Jarvis's own source code. ONLY use when the user explicitly "
-                    "asks Jarvis to change its own code or interface. "
-                    "Triggers: 'improve yourself', 'modify your code', 'update your code', "
-                    "'upgrade your routing', 'change your interface', 'review your own code', "
-                    "'what are your shortcomings', 'self review'. "
-                    "Do NOT use for general questions about improvement or modification.",
-
-    "meeting": "Smart Listen — tap call audio and get real-time suggestions. "
-               "Triggers: 'smart listen', 'listen to call', 'meeting mode', 'setup blackhole'.",
-
-    "message": "Send an iMessage or SMS via the macOS Messages app. "
-               "Triggers: 'text', 'message', 'send a message', 'iMessage', 'send a text'. "
-               "Params: recipient (name or phone), message (text body).",
-}
-
-_TOOL_LIST = "\n".join(f'  "{k}": {v}' for k, v in TOOLS.items())
+TOOLS = tool_registry.tools()
+_TOOL_LIST = tool_registry.tool_list_text()
 
 _SYSTEM = f"""You are Jarvis's intent classifier. Given user input, select the best tool.
 
@@ -181,9 +99,12 @@ def classify(user_input: str) -> ToolDecision:
     if fast:
         return _attach_skill(user_input, fast)
 
-    auto_specialized = _auto_specialized_classify(user_input.lower().strip())
-    if auto_specialized:
-        return _attach_skill(user_input, auto_specialized)
+    # In open-source mode, skip the multi-pass specialized pipeline — the single
+    # local model with reasoning-boost prompt handles these queries better and faster.
+    if not model_router.is_open_source_mode():
+        auto_specialized = _auto_specialized_classify(user_input.lower().strip())
+        if auto_specialized:
+            return _attach_skill(user_input, auto_specialized)
 
     if model_router.is_open_source_mode():
         return _attach_skill(user_input, _FALLBACK)

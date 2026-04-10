@@ -18,7 +18,7 @@ Mode commands:
   "what mode are you in"        → status
 """
 
-from config import GPT_MINI, GPT_FULL, GEMINI_FLASH, GEMINI_PRO, HAIKU, SONNET, OPUS
+from config import GPT_MINI
 from config import LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED, DEFAULT_MODE
 from brain import ask_stream
 from brain_gemini import ask_gemini_stream
@@ -30,6 +30,8 @@ import skills
 import vault
 import graph_context as _gctx
 import semantic_memory as _smem
+import provider_router
+import telemetry
 
 _current_mode = DEFAULT_MODE
 
@@ -156,7 +158,14 @@ def _best_local(text: str) -> str:
         if any(LOCAL_CODER in m for m in available):
             return LOCAL_CODER
 
-    if any(t in lower for t in ("analyze", "plan", "explain", "why", "how", "reason")):
+    # Reasoning tasks — prefer DeepSeek R1 if available (built-in chain-of-thought)
+    reasoning_triggers = (
+        "analyze", "plan", "explain", "why", "how", "reason", "think",
+        "compare", "evaluate", "decide", "best approach", "tradeoff",
+        "step by step", "walk me through", "research", "summarize",
+        "design", "architecture", "strategy", "understand",
+    )
+    if any(t in lower for t in reasoning_triggers):
         if any(LOCAL_REASONING in m for m in available):
             return LOCAL_REASONING
 
@@ -164,7 +173,8 @@ def _best_local(text: str) -> str:
     fallback_preferred = [promoted]
     if LOCAL_PREFER_TUNED:
         fallback_preferred.append(LOCAL_TUNED)
-    fallback_preferred.extend([LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING])
+    # Prefer reasoning model as general fallback (DeepSeek R1 > Gemma for most tasks)
+    fallback_preferred.extend([LOCAL_REASONING, LOCAL_DEFAULT, LOCAL_CODER])
 
     for preferred in fallback_preferred:
         if not preferred:
@@ -187,60 +197,35 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
     else:
         active_skill = ""
 
-    if mode == "local":
-        if local_models:
-            chosen = _best_local(user_input or "general conversation")
-            return f"I'm in local mode and I'd answer this{active_skill} with Ollama using {chosen}."
-        return "I'm in local mode, but no Ollama model is currently available."
+    tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
+    explicit_cloud = mode == "cloud"
+    if mode == "auto":
+        policy = cost_policy.route_decision(
+            user_input or "general conversation",
+            tier,
+            tool="chat",
+            local_available=bool(local_models),
+        )
+        tier = policy.get("tier", tier)
+        explicit_cloud = policy.get("provider") == "cloud"
 
-    if is_open_source_mode():
-        if local_models:
-            chosen = _best_local(user_input or "general conversation")
-            return f"I'm in open-source mode and this request is staying{active_skill} on the local Jarvis runtime with Ollama using {chosen}."
+    local_model = _best_local(user_input or "general conversation") if local_models else ""
+    plan = provider_router.build_plan(
+        mode=mode,
+        tier=tier,
+        local_available=bool(local_models),
+        local_model=local_model,
+        explicit_cloud=explicit_cloud,
+    )
+    if not plan.candidates:
         return "I'm in open-source mode, but no local Ollama model is currently available."
 
-    if mode == "cloud":
-        tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
-        if tier in ("local", "mini"):
-            return f"I'm in cloud mode and this request would use {GPT_MINI}{active_skill}."
-        if tier == "haiku":
-            return f"I'm in cloud mode and this request would use {GEMINI_FLASH}{active_skill}, with OpenAI and Claude as fallbacks."
-        if tier == "sonnet":
-            return f"I'm in cloud mode and this request would use {GPT_FULL}{active_skill}, with Gemini and Claude as fallbacks."
-        return f"I'm in cloud mode and this request would use {GEMINI_PRO}{active_skill}, with GPT-4o and Claude as fallbacks."
-
-    tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
-    policy = cost_policy.route_decision(
-        user_input or "general conversation",
-        tier,
-        tool="chat",
-        local_available=bool(local_models),
+    chain = " -> ".join(f"{candidate.label} ({candidate.model})" for candidate in plan.candidates[:4])
+    return (
+        f"I'm in {mode} mode{active_skill}. "
+        f"For this request the active route chain is {chain}. "
+        f"Policy: {plan.reason}"
     )
-    policy_tier = policy.get("tier", tier)
-    provider = policy.get("provider", "base")
-    if provider == "local" and local_models:
-        chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
-    if provider == "cloud":
-        if policy_tier in ("local", "mini"):
-            return f"I'm in auto mode and this request would use {GPT_MINI}{active_skill}."
-        if policy_tier == "haiku":
-            return f"I'm in auto mode and this request would use {GEMINI_FLASH}{active_skill}, with OpenAI and Claude as fallbacks."
-        if policy_tier == "sonnet":
-            return f"I'm in auto mode and this request would use {GPT_FULL}{active_skill}, with Gemini and Claude as fallbacks."
-        return f"I'm in auto mode and this request would use {GEMINI_PRO}{active_skill}, with GPT-4o and Claude as fallbacks."
-    if tier == "mini":
-        return f"I'm in auto mode and this request would use {GPT_MINI}{active_skill}."
-    if tier == "haiku":
-        return f"I'm in auto mode and this request would use {GEMINI_FLASH}{active_skill}, with OpenAI and Claude as fallbacks."
-    if tier == "sonnet":
-        return f"I'm in auto mode and this request would use {GPT_FULL}{active_skill}, with Gemini and Claude as fallbacks."
-    if tier == "opus":
-        return f"I'm in auto mode and this request would use {GEMINI_PRO}{active_skill}, with GPT-4o and Claude as fallbacks."
-    if local_models:
-        chosen = _best_local(user_input or "general conversation")
-        return f"I'm in auto mode and this request is currently routing{active_skill} to local inference with Ollama using {chosen}."
-    return f"I'm in auto mode, but no local Ollama model is currently available, so this request would fall back to {GPT_MINI}{active_skill}."
 
 
 def _classify_complexity(text: str, skill_id: str | None = None, active_skills: list | None = None) -> str:
@@ -365,164 +350,78 @@ def smart_stream(
 
         return _stream()
 
-    # ── Force local ───────────────────────────────────────────────────────────
-    if mode == "local":
-        if _has_local():
-            model = _best_local(user_input)
-            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
-        else:
-            return _resilient_stream(
-                lambda: ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True),
-                [
-                    ("Gemini Flash", lambda: ask_gemini_stream(user_input, GEMINI_FLASH, system_extra=system_extra, track_context=True)),
-                    ("Claude Haiku", lambda: ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True)),
-                ],
-            ), "GPT-mini"
+    local_available = _has_local()
+    local_model = _best_local(user_input) if local_available else ""
 
-    # ── Open-source mode: local-only model path ─────────────────────────────
-    if is_open_source_mode():
-        if _has_local():
-            model = _best_local(user_input)
-            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Open-Source"
+    tier = _classify_complexity(user_input, active_skills=resolved_skills)
+    explicit_cloud = mode == "cloud"
+    if mode == "auto":
+        policy = cost_policy.route_decision(
+            user_input,
+            tier,
+            tool=tool,
+            local_available=local_available,
+        )
+        tier = policy["tier"]
+        explicit_cloud = policy.get("provider") == "cloud"
+
+    plan = provider_router.build_plan(
+        mode=mode,
+        tier=tier,
+        local_available=local_available,
+        local_model=local_model,
+        explicit_cloud=explicit_cloud,
+    )
+
+    if not plan.candidates:
         return _open_source_unavailable_stream(), "Open-Source"
 
-    # ── Force cloud ───────────────────────────────────────────────────────────
-    if mode == "cloud":
-        tier = _classify_complexity(user_input, active_skills=resolved_skills)
-        if tier in ("local", "mini"):
-            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
-        elif tier == "haiku":
-            fallbacks = [
-                ("GPT-mini", lambda: ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True)),
-                ("Claude Haiku", lambda: ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True)),
-            ]
-            if _has_local():
-                fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-            return _resilient_stream(
-                lambda: ask_gemini_stream(user_input, GEMINI_FLASH, system_extra=system_extra, track_context=True),
-                fallbacks,
-            ), "Gemini Flash"
-        elif tier == "sonnet":
-            fallbacks = [
-                ("Gemini Pro", lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True)),
-                ("Claude Sonnet", lambda: ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True)),
-            ]
-            if _has_local():
-                fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-            return _resilient_stream(
-                lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True),
-                fallbacks,
-            ), "GPT-4o"
-        else:
-            fallbacks = [
-                ("GPT-4o", lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True)),
-                ("Claude Opus", lambda: ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True)),
-            ]
-            if _has_local():
-                fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-            return _resilient_stream(
-                lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True),
-                fallbacks,
-            ), "Gemini Pro"
+    primary_label = plan.candidates[0].label
 
-    # ── Auto mode: local-first, cloud only when needed ────────────────────────
-    tier = _classify_complexity(user_input, active_skills=resolved_skills)
-    policy = cost_policy.route_decision(
-        user_input,
-        tier,
-        tool=tool,
-        local_available=_has_local(),
-    )
-    tier = policy["tier"]
-    provider = policy.get("provider", "base")
+    def _candidate_stream(candidate):
+        if candidate.provider == "ollama":
+            return ask_local_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                raise_on_error=True,
+            )
+        if candidate.provider == "openai":
+            return ask_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+        if candidate.provider == "gemini":
+            return ask_gemini_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+        if candidate.provider == "anthropic":
+            return ask_claude_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+        raise RuntimeError(f"Unknown provider candidate: {candidate.provider}")
 
-    if provider == "local":
-        model = _best_local(user_input)
-        return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
+    def _execute_plan_stream():
+        last_error = None
+        selected = None
+        for candidate in plan.candidates:
+            try:
+                selected = {
+                    "provider": candidate.provider,
+                    "model": candidate.model,
+                    "local": candidate.local,
+                    "label": candidate.label,
+                }
+                telemetry.log_route_decision(
+                    user_input=user_input,
+                    mode=plan.mode,
+                    tier=plan.tier,
+                    plan={"candidates": [c.__dict__ for c in plan.candidates]},
+                    selected=selected,
+                    reason=plan.reason,
+                )
+                yield from _candidate_stream(candidate)
+                return
+            except Exception as exc:
+                last_error = exc
+                print(f"[ModelRouter] Candidate {candidate.label} failed: {exc}")
+        yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
-    if provider == "cloud":
-        if tier in ("local", "mini"):
-            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
-        if tier == "haiku":
-            fallbacks = [
-                ("GPT-mini", lambda: ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True)),
-                ("Claude Haiku", lambda: ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True)),
-            ]
-            if _has_local():
-                fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-            return _resilient_stream(
-                lambda: ask_gemini_stream(user_input, GEMINI_FLASH, system_extra=system_extra, track_context=True),
-                fallbacks,
-            ), "Gemini Flash"
-        if tier == "sonnet":
-            fallbacks = [
-                ("Gemini Pro", lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True)),
-                ("Claude Sonnet", lambda: ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True)),
-            ]
-            if _has_local():
-                fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-            return _resilient_stream(
-                lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True),
-                fallbacks,
-            ), "GPT-4o"
-        fallbacks = [
-            ("GPT-4o", lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True)),
-            ("Claude Opus", lambda: ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True)),
-        ]
-        if _has_local():
-            fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-        return _resilient_stream(
-            lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True),
-            fallbacks,
-        ), "Gemini Pro"
-
-    if tier == "local":
-        if _has_local():
-            model = _best_local(user_input)
-            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
-        else:
-            # No local model — use cheapest cloud
-            return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
-
-    elif tier == "mini":
-        return ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True), "GPT-mini"
-
-    elif tier == "haiku":
-        # Try local first, fall back to Haiku
-        if _has_local():
-            model = _best_local(user_input)
-            return ask_local_stream(user_input, model, system_extra=system_extra, track_context=True), "Local"
-        return _resilient_stream(
-            lambda: ask_gemini_stream(user_input, GEMINI_FLASH, system_extra=system_extra, track_context=True),
-            [
-                ("GPT-mini", lambda: ask_stream(user_input, GPT_MINI, system_extra=system_extra, track_context=True)),
-                ("Claude Haiku", lambda: ask_claude_stream(user_input, HAIKU, system_extra=system_extra, track_context=True)),
-            ],
-        ), "Gemini Flash"
-
-    elif tier == "sonnet":
-        fallbacks = [
-            ("Gemini Pro", lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True)),
-            ("Claude Sonnet", lambda: ask_claude_stream(user_input, SONNET, system_extra=system_extra, track_context=True)),
-        ]
-        if _has_local():
-            fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-        return _resilient_stream(
-            lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True),
-            fallbacks,
-        ), "GPT-4o"
-
-    else:  # opus — only when genuinely needed
-        fallbacks = [
-            ("GPT-4o", lambda: ask_stream(user_input, GPT_FULL, system_extra=system_extra, track_context=True)),
-            ("Claude Opus", lambda: ask_claude_stream(user_input, OPUS, system_extra=system_extra, track_context=True)),
-        ]
-        if _has_local():
-            fallbacks.append(("Local", lambda: ask_local_stream(user_input, _best_local(user_input), system_extra=system_extra, track_context=True)))
-        return _resilient_stream(
-            lambda: ask_gemini_stream(user_input, GEMINI_PRO, system_extra=system_extra, track_context=True),
-            fallbacks,
-        ), "Gemini Pro"
+    return _execute_plan_stream(), primary_label
 
 
 def format_with_mini(
@@ -531,7 +430,7 @@ def format_with_mini(
     tool: str | None = None,
     extra_system: str = "",
 ):
-    """Format tool output using cheapest cloud model, unless open-source mode is active."""
+    """Format tool output with free-first routing for lightweight generation."""
     import memory as _mem
     context = _mem.get_context()
     system_extra, _ = skills.build_system_extra(prompt, skill_id=skill_id, tool=tool)
@@ -539,8 +438,42 @@ def format_with_mini(
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     if context:
         prompt = prompt + f"\n\nUser context for personalization:{context}"
-    if is_open_source_mode():
-        if _has_local():
-            return ask_local_stream(prompt, _best_local(prompt), system_extra=system_extra, track_context=False)
+    local_available = _has_local()
+    local_model = _best_local(prompt) if local_available else ""
+    plan = provider_router.build_plan(
+        mode=_current_mode,
+        tier="mini",
+        local_available=local_available,
+        local_model=local_model,
+        explicit_cloud=_current_mode == "cloud",
+    )
+    if not plan.candidates:
         return _open_source_unavailable_stream()
-    return ask_stream(prompt, GPT_MINI, system_extra=system_extra)
+
+    def _stream():
+        last_error = None
+        for candidate in plan.candidates:
+            try:
+                if candidate.provider == "ollama":
+                    yield from ask_local_stream(
+                        prompt,
+                        candidate.model,
+                        system_extra=system_extra,
+                        track_context=False,
+                        raise_on_error=True,
+                    )
+                    return
+                if candidate.provider == "gemini":
+                    yield from ask_gemini_stream(prompt, candidate.model, system_extra=system_extra, track_context=False)
+                    return
+                if candidate.provider == "anthropic":
+                    yield from ask_claude_stream(prompt, candidate.model, system_extra=system_extra, track_context=False)
+                    return
+                yield from ask_stream(prompt, candidate.model, system_extra=system_extra, track_context=False)
+                return
+            except Exception as exc:
+                last_error = exc
+                continue
+        yield f"I hit an upstream formatting error and fallbacks also failed: {last_error}"
+
+    return _stream()

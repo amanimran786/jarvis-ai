@@ -69,6 +69,11 @@ class LocalSttConfigTests(unittest.TestCase):
         self.assertFalse(runtime["faster_whisper"]["vad_filter"])
         self.assertEqual(runtime["faster_whisper"]["beam_size"], 2)
 
+    def test_system_prompt_enforces_truthful_scope_language(self):
+        cfg = self._reload_with_env({})
+        self.assertIn("Do not claim to be unrestricted", cfg.SYSTEM_PROMPT)
+        self.assertIn("Never claim you can bypass runtime policy", cfg.SYSTEM_PROMPT)
+
 
 if __name__ == "__main__":
     unittest.main()

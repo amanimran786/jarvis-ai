@@ -450,26 +450,26 @@ class TerminalCommandGatingTests(unittest.TestCase):
 
     def test_run_command_blocked_by_hook(self):
         import terminal
-        with patch("terminal.hooks.pre_shell_command", return_value={"ok": False, "reason": "Policy blocked."}):
+        with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Policy blocked."}):
             result = terminal.run_command("ls -la")
         self.assertEqual(result, "Policy blocked.")
 
     def test_run_command_blocked_by_destructive_pattern(self):
         import terminal
-        with patch("terminal.hooks.pre_shell_command", return_value={"ok": True, "reason": ""}):
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}):
             result = terminal.run_command("rm -rf /")
         self.assertIn("Blocked", result)
         self.assertIn("rm -rf", result)
 
     def test_run_admin_command_blocked_by_hook(self):
         import terminal
-        with patch("terminal.hooks.pre_shell_command", return_value={"ok": False, "reason": "Admin blocked."}):
+        with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Admin blocked."}):
             result = terminal.run_admin_command("ls /System")
         self.assertEqual(result, "Admin blocked.")
 
     def test_run_admin_command_blocked_by_destructive_pattern(self):
         import terminal
-        with patch("terminal.hooks.pre_shell_command", return_value={"ok": True, "reason": ""}):
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}):
             result = terminal.run_admin_command("rm -rf /etc")
         self.assertIn("Blocked", result)
 
@@ -478,7 +478,7 @@ class TerminalWriteTests(unittest.TestCase):
 
     def test_write_file_blocked_by_hook(self):
         import terminal
-        with patch("terminal.hooks.pre_file_write", return_value={"ok": False, "reason": "Write blocked."}):
+        with patch("terminal.perms.can_write_file", return_value={"ok": False, "reason": "Write blocked."}):
             result = terminal.write_file("/tmp/test.txt", "content")
         self.assertEqual(result, "Write blocked.")
 
@@ -486,8 +486,8 @@ class TerminalWriteTests(unittest.TestCase):
         import terminal
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "output.txt")
-            with patch("terminal.hooks.pre_file_write", return_value={"ok": True, "reason": ""}), \
-                 patch("terminal.hooks.post_file_write", return_value={"ok": True, "reason": ""}):
+            with patch("terminal.perms.can_write_file", return_value={"ok": True, "reason": ""}), \
+                 patch("terminal.perms.after_write", return_value={"ok": True, "reason": ""}):
                 result = terminal.write_file(path, "Hello!")
             # Assert inside the context while the temp dir still exists
             self.assertIn("written to", result.lower())
@@ -497,8 +497,8 @@ class TerminalWriteTests(unittest.TestCase):
         import terminal
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "bad.py")
-            with patch("terminal.hooks.pre_file_write", return_value={"ok": True, "reason": ""}), \
-                 patch("terminal.hooks.post_file_write", return_value={"ok": False, "reason": "Syntax error."}):
+            with patch("terminal.perms.can_write_file", return_value={"ok": True, "reason": ""}), \
+                 patch("terminal.perms.after_write", return_value={"ok": False, "reason": "Syntax error."}):
                 result = terminal.write_file(path, "def broken(")
         self.assertEqual(result, "Syntax error.")
 
@@ -1223,6 +1223,23 @@ class BehaviorHooksShellGatingTests(unittest.TestCase):
         entry = json.loads(lines[0])
         self.assertEqual(entry["phase"], "pre_shell")
 
+    def test_pre_shell_command_permissive_profile_allows_rm_rf(self):
+        import behavior_hooks
+        with patch.dict(os.environ, {"JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE": "1"}, clear=False):
+            with self._patch_log():
+                result = behavior_hooks.pre_shell_command("rm -rf /tmp/test")
+        self.assertTrue(result["ok"])
+
+    def test_pre_shell_command_permissive_profile_requires_admin_for_protected_path(self):
+        import behavior_hooks
+        with patch.dict(os.environ, {"JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE": "1"}, clear=False):
+            with self._patch_log():
+                blocked = behavior_hooks.pre_shell_command("chmod 777 /etc/passwd", admin=False)
+                allowed = behavior_hooks.pre_shell_command("chmod 777 /etc/passwd", admin=True)
+        self.assertFalse(blocked["ok"])
+        self.assertEqual(blocked["rule"], "protected_path_shell_requires_admin")
+        self.assertTrue(allowed["ok"])
+
 
 class BehaviorHooksFileWriteTests(unittest.TestCase):
 
@@ -1254,6 +1271,20 @@ class BehaviorHooksFileWriteTests(unittest.TestCase):
         import behavior_hooks
         with self._patch_log():
             result = behavior_hooks.pre_file_write("/etc/test", allow_protected=True)
+        self.assertTrue(result["ok"])
+
+    def test_pre_file_write_allows_protected_when_permissive_env_enabled(self):
+        import behavior_hooks
+        with patch.dict(
+            os.environ,
+            {
+                "JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE": "1",
+                "JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES": "1",
+            },
+            clear=False,
+        ):
+            with self._patch_log():
+                result = behavior_hooks.pre_file_write("/etc/test")
         self.assertTrue(result["ok"])
 
     def test_post_file_write_valid_python(self):

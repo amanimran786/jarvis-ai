@@ -1,16 +1,132 @@
 import base64
 import tempfile
 import os
-import cv2
+import shutil
+import subprocess
+from functools import lru_cache
 from openai import OpenAI
 from config import OPENAI_API_KEY
 from screen_capture import capture_screenshot_temp
 
-_client = OpenAI(api_key=OPENAI_API_KEY)
+
+def _cv2():
+    import cv2
+
+    return cv2
+
+
+@lru_cache(maxsize=1)
+def _get_openai_client():
+    if not OPENAI_API_KEY:
+        return None
+    return OpenAI(api_key=OPENAI_API_KEY)
+
+
+def _run_tesseract(path: str, psm: str) -> str:
+    tesseract = shutil.which("tesseract")
+    if not tesseract:
+        return ""
+    try:
+        proc = subprocess.run(
+            [tesseract, path, "stdout", "--psm", psm],
+            capture_output=True,
+            text=True,
+            timeout=12,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return ""
+        return (proc.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def _score_ocr_text(text: str) -> int:
+    if not text:
+        return 0
+    lines = [line for line in text.splitlines() if line.strip()]
+    digits = sum(ch.isdigit() for ch in text)
+    letters = sum(ch.isalpha() for ch in text)
+    punctuation = sum(ch in ":;=()[]{}./_-<>" for ch in text)
+    return len(text) + len(lines) * 24 + digits * 2 + letters + punctuation * 3
+
+
+def _preprocess_for_ocr(path: str) -> str:
+    tmp_path = None
+    try:
+        cv2 = _cv2()
+        image = cv2.imread(path)
+        if image is None:
+            return ""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        upscaled = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+        normalized = cv2.GaussianBlur(upscaled, (3, 3), 0)
+        processed = cv2.adaptiveThreshold(
+            normalized,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            31,
+            11,
+        )
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.close()
+        cv2.imwrite(tmp.name, processed)
+        tmp_path = tmp.name
+        return tmp_path
+    except Exception:
+        return ""
+    finally:
+        # ownership of tmp_path passes to caller on success
+        pass
+
+
+def _extract_ocr_text(path: str) -> str:
+    candidates = []
+    original_passes = ("6", "11")
+    for psm in original_passes:
+        text = _run_tesseract(path, psm)
+        if text:
+            candidates.append(text)
+
+    processed_path = _preprocess_for_ocr(path)
+    try:
+        if processed_path:
+            for psm in ("6", "11", "12"):
+                text = _run_tesseract(processed_path, psm)
+                if text:
+                    candidates.append(text)
+    finally:
+        if processed_path and os.path.exists(processed_path):
+            os.unlink(processed_path)
+
+    if not candidates:
+        return ""
+    return max(candidates, key=_score_ocr_text)
+
+
+def _local_vision_summary(prompt: str, ocr_text: str) -> str:
+    if not ocr_text.strip():
+        return ""
+    from brain_ollama import ask_local_stream
+
+    summary_prompt = (
+        f"{prompt}\n\n"
+        "Use only the OCR evidence below. If OCR is partial, say so briefly and summarize only what is supported.\n\n"
+        f"OCR:\n{ocr_text[:8000]}"
+    )
+    return "".join(
+        ask_local_stream(
+            summary_prompt,
+            system_extra="Use only the supplied OCR evidence. Do not invent unseen visual details. Keep the answer concise and practical.",
+            raise_on_error=False,
+        )
+    ).strip()
 
 
 def _capture_frame() -> str:
     """Capture a single frame from the webcam and return path to saved image."""
+    cv2 = _cv2()
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         raise RuntimeError("Could not access the webcam.")
@@ -38,10 +154,16 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
     path = None
     try:
         path = _capture_frame()
+        local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
+        if local_answer:
+            return local_answer
+        client = _get_openai_client()
+        if client is None:
+            return "I couldn't extract enough local text from the camera frame to answer that reliably yet."
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
 
-        response = _client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
@@ -73,10 +195,16 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
     """Take a screenshot and describe it using Vision API."""
     path = capture_screenshot_temp(preferred_format="jpg", fallback_formats=("png",))
     try:
+        local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
+        if local_answer:
+            return local_answer
+        client = _get_openai_client()
+        if client is None:
+            return "I couldn't extract enough local text from this screen to answer that reliably yet."
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
 
-        response = _client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {

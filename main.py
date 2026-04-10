@@ -4,7 +4,19 @@ import traceback
 import threading
 import faulthandler
 
-import agents
+# Fix Qt cocoa plugin path before any PyQt6 import.
+# Conda sometimes writes a corrupted Qt path registry ("plug3ins" typo).
+# Setting QT_PLUGIN_PATH explicitly bypasses it.
+_pyqt6_plugins = os.path.join(
+    os.path.dirname(sys.executable),
+    "..", "lib",
+    f"python{sys.version_info.major}.{sys.version_info.minor}",
+    "site-packages", "PyQt6", "Qt6", "plugins",
+)
+_pyqt6_plugins = os.path.normpath(_pyqt6_plugins)
+if os.path.isdir(_pyqt6_plugins):
+    os.environ.setdefault("QT_PLUGIN_PATH", _pyqt6_plugins)
+
 import evals
 import jarvis_daemon
 import runtime_state
@@ -145,11 +157,62 @@ def _run_headless():
             break
 
 
+def _request_macos_permissions():
+    import subprocess
+    import os
+    print("[System] Requesting macOS Accessibility and Automation permissions for Python and Terminal...")
+    
+    targets = [
+        'tell application "System Events" to get name of current user',
+        'tell application "Messages" to get name of first service',
+        'tell application "Mail" to get name of first account',
+        'tell application "Calendar" to get name of first calendar',
+        'tell application "Contacts" to get name of first person',
+        'tell application "Terminal" to get windows'
+    ]
+    
+    # Trigger requests for the current python process
+    for cmd in targets:
+        subprocess.run(["osascript", "-e", cmd], capture_output=True)
+        
+    # Trigger requests for the Terminal app by having it run osascript
+    term_script = " && ".join([f"osascript -e '{cmd}'" for cmd in targets])
+    term_script += " && exit"
+    apple_script = f'tell application "Terminal" to do script "{term_script}"'
+    subprocess.run(["osascript", "-e", apple_script], capture_output=True)
+
+
+def _run_deferred_startup_tasks() -> None:
+    request_permissions = os.getenv("JARVIS_REQUEST_STARTUP_PERMISSIONS", "").lower() in {"1", "true", "yes", "on"}
+    if request_permissions:
+        try:
+            _request_macos_permissions()
+        except Exception:
+            traceback.print_exc()
+
+    try:
+        import terminal
+
+        print("[System] Requesting administrative access for this session...")
+        terminal.run_admin_command("echo 'Jarvis Administrator Privileges Granted'")
+    except Exception:
+        traceback.print_exc()
+
+
+def _start_deferred_startup_tasks() -> None:
+    threading.Thread(
+        target=_run_deferred_startup_tasks,
+        daemon=True,
+        name="JarvisStartupSetup",
+    ).start()
+
 def _run():
     _install_crash_logging()
     api_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
     api_port = _resolve_api_port()
+
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
+    _start_deferred_startup_tasks()
 
     if "--no-ui" in sys.argv:
         _run_headless()

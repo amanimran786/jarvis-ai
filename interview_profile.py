@@ -17,6 +17,10 @@ CAREER_KB_ROOT = KB_ROOT / "career"
 UNIVERSAL_BASE_POINTER = CAREER_KB_ROOT / "universal_base.md"
 UNIVERSAL_BASE_SOURCE = CAREER_KB_ROOT / "Jarvis_Universal_Interview_Context.md"
 PACKS_DIR = CAREER_KB_ROOT / "packs"
+CAREER_OPS_PLAYBOOK = CAREER_KB_ROOT / "career_ops_interview_playbook.md"
+STORY_BANK_TEMPLATE = CAREER_KB_ROOT / "story_bank_template.md"
+APPLICATION_STATES = CAREER_KB_ROOT / "application_states.md"
+CANDIDATE_PROFILE_TEMPLATE = CAREER_KB_ROOT / "candidate_profile_template.md"
 
 
 def _read_text(path: Path) -> str:
@@ -87,6 +91,59 @@ def _load_universal_base_text() -> str:
         return source
     pointer = _read_text(UNIVERSAL_BASE_POINTER)
     return pointer
+
+
+def _career_ops_asset_text(path: Path) -> str:
+    return _clean_markdown_excerpt(_read_text(path), max_chars=900)
+
+
+def _proof_points_line(limit: int = 3) -> str:
+    items = PROFILE["evidence"][:limit]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _story_bank_fit_text(user_input: str) -> str:
+    lower = user_input.lower()
+    if any(term in lower for term in ("failure", "mistake", "high-pressure", "error", "failed")):
+        return "The strongest story-bank angle here is failure and recovery with explicit reflection."
+    if any(term in lower for term in ("conflict", "cross-functional", "pushback", "stakeholder")):
+        return "The strongest story-bank angle here is cross-functional influence under friction."
+    if any(term in lower for term in ("leadership", "ownership", "ambiguity")):
+        return "The strongest story-bank angle here is leadership under ambiguity with a measurable result."
+    if any(term in lower for term in ("data", "metrics", "false positive", "spike", "sql")):
+        return "The strongest story-bank angle here is process improvement driven by data and diagnosis."
+    return "The strongest story-bank angle here is a measurable STAR plus reflection story, not a generic summary."
+
+
+def _candidate_profile_hint() -> str:
+    text = _career_ops_asset_text(CANDIDATE_PROFILE_TEMPLATE)
+    if not text:
+        return ""
+    return "The answer should stay anchored on target roles, clear narrative, and measurable proof points."
+
+
+def _application_states_summary() -> str:
+    text = _career_ops_asset_text(APPLICATION_STATES)
+    if not text:
+        return ""
+    return (
+        "Keep application statuses normalized as Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, and Skip. "
+        "Dates should stay separate from the status itself, and no status change should be invented without clear evidence or your explicit instruction."
+    )
+
+
+def _interview_playbook_hint() -> str:
+    text = _career_ops_asset_text(CAREER_OPS_PLAYBOOK)
+    if not text:
+        return ""
+    return (
+        "Prep should stay company-specific: separate sourced findings from inferred ones, map likely questions to real proof points, "
+        "and identify missing stories before the interview instead of improvising live."
+    )
 
 
 PROFILE = {
@@ -415,10 +472,16 @@ def canonical_profile_text(user_input: str = "") -> str:
 
 
 def tell_me_about_yourself_text(user_input: str = "") -> str:
+    profile_hint = _candidate_profile_hint()
     if _is_youtube_age_role(user_input):
-        return YOUTUBE_AGE_ROLE["tell_me_about_yourself"]
+        return (
+            f"{YOUTUBE_AGE_ROLE['tell_me_about_yourself']} "
+            f"The proof points I would foreground are {_proof_points_line()}. "
+            f"{profile_hint}"
+        )
     family = _role_family(user_input)
-    return ROLE_PROFILES.get(family, ROLE_PROFILES["hybrid"])["tell_me_about_yourself"]
+    base = ROLE_PROFILES.get(family, ROLE_PROFILES["hybrid"])["tell_me_about_yourself"]
+    return f"{base} The proof points I would foreground are {_proof_points_line()}. {profile_hint}"
 
 
 def _role_family(user_input: str) -> str:
@@ -452,6 +515,7 @@ def supported_role_families_text() -> str:
         "Jarvis can now tailor your interview story for four main role families: "
         "AI Trust and Safety, AI Safety, Cybersecurity, and Software Engineering, plus a hybrid technical safety default. "
         "Underneath that, it can also reuse your strongest behavioral stories and diagnostic frameworks across those domains instead of treating each interview like a fresh script."
+        " It now also carries a structured interview-prep playbook, a reusable story-bank pattern, and normalized application states by default."
         f"{pack_text}"
     )
 
@@ -485,7 +549,8 @@ def target_role_pack_text(user_input: str = "") -> str:
             return (
                 f"Target role pack: {company} — {role_title}. "
                 f"The best positioning is: {section1} "
-                f"The lead stories for this pack are {story_text}."
+                f"The lead stories for this pack are {story_text}. "
+                "For interview prep, separate sourced findings from inferred ones and map the likely questions back to those stories."
             )
 
     pack = TARGET_ROLE_PACKS[_pack_key(user_input)]
@@ -497,11 +562,13 @@ def target_role_pack_text(user_input: str = "") -> str:
         f"The best positioning is: {pack['best_pitch']} "
         f"The main things to emphasize are {emphasize}. "
         f"The strongest stories to lean on are {stories}. "
-        f"The best frameworks to keep in the foreground are {frameworks}."
+        f"The best frameworks to keep in the foreground are {frameworks}. "
+        "For interview prep, separate sourced findings from inferred ones and map the likely questions back to those stories."
     )
 
 
 def role_fit_text(user_input: str) -> str:
+    profile_hint = _candidate_profile_hint()
     family = _role_family(user_input)
 
     if family == "trust_safety":
@@ -509,6 +576,7 @@ def role_fit_text(user_input: str) -> str:
             "I am a strong fit because I have already operated across the full Trust and Safety stack: frontline enforcement, reviewer quality, vendor calibration, escalation judgment, and policy-to-product execution. "
             "I have done that work at YouTube, Meta, Google Play, and TikTok, so I understand both decision quality and the operational systems behind it. "
             "What strengthens the fit is that I also bring technical depth. I use Python and SQL to investigate trends, validate signals, and improve workflows, which means I can help move a team from reactive case handling toward measurable systems improvement."
+            f" The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
         )
 
     if family == "ai_safety":
@@ -516,6 +584,7 @@ def role_fit_text(user_input: str) -> str:
             "I am a strong fit for an AI safety role because I bring both adversarial judgment and operational execution. "
             "I have worked on model misuse, jailbreak attempts, coordinated abuse, and high-risk harm patterns, and I am comfortable translating those findings into better detection, escalation, and safety workflows. "
             "I also bring a software and data foundation, so I am not limited to policy analysis. I can investigate with Python and SQL, reason about signal quality, and partner well with engineering on scalable safety controls."
+            f" The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
         )
 
     if family == "security":
@@ -523,6 +592,7 @@ def role_fit_text(user_input: str) -> str:
             "I am a strong fit for a cybersecurity-oriented role because my background combines operational security discipline with abuse investigation and technical systems thinking. "
             "I have handled security operations, incident-oriented environments, threat detection, and audit-minded execution, and I also bring experience investigating adversarial behavior in online platforms and AI systems. "
             "That combination matters because strong security work is not just about finding issues. It is about triaging risk clearly, building reliable workflows, and improving detection and response over time."
+            f" The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
         )
 
     if family == "software_engineering":
@@ -530,13 +600,15 @@ def role_fit_text(user_input: str) -> str:
             "I am a strong fit because I bring more than a standard software engineering profile. "
             "I have backend and systems experience in Python, SQL, APIs, data pipelines, debugging, and production-oriented problem solving, but I pair that with real-world judgment from safety, abuse, and security domains. "
             "That means I do not just build features. I think carefully about reliability, misuse, edge cases, and operational impact, which is especially useful for platform, infra, and safety-adjacent engineering roles."
+            f" The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
         )
 
     return (
         "I am a strong fit because my background already sits at the intersection this kind of role needs. "
         "I bring over five years across Trust and Safety and AI Safety, a real software engineering foundation, and complementary cybersecurity and adversarial investigation experience. "
         "In practice, that means I can make high-stakes judgment calls, use data and tooling to validate what is actually happening, and partner effectively with operations, policy, and engineering to improve the system rather than just handle individual cases. "
-        "That convergence is exactly the direction I am intentionally building toward."
+        "That convergence is exactly the direction I am intentionally building toward. "
+        f"The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
     )
 
 
@@ -620,19 +692,23 @@ def engineering_pushback_text(user_input: str) -> str:
 
 def behavioral_story_text(user_input: str) -> str:
     lower = user_input.lower()
+    suffix = (
+        f" {_story_bank_fit_text(user_input)} "
+        "If the fit is only partial, draft the missing story from real experience before the interview instead of improvising."
+    )
     if any(term in lower for term in ("failure", "mistake", "wrong", "error", "failed")):
-        return UNIVERSAL_STORIES["failure_enforcement_error"]
+        return UNIVERSAL_STORIES["failure_enforcement_error"] + suffix
     if any(term in lower for term in ("novel abuse", "novel pattern", "ai safety", "jailbreak", "coordinated abuse")):
-        return UNIVERSAL_STORIES["anthropic_novel_abuse"]
+        return UNIVERSAL_STORIES["anthropic_novel_abuse"] + suffix
     if any(term in lower for term in ("engineering pushed back", "stakeholder conflict", "cross-functional", "increase review volume")):
-        return UNIVERSAL_STORIES["tiktok_engineering_pushback"]
+        return UNIVERSAL_STORIES["tiktok_engineering_pushback"] + suffix
     if any(term in lower for term in ("used data", "data-driven", "false positive", "sql", "spike")):
-        return UNIVERSAL_STORIES["tiktok_false_positive"]
+        return UNIVERSAL_STORIES["tiktok_false_positive"] + suffix
     if any(term in lower for term in ("calibration", "quality", "ambiguity", "vendor", "irr")):
-        return UNIVERSAL_STORIES["meta_calibration"]
+        return UNIVERSAL_STORIES["meta_calibration"] + suffix
     if any(term in lower for term in ("why this role", "why youtube", "career story", "background")):
-        return UNIVERSAL_STORIES["youtube_origin"]
-    return UNIVERSAL_STORIES["meta_calibration"]
+        return UNIVERSAL_STORIES["youtube_origin"] + suffix
+    return UNIVERSAL_STORIES["meta_calibration"] + suffix
 
 
 def situational_framework_text(user_input: str) -> str:
@@ -677,6 +753,31 @@ def is_target_role_pack_query(lower: str) -> bool:
             "what should i emphasize for",
             "how should i position myself for",
             "give me my pack for",
+        )
+    )
+
+
+def is_interview_prep_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "help me prep for",
+            "interview prep",
+            "prepare me for this interview",
+            "how should i prep for",
+            "what should i prepare for this interview",
+            "what should i study for this interview",
+        )
+    )
+
+
+def is_application_status_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "application status",
+            "application states",
+            "job application states",
+            "normalize application status",
+            "what statuses should i use",
         )
     )
 
@@ -816,10 +917,37 @@ def is_situational_query(lower: str) -> bool:
     )
 
 
+def interview_prep_text(user_input: str) -> str:
+    role_pack = target_role_pack_text(user_input)
+    playbook_hint = _interview_playbook_hint()
+    story_hint = _story_bank_fit_text(user_input)
+    return (
+        "For this interview, I would prep it as company-specific intelligence, not a generic script. "
+        f"{role_pack} "
+        f"{playbook_hint} "
+        f"The proof points I would keep at the center are {_proof_points_line()}. "
+        f"{story_hint} "
+        "The next prep pass should explicitly cover likely rounds, likely question categories, story mapping, and any honest gaps we still need to frame around."
+    )
+
+
+def application_states_text() -> str:
+    summary = _application_states_summary()
+    if summary:
+        return summary
+    return (
+        "Keep application statuses normalized as Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, and Skip."
+    )
+
+
 def answer_for_query(user_input: str) -> str:
     lower = user_input.lower().strip()
     if "what roles are you targeting" in lower or "what roles am i targeting" in lower:
         return supported_role_families_text()
+    if is_application_status_query(lower):
+        return application_states_text()
+    if is_interview_prep_query(lower):
+        return interview_prep_text(user_input)
     if is_target_role_pack_query(lower):
         return target_role_pack_text(user_input)
     if is_tell_me_about_yourself_query(lower):

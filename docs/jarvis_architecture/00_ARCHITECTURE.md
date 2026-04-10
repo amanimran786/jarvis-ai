@@ -413,7 +413,7 @@ Jarvis/
     "working_store": "memory/working/",
     "top_k_semantic": 5,
     "top_k_episodic": 3,
-    "private_vault": "memory/private.vault"
+    "private_store": "reserved for a future encrypted local store"
   },
   "models": {
     "local": "mistral:7b-instruct",

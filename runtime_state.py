@@ -24,6 +24,7 @@ class RuntimeState:
 
 
 _STATE = RuntimeState()
+_CALL_ASSIST_CACHE_TTL = 1.0
 
 
 def get_state() -> RuntimeState:
@@ -40,6 +41,12 @@ def update(**kwargs: Any) -> RuntimeState:
 
 
 def snapshot() -> dict[str, Any]:
+    try:
+        import task_runtime
+
+        managed_runtime = task_runtime.runtime_snapshot()
+    except Exception as exc:
+        managed_runtime = {"ok": False, "error": str(exc)}
     return {
         "started_at": _STATE.started_at,
         "status": _STATE.status,
@@ -52,6 +59,7 @@ def snapshot() -> dict[str, Any]:
         "last_error": _STATE.last_error,
         "call_assist": dict(_STATE.call_assist),
         "call_assist_updated_at": _STATE.call_assist_updated_at,
+        "managed_runtime": managed_runtime,
         "meta": dict(_STATE.meta),
     }
 
@@ -206,6 +214,15 @@ def _summarize_call_assist(snapshot: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def refresh_call_assist(force_refresh: bool = False) -> dict[str, Any]:
+    if not force_refresh and _STATE.call_assist and _STATE.call_assist_updated_at:
+        try:
+            updated = datetime.fromisoformat(_STATE.call_assist_updated_at)
+            age = (datetime.now(timezone.utc) - updated).total_seconds()
+            if age < _CALL_ASSIST_CACHE_TTL:
+                return dict(_STATE.call_assist)
+        except Exception:
+            pass
+
     try:
         import meeting_listener
 

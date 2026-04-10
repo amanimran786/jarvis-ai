@@ -101,6 +101,19 @@ def _running_app_names() -> set[str]:
         return set()
 
 
+def _frontmost_app_name() -> str:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to get name of first application process whose frontmost is true'],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+        )
+        return (result.stdout or "").strip()
+    except Exception:
+        return ""
+
+
 def _all_process_names() -> set[str]:
     try:
         result = subprocess.run(
@@ -176,31 +189,19 @@ def _compute_meeting_app() -> str | None:
         if proc in running:
             return label
 
-    browser_checks = [
-        (
-            "Google Chrome",
-            'tell application "Google Chrome" to get URL of active tab of front window',
-        ),
-        (
-            "Safari",
-            'tell application "Safari" to get URL of current tab of front window',
-        ),
-        (
-            "Brave Browser",
-            'tell application "Brave Browser" to get URL of active tab of front window',
-        ),
-        (
-            "ChatGPT Atlas",
-            'tell application "ChatGPT Atlas" to get URL of active tab of front window',
-        ),
-    ]
-    for _browser, script in browser_checks:
-        if _browser not in running_names:
-            continue
-        label = _browser_active_meeting_label(_browser, script)
+    browser_checks = {
+        "Google Chrome": 'tell application "Google Chrome" to get URL of active tab of front window',
+        "Safari": 'tell application "Safari" to get URL of current tab of front window',
+        "Brave Browser": 'tell application "Brave Browser" to get URL of active tab of front window',
+        "ChatGPT Atlas": 'tell application "ChatGPT Atlas" to get URL of active tab of front window',
+    }
+    frontmost = _frontmost_app_name()
+    script = browser_checks.get(frontmost)
+    if frontmost and script and frontmost in running_names:
+        label = _browser_active_meeting_label(frontmost, script)
         if label:
             return label
-        label = _browser_any_meeting_label(_browser)
+        label = _browser_any_meeting_label(frontmost)
         if label:
             return label
     return None

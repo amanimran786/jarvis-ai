@@ -41,6 +41,8 @@ import behavior_hooks
 import cost_policy
 import usage_tracker
 import runtime_state
+import provider_router
+import task_runtime
 
 
 def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
@@ -77,6 +79,16 @@ _CHAT_LOCK = threading.Lock()
 class ChatRequest(BaseModel):
     message: str
     stream: bool = False
+
+
+class TaskRequest(BaseModel):
+    prompt: str
+    kind: str = "task"
+    source: str = "api"
+    assigned_agent_id: str = ""
+    terse_mode: str = ""
+    isolated_workspace: bool | None = None
+    meta: dict | None = None
 
 
 class FactRequest(BaseModel):
@@ -241,8 +253,8 @@ def eval_summary(hours: int = 24 * 7):
 
 
 @app.get("/status")
-def status():
-    call_assist = runtime_state.refresh_call_assist(force_refresh=True)
+def status(refresh: bool = False):
+    call_assist = runtime_state.refresh_call_assist(force_refresh=refresh)
     return {
         "status": "online",
         "mode": model_router.get_mode(),
@@ -252,17 +264,90 @@ def status():
         "context": ctx.get_stats(),
         "usage_24h": usage_tracker.summarize(hours=24, include_recent=0),
         "cost_policy": cost_policy.policy_status(),
+        "provider_routing": provider_router.runtime_policy(),
         "call_assist": call_assist,
     }
 
 
 @app.get("/runtime/state")
-def get_runtime_state():
+def get_runtime_state(refresh: bool = False):
     try:
-        runtime_state.refresh_call_assist(force_refresh=True)
+        runtime_state.refresh_call_assist(force_refresh=refresh)
         return {"ok": True, "state": runtime_state.snapshot()}
     except Exception as exc:
         return {"ok": False, "error": str(exc), "state": {}}
+
+
+@app.get("/agents")
+def list_agents():
+    return {"ok": True, "agents": task_runtime.list_agents()}
+
+
+@app.get("/agents/{agent_id}")
+def get_agent(agent_id: str):
+    agent = task_runtime.get_agent(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "agent_not_found"})
+    return {"ok": True, "agent": agent}
+
+
+@app.get("/tasks")
+def list_tasks(limit: int = 25, status: str = ""):
+    return {"ok": True, "tasks": task_runtime.list_tasks(limit=limit, status=status)}
+
+
+@app.post("/tasks")
+def create_task(req: TaskRequest):
+    task = task_runtime.submit_task(
+        req.prompt,
+        kind=req.kind,
+        source=req.source,
+        assigned_agent_id=req.assigned_agent_id,
+        terse_mode=req.terse_mode,
+        isolated_workspace=req.isolated_workspace,
+        meta=req.meta,
+    )
+    return {"ok": True, "task": task}
+
+
+@app.get("/tasks/{task_id}")
+def get_task(task_id: str):
+    task = task_runtime.get_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+    return {"ok": True, "task": task}
+
+
+@app.get("/tasks/{task_id}/events")
+def get_task_events(task_id: str):
+    task = task_runtime.get_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+    return {"ok": True, "events": task_runtime.get_task_events(task_id)}
+
+
+@app.get("/tasks/{task_id}/stream")
+def stream_task(task_id: str):
+    task = task_runtime.get_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+
+    def generate():
+        for event in task_runtime.stream_task_events(task_id):
+            yield f"data: {json.dumps(event)}\n\n"
+            if event.get("type") == "done":
+                break
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.post("/tasks/{task_id}/cancel")
+def cancel_task(task_id: str):
+    task = task_runtime.cancel_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+    return {"ok": True, "task": task}
 
 
 @app.get("/bridge/status")

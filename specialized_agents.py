@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from brain_claude import ask_claude
-from config import HAIKU, SONNET, SYSTEM_PROMPT
+from brain_ollama import ask_local, get_best_available
+from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING
 import skills
 
 
@@ -316,14 +317,25 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         ).strip()
         return {"role": role, "model": spec.model, "output": output}
     except Exception as exc:
-        output = _fallback_role_output(role, task, context=context).strip()
-        return {
-            "role": role,
-            "model": spec.model,
-            "output": output,
-            "fallback": True,
-            "error": str(exc),
-        }
+        # Cloud failed — fall back to best available local model instead of stub text
+        try:
+            local_model = get_best_available(LOCAL_REASONING)
+            full_system = system + ("\n\n" + system_extra if system_extra else "")
+            output = ask_local(
+                prompt,
+                model=local_model,
+                system_extra=full_system,
+            ).strip()
+            return {"role": role, "model": f"local/{local_model}", "output": output, "fallback": True}
+        except Exception as local_exc:
+            output = _fallback_role_output(role, task, context=context).strip()
+            return {
+                "role": role,
+                "model": spec.model,
+                "output": output,
+                "fallback": True,
+                "error": f"cloud: {exc} | local: {local_exc}",
+            }
 
 
 def run(user_input: str, roles: list[str] | None = None) -> dict:

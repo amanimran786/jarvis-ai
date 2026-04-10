@@ -19,6 +19,7 @@ Usage:
 """
 
 import json
+import copy
 import threading
 import time
 import glob
@@ -26,6 +27,7 @@ import logging
 import os
 import socket
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
@@ -418,6 +420,10 @@ _BONJOUR_SERVICE_TYPES: dict[str, str] = {
     "googlecast": "_googlecast._tcp",
 }
 
+_NEARBY_CACHE_LOCK = threading.Lock()
+_NEARBY_CACHE_VALUE: dict[str, Any] | None = None
+_NEARBY_CACHE_UNTIL = 0.0
+
 
 def _run_json_command(args: list[str]) -> dict:
     try:
@@ -524,28 +530,46 @@ def _browse_bonjour_service(service_type: str, timeout: float = 2.5) -> list[dic
 
 
 def discover_network_services(timeout: float = 2.5) -> dict:
-    services = {
-        label: _browse_bonjour_service(service_type, timeout=timeout)
-        for label, service_type in _BONJOUR_SERVICE_TYPES.items()
-    }
+    services: dict[str, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=len(_BONJOUR_SERVICE_TYPES) or 1) as pool:
+        futures = {
+            pool.submit(_browse_bonjour_service, service_type, timeout=timeout): label
+            for label, service_type in _BONJOUR_SERVICE_TYPES.items()
+        }
+        for future in as_completed(futures):
+            label = futures[future]
+            try:
+                services[label] = future.result()
+            except Exception:
+                services[label] = []
     return {
         "available": True,
         "services": services,
     }
 
 
-def discover_nearby(timeout: float = 2.5) -> dict:
+def discover_nearby(timeout: float = 2.5, force_refresh: bool = False) -> dict:
     """
     Unified nearby-device snapshot for Jarvis.
     Includes Bluetooth plus common local-network services like AirPlay/RAOP.
     """
+    global _NEARBY_CACHE_VALUE, _NEARBY_CACHE_UNTIL
+    now = time.monotonic()
+    with _NEARBY_CACHE_LOCK:
+        if not force_refresh and _NEARBY_CACHE_VALUE is not None and now < _NEARBY_CACHE_UNTIL:
+            return copy.deepcopy(_NEARBY_CACHE_VALUE)
+
     bluetooth = discover_bluetooth_devices()
     network = discover_network_services(timeout=timeout)
-    return {
+    snapshot = {
         "ts": datetime.now().isoformat(),
         "bluetooth": bluetooth,
         "network": network,
     }
+    with _NEARBY_CACHE_LOCK:
+        _NEARBY_CACHE_VALUE = copy.deepcopy(snapshot)
+        _NEARBY_CACHE_UNTIL = time.monotonic() + 20.0
+    return snapshot
 
 
 def local_ipv4_addresses() -> list[str]:

@@ -4,15 +4,24 @@ import subprocess
 import threading
 import speech_recognition as sr
 from openai import OpenAI
-from config import OPENAI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL
+from config import (
+    OPENAI_API_KEY,
+    ELEVENLABS_API_KEY,
+    ELEVENLABS_VOICE_ID,
+    ELEVENLABS_MODEL,
+    OPENAI_TTS_MODEL,
+    OPENAI_TTS_VOICE,
+    TTS_BACKENDS,
+)
 import call_privacy
 import local_stt
+import local_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
 
 WAKE_WORDS = {"hey jarvis", "ok jarvis"}
-OPENAI_TTS_VOICE = "onyx"   # fallback voice
+_last_tts_engine = ""
 
 # Prevents mic from picking up Jarvis's own TTS output.
 # Cleared while Jarvis is speaking; listen() blocks until set again.
@@ -67,26 +76,57 @@ def _speak_elevenlabs(text: str) -> bool:
         return False
 
 
-def _speak_openai(text: str):
+def _speak_openai(text: str) -> bool:
     """Speak via OpenAI TTS (fallback)."""
     if _openai_client is None:
-        raise RuntimeError("OpenAI TTS is not configured.")
+        return False
     response = _openai_client.audio.speech.create(
-        model="tts-1",
+        model=OPENAI_TTS_MODEL,
         voice=OPENAI_TTS_VOICE,
         input=text
     )
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
         f.write(response.content)
         tmp_path = f.name
-    subprocess.run(["afplay", tmp_path], check=True, capture_output=True)
-    os.unlink(tmp_path)
+    try:
+        subprocess.run(["afplay", tmp_path], check=True, capture_output=True)
+        return True
+    finally:
+        os.unlink(tmp_path)
+
+
+def _speak_local(text: str) -> bool:
+    result = local_tts.speak(text)
+    if not result.get("ok"):
+        error = result.get("error")
+        if error:
+            print(f"[Local TTS] {error}")
+        return False
+    return True
+
+
+def _speak_with_fallbacks(text: str) -> str:
+    global _last_tts_engine
+    for backend in TTS_BACKENDS:
+        try:
+            if backend == "say" and _speak_local(text):
+                _last_tts_engine = "Local TTS (say)"
+                return _last_tts_engine
+            if backend == "elevenlabs" and _speak_elevenlabs(text):
+                _last_tts_engine = "ElevenLabs"
+                return _last_tts_engine
+            if backend == "openai" and _speak_openai(text):
+                _last_tts_engine = "OpenAI TTS"
+                return _last_tts_engine
+        except Exception as exc:
+            print(f"[TTS] Backend {backend} failed: {exc}")
+    raise RuntimeError("No TTS backend succeeded.")
 
 
 # ── Public speak API ─────────────────────────��────────────────────────────────
 
 def speak(text: str) -> None:
-    """Speak text — ElevenLabs first, OpenAI TTS as fallback."""
+    """Speak text — local macOS TTS first, then paid fallbacks if needed."""
     if not text or not text.strip():
         return
     print(f"Jarvis: {text}")
@@ -95,8 +135,7 @@ def speak(text: str) -> None:
         return
     _done_speaking.clear()
     try:
-        if not _speak_elevenlabs(text):
-            _speak_openai(text)
+        _speak_with_fallbacks(text)
     finally:
         _done_speaking.set()
 
@@ -234,7 +273,15 @@ def wait_for_wake_word() -> None:
 
 def tts_engine() -> str:
     """Return which TTS engine is active."""
-    return "ElevenLabs" if _get_eleven() else "OpenAI TTS"
+    if _last_tts_engine:
+        return _last_tts_engine
+    if "say" in TTS_BACKENDS and local_tts.status().get("ready"):
+        return "Local TTS (say)"
+    if "elevenlabs" in TTS_BACKENDS and _get_eleven():
+        return "ElevenLabs"
+    if "openai" in TTS_BACKENDS and _openai_client is not None:
+        return "OpenAI TTS"
+    return "Unavailable"
 
 
 def stt_engine() -> str:

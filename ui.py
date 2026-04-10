@@ -6,6 +6,7 @@ import math
 import random
 import subprocess
 import shutil
+import time
 from datetime import datetime
 import learner
 import model_router
@@ -90,12 +91,10 @@ QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
 # ── Glow helper ────────────────────────────────────────────────────────────────
 
 def _glow(widget, color=C_CYAN, radius=12):
-    fx = QGraphicsDropShadowEffect()
-    fx.setBlurRadius(radius)
-    fx.setColor(QColor(color))
-    fx.setOffset(0, 0)
-    widget.setGraphicsEffect(fx)
-    return fx
+    # Disabled: QGraphicsDropShadowEffect is completely software-rendered in PyQt6
+    # and forces full layout repaints when any sibling widget (like the text input)
+    # is updated, causing severe typing lag.
+    return None
 
 
 def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
@@ -153,14 +152,25 @@ def _meeting_stop() -> str:
 
 
 def _meeting_status_snapshot() -> dict:
+    now = time.monotonic()
+    cached = getattr(_meeting_status_snapshot, "_cache", None)
+    cached_until = getattr(_meeting_status_snapshot, "_cache_until", 0.0)
+    if cached is not None and now < cached_until:
+        return dict(cached)
+
     handled, value = _call_optional(
         _meeting_controller_mod,
         ("status_snapshot", "refresh_status", "snapshot"),
-        force_refresh=True,
+        force_refresh=False,
     )
     if handled and isinstance(value, dict):
-        return value
-    return meeting_listener.status_snapshot()
+        snapshot = value
+    else:
+        snapshot = meeting_listener.status_snapshot()
+
+    _meeting_status_snapshot._cache = dict(snapshot)
+    _meeting_status_snapshot._cache_until = now + 0.6
+    return snapshot
 
 
 def _live_listener_snapshot(snapshot: dict) -> dict:
@@ -200,6 +210,7 @@ def _force_text_widget_update(widget, text: str):
 class LiveUpdateBridge(QObject):
     transcript = pyqtSignal(str)
     suggestion = pyqtSignal(str)
+    device_summary = pyqtSignal(str)
 
 
 def _trace_ui_event(window, surface: str, event: str, text: str = "", **fields):
@@ -473,12 +484,33 @@ class JarvisOrb(QWidget):
         # Timer — 50fps
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(20)
+        self._sync_animation_rate()
 
     # ── Public state control ──────────────────────────────────────────────────
 
     def set_state(self, state: str):
+        if state == self._state:
+            return
         self._state = state
+        self._sync_animation_rate()
+        self.update()
+
+    def _target_interval_ms(self) -> int:
+        return {
+            self.STATE_IDLE: 55,
+            self.STATE_LISTENING: 34,
+            self.STATE_SPEAKING: 20,
+        }.get(self._state, 55)
+
+    def _sync_animation_rate(self):
+        if not self.isVisible():
+            self._timer.stop()
+            return
+        interval = self._target_interval_ms()
+        if self._timer.interval() != interval:
+            self._timer.setInterval(interval)
+        if not self._timer.isActive():
+            self._timer.start()
 
     # ── Animation tick ────────────────────────────────────────────────────────
 
@@ -511,6 +543,14 @@ class JarvisOrb(QWidget):
             self._bars[i] += (self._bar_target[i] - self._bars[i]) * 0.25
 
         self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_animation_rate()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._timer.stop()
 
     # ── Paint ─────────────────────────────────────────────────────────────────
 
@@ -714,13 +754,39 @@ class HUDBackground(QWidget):
         self._scan_y = 0
         self._scan_alpha = 180
         self._scan_dir = 1
+        self._busy = False
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(20)
+        self._sync_animation_rate()
+
+    def set_busy(self, busy: bool):
+        busy = bool(busy)
+        if busy == self._busy:
+            return
+        self._busy = busy
+        self._sync_animation_rate()
 
     def _tick(self):
         self._scan_y = (self._scan_y + 2) % max(self.height(), 1)
         self.update()
+
+    def _sync_animation_rate(self):
+        if not self.isVisible():
+            self._timer.stop()
+            return
+        interval = 35 if self._busy else 110
+        if self._timer.interval() != interval:
+            self._timer.setInterval(interval)
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_animation_rate()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._timer.stop()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -808,19 +874,23 @@ class HUDBackground(QWidget):
 class PulseDot(QWidget):
     """A small pulsing dot indicating online/listening state."""
 
-    def __init__(self, color=C_GREEN, parent=None):
+    def __init__(self, color=C_GREEN, parent=None, animated: bool = True):
         super().__init__(parent)
         self.setFixedSize(10, 10)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._color = color
-        self._alpha = 255
+        self._animated = animated
+        self._alpha = 255 if animated else 215
         self._dir = -4
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
-        self._timer.start(25)
+        self._timer = None
+        if animated:
+            self._timer = QTimer(self)
+            self._timer.timeout.connect(self._tick)
+            self._timer.start(25)
 
     def set_color(self, color):
         self._color = color
+        self.update()
 
     def _tick(self):
         self._alpha += self._dir
@@ -853,10 +923,28 @@ class SignalBars(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(55)
+        self._sync_animation_rate()
 
     def set_intensity(self, intensity: float):
         self._intensity = max(0.1, min(1.0, intensity))
+        self._sync_animation_rate()
+
+    def _target_interval_ms(self) -> int:
+        if self._intensity <= 0.3:
+            return 180
+        if self._intensity <= 0.6:
+            return 100
+        return 55
+
+    def _sync_animation_rate(self):
+        if not self.isVisible():
+            self._timer.stop()
+            return
+        interval = self._target_interval_ms()
+        if self._timer.interval() != interval:
+            self._timer.setInterval(interval)
+        if not self._timer.isActive():
+            self._timer.start()
 
     def _tick(self):
         for i in range(len(self._targets)):
@@ -864,6 +952,14 @@ class SignalBars(QWidget):
                 self._targets[i] = random.uniform(0.12, self._intensity)
             self._bars[i] += (self._targets[i] - self._bars[i]) * 0.28
         self.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_animation_rate()
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self._timer.stop()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -927,7 +1023,7 @@ class TelemetryPanel(QFrame):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(6)
 
-        dot = PulseDot(color)
+        dot = PulseDot(color, animated=False)
         dot.setFixedSize(8, 8)
         row_layout.addWidget(dot, alignment=Qt.AlignmentFlag.AlignTop)
         self._dot_widgets[key] = dot
@@ -1132,7 +1228,7 @@ class MessageBubble(QFrame):
         label_row = QHBoxLayout()
         label_row.setContentsMargins(0, 0, 0, 0)
 
-        dot = PulseDot(C_ORANGE if is_user else C_CYAN)
+        dot = PulseDot(C_ORANGE if is_user else C_CYAN, animated=False)
         dot.setFixedSize(8, 8)
         label_row.addWidget(dot)
 
@@ -1210,6 +1306,8 @@ class JarvisWindow(QMainWindow):
         self._last_live_listener_started_at = 0.0
         self._last_live_transcript_at = 0.0
         self._last_live_suggestion_at = 0.0
+        self._device_refresh_in_flight = False
+        self._device_refresh_pending = False
         self._build_ui()
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
@@ -1222,6 +1320,8 @@ class JarvisWindow(QMainWindow):
             self._live_updates = LiveUpdateBridge(self)
         self._live_updates.transcript.connect(self._apply_live_transcript_update)
         self._live_updates.suggestion.connect(self._apply_live_suggestion_update)
+        if hasattr(self, "_apply_device_summary_update"):
+            self._live_updates.device_summary.connect(self._apply_device_summary_update)
         self._live_signals_bound = True
 
     def _on_transcript(self, text: str):
@@ -1668,7 +1768,7 @@ class JarvisWindow(QMainWindow):
 
         self._telemetry_timer = QTimer(self)
         self._telemetry_timer.timeout.connect(self._refresh_telemetry)
-        self._telemetry_timer.start(1200)
+        self._telemetry_timer.start(2500)
         self._device_timer = QTimer(self)
         self._device_timer.timeout.connect(self._refresh_nearby_devices)
         self._device_timer.start(15000)
@@ -1698,8 +1798,19 @@ class JarvisWindow(QMainWindow):
             self._add_message("Nearby Devices stays hidden while meeting toolbar mode is active.", "jarvis", "Hardware")
             return
         self.device_panel.setVisible(visible)
-        self.devices_btn.setText("◉ DEVICES" if visible else "◎ DEVICES")
-        self.devices_btn.setStyleSheet(f"""
+        self._sync_devices_button_state(visible)
+        if visible:
+            self._refresh_nearby_devices()
+
+    def _toggle_device_panel(self):
+        self._set_device_panel_visible(not self.device_panel.isVisible())
+
+    def _sync_devices_button_state(self, visible: bool):
+        btn = getattr(self, "devices_btn", None)
+        if btn is None:
+            return
+        btn.setText("◉ DEVICES" if visible else "◎ DEVICES")
+        btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 color: {C_CYAN if visible else C_TEXT_DIM};
@@ -1714,11 +1825,6 @@ class JarvisWindow(QMainWindow):
                 background: {C_BLUE};
             }}
         """)
-        if visible:
-            self._refresh_nearby_devices()
-
-    def _toggle_device_panel(self):
-        self._set_device_panel_visible(not self.device_panel.isVisible())
 
     def _bridge_snapshot(self) -> dict:
         return _bridge_snapshot_data()
@@ -1760,13 +1866,30 @@ class JarvisWindow(QMainWindow):
     def _refresh_nearby_devices(self):
         if not hasattr(self, "device_summary"):
             return
-        try:
-            snapshot = _device_refresh_snapshot(timeout=1.2)
-            text = self._format_nearby_snapshot(snapshot)
-        except Exception as e:
-            text = f"Nearby device scan failed: {e}"
+        if self._device_refresh_in_flight:
+            self._device_refresh_pending = True
+            return
+        self._device_refresh_in_flight = True
+        self.device_summary.setPlainText("Refreshing nearby devices...")
+        self.device_summary.moveCursor(QTextCursor.MoveOperation.Start)
+
+        def _worker():
+            try:
+                snapshot = _device_refresh_snapshot(timeout=0.6)
+                text = self._format_nearby_snapshot(snapshot)
+            except Exception as exc:
+                text = f"Nearby device scan failed: {exc}"
+            self._live_updates.device_summary.emit(text)
+
+        threading.Thread(target=_worker, daemon=True, name="JarvisNearbyDevices").start()
+
+    def _apply_device_summary_update(self, text: str):
+        self._device_refresh_in_flight = False
         self.device_summary.setPlainText(text)
         self.device_summary.moveCursor(QTextCursor.MoveOperation.Start)
+        if self._device_refresh_pending:
+            self._device_refresh_pending = False
+            self._refresh_nearby_devices()
 
     def _open_device_settings(self, target: str):
         msg = _device_open_settings(target)
@@ -1849,7 +1972,7 @@ class JarvisWindow(QMainWindow):
         self._meeting_watchdog_timer = QTimer(self)
         self._meeting_watchdog_timer.timeout.connect(self._meeting_watchdog_tick)
         self._meeting_watchdog_tick()
-        self._meeting_watchdog_timer.start(1000)
+        self._meeting_watchdog_timer.start(1500)
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
@@ -1959,6 +2082,12 @@ class JarvisWindow(QMainWindow):
     def _show_suggestion(self, suggestion: str):
         self._apply_live_suggestion_update(suggestion)
 
+    def _refresh_live_call_status(self):
+        # The classic window does not expose the richer orbital call-status panel.
+        # Keep this as a shared no-op so event-driven transcript/suggestion updates
+        # can safely call into it without special-casing the window type.
+        return
+
     # ── Briefing ───────────────────────────────────────────────────────────────
 
     def _maybe_brief(self):
@@ -2048,6 +2177,14 @@ class JarvisWindow(QMainWindow):
     def _update_meeting_toolbar_layout(self):
         if not self._meeting_toolbar_mode:
             return
+        if not all(
+            hasattr(self, name)
+            for name in ("_orb_panel", "_div_after_orb", "scroll", "_div_before_input", "_subtitle", "compact_btn")
+        ):
+            if hasattr(self, "_set_tray_visible"):
+                self._set_tray_visible(True)
+            self.adjustSize()
+            return
         panel_height = 112 if self.suggest_panel.isVisible() else 0
         target_height = 146 + panel_height
         self.resize(max(self.width(), 560), target_height)
@@ -2064,27 +2201,41 @@ class JarvisWindow(QMainWindow):
         self._meeting_toolbar_mode = enabled
         self._meeting_toolbar_auto = auto
 
+        if not all(
+            hasattr(self, name)
+            for name in ("_orb_panel", "_div_after_orb", "scroll", "_div_before_input", "_subtitle", "compact_btn")
+        ):
+            if enabled:
+                self._meeting_toolbar_manual_expand_meeting = None
+                if hasattr(self, "device_panel"):
+                    self.device_panel.hide()
+                self._sync_devices_button_state(False)
+                if hasattr(self, "_top_chip"):
+                    self._top_chip.setText("MEETING MODE")
+                if hasattr(self, "_peek_label"):
+                    self._peek_label.setText("Meeting active. Tactical panel ready.")
+                if hasattr(self, "_set_tray_visible"):
+                    self._set_tray_visible(True)
+                self.raise_()
+                self.activateWindow()
+                return
+
+            if not auto and current_meeting != "NONE":
+                self._meeting_toolbar_manual_expand_meeting = current_meeting
+            if hasattr(self, "_top_chip"):
+                self._top_chip.setText(getattr(self, "_default_top_chip_text", "JARVIS"))
+            if hasattr(self, "_peek_label"):
+                self._peek_label.setText("Ambient mode active. Hover or double-click for controls.")
+            if hasattr(self, "_set_tray_visible") and not getattr(self, "_tray_locked", False):
+                self._set_tray_visible(False)
+            return
+
         if enabled:
             self._meeting_toolbar_manual_expand_meeting = None
             self._normal_geometry = self.geometry()
             self.setMinimumSize(560, 146)
             self.device_panel.hide()
-            self.devices_btn.setText("◎ DEVICES")
-            self.devices_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: transparent;
-                    color: {C_TEXT_DIM};
-                    border: 1px solid {C_BORDER};
-                    border-radius: 3px;
-                    padding: 0 10px;
-                    letter-spacing: 1px;
-                }}
-                QPushButton:hover {{
-                    color: {C_CYAN};
-                    border-color: {C_CYAN};
-                    background: {C_BLUE};
-                }}
-            """)
+            self._sync_devices_button_state(False)
             self._orb_panel.hide()
             self._div_after_orb.hide()
             self.scroll.hide()
@@ -2109,6 +2260,11 @@ class JarvisWindow(QMainWindow):
         self.compact_btn.setToolTip("Toggle compact meeting bar")
         if self._normal_geometry is not None:
             self.setGeometry(self._normal_geometry)
+        else:
+            self.resize(820, 640)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def _sync_orb_to_voice(self):
         """Keep orb state in sync with actual TTS playback."""
@@ -2234,23 +2390,29 @@ class JarvisWindow(QMainWindow):
         self._add_message(f"Logged feedback under {failure['category']} for the last Jarvis answer.", "jarvis", "Eval")
 
     def _set_status(self, text: str):
+        if self._status_label.text() == text:
+            return
         self._status_label.setText(text)
+        busy = False
         if "LISTEN" in text or "ACTIVE" in text or "VOICE" in text:
             self._status_label.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_CYAN)
             self._orb.set_state(JarvisOrb.STATE_LISTENING)
             self._signal_bars.set_intensity(0.55)
+            busy = True
         elif "PROCESS" in text or "SCANNING" in text or "CAMERA" in text or "READING" in text:
             self._status_label.setStyleSheet(f"color: {C_WARNING}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_WARNING)
             self._orb.set_state(JarvisOrb.STATE_SPEAKING)
             self._signal_bars.set_intensity(1.0)
+            busy = True
         else:
             self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_GREEN)
             self._orb.set_state(JarvisOrb.STATE_IDLE)
             self._signal_bars.set_intensity(0.28)
-        self._refresh_telemetry()
+        if hasattr(self, "_hud_bg"):
+            self._hud_bg.set_busy(busy)
 
     def _send_text(self):
         text = self.input_field.text().strip()
@@ -2402,7 +2564,7 @@ class OrbShellWindow(JarvisWindow):
         self._bind_live_update_signals()
         self._start_voice()
         self._adaptive_timer.start(340)
-        self._call_status_timer.start(1000)
+        self._call_status_timer.start(2500)
 
     def _build_ui(self):
         central = QWidget()
@@ -2751,6 +2913,8 @@ end tell
             self._animate_to(best)
 
     def _set_tray_visible(self, visible: bool):
+        if self.suggest_panel.isVisible() == visible and (visible or not self._tray_locked):
+            return
         if visible:
             self.suggest_panel.show()
             self._collapse_timer.stop()
