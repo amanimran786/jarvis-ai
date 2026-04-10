@@ -2546,6 +2546,15 @@ class JarvisWindow(QMainWindow):
             hotkeys.stop()
         except Exception:
             pass
+        try:
+            import multiprocessing as _mp
+            for _child in _mp.active_children():
+                try:
+                    _child.terminate()
+                except Exception:
+                    pass
+        except Exception:
+            pass
         event.accept()
 
 
@@ -3274,7 +3283,8 @@ def run():
         window.setWindowIcon(runtime_icon)
     window.show()
     QTimer.singleShot(0, lambda: _activate_macos_app(window))
-    sys.exit(app.exec())
+    app.exec()
+    sys.exit(0)
 
 
 if __name__ == "__main__":
