@@ -113,9 +113,20 @@ def write_api_endpoint(host: str, port: int, *, pid: int | None = None) -> None:
         "host": host,
         "port": int(port),
         "pid": int(pid or os.getpid()),
+        "token": os.getenv("JARVIS_API_TOKEN", "").strip(),
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
     runtime_meta_path().write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def clear_api_endpoint() -> None:
+    for path in (runtime_meta_path(), port_file_path()):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
 
 def read_api_endpoint() -> dict[str, Any] | None:
@@ -132,6 +143,7 @@ def read_api_endpoint() -> dict[str, Any] | None:
         "host": host,
         "port": port,
         "pid": payload.get("pid"),
+        "token": str(payload.get("token") or "").strip(),
         "written_at": payload.get("written_at"),
         "base_url": f"http://{host}:{port}",
     }

@@ -811,6 +811,9 @@ class ApiSurfaceTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.client.close()
 
+    def tearDown(self):
+        api._API_TOKEN = ""
+
     def test_status_endpoint_exposes_cost_policy(self):
         response = self.client.get("/status")
         self.assertEqual(response.status_code, 200)
@@ -932,6 +935,22 @@ class ApiSurfaceTests(unittest.TestCase):
         event_types = {event["type"] for event in events.json()["events"]}
         self.assertIn("workspace", event_types)
         self.assertIn("chunk", event_types)
+
+    def test_public_status_path_remains_visible_when_auth_is_enabled(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.get("/status")
+        self.assertEqual(response.status_code, 200)
+
+    def test_protected_paths_require_auth_when_token_is_enabled(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.get("/memory/status")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "auth_required")
+
+    def test_protected_paths_accept_bearer_token(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.get("/memory/status", headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 200)
 
 
 class BenchmarkCoverageTests(unittest.TestCase):

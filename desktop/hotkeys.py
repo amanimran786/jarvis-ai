@@ -22,6 +22,7 @@ _on_clip    = None
 _on_toggle  = None
 _on_listen  = None
 _on_overlay = None
+_listener = None
 
 _current_keys = set()
 
@@ -76,11 +77,27 @@ def _fire(action: str):
 
 def start():
     """Start the global hotkey listener in a background thread."""
+    global _listener
     if platform.system() == "Darwin" and os.getenv("JARVIS_ENABLE_GLOBAL_HOTKEYS", "").lower() not in {"1", "true", "yes", "on"}:
         print("[Hotkeys] Disabled on macOS by default for stability. Set JARVIS_ENABLE_GLOBAL_HOTKEYS=1 to re-enable.")
         return None
+    if _listener is not None:
+        return _listener
     listener = keyboard.Listener(on_press=_on_press, on_release=_on_release)
     listener.daemon = True
     listener.start()
+    _listener = listener
     print("[Hotkeys] Active — Cmd+Opt+J: screen | K: webcam | L: clipboard | M: listen | ;: toggle | O: overlay")
     return listener
+
+
+def stop():
+    global _listener
+    listener = _listener
+    _listener = None
+    if listener is None:
+        return
+    try:
+        listener.stop()
+    except Exception:
+        pass

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
-import socket
 import time
 import threading
+import json
+import urllib.request
+import urllib.error
 
 import api
 import runtime_state
@@ -27,11 +29,14 @@ def _resolve_host_port(host: str | None = None, port: int | None = None) -> tupl
 def _wait_for_api_ready(host: str, port: int, timeout: float = 8.0) -> bool:
     deadline = time.monotonic() + timeout
     last_error = ""
+    url = f"http://{host}:{port}/status"
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection((host, port), timeout=0.5):
+            with urllib.request.urlopen(url, timeout=0.5) as resp:
+                payload = json.load(resp)
+            if payload.get("status") == "online":
                 return True
-        except OSError as exc:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
             last_error = str(exc)
             time.sleep(0.1)
     if last_error:
@@ -88,6 +93,9 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
         if not _wait_for_api_ready(actual_host, actual_port):
             runtime_state.mark_error(f"API did not become ready at http://{actual_host}:{actual_port}")
             return _BOOT_THREAD
+        runtime_state.port_file_path().write_text(str(actual_port), encoding="utf-8")
+        os.environ["JARVIS_API_TOKEN"] = api.get_api_token()
+        runtime_state.write_api_endpoint(actual_host, actual_port)
         runtime_state.mark_started(
             host=actual_host,
             port=actual_port,

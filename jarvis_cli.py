@@ -17,11 +17,24 @@ Usage:
 
 import sys
 import json
+import os
 import urllib.request
 import urllib.error
 
+
+def _auth_headers() -> dict[str, str]:
+    token = os.getenv("JARVIS_API_TOKEN", "").strip()
+    if not token:
+        try:
+            import runtime_state
+            metadata = runtime_state.read_api_endpoint() or {}
+            token = str(metadata.get("token") or "").strip()
+        except Exception:
+            token = ""
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _base() -> str:
-    import os
     explicit = os.getenv("JARVIS_API_BASE_URL", "").strip()
     if explicit:
         return explicit.rstrip("/")
@@ -41,7 +54,7 @@ def post(path: str, body: dict) -> dict:
     data = json.dumps(body).encode()
     req = urllib.request.Request(
         _base() + path, data=data,
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json", **_auth_headers()}
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read())
@@ -52,7 +65,7 @@ def _stream_chat(message: str) -> int:
     data = json.dumps({"message": message, "stream": True}).encode()
     req = urllib.request.Request(
         base + "/chat", data=data,
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json", **_auth_headers()}
     )
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -110,7 +123,8 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
     if workspace.get("enabled") and workspace.get("worktree_path"):
         print(f"[workspace:{workspace.get('worktree_path')}]", flush=True)
     try:
-        with urllib.request.urlopen(base + f"/tasks/{task_id}/stream", timeout=600) as resp:
+        req = urllib.request.Request(base + f"/tasks/{task_id}/stream", headers=_auth_headers())
+        with urllib.request.urlopen(req, timeout=600) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()
                 if not line.startswith("data:"):
@@ -141,7 +155,8 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
 
 
 def get(path: str) -> dict:
-    with urllib.request.urlopen(_base() + path, timeout=10) as resp:
+    req = urllib.request.Request(_base() + path, headers=_auth_headers())
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
 
 

@@ -15,6 +15,12 @@ EXCLUDE_DIRS = {
     "venv",
     "build",
     "dist",
+    "docs",
+    "tests",
+    "graphify-out",
+    "memory",
+    "training",
+    ".jarvis_backups",
 }
 EXCLUDE_EXTS = {
     ".py",
@@ -26,9 +32,6 @@ EXCLUDE_EXTS = {
 
 def iter_datas():
     datas = []
-    env_path = ROOT / ".env"
-    if env_path.is_file():
-        datas.append((str(env_path), "."))
     for path in ROOT.rglob("*"):
         rel = path.relative_to(ROOT)
         if any(part in EXCLUDE_DIRS for part in rel.parts):
@@ -36,6 +39,8 @@ def iter_datas():
         if not path.is_file():
             continue
         if path.suffix in EXCLUDE_EXTS:
+            continue
+        if rel.parts[:2] in {("vault", "indexes"), ("vault", "outputs")}:
             continue
         datas.append((str(path), str(path.parent.relative_to(ROOT))))
     return datas
@@ -48,30 +53,33 @@ hiddenimports = sorted(set(
         "api",
         "agents",
         "behavior_hooks",
-        "brain",
-        "brain_claude",
-        "brain_gemini",
-        "brain_ollama",
+        "brains.brain",
+        "brains.brain_claude",
+        "brains.brain_gemini",
+        "brains.brain_ollama",
         "briefing",
         "browser",
         "call_privacy",
         "camera",
-        "bridge",
+        "desktop.bridge",
         "config",
         "conversation_context",
         "cost_policy",
-        "device_panel",
+        "desktop.device_panel",
         "evals",
         "google_services",
         "hardware",
-        "hotkeys",
+        "desktop.hotkeys",
         "interview_profile",
         "jarvis_daemon",
         "learner",
-        "local_beta",
-        "local_model_automation",
-        "local_model_eval",
-        "local_training",
+        "local_runtime.local_beta",
+        "local_runtime.local_model_automation",
+        "local_runtime.local_model_eval",
+        "local_runtime.local_training",
+        "local_runtime.local_stt",
+        "local_runtime.local_tts",
+        "local_runtime.local_model_benchmark",
         "meeting_listener",
         "meeting_controller",
         "memory",
@@ -80,12 +88,12 @@ hiddenimports = sorted(set(
         "notes",
         "operative",
         "orchestrator",
-        "overlay",
+        "desktop.overlay",
         "prompt_modifiers",
         "provider_priority",
         "research",
         "router",
-        "screen_capture",
+        "desktop.screen_capture",
         "self_improve",
         "runtime_state",
         "semantic_memory",

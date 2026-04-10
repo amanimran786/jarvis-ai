@@ -1186,8 +1186,12 @@ def start(on_transcript=None, on_suggestion=None) -> str:
 
 def stop() -> str:
     """Stop smart listening."""
-    global _running
+    global _running, _thread
     _running = False
+    worker = _thread
+    if worker and worker.is_alive():
+        worker.join(timeout=2.0)
+    _thread = None
     return "Smart listening stopped."
 
 

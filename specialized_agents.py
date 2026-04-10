@@ -13,7 +13,7 @@ from pathlib import Path
 
 from brains.brain_claude import ask_claude
 from brains.brain_ollama import ask_local, get_best_available
-from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING
+from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT
 import model_router
 import skills
 
