@@ -13,7 +13,13 @@ Default hotkeys:
 import threading
 import os
 import platform
-from pynput import keyboard
+
+try:
+    from pynput import keyboard
+    _HOTKEY_IMPORT_ERROR = None
+except Exception as exc:
+    keyboard = None
+    _HOTKEY_IMPORT_ERROR = exc
 
 # Callbacks set by ui.py
 _on_screen  = None
@@ -26,14 +32,16 @@ _listener = None
 
 _current_keys = set()
 
-HOTKEYS = {
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('j')]): 'screen',
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('k')]): 'webcam',
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('l')]): 'clip',
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char(';')]): 'toggle',
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('m')]): 'listen',
-    frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('o')]): 'overlay',
-}
+HOTKEYS = {}
+if keyboard is not None:
+    HOTKEYS = {
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('j')]): 'screen',
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('k')]): 'webcam',
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('l')]): 'clip',
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char(';')]): 'toggle',
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('m')]): 'listen',
+        frozenset([keyboard.Key.cmd, keyboard.Key.alt, keyboard.KeyCode.from_char('o')]): 'overlay',
+    }
 
 
 def register(on_screen=None, on_webcam=None, on_clip=None, on_toggle=None, on_listen=None, on_overlay=None):
@@ -48,6 +56,8 @@ def register(on_screen=None, on_webcam=None, on_clip=None, on_toggle=None, on_li
 
 def _normalize(key):
     """Normalize key for consistent matching."""
+    if keyboard is None:
+        return key
     try:
         if hasattr(key, 'char') and key.char:
             return keyboard.KeyCode.from_char(key.char.lower())
@@ -78,6 +88,9 @@ def _fire(action: str):
 def start():
     """Start the global hotkey listener in a background thread."""
     global _listener
+    if keyboard is None:
+        print(f"[Hotkeys] Unavailable: {_HOTKEY_IMPORT_ERROR}")
+        return None
     if platform.system() == "Darwin" and os.getenv("JARVIS_ENABLE_GLOBAL_HOTKEYS", "").lower() not in {"1", "true", "yes", "on"}:
         print("[Hotkeys] Disabled on macOS by default for stability. Set JARVIS_ENABLE_GLOBAL_HOTKEYS=1 to re-enable.")
         return None

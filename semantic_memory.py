@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -62,6 +64,14 @@ _TIERS = ("public", "semi_private")
 
 _embed_vecs: list[list[float]] = []
 _embed_ready: bool = False
+_embed_matrix = None          # numpy matrix built once from _embed_vecs
+
+# ── Query embedding LRU cache ────────────────────────────────────────────────
+# Each Ollama embed() call costs ~10-50ms. Cache the last 64 query vectors so
+# repeated or near-identical queries skip the roundtrip entirely.
+_EMBED_CACHE_SIZE = 64
+_embed_cache: OrderedDict[str, list[float]] = OrderedDict()
+_embed_cache_lock = threading.Lock()
 
 
 # ── Index management ─────────────────────────────────────────────────────────
@@ -104,7 +114,7 @@ def _doc_text(e: dict[str, Any]) -> str:
 
 def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
     """Try to build a real embedding index via Ollama. Returns True on success."""
-    global _embed_vecs, _embed_ready
+    global _embed_vecs, _embed_ready, _embed_matrix
     try:
         from brains.brain_ollama import embed
         vecs = []
@@ -114,6 +124,15 @@ def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
                 return False
             vecs.append(v)
         _embed_vecs = vecs
+        # Pre-build numpy matrix for O(1) batch cosine similarity
+        try:
+            import numpy as np
+            mat = np.array(vecs, dtype=np.float32)
+            norms = np.linalg.norm(mat, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            _embed_matrix = mat / norms   # unit-normalised rows
+        except ImportError:
+            _embed_matrix = None
         _embed_ready = True
         return True
     except Exception:

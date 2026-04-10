@@ -122,27 +122,52 @@ EXPLICIT_LOCAL = {
 }
 
 
+import time as _time
+import threading as _threading
+
+# ── Local model list cache with TTL ───────────────────────────────────────────
+# list_local_models() costs ~264ms (Ollama API roundtrip).
+# Cache for 30 seconds — stale by at most one pull cycle, saves every query.
+_LOCAL_LIST_LOCK = _threading.Lock()
+_LOCAL_LIST_TTL = 30.0
+_local_models_cache: list[str] = []
+_local_models_cached_at: float = 0.0
 _local_available_cache: bool | None = None
 
-def _has_local() -> bool:
-    """Check if any local models are available. Cached after first check."""
-    global _local_available_cache
-    if _local_available_cache is None:
+
+def _cached_local_models() -> list[str]:
+    global _local_models_cache, _local_models_cached_at
+    now = _time.monotonic()
+    if _local_models_cache and (now - _local_models_cached_at) < _LOCAL_LIST_TTL:
+        return _local_models_cache
+    with _LOCAL_LIST_LOCK:
+        now = _time.monotonic()
+        if _local_models_cache and (now - _local_models_cached_at) < _LOCAL_LIST_TTL:
+            return _local_models_cache
         try:
-            _local_available_cache = len(list_local_models()) > 0
+            _local_models_cache = list_local_models()
         except Exception:
-            _local_available_cache = False
-    return _local_available_cache
+            _local_models_cache = []
+        _local_models_cached_at = _time.monotonic()
+    return _local_models_cache
+
+
+def _has_local() -> bool:
+    """Check if any local models are available. Backed by TTL-cached list."""
+    return len(_cached_local_models()) > 0
+
 
 def refresh_local_cache() -> None:
-    """Call this after pulling a new model so the cache updates."""
-    global _local_available_cache
+    """Call this after pulling a new model so the cache updates immediately."""
+    global _local_available_cache, _local_models_cache, _local_models_cached_at
     _local_available_cache = None
+    _local_models_cache = []
+    _local_models_cached_at = 0.0
 
 
 def _best_local(text: str) -> str:
     """Pick the best available local model for the task."""
-    available = list_local_models()
+    available = _cached_local_models()
     lower = text.lower()
     promoted = local_model_eval.promoted_model()
 
@@ -318,16 +343,42 @@ def smart_stream(
     system_extra = grounding_extra + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
-    vault_extra = vault.build_context(user_input, tool=tool)
+    # ── Parallel context assembly ──────────────────────────────────────────────
+    # vault, graph, and semantic memory are all read-only and independent.
+    # Running them concurrently cuts wall time from sum → max of the three.
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+    def _get_vault():
+        return vault.build_context(user_input, tool=tool)
+
+    def _get_graph():
+        return _gctx.context_for_query(user_input, tool=tool)
+
+    def _get_smem():
+        return _smem.context_for_query(user_input, top_k=3, max_chars=1200)
+
+    vault_extra = graph_extra = smem_ctx = ""
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="ctx") as _pool:
+        _fv = _pool.submit(_get_vault)
+        _fg = _pool.submit(_get_graph)
+        _fs = _pool.submit(_get_smem)
+        try:
+            vault_extra = _fv.result(timeout=2.0) or ""
+        except Exception:
+            pass
+        try:
+            graph_extra = _fg.result(timeout=2.0) or ""
+        except Exception:
+            pass
+        try:
+            smem_ctx = _fs.result(timeout=4.0) or ""
+        except Exception:
+            pass
+
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
-
-    graph_extra = _gctx.context_for_query(user_input, tool=tool)
     if graph_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + graph_extra
-
-    # Semantic KB: inject relevant facts from memory/ (TF-IDF over structured JSON)
-    smem_ctx = _smem.context_for_query(user_input, top_k=3, max_chars=1200)
     if smem_ctx:
         system_extra = system_extra + ("\n\n" if system_extra else "") + smem_ctx
 
@@ -370,6 +421,7 @@ def smart_stream(
         explicit_cloud = policy.get("provider") == "cloud"
 
     plan = provider_router.build_plan(
+
         mode=mode,
         tier=tier,
         local_available=local_available,
