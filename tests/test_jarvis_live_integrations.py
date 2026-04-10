@@ -48,6 +48,10 @@ class LiveApiReadOnlyTests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(api.app)
 
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.close()
+
     @live_only
     def test_status_usage_and_cost_policy_endpoints(self):
         status = self.client.get("/status")

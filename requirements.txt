@@ -20,3 +20,4 @@ pyobjc-framework-Cocoa
 ollama
 pypdf
 # self_improve uses stdlib only (difflib, shutil, subprocess)
+cryptography

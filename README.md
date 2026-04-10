@@ -61,6 +61,19 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
    ANTHROPIC_API_KEY=sk-ant-...
    ELEVENLABS_API_KEY=...
    ELEVENLABS_VOICE_ID=...   # optional, defaults to George
+
+   # Free-first routing (defaults shown)
+   JARVIS_FREE_FIRST_ENABLED=1
+   JARVIS_PAID_FALLBACK_ENABLED=1
+   JARVIS_LOCAL_STRICT_FIRST=1
+   JARVIS_PROVIDER_PRIORITY_MINI=openai,gemini,anthropic
+   JARVIS_PROVIDER_PRIORITY_HAIKU=gemini,openai,anthropic
+   JARVIS_PROVIDER_PRIORITY_SONNET=openai,gemini,anthropic
+   JARVIS_PROVIDER_PRIORITY_OPUS=gemini,openai,anthropic
+
+   # Optional: max-permissive local profile (keeps only hard-stop gates)
+   JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE=0
+   JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES=0
    ```
 
 5. Optional: add `credentials.json` from Google Cloud Console for Calendar/Gmail/Drive OAuth.
@@ -86,6 +99,14 @@ A personal voice + text AI assistant for macOS. Jarvis combines local-first infe
    venv/bin/python scripts/build_graphify_repo.py
    ```
    This writes `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md`, and `graphify-out/analysis.json`.
+
+9. Optional: generate callable tool signatures and benchmark local models:
+   ```bash
+   venv/bin/python scripts/generate_tool_signatures.py
+   venv/bin/python scripts/benchmark_local_models.py --repeats 1
+   ```
+   If you have a malware detection API running locally, set:
+   `JARVIS_MALWARE_API_BASE=http://127.0.0.1:<port>`
 
 ## Running
 

@@ -7,6 +7,7 @@ import threading
 
 import api
 import runtime_state
+import task_runtime
 
 
 _BOOT_LOCK = threading.Lock()
@@ -45,6 +46,7 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
     global _BOOT_THREAD
 
     resolved_host, resolved_port = _resolve_host_port(host=host, port=port)
+    task_runtime.bootstrap()
 
     with _BOOT_LOCK:
         if _BOOT_THREAD and _BOOT_THREAD.is_alive():
