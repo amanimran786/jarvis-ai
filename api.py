@@ -10,6 +10,9 @@ Endpoints:
   GET  /evals/summary — inspect recent eval state
   GET  /status        — current mode, online check
   GET  /memory        — facts, topics, recent conversations
+  GET  /osint/status  — local OSINT tool availability
+  POST /osint/username — username footprint scan via Maigret
+  POST /osint/domain-typos — domain typo-squatting scan via DNSTwist
   POST /memory/add    — add a fact
   POST /memory/forget — forget by keyword
   GET  /mode          — current model routing mode
@@ -48,6 +51,7 @@ import provider_router
 import task_runtime
 import semantic_memory
 import graph_context as gctx
+import osint_tools
 
 
 def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
@@ -243,6 +247,20 @@ class LocalBetaRunRequest(BaseModel):
     build_training_pack: bool = False
     teacher_model: str = "claude-sonnet-4-6"
     suite: str = "all"
+
+
+class OsintUsernameRequest(BaseModel):
+    username: str
+    timeout_seconds: int = 45
+    top_sites: int = 200
+    max_results: int = 25
+
+
+class OsintDomainTyposRequest(BaseModel):
+    domain: str
+    timeout_seconds: int = 60
+    max_results: int = 25
+    registered_only: bool = True
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -686,6 +704,33 @@ def get_self_review(area: str = ""):
 def post_self_review(req: SelfReviewRequest):
     result, message = _safe_self_review(area=req.area or None)
     return {"ok": result.get("ok", False), "message": message, "result": result}
+
+
+@app.get("/osint/status")
+def osint_status():
+    return {"ok": True, "status": osint_tools.status()}
+
+
+@app.post("/osint/username")
+def osint_username(req: OsintUsernameRequest):
+    result = osint_tools.username_lookup(
+        req.username,
+        timeout_seconds=req.timeout_seconds,
+        top_sites=req.top_sites,
+        max_results=req.max_results,
+    )
+    return result
+
+
+@app.post("/osint/domain-typos")
+def osint_domain_typos(req: OsintDomainTyposRequest):
+    result = osint_tools.domain_typo_scan(
+        req.domain,
+        timeout_seconds=req.timeout_seconds,
+        max_results=req.max_results,
+        registered_only=req.registered_only,
+    )
+    return result
 
 
 @app.get("/memory")

@@ -188,6 +188,26 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
             return False, "Missing required hash."
         return _http_json("POST", "/ioc/hash", {"hash": hash_value, "source": source})
 
+    if tool == "osint_username":
+        import osint_tools
+        result = osint_tools.username_lookup(
+            params.get("username", ""),
+            timeout_seconds=int(params.get("timeout_seconds", 45)),
+            top_sites=int(params.get("top_sites", 200)),
+            max_results=int(params.get("max_results", 25)),
+        )
+        return True, json.dumps(result)
+
+    if tool == "osint_domain_typos":
+        import osint_tools
+        result = osint_tools.domain_typo_scan(
+            params.get("domain", ""),
+            timeout_seconds=int(params.get("timeout_seconds", 60)),
+            max_results=int(params.get("max_results", 25)),
+            registered_only=bool(params.get("registered_only", True)),
+        )
+        return True, json.dumps(result)
+
     prompt = params.get("prompt", params.get("content", step.description))
     if step_results:
         last = step_results.get(max(step_results.keys()))
