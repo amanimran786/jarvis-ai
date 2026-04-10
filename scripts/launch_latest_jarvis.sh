@@ -56,4 +56,6 @@ fi
 
 # Use 'open -a' (without -n) to reuse existing instance if running
 # or start a new one if not running (normal macOS behavior)
-open -a "$APPLICATIONS_APP"
+# Run detached so the script can exit immediately
+open -a "$APPLICATIONS_APP" &
+disown $!
