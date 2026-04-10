@@ -10,6 +10,8 @@ Usage:
   python jarvis_cli.py --skills
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
+  python jarvis_cli.py --graph-query "meeting watchdog"
+  python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
   python jarvis_cli.py --agents
   python jarvis_cli.py --tasks
   python jarvis_cli.py --task-status <task_id>
@@ -23,6 +25,7 @@ import json
 import os
 import urllib.request
 import urllib.error
+import urllib.parse
 
 
 def _auth_headers() -> dict[str, str]:
@@ -174,6 +177,8 @@ def main():
         print("       python jarvis_cli.py --connector <connector_id>")
         print("       python jarvis_cli.py --plugins")
         print("       python jarvis_cli.py --plugin <plugin_id>")
+        print("       python jarvis_cli.py --graph-query <query>")
+        print("       python jarvis_cli.py --graph-path <source> <target>")
         print("       python jarvis_cli.py --agents")
         print("       python jarvis_cli.py --tasks")
         print("       python jarvis_cli.py --task-status <task_id>")
@@ -250,6 +255,25 @@ def main():
             sys.exit(1)
         payload = get(f"/plugins/{sys.argv[2]}")
         print(json.dumps(payload.get("plugin", {}), indent=2))
+        return
+
+    if flag == "--graph-query":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --graph-query <query>", file=sys.stderr)
+            sys.exit(1)
+        query = " ".join(sys.argv[2:])
+        payload = get(f"/graph/query?q={urllib.parse.quote(query)}")
+        print(json.dumps(payload.get("result", {}), indent=2))
+        return
+
+    if flag == "--graph-path":
+        if len(sys.argv) < 4:
+            print("Usage: python jarvis_cli.py --graph-path <source> <target>", file=sys.stderr)
+            sys.exit(1)
+        source = urllib.parse.quote(sys.argv[2])
+        target = urllib.parse.quote(sys.argv[3])
+        payload = get(f"/graph/path?source={source}&target={target}")
+        print(json.dumps(payload.get("result", {}), indent=2))
         return
 
     if flag == "--agents":

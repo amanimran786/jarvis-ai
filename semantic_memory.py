@@ -37,6 +37,7 @@ Integration points:
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
@@ -50,6 +51,8 @@ _ROOT = Path(__file__).resolve().parent
 MEMORY_DIR = _ROOT / "memory"
 SEMANTIC_DIR = MEMORY_DIR / "semantic"
 EPISODIC_DIR = MEMORY_DIR / "episodic"
+CONVERSATIONS_DIR = MEMORY_DIR / "conversations"
+VERBATIM_LOG_PATH = CONVERSATIONS_DIR / "verbatim.jsonl"
 
 # ── TF-IDF index state ───────────────────────────────────────────────────────
 
@@ -105,11 +108,70 @@ def _load_all_entries() -> list[dict[str, Any]]:
                 all_entries.append(e)
             except Exception:
                 continue
+    # Verbatim conversation log
+    if VERBATIM_LOG_PATH.exists():
+        try:
+            lines = VERBATIM_LOG_PATH.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            lines = []
+        max_conversation_entries = max(int(_safe_int_env("JARVIS_CONVERSATION_INDEX_LIMIT", 1200)), 100)
+        for line in lines[-max_conversation_entries:]:
+            line = (line or "").strip()
+            if not line:
+                continue
+            try:
+                convo = json.loads(line)
+            except Exception:
+                continue
+            user_text = _compact_text(convo.get("user", ""))
+            assistant_text = _compact_text(convo.get("assistant", ""))
+            if not user_text and not assistant_text:
+                continue
+            content_parts = []
+            if user_text:
+                content_parts.append(f"User: {user_text}")
+            if assistant_text:
+                content_parts.append(f"Assistant: {assistant_text}")
+            all_entries.append(
+                {
+                    "id": convo.get("id", _generate_id()),
+                    "content": " | ".join(content_parts),
+                    "tags": _conversation_tags(convo),
+                    "_source": "conversation",
+                    "_tier": "semi_private",
+                    "created_at": convo.get("timestamp", ""),
+                }
+            )
     return all_entries
 
 
 def _doc_text(e: dict[str, Any]) -> str:
     return f"{e.get('content', '')} {' '.join(e.get('tags', []))}"
+
+
+def _safe_int_env(name: str, default: int) -> int:
+    try:
+        return int((os.getenv(name, str(default)) or str(default)).strip())
+    except Exception:
+        return default
+
+
+def _compact_text(value: str, limit: int = 700) -> str:
+    text = re.sub(r"\s+", " ", (value or "").strip())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
+def _conversation_tags(entry: dict[str, Any]) -> list[str]:
+    tags = ["conversation", "verbatim"]
+    model = (entry.get("model") or "").strip()
+    source = (entry.get("source") or "").strip()
+    if model:
+        tags.append(f"model:{model}")
+    if source:
+        tags.append(f"source:{source}")
+    return tags
 
 
 def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
@@ -367,6 +429,27 @@ def write_episodic(domain: str, event: dict[str, Any]) -> Path:
     return path
 
 
+def log_conversation_turn(user_input: str, assistant_response: str, model: str = "", source: str = "") -> None:
+    """Append a verbatim turn to local conversation memory and invalidate index."""
+    user_text = _compact_text(user_input, limit=2000)
+    assistant_text = _compact_text(assistant_response, limit=2500)
+    if not user_text and not assistant_text:
+        return
+
+    CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": _generate_id(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "user": user_text,
+        "assistant": assistant_text,
+        "model": (model or "").strip(),
+        "source": (source or "").strip(),
+    }
+    with VERBATIM_LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    invalidate()
+
+
 # ── Formatting ───────────────────────────────────────────────────────────────
 
 def format_for_prompt(hits: list[dict[str, Any]], max_chars: int = 2000) -> str:
@@ -417,7 +500,9 @@ def status() -> dict[str, Any]:
         "entries_indexed": len(_entries),
         "semantic_entries": sum(1 for e in _entries if e.get("_source") == "semantic"),
         "episodic_entries": sum(1 for e in _entries if e.get("_source") == "episodic"),
+        "conversation_entries": sum(1 for e in _entries if e.get("_source") == "conversation"),
         "index_ready": _vectorizer is not None,
         "retrieval_backend": "ollama-embeddings" if _embed_ready else "tfidf",
         "memory_dir": str(MEMORY_DIR),
+        "conversation_log": str(VERBATIM_LOG_PATH),
     }
