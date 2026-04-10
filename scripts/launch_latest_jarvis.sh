@@ -5,6 +5,15 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPLICATIONS_APP="$HOME/Applications/Jarvis.app"
 INSTALL_SCRIPT="$ROOT/scripts/install_jarvis_app.sh"
 STAMP_FILE="$ROOT/.jarvis_build_stamp"
+LOCKFILE="/tmp/jarvis_launcher.lock"
+
+# Ensure only one launcher invocation at a time (prevent race conditions)
+exec 9>"$LOCKFILE"
+if ! flock -n 9; then
+  # Another launcher is already running, wait briefly then exit
+  sleep 1
+  exit 0
+fi
 
 latest_source_stamp() {
   /usr/bin/find "$ROOT" \
