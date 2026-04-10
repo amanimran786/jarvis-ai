@@ -44,6 +44,7 @@ import hardware as hw
 import browser
 from desktop import overlay as _overlay_mod
 import call_privacy
+from local_runtime import local_stt
 
 try:
     import meeting_controller as _meeting_controller_mod
@@ -86,6 +87,9 @@ C_WARNING   = "#FFAA00"       # processing state
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
+WAKE_PROMPT = "Say 'Hey Jarvis' to talk."
+WAKE_ACK = "I'm here. Go ahead."
+MIC_IDLE_TOOLTIP = "Jarvis is standing by for the wake word."
 
 
 # ── Glow helper ────────────────────────────────────────────────────────────────
@@ -102,6 +106,19 @@ def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
         background-color: {fill};
         border: 1px solid {border};
         border-radius: {radius}px;
+    """
+
+
+def _mic_chip_css(border: str, fill: str, text: str) -> str:
+    return f"""
+        QLabel {{
+            background: {fill};
+            color: {text};
+            border: 1px solid {border};
+            border-radius: 10px;
+            padding: 4px 10px;
+            letter-spacing: 1px;
+        }}
     """
 
 
@@ -1125,8 +1142,8 @@ class VoiceWorker(QThread):
             self._conversation()
 
     def _conversation(self):
-        speak("Yes?")
-        self.message.emit("Yes?", "jarvis", "")
+        speak(WAKE_ACK)
+        self.message.emit(WAKE_ACK, "jarvis", "")
         misses = 0
         exchanges = []
 
@@ -1351,6 +1368,11 @@ class JarvisWindow(QMainWindow):
         self._last_live_suggestion_at = 0.0
         self._device_refresh_in_flight = False
         self._device_refresh_pending = False
+        self._voice_services_started = False
+        self._voice_runtime_ready = False
+        self._voice_runtime_mode = "unknown"
+        self._voice_runtime_detail = ""
+        self._voice_runtime_tooltip = ""
         self._build_ui()
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
@@ -1444,6 +1466,20 @@ class JarvisWindow(QMainWindow):
         status_row.addWidget(self._status_dot)
         status_row.addWidget(self._status_label)
         status_block.addLayout(status_row)
+
+        self._voice_hint_label = QLabel(WAKE_PROMPT)
+        self._voice_hint_label.setFont(QFont("Courier New", 7))
+        self._voice_hint_label.setWordWrap(True)
+        self._voice_hint_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._voice_hint_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        status_block.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignRight)
+
+        self._mic_chip = QLabel("● MIC STANDBY")
+        self._mic_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mic_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 185)", C_TEXT_DIM))
+        self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
+        status_block.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignRight)
 
         mode_lbl = QLabel(f"MODE: {model_router.get_mode().upper()}")
         mode_lbl.setFont(QFont("Courier New", 7))
@@ -1978,6 +2014,9 @@ class JarvisWindow(QMainWindow):
     # ── Voice & startup ────────────────────────────────────────────────────────
 
     def _start_voice(self):
+        if self._voice_services_started:
+            return
+        self._voice_services_started = True
         set_timer_callback(self._on_timer_done)
         learner.start_background_feed()
 
@@ -1986,11 +2025,30 @@ class JarvisWindow(QMainWindow):
 
         threading.Thread(target=self._maybe_brief, daemon=True).start()
 
-        self.voice_worker = VoiceWorker()
-        self.voice_worker.message.connect(self._add_message)
-        self.voice_worker.interaction.connect(self._register_interaction)
-        self.voice_worker.status.connect(self._set_status)
-        self.voice_worker.start()
+        voice_runtime = self._voice_runtime_snapshot()
+        self._voice_runtime_ready = bool(voice_runtime["can_listen"])
+        self._voice_runtime_mode = str(voice_runtime["mode"])
+        self._voice_runtime_detail = str(voice_runtime["detail"])
+        self._voice_runtime_tooltip = str(voice_runtime["tooltip"])
+        self._set_voice_hint(
+            self._voice_runtime_detail,
+            str(voice_runtime["color"]),
+            self._voice_runtime_tooltip,
+        )
+
+        if self._voice_runtime_ready:
+            self.voice_worker = VoiceWorker()
+            self.voice_worker.message.connect(self._add_message)
+            self.voice_worker.interaction.connect(self._register_interaction)
+            self.voice_worker.status.connect(self._set_status)
+            self.voice_worker.start()
+        else:
+            self._set_status(str(voice_runtime["label"]))
+            self._add_message(
+                f"Voice input unavailable. {self._voice_runtime_tooltip}",
+                "jarvis",
+                "Voice",
+            )
 
         # Poll voice speaking state → drive orb animation
         from voice import _done_speaking as _voice_speaking_event
@@ -2345,11 +2403,135 @@ class JarvisWindow(QMainWindow):
 
     def _status_color_for_text(self, text: str) -> str:
         upper = (text or "").upper()
-        if "LISTEN" in upper or "ACTIVE" in upper or "VOICE" in upper:
+        if "OFFLINE" in upper or "UNAVAILABLE" in upper or "DEGRADED" in upper:
+            return C_WARNING
+        if "LISTEN" in upper or "ACTIVE" in upper or "VOICE" in upper or "WAKE WORD" in upper or "MIC READY" in upper:
             return C_CYAN
         if "PROCESS" in upper or "SCAN" in upper or "CAMERA" in upper or "READING" in upper:
             return C_WARNING
         return C_GREEN
+
+    def _voice_runtime_snapshot(self) -> dict[str, str | bool]:
+        try:
+            snap = local_stt.status()
+        except Exception as exc:
+            return {
+                "can_listen": False,
+                "mode": "unavailable",
+                "label": "VOICE OFFLINE",
+                "detail": "Voice input could not initialize.",
+                "tooltip": str(exc),
+                "color": C_WARNING,
+            }
+
+        active = (snap.get("active_engine") or "unavailable").strip().lower()
+        import_error = (snap.get("import_error") or "").strip()
+
+        if active == "faster-whisper":
+            model = snap.get("model") or "faster-whisper"
+            return {
+                "can_listen": True,
+                "mode": "ready",
+                "label": "MIC READY",
+                "detail": WAKE_PROMPT,
+                "tooltip": f"Local STT ready via {model}.",
+                "color": C_CYAN,
+            }
+
+        if active == "openai":
+            return {
+                "can_listen": True,
+                "mode": "degraded",
+                "label": "VOICE DEGRADED",
+                "detail": "Using remote speech fallback.",
+                "tooltip": "Local STT is unavailable, so Jarvis will fall back to remote speech recognition.",
+                "color": C_WARNING,
+            }
+
+        reason = import_error or "No speech-to-text backend is available."
+        recovery = "Launch Jarvis with ./venv/bin/python main.py."
+        return {
+            "can_listen": False,
+            "mode": "unavailable",
+            "label": "VOICE OFFLINE",
+            "detail": recovery,
+            "tooltip": f"{reason} {recovery}".strip(),
+            "color": C_WARNING,
+        }
+
+    def _set_voice_hint(self, text: str, color: str = C_TEXT_DIM, tooltip: str = ""):
+        if not hasattr(self, "_voice_hint_label"):
+            return
+        self._voice_hint_label.setText(text)
+        self._voice_hint_label.setToolTip(tooltip or text)
+        self._voice_hint_label.setStyleSheet(f"color: {color}; background: transparent;")
+
+    def _set_mic_chip(self, label: str, border: str, fill: str, text: str, tooltip: str):
+        if not hasattr(self, "_mic_chip"):
+            return
+        self._mic_chip.setText(label)
+        self._mic_chip.setToolTip(tooltip)
+        self._mic_chip.setStyleSheet(_mic_chip_css(border, fill, text))
+
+    def _apply_voice_hint_for_status(self, raw_text: str):
+        runtime_mode = getattr(self, "_voice_runtime_mode", "unknown")
+        runtime_detail = getattr(self, "_voice_runtime_detail", "")
+        runtime_tooltip = getattr(self, "_voice_runtime_tooltip", "")
+
+        if runtime_mode == "unavailable":
+            self._set_voice_hint(runtime_detail or "Voice input unavailable.", C_WARNING, runtime_tooltip)
+            self._set_mic_chip(
+                "● MIC OFFLINE",
+                C_WARNING,
+                "rgba(255, 170, 0, 0.14)",
+                C_WARNING,
+                runtime_tooltip or "Voice input is unavailable.",
+            )
+            return
+
+        upper = (raw_text or "").upper()
+        if "AWAITING WAKE WORD" in upper or "MIC READY" in upper or upper == "ONLINE":
+            self._set_voice_hint(
+                "Listening for 'Hey Jarvis'.",
+                C_CYAN if runtime_mode == "ready" else C_WARNING,
+                runtime_tooltip or runtime_detail or WAKE_PROMPT,
+            )
+            self._set_mic_chip(
+                "● MIC STANDBY" if runtime_mode == "ready" else "● MIC DEGRADED",
+                C_CYAN if runtime_mode == "ready" else C_WARNING,
+                "rgba(0, 212, 255, 0.12)" if runtime_mode == "ready" else "rgba(255, 170, 0, 0.14)",
+                C_CYAN if runtime_mode == "ready" else C_WARNING,
+                runtime_tooltip or runtime_detail or MIC_IDLE_TOOLTIP,
+            )
+            return
+        if "LISTENING" in upper or "VOICE ACTIVE" in upper:
+            self._set_voice_hint("I'm listening now. Speak your prompt.", C_GREEN, "Jarvis is capturing microphone input.")
+            self._set_mic_chip(
+                "● MIC HOT",
+                C_GREEN,
+                "rgba(0, 255, 136, 0.20)",
+                C_GREEN,
+                "Jarvis is actively hearing you right now.",
+            )
+            return
+        if "PROCESS" in upper:
+            self._set_voice_hint("Thinking through what you said.", C_WARNING, "Jarvis heard you and is working on the reply.")
+            self._set_mic_chip(
+                "● MIC COOLING",
+                C_WARNING,
+                "rgba(255, 170, 0, 0.14)",
+                C_WARNING,
+                "Jarvis heard you and is processing the request.",
+            )
+            return
+        self._set_voice_hint(runtime_detail or WAKE_PROMPT, C_TEXT_DIM, runtime_tooltip or runtime_detail)
+        self._set_mic_chip(
+            "● MIC STANDBY",
+            C_BORDER,
+            "rgba(3, 18, 28, 165)",
+            C_TEXT_DIM,
+            runtime_tooltip or runtime_detail or MIC_IDLE_TOOLTIP,
+        )
 
     def _on_agent_alert(self, title: str, body: str, speak_it: bool):
         """Called from agent threads — must marshal to UI thread via QTimer."""
@@ -2435,17 +2617,29 @@ class JarvisWindow(QMainWindow):
         self._add_message(f"Logged feedback under {failure['category']} for the last Jarvis answer.", "jarvis", "Eval")
 
     def _set_status(self, text: str):
-        if self._status_label.text() == text:
+        raw_text = text or ""
+        upper = raw_text.upper()
+        display_text = {
+            "AWAITING WAKE WORD": "MIC READY",
+            "VOICE ACTIVE": "MIC LIVE",
+        }.get(raw_text, raw_text)
+        if self._status_label.text() == display_text:
+            self._apply_voice_hint_for_status(raw_text)
             return
-        self._status_label.setText(text)
+        self._status_label.setText(display_text)
         busy = False
-        if "LISTEN" in text or "ACTIVE" in text or "VOICE" in text:
+        if "OFFLINE" in upper or "UNAVAILABLE" in upper or "DEGRADED" in upper:
+            self._status_label.setStyleSheet(f"color: {C_WARNING}; background: transparent; letter-spacing: 2px;")
+            self._status_dot.set_color(C_WARNING)
+            self._orb.set_state(JarvisOrb.STATE_IDLE)
+            self._signal_bars.set_intensity(0.18)
+        elif any(token in upper for token in ("LISTEN", "ACTIVE", "VOICE", "WAKE WORD", "MIC READY")):
             self._status_label.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_CYAN)
             self._orb.set_state(JarvisOrb.STATE_LISTENING)
             self._signal_bars.set_intensity(0.55)
             busy = True
-        elif "PROCESS" in text or "SCANNING" in text or "CAMERA" in text or "READING" in text:
+        elif "PROCESS" in upper or "SCANNING" in upper or "CAMERA" in upper or "READING" in upper:
             self._status_label.setStyleSheet(f"color: {C_WARNING}; background: transparent; letter-spacing: 2px;")
             self._status_dot.set_color(C_WARNING)
             self._orb.set_state(JarvisOrb.STATE_SPEAKING)
@@ -2458,6 +2652,7 @@ class JarvisWindow(QMainWindow):
             self._signal_bars.set_intensity(0.28)
         if hasattr(self, "_hud_bg"):
             self._hud_bg.set_busy(busy)
+        self._apply_voice_hint_for_status(raw_text)
 
     def _send_text(self):
         text = self.input_field.text().strip()
@@ -2652,6 +2847,7 @@ class OrbShellWindow(JarvisWindow):
         self._bootstrapped = True
         self._refresh_live_call_status()
         self._bind_live_update_signals()
+        self._apply_voice_hint_for_status(self._status_label.text())
         self._start_voice()
         self._adaptive_timer.start(340)
         self._call_status_timer.start(2500)
@@ -2715,6 +2911,20 @@ class OrbShellWindow(JarvisWindow):
         status_wrap.setStyleSheet("background: transparent;")
         status_wrap.setLayout(self._status_row)
         orb_layout.addWidget(status_wrap, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._voice_hint_label = QLabel(WAKE_PROMPT)
+        self._voice_hint_label.setWordWrap(True)
+        self._voice_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._voice_hint_label.setFont(QFont("Courier New", 7))
+        self._voice_hint_label.setStyleSheet("color: " + C_TEXT_DIM + "; background: transparent;")
+        orb_layout.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._mic_chip = QLabel("● MIC STANDBY")
+        self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mic_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._mic_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 165)", C_TEXT_DIM))
+        self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
+        orb_layout.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(orb_shell, alignment=Qt.AlignmentFlag.AlignCenter)
 
