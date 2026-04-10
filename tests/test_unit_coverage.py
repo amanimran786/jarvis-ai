@@ -1608,5 +1608,35 @@ class SemanticMemoryRetrievalTests(unittest.TestCase):
         self.assertEqual(hits, [])
 
 
+class MainStartupGuardTests(unittest.TestCase):
+    def test_gui_launch_reexecs_from_conda_into_project_venv(self):
+        import main
+
+        with patch("main._is_conda_python", return_value=True), \
+             patch.object(main.sys, "argv", ["main.py"]), \
+             patch("main._project_venv_python", return_value="/tmp/jarvis-venv/bin/python"), \
+             patch("main.os.path.exists", return_value=True), \
+             patch("main.os.path.realpath", side_effect=lambda p: p), \
+             patch("main.os.execv") as execv_mock:
+            main._ensure_supported_gui_runtime()
+
+        execv_mock.assert_called_once_with(
+            "/tmp/jarvis-venv/bin/python",
+            ["/tmp/jarvis-venv/bin/python", "main.py"],
+        )
+
+    def test_gui_launch_from_conda_without_venv_exits_cleanly(self):
+        import main
+
+        with patch("main._is_conda_python", return_value=True), \
+             patch.object(main.sys, "argv", ["main.py"]), \
+             patch("main._project_venv_python", return_value="/tmp/missing-venv/bin/python"), \
+             patch("main.os.path.exists", return_value=False):
+            with self.assertRaises(SystemExit) as exc:
+                main._ensure_supported_gui_runtime()
+
+        self.assertIn("should not be launched from conda", str(exc.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

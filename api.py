@@ -427,6 +427,27 @@ def get_local_beta_status():
     return {"ok": True, "status": local_beta.status()}
 
 
+@app.get("/local/capabilities")
+def get_local_capabilities():
+    import brain_ollama
+    import local_stt
+    import local_tts
+    import semantic_memory
+
+    example_query = "Why does TCP have a three-way handshake and not a two-way handshake?"
+    return {
+        "ok": True,
+        "mode": model_router.get_mode(),
+        "capabilities": {
+            **brain_ollama.local_capabilities(),
+            "reasoning_route": model_router.describe_runtime_for(example_query),
+            "stt": local_stt.status(),
+            "tts": local_tts.status(),
+            "semantic_memory": semantic_memory.status(),
+        },
+    }
+
+
 @app.post("/local/training/export")
 def export_local_training(req: LocalTrainingExportRequest):
     result = local_training.export_sft_dataset(limit=req.limit, cloud_only=req.cloud_only)
@@ -657,4 +678,12 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
         except Exception:
             pass
     print(f"[API] Jarvis API running at http://{_host}:{_port}")
+
+    # Pre-load the reasoning model in the background so first query is instant
+    import model_router as _mr
+    if _mr.is_open_source_mode():
+        from brain_ollama import warm_model_cache
+        warm_thread = threading.Thread(target=warm_model_cache, daemon=True, name="OllamaWarm")
+        warm_thread.start()
+
     return t

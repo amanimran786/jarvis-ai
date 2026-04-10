@@ -148,80 +148,77 @@ def _capture_frame() -> str:
 
 def see(prompt: str = "Describe what you see in detail.") -> str:
     """
-    Capture a webcam frame and ask GPT-4o Vision to describe it.
-    prompt: what to ask about the image
+    Capture a webcam frame and describe it — fully local when possible.
+
+    Priority:
+      1. Local multimodal model (llava/minicpm-v) — actual image understanding
+      2. OCR + local LLM summary — text-heavy screens
+      3. GPT-4o Vision — cloud fallback only when no local vision model is available
     """
     path = None
     try:
         path = _capture_frame()
+        from brain_ollama import ask_local_vision
+        local_vision = ask_local_vision(
+            path, prompt,
+            system_extra="Be concise. This response will be spoken aloud. No markdown."
+        )
+        if local_vision:
+            return local_vision
         local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
         if local_answer:
             return local_answer
         client = _get_openai_client()
         if client is None:
-            return "I couldn't extract enough local text from the camera frame to answer that reliably yet."
+            return "No local vision model is available. Pull one with: ollama pull llava:7b"
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
-
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_data}"
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": f"You are Jarvis, a helpful AI assistant. {prompt} Be concise — this response will be spoken aloud."
-                        }
-                    ]
-                }
-            ],
-            max_tokens=300
+            messages=[{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
+                {"type": "text", "text": f"You are Jarvis. {prompt} Be concise — spoken aloud."}
+            ]}],
+            max_tokens=300,
         )
         return response.choices[0].message.content
-
     finally:
         if path and os.path.exists(path):
             os.unlink(path)
 
 
 def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> str:
-    """Take a screenshot and describe it using Vision API."""
+    """Take a screenshot and describe it — fully local when possible.
+
+    Priority:
+      1. Local multimodal model (llava/minicpm-v)
+      2. OCR + local LLM summary
+      3. GPT-4o Vision — cloud fallback only
+    """
     path = capture_screenshot_temp(preferred_format="jpg", fallback_formats=("png",))
     try:
+        from brain_ollama import ask_local_vision
+        local_vision = ask_local_vision(
+            path, prompt,
+            system_extra="Be concise. This response will be spoken aloud. No markdown."
+        )
+        if local_vision:
+            return local_vision
         local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
         if local_answer:
             return local_answer
         client = _get_openai_client()
         if client is None:
-            return "I couldn't extract enough local text from this screen to answer that reliably yet."
+            return "No local vision model is available. Pull one with: ollama pull llava:7b"
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
-
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
-                        },
-                        {
-                            "type": "text",
-                            "text": f"You are Jarvis. {prompt}"
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1024
+            messages=[{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
+                {"type": "text", "text": f"You are Jarvis. {prompt}"},
+            ]}],
+            max_tokens=1024,
         )
         return response.choices[0].message.content
     finally:
