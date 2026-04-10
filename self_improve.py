@@ -794,5 +794,4 @@ def restart_jarvis() -> None:
                 pass
     except Exception:
         pass
-    subprocess.Popen([sys.executable] + sys.argv)
-    sys.exit(0)
+    os.execv(sys.executable, [sys.executable] + sys.argv)

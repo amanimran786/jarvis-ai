@@ -236,61 +236,103 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertEqual(result["final"], "Execute second.")
 
     def test_specialized_agent_science_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "What is the difference between entropy in thermodynamics and entropy in information theory?"
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "What is the difference between entropy in thermodynamics and entropy in information theory?"
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertEqual(result["roles"], ["science_expert", "reviewer"])
         self.assertIn("thermodynamics", result["final"])
         self.assertTrue(any(term in result["final"] for term in ("information theory", "Shannon entropy")))
 
     def test_specialized_agent_memory_leak_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "I have a Python service leaking memory over time. Give me the most likely causes and a concrete debugging sequence."
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "I have a Python service leaking memory over time. Give me the most likely causes and a concrete debugging sequence."
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertIn("cache", result["final"])
         self.assertTrue(any(term in result["final"] for term in ("objgraph", "tracemalloc", "connection", "client")))
 
     def test_specialized_agent_fastapi_502_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence."
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence."
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertTrue(any(term in result["final"] for term in ("0.0.0.0", "proxy_pass", "upstream", "logs")))
 
     def test_specialized_agent_auth_security_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "Review this authentication design for security issues. It stores JWT access tokens in localStorage and trusts frontend role checks before showing admin actions."
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "Review this authentication design for security issues. It stores JWT access tokens in localStorage and trusts frontend role checks before showing admin actions."
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertTrue(any(term in result["final"] for term in ("localStorage", "XSS", "server-side", "authorization")))
 
     def test_specialized_agent_migration_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "Give me a zero-downtime rollout plan for making a nullable Postgres column required in production."
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "Give me a zero-downtime rollout plan for making a nullable Postgres column required in production."
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertTrue(any(term in result["final"] for term in ("backfill", "constraint", "NOT NULL", "rollback", "validate")))
 
     def test_specialized_agent_race_condition_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?"
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?"
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertTrue(any(term in result["final"] for term in ("shared state", "logging", "reproduce", "stress")))
 
     def test_specialized_agent_stale_read_fallback_when_claude_unavailable(self):
-        with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")):
-            result = specialized_agents.run(
-                "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?"
-            )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.ask_claude", side_effect=RuntimeError("credit balance too low")), \
+                 patch("specialized_agents.ask_local", side_effect=RuntimeError("local unavailable")):
+                result = specialized_agents.run(
+                    "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?"
+                )
+        finally:
+            model_router.set_mode(previous)
         self.assertTrue(result["ok"])
         self.assertTrue(any(term in result["final"] for term in ("cache invalidation", "replica lag", "read-after-write", "primary")))
 
@@ -338,9 +380,14 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(decision.tool, "chat")
 
     def test_science_prompt_auto_invokes_specialized_agent(self):
-        decision = orchestrator.classify(
-            "What are the main ways CRISPR editing creates off-target effects, and how do researchers reduce them?"
-        )
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            decision = orchestrator.classify(
+                "What are the main ways CRISPR editing creates off-target effects, and how do researchers reduce them?"
+            )
+        finally:
+            model_router.set_mode(previous)
         self.assertEqual(decision.tool, "specialized_agent")
         self.assertEqual(decision.params.get("roles"), ["science_expert", "reviewer"])
 
@@ -792,12 +839,17 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(text, "Stub answer.")
 
     def test_automatic_specialized_agent_route_for_science_question(self):
-        with patch("specialized_agents.run", return_value={"ok": True, "roles": ["science_expert", "reviewer"], "final": "Science stub."}), \
-             patch("specialized_agents.result_text", return_value="Science stub."):
-            stream, label = router.route_stream(
-                "Why do transformer KV caches improve inference speed, and what are the memory tradeoffs as sequence length grows?"
-            )
-            text = "".join(stream)
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.run", return_value={"ok": True, "roles": ["science_expert", "reviewer"], "final": "Science stub."}), \
+                 patch("specialized_agents.result_text", return_value="Science stub."):
+                stream, label = router.route_stream(
+                    "Why do transformer KV caches improve inference speed, and what are the memory tradeoffs as sequence length grows?"
+                )
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
         self.assertEqual(label, "Specialized Agents")
         self.assertEqual(text, "Science stub.")
 

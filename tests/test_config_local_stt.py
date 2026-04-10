@@ -25,7 +25,12 @@ class LocalSttConfigTests(unittest.TestCase):
             return importlib.reload(config_module)
 
     def test_defaults_to_faster_whisper_first_with_openai_fallback(self):
-        cfg = self._reload_with_env({})
+        cfg = self._reload_with_env({
+            "JARVIS_STT_BACKENDS": "faster-whisper,openai",
+            "JARVIS_OPENAI_STT_FALLBACK_ENABLED": "1",
+            "JARVIS_LOCAL_STT_ENABLED": "1",
+            "JARVIS_FASTER_WHISPER_ENABLED": "1",
+        })
         self.assertEqual(cfg.STT_BACKENDS, ("faster-whisper", "openai"))
         self.assertEqual(cfg.STT_PRIMARY_BACKEND, "faster-whisper")
         self.assertTrue(cfg.LOCAL_STT_ENABLED)
@@ -34,6 +39,9 @@ class LocalSttConfigTests(unittest.TestCase):
     def test_explicit_backend_order_filters_unknown_and_duplicates(self):
         cfg = self._reload_with_env({
             "JARVIS_STT_BACKENDS": "openai, faster-whisper, invalid, openai",
+            "JARVIS_OPENAI_STT_FALLBACK_ENABLED": "1",
+            "JARVIS_LOCAL_STT_ENABLED": "1",
+            "JARVIS_FASTER_WHISPER_ENABLED": "1",
         })
         self.assertEqual(cfg.STT_BACKENDS, ("openai", "faster-whisper"))
         self.assertEqual(cfg.STT_PRIMARY_BACKEND, "openai")
