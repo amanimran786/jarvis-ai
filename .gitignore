@@ -54,7 +54,7 @@ build/
 assets/icon.iconset/
 
 # Runtime logs
-routing_log.jsonl
+routing_log*.jsonl
 
 # Graphify build artifacts
 graphify-out/.graphify_*
