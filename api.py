@@ -22,6 +22,7 @@ Endpoints:
 import json
 import os
 import hmac
+import hashlib
 import secrets
 import threading
 import uvicorn
@@ -82,7 +83,7 @@ def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
 _API_TOKEN = ""
-_PUBLIC_PATHS = {"/status"}
+_PUBLIC_PATHS = {"/status", "/webhooks/trigger", "/webhooks/github"}
 
 
 def _host_without_port(host_header: str) -> str:
@@ -112,6 +113,152 @@ def _token_authorized(request: Request) -> bool:
     else:
         supplied = request.headers.get("X-Jarvis-Token", "").strip()
     return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
+def _webhook_secret() -> str:
+    return (os.getenv("JARVIS_WEBHOOK_SECRET", "") or "").strip()
+
+
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name, "")
+    if raw is None:
+        return default
+    lowered = str(raw).strip().lower()
+    if not lowered:
+        return default
+    return lowered in {"1", "true", "yes", "on"}
+
+
+def _signature_candidates(request: Request) -> list[str]:
+    values = [
+        request.headers.get("x-jarvis-signature", ""),
+        request.headers.get("x-jarvis-signature-256", ""),
+        request.headers.get("x-hub-signature-256", ""),
+    ]
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def _validate_webhook_signature(request: Request, body: bytes) -> tuple[bool, str]:
+    secret = _webhook_secret()
+    if not secret:
+        if _env_truthy("JARVIS_ALLOW_UNSIGNED_WEBHOOKS", default=False):
+            return True, ""
+        return False, "webhook_secret_missing"
+    signatures = _signature_candidates(request)
+    if not signatures:
+        return False, "signature_missing"
+    expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    if any(hmac.compare_digest(sig, expected) for sig in signatures):
+        return True, ""
+    return False, "signature_invalid"
+
+
+def _coerce_json_body(body: bytes) -> dict:
+    if not body:
+        return {}
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {"payload": data}
+
+
+def _compact_json(value) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    except Exception:
+        return repr(value)
+
+
+def _payload_meta(body: bytes, payload: dict) -> dict:
+    # Keep webhook task metadata lightweight by default to reduce leakage risk.
+    # Full raw payload storage is opt-in for debugging.
+    digest = hashlib.sha256(body or b"").hexdigest()
+    if _env_truthy("JARVIS_WEBHOOK_STORE_FULL_PAYLOAD", default=False):
+        return {"sha256": digest, "payload": payload}
+    keys = sorted(str(key) for key in payload.keys()) if isinstance(payload, dict) else []
+    return {"sha256": digest, "payload_keys": keys, "payload_bytes": len(body or b"")}
+
+
+def _generic_webhook_prompt(payload: dict, event_name: str) -> str:
+    explicit = str(payload.get("prompt") or "").strip()
+    if explicit:
+        return explicit
+    action = str(payload.get("action") or "").strip()
+    subject = (
+        payload.get("title")
+        or payload.get("name")
+        or payload.get("summary")
+        or payload.get("description")
+        or payload.get("message")
+        or payload.get("text")
+        or ""
+    )
+    subject_text = str(subject).strip()
+    summary_bits = [f"event={event_name or 'webhook'}"]
+    if action:
+        summary_bits.append(f"action={action}")
+    if subject_text:
+        summary_bits.append(f"subject={subject_text[:160]}")
+    else:
+        summary_bits.append(f"payload={_compact_json(payload)[:220]}")
+    return "Handle incoming webhook trigger. " + " | ".join(summary_bits)
+
+
+def _github_webhook_prompt(event_name: str, payload: dict) -> str:
+    action = str(payload.get("action") or "").strip()
+    repo = ((payload.get("repository") or {}).get("full_name") or "").strip()
+    issue = payload.get("issue") or {}
+    pull_request = payload.get("pull_request") or {}
+    comment = payload.get("comment") or {}
+    review = payload.get("review") or {}
+    release = payload.get("release") or {}
+    sender = ((payload.get("sender") or {}).get("login") or "").strip()
+
+    title = (
+        issue.get("title")
+        or pull_request.get("title")
+        or release.get("name")
+        or release.get("tag_name")
+        or comment.get("body")
+        or review.get("body")
+        or ""
+    )
+    number = issue.get("number") or pull_request.get("number") or ""
+
+    parts = [f"Handle GitHub webhook event '{event_name or 'unknown'}'."]
+    if repo:
+        parts.append(f"Repository: {repo}.")
+    if action:
+        parts.append(f"Action: {action}.")
+    if number:
+        parts.append(f"Number: {number}.")
+    if title:
+        parts.append(f"Title/body: {str(title).strip()[:220]}.")
+    if sender:
+        parts.append(f"Sender: {sender}.")
+    if not any([repo, action, number, title, sender]):
+        parts.append(f"Payload summary: {_compact_json(payload)[:260]}.")
+    return " ".join(parts)
+
+
+def _submit_webhook_task(
+    *,
+    prompt: str,
+    kind: str,
+    source: str,
+    terse_mode: str = "",
+    isolated_workspace: bool | None = None,
+    meta: dict | None = None,
+):
+    return task_runtime.submit_task(
+        prompt,
+        kind=kind or "task",
+        source=source,
+        terse_mode=terse_mode or "",
+        isolated_workspace=isolated_workspace,
+        meta=meta or {},
+    )
 
 
 @app.middleware("http")
@@ -443,6 +590,95 @@ def create_task(req: TaskRequest):
         meta=req.meta,
     )
     return {"ok": True, "task": task}
+
+
+@app.post("/webhooks/trigger")
+async def webhook_trigger(request: Request):
+    body = await request.body()
+    authorized, error = _validate_webhook_signature(request, body)
+    if not authorized:
+        return JSONResponse(status_code=401, content={"ok": False, "error": error})
+
+    payload = _coerce_json_body(body)
+    event_name = str(
+        payload.get("event")
+        or payload.get("event_type")
+        or payload.get("type")
+        or request.headers.get("x-jarvis-event", "")
+        or "webhook.trigger"
+    ).strip()
+    kind = str(payload.get("kind") or "task").strip() or "task"
+    terse_mode = str(payload.get("terse_mode") or "").strip()
+    isolated_workspace = payload.get("isolated_workspace")
+    meta = {
+        "event_name": event_name,
+        "headers": {
+            "x-jarvis-signature": request.headers.get("x-jarvis-signature", ""),
+            "x-jarvis-signature-256": request.headers.get("x-jarvis-signature-256", ""),
+            "content-type": request.headers.get("content-type", ""),
+            "user-agent": request.headers.get("user-agent", ""),
+        },
+        "payload_meta": _payload_meta(body, payload),
+    }
+    user_meta = payload.get("meta")
+    if isinstance(user_meta, dict):
+        meta.update(user_meta)
+    prompt = _generic_webhook_prompt(payload, event_name)
+    task = _submit_webhook_task(
+        prompt=prompt,
+        kind=kind,
+        source="webhook",
+        terse_mode=terse_mode,
+        isolated_workspace=isolated_workspace if isinstance(isolated_workspace, bool) else None,
+        meta=meta,
+    )
+    return {"ok": True, "task_id": task.get("id"), "status": task.get("status"), "task": task}
+
+
+@app.post("/webhooks/github")
+async def github_webhook(request: Request):
+    body = await request.body()
+    authorized, error = _validate_webhook_signature(request, body)
+    if not authorized:
+        return JSONResponse(status_code=401, content={"ok": False, "error": error})
+
+    payload = _coerce_json_body(body)
+    event_name = str(request.headers.get("x-github-event", "") or payload.get("event") or "github").strip()
+    delivery = str(request.headers.get("x-github-delivery", "")).strip()
+    action = str(payload.get("action") or "").strip()
+    repo = (payload.get("repository") or {}).get("full_name") if isinstance(payload.get("repository"), dict) else ""
+    kind = str(payload.get("kind") or "task").strip() or "task"
+    terse_mode = str(payload.get("terse_mode") or "").strip()
+    isolated_workspace = payload.get("isolated_workspace")
+    meta = {
+        "event_name": event_name,
+        "delivery": delivery,
+        "action": action,
+        "repository": repo,
+        "headers": {
+            "x-github-event": request.headers.get("x-github-event", ""),
+            "x-github-delivery": delivery,
+            "x-hub-signature-256": request.headers.get("x-hub-signature-256", ""),
+            "x-jarvis-signature": request.headers.get("x-jarvis-signature", ""),
+            "x-jarvis-signature-256": request.headers.get("x-jarvis-signature-256", ""),
+            "content-type": request.headers.get("content-type", ""),
+            "user-agent": request.headers.get("user-agent", ""),
+        },
+        "payload_meta": _payload_meta(body, payload),
+    }
+    user_meta = payload.get("meta")
+    if isinstance(user_meta, dict):
+        meta.update(user_meta)
+    prompt = _github_webhook_prompt(event_name, payload)
+    task = _submit_webhook_task(
+        prompt=prompt,
+        kind=kind,
+        source="github_webhook",
+        terse_mode=terse_mode,
+        isolated_workspace=isolated_workspace if isinstance(isolated_workspace, bool) else None,
+        meta=meta,
+    )
+    return {"ok": True, "task_id": task.get("id"), "status": task.get("status"), "task": task}
 
 
 @app.get("/tasks/{task_id}")

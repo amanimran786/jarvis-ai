@@ -93,7 +93,12 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
         if not _wait_for_api_ready(actual_host, actual_port):
             runtime_state.mark_error(f"API did not become ready at http://{actual_host}:{actual_port}")
             return _BOOT_THREAD
-        runtime_state.port_file_path().write_text(str(actual_port), encoding="utf-8")
+        port_file = runtime_state.port_file_path()
+        port_file.write_text(str(actual_port), encoding="utf-8")
+        try:
+            os.chmod(port_file, 0o600)
+        except OSError:
+            pass
         os.environ["JARVIS_API_TOKEN"] = api.get_api_token()
         runtime_state.write_api_endpoint(actual_host, actual_port)
         runtime_state.mark_started(
