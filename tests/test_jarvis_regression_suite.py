@@ -816,6 +816,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("cost_policy", payload)
+        self.assertIn("api_port", payload)
 
     def test_cost_policy_endpoint(self):
         response = self.client.get("/cost-policy")
@@ -962,6 +963,23 @@ class OverlayMeetingDetectionTests(unittest.TestCase):
         self.assertEqual(overlay.meeting_label_for_url("https://meet.google.com/qqt-truu-hkq"), "MEET")
         self.assertEqual(overlay.meeting_label_for_url("https://teams.microsoft.com/l/meetup-join/abc"), "TEAMS")
         self.assertEqual(overlay.meeting_label_for_url("https://app.zoom.us/wc/join/123"), "ZOOM")
+
+    def test_browser_meeting_detection_is_disabled_by_default(self):
+        with patch("overlay._running_app_names", return_value={"Safari"}), \
+             patch("overlay._all_process_names", return_value={"Safari"}), \
+             patch("overlay._browser_active_meeting_label", side_effect=AssertionError("should not probe browser tabs")), \
+             patch("overlay._browser_any_meeting_label", side_effect=AssertionError("should not scan browser tabs")), \
+             patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(overlay._compute_meeting_app())
+
+    def test_browser_meeting_detection_only_runs_when_explicitly_enabled(self):
+        with patch("overlay._running_app_names", return_value={"Safari"}), \
+             patch("overlay._all_process_names", return_value={"Safari"}), \
+             patch("overlay._frontmost_app_name", return_value="Safari"), \
+             patch("overlay._browser_active_meeting_label", return_value="MEET"), \
+             patch("overlay._browser_any_meeting_label", return_value=None), \
+             patch.dict("os.environ", {"JARVIS_BROWSER_MEETING_DETECTION": "1"}, clear=True):
+            self.assertEqual(overlay._compute_meeting_app(), "MEET")
 
     def test_compute_meeting_app_skips_browsers_that_are_not_running(self):
         with patch("overlay._running_app_names", return_value={"Finder", "Google Chrome"}), \

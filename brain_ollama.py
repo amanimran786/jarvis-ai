@@ -27,8 +27,8 @@ except Exception:
     httpx = None
 
 
-# DeepSeek R1:14b needs longer to load and reason — 180s default, overridable via env
-_OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
+# DeepSeek R1:14b reasons heavily before first token — 600s default, overridable via env
+_OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 _CLIENT_SINGLETON = None
 _CLIENT_LOCK = threading.Lock()
 
@@ -140,25 +140,49 @@ def ask_local_stream(
     prompt_eval_count = None
     eval_count = None
     try:
+        # Cap context for DeepSeek R1 to limit reasoning token explosion on Mac.
+        # 8192 is enough for all Jarvis use cases and keeps response time manageable.
+        options = {}
+        if "deepseek" in model.lower():
+            options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
+            options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
+
         stream = _client().chat(
             model=model,
             messages=messages,
-            stream=True
+            stream=True,
+            options=options if options else None,
         )
         raw_buffer = ""
+        in_think = False  # track DeepSeek R1 <think> blocks
         for chunk in stream:
             prompt_eval_count = getattr(chunk, "prompt_eval_count", prompt_eval_count)
             eval_count = getattr(chunk, "eval_count", eval_count)
             delta = chunk.message.content or ""
             full_reply += delta
             raw_buffer += delta
-            # Only yield at sentence boundaries — strip the full buffer each time
-            # so multi-line patterns (think tags, bullets) are caught correctly
+
+            # Track think block state to yield keepalive during long reasoning
+            if "<think>" in raw_buffer and not in_think:
+                in_think = True
+            if "</think>" in raw_buffer and in_think:
+                in_think = False
+                # Think block done — strip it and flush the real answer start
+                raw_buffer = re.sub(r'<think>.*?</think>', '', raw_buffer, flags=re.DOTALL)
+
+            # During think phase yield empty string as keepalive — keeps SSE
+            # connection alive while DeepSeek R1 reasons internally
+            if in_think:
+                yield ""
+                continue
+
+            # Outside think: yield at sentence boundaries
             if any(raw_buffer.rstrip().endswith(c) for c in ('.', '!', '?')) and len(raw_buffer) > 40:
                 cleaned = _strip_markdown(raw_buffer)
                 if cleaned:
                     yield cleaned
                 raw_buffer = ""
+
         if raw_buffer:
             cleaned = _strip_markdown(raw_buffer)
             if cleaned:

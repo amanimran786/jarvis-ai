@@ -1,180 +1,248 @@
-# Jarvis AI
+# <div align="center">Jarvis AI</div>
 
-A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
+<div align="center">
+  <img src="assets/readme-hero.svg" alt="Jarvis AI hero" width="100%" />
+</div>
 
-## Features
+<div align="center">
 
-- **Voice + text interface** — speech-to-text input, ElevenLabs TTS output, and a desktop chat UI
-- **Local-first model routing** — Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost
-- **Local-model improvement loop** — Jarvis can export strong interaction datasets, distill repeated failures into better teacher answers, and generate tuned Ollama model targets so the local path gets stronger over time
-- **Persistent memory** — remembers facts, preferences, projects, and recent context from local JSON stores
-- **Local skills** — lightweight skill metadata stays cheap to load, while full `SKILL.md` instructions and references load only for the active request
-- **Specialist skill bench** — Jarvis can stack a small set of specialist skills per request for planning, coding, debugging, review, architecture, writing, research, and source-grounded answers
-- **Specialized agents** — Jarvis can run isolated role passes such as planner, executor, reviewer, science expert, security reviewer, and self-improve critic through the local `agents/` layer
-- **Scoped prompt modifiers** — request-local shorthands like `ELI5:`, `/BRIEFLY`, `TONE formal:`, or `ROLE: ... TASK: ... FORMAT: ...` shape only the current answer instead of bloating the global system prompt
-- **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary
-- **Local markdown vault** — indexed markdown files in `vault/` can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward, with citations to exact local files and headings
-- **Graphify repo grounding** — a generated code graph under `graphify-out/` can be injected as supporting context for repo and codebase questions, so Jarvis can answer from the project structure instead of rereading raw files every time
-- **Wiki compiler** — raw markdown in `vault/raw/` can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval
-- **Structured source ingestion** — PDFs keep page boundaries, PowerPoint decks keep slide boundaries, and Google Drive sources can be pulled into the vault before indexing
-- **Self-learning** — background knowledge feed, fact extraction, and daily reflection
-- **Live browser control** — open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons
-- **System control** — volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands
-- **Admin command path** — can run a terminal command through the native macOS administrator prompt when explicitly asked
-- **Behavior gates** — deterministic pre/post hooks guard shell commands, admin commands, file writes, and self-improve entry before risky actions execute
-- **Cost policy** — Jarvis now uses a deterministic policy layer to keep simple chat local, escalate higher-stakes requests to cloud, and block distill or train cycles until repeated eval failures justify the spend
-- **Google integration** — Calendar and Gmail read/create/send via OAuth2, plus Google Drive document ingestion into the local vault
-- **Meeting overlay** — floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share
-- **Webcam + screen vision** — image and screen analysis from the camera and desktop
-- **Self-improvement** — Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically
-- **Stealth mode** — windows hidden from screen share using macOS APIs
+[![Platform](https://img.shields.io/badge/platform-macOS-111827?style=for-the-badge&logo=apple)](https://www.apple.com/macos/)
+[![Python](https://img.shields.io/badge/python-3.12+-1f6feb?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Ollama](https://img.shields.io/badge/local_models-Ollama-0f172a?style=for-the-badge)](https://ollama.com/)
+[![Desktop App](https://img.shields.io/badge/desktop-PyQt6-12324a?style=for-the-badge)](/Users/truthseeker/jarvis-ai/ui.py)
+[![Mode](https://img.shields.io/badge/default-open--source-0b7285?style=for-the-badge)](/Users/truthseeker/jarvis-ai/config.py)
 
-## Requirements
+</div>
 
-- macOS
-- Python 3.12+
-- [Ollama](https://ollama.com) for local model support
-- [BlackHole 2ch](https://existential.audio/blackhole/) (optional) for capturing call audio in meeting mode
+Jarvis is a local-first desktop assistant for macOS. It is built to talk, listen, reason, remember, inspect your codebase, control your browser, and operate as a real desktop app before it ever needs a paid API.
 
-## Setup
+The direction is simple:
 
-1. Clone the repo:
-   ```bash
-   git clone https://github.com/amanimran786/jarvis-ai.git
-   cd jarvis-ai
-   ```
+- make the core path run locally
+- keep cloud providers as optional fallback, not the foundation
+- ship Jarvis as a real desktop product, not just a prompt loop
 
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate
-   ```
+## Why Jarvis
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+Jarvis is aiming at a very specific experience: your own GPT-class desktop AI, running on your machine, grounded in your projects, and able to act across your Mac.
 
-4. Create a `.env` file in the project root:
-   ```
-   OPENAI_API_KEY=sk-...
-   ANTHROPIC_API_KEY=sk-ant-...
-   ELEVENLABS_API_KEY=...
-   ELEVENLABS_VOICE_ID=...   # optional, defaults to George
+Today that means:
 
-   # Free-first routing (defaults shown)
-   JARVIS_FREE_FIRST_ENABLED=1
-   JARVIS_PAID_FALLBACK_ENABLED=1
-   JARVIS_LOCAL_STRICT_FIRST=1
-   JARVIS_PROVIDER_PRIORITY_MINI=openai,gemini,anthropic
-   JARVIS_PROVIDER_PRIORITY_HAIKU=gemini,openai,anthropic
-   JARVIS_PROVIDER_PRIORITY_SONNET=openai,gemini,anthropic
-   JARVIS_PROVIDER_PRIORITY_OPUS=gemini,openai,anthropic
+- local-first chat and reasoning with Ollama
+- local STT with `faster-whisper`
+- local TTS with macOS `say`
+- local codebase grounding through Graphify artifacts
+- a packaged desktop app that stays in sync in both `Applications` and `Desktop`
+- managed task runtime, agent registry, and task lifecycle inspection
 
-   # Optional: max-permissive local profile (keeps only hard-stop gates)
-   JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE=0
-   JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES=0
-   ```
+It also means being honest about the current state:
 
-5. Optional: add `credentials.json` from Google Cloud Console for Calendar/Gmail/Drive OAuth.
+- the core open-source path is real and usable now
+- some subsystems still keep paid fallbacks available
+- the project is actively moving those remaining paths to stronger local replacements
 
-6. Install and pull the recommended local models:
-   ```bash
-   brew install ollama
-   brew services start ollama
-   ollama pull llama3.1:8b
-   ollama pull qwen2.5-coder:7b
-   ollama pull mistral
-   ```
+## What It Can Do
 
-7. Grant macOS permissions when prompted:
-   - Accessibility, so global hotkeys and input automation can work
-   - Contacts, so first-run iMessage contact lookup can succeed
-   - Microphone, camera, and screen recording as needed for voice, webcam, and screen analysis
-   - Automation permissions for controlling apps like Safari, Messages, and Terminal
+| Area | Current capability |
+|---|---|
+| Chat + reasoning | Local-first conversation, planning, debugging, architecture, and technical Q&A |
+| Coding | Local coder model routing, code-review paths, repo-aware answers, task runtime, and CLI execution |
+| Voice | Local speech-to-text, local text-to-speech, wake-word flow, and meeting-assist plumbing |
+| Memory | Persistent facts, preferences, projects, recent conversations, and tiered memory inspection |
+| Repo grounding | Graphify-powered codebase context and local vault-based retrieval |
+| Browser + Mac | Open sites, inspect current page, click visible controls, launch apps, change volume, take screenshots |
+| Desktop app | PyQt6 UI, meeting toolbar, compact shell, packaged `Jarvis.app`, Desktop launcher |
+| Agents + runtime | Managed tasks, streamed task output, isolated code-task workspaces, agent/task inspection endpoints |
 
-8. Optional: build Graphify repo artifacts for stronger codebase grounding:
-   ```bash
-   venv/bin/python -m pip install graphifyy
-   venv/bin/python scripts/build_graphify_repo.py
-   ```
-   This writes `graphify-out/graph.json`, `graphify-out/GRAPH_REPORT.md`, and `graphify-out/analysis.json`.
+## Local Stack
 
-9. Optional: generate callable tool signatures and benchmark local models:
-   ```bash
-   venv/bin/python scripts/generate_tool_signatures.py
-   venv/bin/python scripts/benchmark_local_models.py --repeats 1
-   ```
-   If you have a malware detection API running locally, set:
-   `JARVIS_MALWARE_API_BASE=http://127.0.0.1:<port>`
+Jarvis is configured around a local-first model stack:
 
-## Running
+- default local chat: `gemma4:e4b`
+- local reasoning: `deepseek-r1:14b`
+- local coding: `qwen2.5-coder:7b`
+- local STT: `faster-whisper`
+- local TTS: macOS `say`
+- local embeddings: `nomic-embed-text`
+- local vision path available: `llava:7b` when installed
+
+You can inspect the live local stack at runtime with:
 
 ```bash
-# GUI mode (default)
+curl http://127.0.0.1:8765/local/capabilities
+```
+
+If Jarvis moves to a different port because `8765` is taken, the packaged app and CLI now discover that automatically.
+
+## Quick Start
+
+### 1. Clone and create a venv
+
+```bash
+git clone https://github.com/amanimran786/jarvis-ai.git
+cd jarvis-ai
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Install and start Ollama
+
+```bash
+brew install ollama
+brew services start ollama
+```
+
+### 3. Pull the recommended local models
+
+```bash
+ollama pull gemma4:e4b
+ollama pull deepseek-r1:14b
+ollama pull qwen2.5-coder:7b
+ollama pull nomic-embed-text
+```
+
+Optional local vision:
+
+```bash
+ollama pull llava:7b
+```
+
+### 4. Run Jarvis
+
+```bash
+# GUI mode
 ./run.sh
 
-# Headless / terminal-only
+# Headless mode
 ./run.sh --no-ui
 ```
 
-Jarvis exposes a local API while running:
+### 5. Build and install the desktop app
 
-- `GET /status` — current mode and local-model availability
-- `POST /chat` — chat with Jarvis
-- `GET /context` — inspect current prompt/session footprint and recent request context stats
-- `GET /usage` — inspect provider call counts, token totals, local-vs-cloud split, and estimated cloud cost
-- `GET /cost-policy` — inspect the current routing and local-model-improvement policy state
-- `GET /hooks/status` — inspect behavior-gate activity and recent blocked actions
-- `GET /vault` — inspect the current local vault index status
-- `POST /vault/build` — compile raw markdown into wiki pages and rebuild the vault indexes
-- `GET /local/training/status` — inspect exported datasets, distilled examples, and Modelfiles for local tuning
-- `GET /local/evals/status` — inspect local-model benchmark runs and current promoted local model
-- `GET /local/automation/status` — inspect automated local-model training and eval cycles
-- `GET /local/beta/status` — inspect safe beta-test runs that replay Jarvis goldens and log failures into evals
-- `POST /local/training/export` — export successful interaction examples into JSONL for local SFT
-- `POST /local/training/distill` — ask a stronger teacher model to rewrite failed cases into better training targets
-- `POST /local/training/modelfile` — generate an Ollama Modelfile for the tuned Jarvis local model target
-- `POST /local/training/run` — run the full export + distill + pack + Modelfile pipeline in one call
-- `POST /local/training/handoff` — build offline Unsloth and Axolotl fine-tune handoff folders from the latest training pack
-- `POST /local/evals/run` — compare a candidate local Ollama model against the current baseline on Jarvis-specific benchmark prompts
-- `POST /local/evals/promote` — promote a local model only if the benchmark result clears the configured thresholds
-- `POST /local/automation/run` — run the full automated cycle: build pack, create candidate model, evaluate it, and promote only if it wins
-- `POST /local/beta/run` — run a safe beta suite against Jarvis, log failures into evals, and optionally build a fresh training pack from that new evidence
-- `GET /memory` — inspect saved memory
-- `GET /memory/status` — inspect tiered-memory readiness, working-memory contents, and the durable user profile summary
-- `POST /memory/consolidate` — rebuild the working-memory and long-term-profile tiers from saved facts, projects, preferences, and recent conversations
-- `POST /mode` — switch `local`, `cloud`, `auto`, or `open-source`
+```bash
+bash scripts/install_jarvis_app.sh
+```
 
-## Skills
+That one command rebuilds the latest packaged app and installs it to:
 
-Jarvis now supports a local skill layer under `skills/`:
+- `/Users/truthseeker/Applications/Jarvis.app`
+- `/Users/truthseeker/Desktop/Jarvis.app`
 
-- `skills/index.json` is the L1 metadata index used for cheap relevance checks
-- `skills/<skill_id>/SKILL.md` holds the full L2 skill instructions
-- `skills/<skill_id>/references/` holds L3 reference files that load only when that skill is active
+So the Desktop icon and the Applications copy stay current with the latest build.
 
-The current built-in skills include:
+## Desktop App Flow
 
-- `browser_execution` for live browser navigation and page-action recovery
-- `planning_execution` for ordered multi-step planning and finish conditions
-- `code_implementation` for focused code changes and implementation guidance
-- `debugging_diagnostics` for ranked root-cause analysis and narrowing steps
-- `code_review` for senior-style review focused on bugs and regressions
-- `architecture_design` for system design and tradeoff questions
-- `engineering_reasoning` for technical software-engineering answers
-- `writing_editor` for rewrite, tone, and concision requests
-- `research_synthesis` for source comparison and grounded research summaries
-- `local_knowledge` and `source_grounding` for vault-first, citation-aware answers
-- `local_model_tuning` for dataset export, selective distillation, and tuned Ollama targets
-- `personal_context` for Aman-specific answers grounded in memory and eval signals
-- `self_improvement` for evidence-gated self-editing behavior
+Jarvis now has a cleaner packaged-app path:
 
-Jarvis now loads a small relevant skill stack per request instead of relying on one giant baseline prompt.
+- the app is built as a proper macOS `onedir` bundle
+- the Desktop launcher is a full app bundle, not a fragile symlink
+- the packaged app is protected from conda GUI-launch issues
+- the CLI discovers the live app port dynamically, even if `8765` is occupied
 
-## Agents
+That means this works reliably:
 
-Jarvis now supports an `agents/` layer for isolated role passes:
+```bash
+open -na /Users/truthseeker/Desktop/Jarvis.app
+./venv/bin/python jarvis_cli.py --status
+```
+
+## Modes
+
+Jarvis supports multiple routing modes:
+
+- `open-source` — local/open tooling only on the main path
+- `local` — prefer local models
+- `auto` — route based on task complexity and policy
+- `cloud` — prefer cloud providers
+
+The default mode is `open-source`.
+
+You can switch modes in-app or by request:
+
+- `switch to open-source mode`
+- `switch to local mode`
+- `switch to auto mode`
+- `switch to cloud mode`
+
+## Runtime API
+
+Jarvis exposes a local HTTP API while running.
+
+### Core
+
+- `GET /status`
+- `GET /runtime/state`
+- `GET /mode`
+- `POST /mode`
+- `POST /chat`
+
+### Local runtime inspection
+
+- `GET /local/capabilities`
+- `GET /local/training/status`
+- `GET /local/evals/status`
+- `GET /local/automation/status`
+- `GET /local/beta/status`
+
+### Memory and retrieval
+
+- `GET /memory`
+- `GET /memory/status`
+- `POST /memory/add`
+- `POST /memory/forget`
+- `POST /memory/consolidate`
+- `GET /vault`
+- `POST /vault/build`
+
+### Managed runtime
+
+- `GET /agents`
+- `GET /tasks`
+- `POST /tasks`
+- `GET /tasks/{task_id}`
+- `GET /tasks/{task_id}/events`
+- `GET /tasks/{task_id}/stream`
+
+## CLI
+
+While Jarvis is running, you can talk to it from the terminal:
+
+```bash
+./venv/bin/python jarvis_cli.py --status
+./venv/bin/python jarvis_cli.py what's the fastest way to debug a FastAPI 502?
+./venv/bin/python jarvis_cli.py --task "summarize the current repo architecture"
+./venv/bin/python jarvis_cli.py --task-code "refactor the auth middleware"
+```
+
+The CLI now resolves the live app endpoint per request, so it stays aligned with the packaged app after restarts and port fallback.
+
+## Repo Grounding
+
+Jarvis can answer questions about this codebase using prebuilt Graphify artifacts instead of rereading raw files every time.
+
+To build the graph:
+
+```bash
+venv/bin/python -m pip install graphifyy
+venv/bin/python scripts/build_graphify_repo.py
+```
+
+That generates:
+
+- `graphify-out/graph.json`
+- `graphify-out/GRAPH_REPORT.md`
+- `graphify-out/analysis.json`
+
+## Skills, Agents, and Tasks
+
+Jarvis is moving away from one giant always-loaded prompt and toward a managed runtime:
+
+- `skills/` contains lightweight skill metadata plus deeper `SKILL.md` instructions
+- `agents/` contains specialist role definitions
+- the task runtime manages agent registration, task state, task streaming, and isolated workspaces for code tasks
+
+Current built-in specialist roles include:
 
 - `planner`
 - `executor`
@@ -183,210 +251,88 @@ Jarvis now supports an `agents/` layer for isolated role passes:
 - `security_reviewer`
 - `self_improve_critic`
 
-Use phrases like `use specialized agents`, `use a science expert`, or `use planner executor reviewer on this`.
-
-## Prompt Modifiers
-
-Jarvis now supports request-scoped prompt modifiers at the start of a message. These change only the current answer and are stripped before tool routing and memory tracking.
-
-Examples:
-
-- `ELI5: explain TCP congestion control`
-- `/BRIEFLY summarize this page`
-- `TONE formal: rewrite this email`
-- `COMPARE: Postgres vs SQLite for a local desktop app`
-- `FIRST PRINCIPLES: should I use a vector database here?`
-- `ROLE: security reviewer TASK: review this auth flow FORMAT: JSON`
-
-Supported modifiers include concise-answer, explanation-style, comparison, role, audience, tone, format, self-evaluation, first-principles, pitfall, and developer-style controls.
-
-## Hotkeys
-
-All hotkeys use `Cmd + Option` and work system-wide, even during screen share.
-
-| Hotkey | Action |
-|---|---|
-| `⌘⌥J` | Capture screen → Jarvis analyzes it |
-| `⌘⌥K` | Capture webcam frame → Jarvis analyzes it |
-| `⌘⌥L` | Read clipboard → Jarvis responds |
-| `⌘⌥M` | Toggle Smart Listen (meeting audio) |
-| `⌘⌥O` | Toggle Meeting Overlay HUD |
-| `⌘⌥;` | Toggle Jarvis window visibility |
-
 ## Architecture
 
-```text
-main.py              # Starts UI, API, hotkeys, learner, agents
-api.py               # Local HTTP API
-ui.py                # PyQt6 desktop interface
-router.py            # Layer 1 routing: fast-path commands, hardware, orchestrator fallback
-orchestrator.py      # Layer 2 intent classification into tool decisions
-model_router.py      # Layer 3 model selection: Local -> GPT-mini -> Haiku -> Sonnet -> Opus
-skills.py            # Local skill registry, matching, and on-demand SKILL.md loading
-conversation_context.py  # Shared task-scoped chat session manager and prompt compaction
-vault.py                 # Local markdown vault indexing, citation-aware search, and snippet loading
-wiki_builder.py          # Deterministic wiki compiler with section metadata
-source_ingest.py         # Structured ingest for files, PDFs, slides, URLs, and Google Drive
-brain.py             # OpenAI backend
-brain_claude.py      # Anthropic backend
-brain_ollama.py      # Ollama backend
-browser.py           # Safari/Chrome control and current-page summarization
-terminal.py          # Shell, file, and admin-command helpers
-memory.py            # Persistent JSON store
-learner.py           # Fact extraction, knowledge feed, reflection
-overlay.py           # Floating meeting HUD
-meeting_listener.py  # BlackHole audio capture and Whisper transcription
-self_improve.py      # Self-rewriting pipeline with backup and syntax validation
-skills/              # Local skill packages: metadata index, SKILL.md files, references
-vault/               # Local markdown knowledge layer: raw, wiki, indexes, outputs
+```mermaid
+flowchart LR
+    UI["PyQt Desktop App"] --> API["Local API"]
+    CLI["jarvis_cli.py"] --> API
+    API --> Router["router.py"]
+    Router --> Runtime["task_runtime.py"]
+    Router --> Models["model_router.py"]
+    Models --> Ollama["Ollama local models"]
+    Router --> Vault["vault + Graphify"]
+    Router --> Browser["browser + hardware + system tools"]
+    Runtime --> Worktree["isolated worktree manager"]
+    API --> State["runtime_state.py"]
 ```
 
-## Configuration
+High-leverage modules:
 
-All model identifiers and the system prompt live in `config.py`. Change models there, not inline.
+- `main.py` — boot path, GUI/runtime startup, crash logging
+- `ui.py` — desktop app UI
+- `api.py` — local HTTP surface
+- `jarvis_daemon.py` — daemon bootstrap
+- `runtime_state.py` — live runtime metadata and endpoint discovery
+- `task_runtime.py` — managed tasks, agents, streams
+- `model_router.py` — model selection
+- `brain_ollama.py` — local inference, capability discovery, model warmup
+- `voice.py` — local-first STT/TTS path
+- `router.py` — user intent routing and fast paths
 
-Model routing mode can be switched at runtime via natural language:
+## macOS Permissions
 
-- *"switch to cloud mode"*
-- *"switch to local mode"*
-- *"switch to auto mode"*
-- *"switch to open-source mode"*
+Depending on what you use, Jarvis may request:
 
-Current recommended local defaults:
+- Accessibility
+- Automation
+- Microphone
+- Camera
+- Screen Recording
 
-- `jarvis-local` as the preferred tuned general model target once you create it in Ollama
-- `llama3.1:8b` for general local conversation
-- `qwen2.5-coder:7b` for coding tasks
-- `mistral` for stronger local reasoning
+These are normal for the desktop-control, voice, meeting, and screen-analysis features.
 
-`open-source` mode is now the default. It keeps Jarvis on local models and local runtime logic first, so the product stays usable even when closed-model credits are unavailable. `auto` mode is still available when you want pragmatic cloud escalation without forcing everything through local models.
+## Optional Cloud Fallbacks
 
-Jarvis now also includes a local-model improvement loop. The intended low-cost order is:
+Jarvis keeps paid providers available as fallback, but they are no longer the center of the system.
 
-- export strong successful cloud answers into SFT-style JSONL
-- distill only repeated failures or weak local answers with a stronger teacher
-- distill a small curated set of expert technology and science answers so the local model learns the tone and structure of high-quality advanced explanations
-- build and register a tuned Ollama target such as `jarvis-local`
-- let general local routing prefer that tuned model automatically once it exists
+If you want that fallback path available, add a `.env` file with only the providers you want:
 
-The one-shot path is now available too: Jarvis can build a merged local training pack that combines exported strong examples with distilled failure corrections and writes a manifest plus Modelfile for the target model.
+```env
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+ELEVENLABS_API_KEY=
+```
 
-Jarvis also has a local beta loop now. Safe golden-style beta runs can replay core product prompts, log any misses into `evals.json`, and feed those standalone failures back into the distillation path even when they were not produced by a normal `/chat` interaction. This is the fastest non-GPU path for improving the local model and product behavior together.
+If you leave those unset, the main local path still works.
 
-The beta runner now supports a focused engineering suite too, so you can stress just the SWE-heavy prompts without mixing them with every other product behavior check.
+## Current Development Direction
 
-Jarvis can also emit offline fine-tune handoff folders for `llama3.1:8b` and `qwen2.5-coder:7b`. Each handoff contains:
+The current push is:
 
-- train and validation JSONL splits in conversation format
-- train and validation JSONL splits in instruction format
-- a baseline Unsloth training script
-- a baseline Axolotl QLoRA config
-- a per-target manifest and handoff README
+- make the desktop app path reliable
+- keep the core assistant usable with zero API cost
+- strengthen local vision and local memory quality
+- keep the Desktop app and Applications app updated together
+- improve the managed-agent runtime so Jarvis feels like a real desktop coworker
 
-Jarvis now also has a local model eval gate. Candidate Ollama models are compared against the current local baseline on Jarvis-specific prompts such as technical reasoning, self-improve policy, personalization, and source-grounded summarization. Promotion is refused unless the candidate improves average score and clears a minimum pass rate.
+## Contributing
 
-On top of that, Jarvis now has an automated local-model cycle. It can generate a fresh training pack, build a candidate Ollama model, benchmark it against the baseline, and only promote it if the benchmark clears the gate. This keeps the local model path improving without blindly overwriting the current best model.
-
-Jarvis now also tracks prompt footprint per request. `/chat` responses include a `context` object with the active session id, carried summary size, prompt-size estimate, and rotation count so you can see when context is growing.
-
-Jarvis now also keeps a real provider usage ledger for its text-model calls. `/chat` responses include a `usage` object for the work done during that request, and `/usage` returns a rolling summary across OpenAI, Anthropic, and Ollama calls. Local calls are tracked separately from cloud calls so you can see whether the system is actually staying local-first.
-
-Cloud cost is still an estimate, not an invoice. The ledger uses blended per-million-token assumptions in [usage_tracker.py](/Users/truthseeker/jarvis-ai/usage_tracker.py) so you can see directional spend even when providers return different usage formats.
-
-## Open-Source Mode
-
-Jarvis now has an explicit `open-source` runtime mode. In this mode, Jarvis keeps the answer path on local models and local runtime logic instead of depending on closed-model APIs for core behavior.
-
-- `smart_stream` stays on Ollama when a local model is available
-- formatting helpers avoid GPT fallback and stay local
-- orchestrator classification skips the Claude classifier and relies on the existing rule and heuristic paths
-- specialized-agent and answer fallbacks still keep the product usable when closed APIs are unavailable
-
-This is the right mode when you want Jarvis to behave like an open-source-heavy system rather than a cloud-first assistant with local fallback.
-
-## Local-First Workflow
-
-The clean day-to-day workflow now looks like this:
-
-- leave Jarvis in `open-source` mode for normal use
-- use `beta test jarvis` to replay the safe golden cases
-- use `beta test engineering` when you want a tighter SWE-focused pass
-- use `coach local model` when you want to refresh the local training pack from the latest failures and strong examples
-- use `coach engineering model` when you want the same loop but only from the engineering beta subset
-- inspect `GET /local/beta/status`, `GET /local/training/status`, and `GET /memory/status` when you want to see whether the local loop is actually improving
-- switch to `auto` or `cloud` only when you intentionally want stronger paid models involved
-
-That keeps the harness, memory, evals, and runtime behavior open-source heavy by default while still leaving optional cloud paths available when you deliberately choose them.
-
-## Tiered Memory
-
-Jarvis now consolidates memory into two tiers instead of only appending raw facts:
-
-- `working_memory` keeps the current active projects, recent conversational focus, recurring topics, and assistive preferences that should shape near-term behavior
-- `long_term_profile` keeps a compact durable summary plus stable facts and recurring project/topic signals that belong in the broader user model
-
-These tiers are rebuilt automatically whenever Jarvis saves new facts, preferences, projects, or conversation summaries. You can also inspect or refresh them directly through `GET /memory/status` and `POST /memory/consolidate`.
-
-## Testing
-
-Jarvis now has two test layers:
-
-- deterministic regression coverage in [tests/test_jarvis_regression_suite.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_regression_suite.py)
-- opt-in live integration coverage in [tests/test_jarvis_live_integrations.py](/Users/truthseeker/jarvis-ai/tests/test_jarvis_live_integrations.py)
-- safe local beta coverage through [tests/jarvis_golden_cases.py](/Users/truthseeker/jarvis-ai/tests/jarvis_golden_cases.py) and `POST /local/beta/run`
-
-Run the regression suite with:
+If you are working on Jarvis locally:
 
 ```bash
-venv/bin/python -m unittest tests.test_jarvis_regression_suite -v
+./venv/bin/python -m py_compile main.py api.py jarvis_cli.py
+./venv/bin/python -m unittest tests.test_jarvis_regression_suite
 ```
 
-Run the live integration suite only when you explicitly want to hit real services:
+For packaged-app changes, rebuild and reinstall with:
 
 ```bash
-JARVIS_RUN_LIVE_INTEGRATION_TESTS=1 venv/bin/python -m unittest tests.test_jarvis_live_integrations -v
+bash scripts/install_jarvis_app.sh
 ```
 
-For side-effecting tests such as sending an iMessage, opt in separately:
+## North Star
 
-```bash
-JARVIS_RUN_LIVE_INTEGRATION_TESTS=1 \
-JARVIS_ALLOW_SIDE_EFFECTS=1 \
-JARVIS_TEST_IMESSAGE_RECIPIENT="Name or number" \
-venv/bin/python -m unittest tests.test_jarvis_live_integrations -v
-```
+Jarvis is being built toward one simple goal:
 
-## Vault
-
-Jarvis now includes a local markdown vault:
-
-- `vault/raw/` for raw source material
-- `vault/wiki/` for cleaned topic pages
-- `vault/indexes/` for generated indexes
-- `vault/outputs/` for generated reports and artifacts
-
-Use phrases like `refresh the vault index`, `search the vault for X`, or `what's in your local knowledge base`. Jarvis also searches the vault automatically for knowledge-seeking requests and injects only the most relevant snippets into the active request.
-
-You can also say `build the vault wiki` or `compile the wiki`. That runs the deterministic `wiki_builder.py` pipeline, which turns files in `vault/raw/` into compiled pages under `vault/wiki/compiled/` and refreshes the topic and keyword indexes in `vault/indexes/`.
-
-Vault search is citation-aware. Jarvis can now point to the exact local file and heading it used, and ingested PDFs/slides preserve page or slide boundaries instead of flattening everything into one text block.
-
-You can ingest local files, repositories, notes, normal URLs, and Google Drive links through the API:
-
-- `POST /vault/ingest` with `source_type` set to `auto`, `google_drive`, `directory`, `url`, or `notes`
-
-## Self-Improve Safety
-
-Jarvis can modify parts of its own source, but the apply path is guarded:
-
-- generated Python is syntax-validated before any file is changed
-- the original file is backed up to `.jarvis_backups/`
-- writes go through a temporary file and atomic replace
-- Jarvis tells you to restart after a successful self-improve run so modules reload cleanly
-
-## Security
-
-- API keys are loaded from `.env` and never hardcoded
-- `credentials.json` and `token.json` are gitignored
-- memory, knowledge, backup, and session files stay local
-- meeting overlay is invisible to screen share via `NSWindowSharingNone`
+> a private, open-source-first desktop AI that feels closer to a real teammate than a chat tab

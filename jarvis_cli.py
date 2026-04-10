@@ -22,35 +22,25 @@ import urllib.error
 
 def _base() -> str:
     import os
-    from pathlib import Path
+    explicit = os.getenv("JARVIS_API_BASE_URL", "").strip()
+    if explicit:
+        return explicit.rstrip("/")
 
-    candidates = []
     try:
         import runtime_state
-        candidates.append(runtime_state.port_file_path())
+        discovered = runtime_state.discover_api_endpoint()
+        if discovered:
+            return str(discovered["base_url"]).rstrip("/")
     except Exception:
         pass
-    candidates.append(Path(os.path.dirname(__file__)) / ".jarvis_port")
 
-    for candidate in candidates:
-        try:
-            with open(candidate, encoding="utf-8") as f:
-                port = f.read().strip()
-            if port:
-                return f"http://127.0.0.1:{port}"
-        except FileNotFoundError:
-            continue
-        except OSError:
-            continue
     return "http://127.0.0.1:8765"
-
-BASE = _base()
 
 
 def post(path: str, body: dict) -> dict:
     data = json.dumps(body).encode()
     req = urllib.request.Request(
-        BASE + path, data=data,
+        _base() + path, data=data,
         headers={"Content-Type": "application/json"}
     )
     with urllib.request.urlopen(req, timeout=60) as resp:
@@ -58,13 +48,14 @@ def post(path: str, body: dict) -> dict:
 
 
 def _stream_chat(message: str) -> int:
+    base = _base()
     data = json.dumps({"message": message, "stream": True}).encode()
     req = urllib.request.Request(
-        BASE + "/chat", data=data,
+        base + "/chat", data=data,
         headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(req, timeout=240) as resp:
+        with urllib.request.urlopen(req, timeout=600) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()
                 if not line.startswith("data:"):
@@ -90,6 +81,7 @@ def _stream_chat(message: str) -> int:
 
 def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", isolated_workspace: bool | None = None) -> int:
     """Stream a managed task via the daemon-backed task runtime."""
+    base = _base()
     payload = {
         "prompt": message,
         "kind": kind,
@@ -118,7 +110,7 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
     if workspace.get("enabled") and workspace.get("worktree_path"):
         print(f"[workspace:{workspace.get('worktree_path')}]", flush=True)
     try:
-        with urllib.request.urlopen(BASE + f"/tasks/{task_id}/stream", timeout=120) as resp:
+        with urllib.request.urlopen(base + f"/tasks/{task_id}/stream", timeout=600) as resp:
             for raw in resp:
                 line = raw.decode("utf-8").strip()
                 if not line.startswith("data:"):
@@ -149,7 +141,7 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
 
 
 def get(path: str) -> dict:
-    with urllib.request.urlopen(BASE + path, timeout=10) as resp:
+    with urllib.request.urlopen(_base() + path, timeout=10) as resp:
         return json.loads(resp.read())
 
 

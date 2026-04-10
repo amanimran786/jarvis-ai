@@ -181,6 +181,9 @@ _meeting_refresh_in_flight = False
 
 # ── Meeting detection ─────────────────────────────────────────────────────────
 
+def _browser_meeting_detection_enabled() -> bool:
+    return os.getenv("JARVIS_BROWSER_MEETING_DETECTION", "").strip().lower() in {"1", "true", "yes", "on"}
+
 def _compute_meeting_app() -> str | None:
     running_names = _running_app_names()
     process_names = running_names | _all_process_names()
@@ -188,6 +191,9 @@ def _compute_meeting_app() -> str | None:
     for proc, label in MEETING_APPS.items():
         if proc in running:
             return label
+
+    if not _browser_meeting_detection_enabled():
+        return None
 
     browser_checks = {
         "Google Chrome": 'tell application "Google Chrome" to get URL of active tab of front window',

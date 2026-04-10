@@ -6,6 +6,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 
 ROOT = Path.cwd().resolve()
+ICON = ROOT / "assets" / "jarvis.icns"
 EXCLUDE_DIRS = {
     ".git",
     ".idea",
@@ -121,9 +122,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="Jarvis",
     debug=False,
     bootloader_ignore_signals=False,
@@ -139,10 +139,20 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="Jarvis",
+)
+
+app = BUNDLE(
+    coll,
     name="Jarvis.app",
-    icon=None,
+    icon=str(ICON) if ICON.is_file() else None,
     bundle_identifier="com.truthseeker.jarvis",
     info_plist={
         "CFBundleName": "Jarvis",

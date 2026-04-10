@@ -41,6 +41,8 @@ def _ensure_supported_gui_runtime() -> None:
     If the repo venv exists, transparently re-exec into it. Otherwise exit with a
     clear message instead of letting Qt abort on plugin initialization.
     """
+    if getattr(sys, "frozen", False):
+        return
     if "--no-ui" in sys.argv:
         return
     if not _is_conda_python():
