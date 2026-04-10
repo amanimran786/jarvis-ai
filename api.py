@@ -25,6 +25,7 @@ import hmac
 import hashlib
 import secrets
 import threading
+import time
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -50,6 +51,7 @@ import usage_tracker
 import runtime_state
 import provider_router
 import task_runtime
+import task_persistence
 import semantic_memory
 import graph_context as gctx
 import osint_tools
@@ -151,6 +153,67 @@ def _validate_webhook_signature(request: Request, body: bytes) -> tuple[bool, st
     if any(hmac.compare_digest(sig, expected) for sig in signatures):
         return True, ""
     return False, "signature_invalid"
+
+
+def _webhook_secret_is_configured() -> bool:
+    return bool(_webhook_secret())
+
+
+def _webhook_max_age_seconds() -> int:
+    raw = (os.getenv("JARVIS_WEBHOOK_MAX_AGE_SECONDS", "") or "").strip()
+    if not raw:
+        return 300
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return 300
+    return parsed if parsed > 0 else 300
+
+
+def _parse_unix_seconds(value: str) -> int | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        # Accept integer strings and lossless float strings such as "1712791200.0".
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _register_webhook_receipt(
+    source: str,
+    delivery_id: str,
+    *,
+    event_name: str = "",
+    body_sha256: str = "",
+) -> bool:
+    register_fn = getattr(task_persistence, "register_webhook_receipt", None)
+    if not callable(register_fn):
+        return True
+    receipt_source = str(source or "").strip() or "webhook"
+    receipt_delivery = str(delivery_id or "").strip()
+    if not receipt_delivery:
+        return True
+    try:
+        result = register_fn(
+            receipt_source,
+            receipt_delivery,
+            str(event_name or ""),
+            str(body_sha256 or ""),
+        )
+    except TypeError:
+        result = register_fn(receipt_source, receipt_delivery)
+    if isinstance(result, bool):
+        return result
+    if isinstance(result, dict):
+        if "duplicate" in result:
+            return not bool(result.get("duplicate"))
+        if "ok" in result:
+            return bool(result.get("ok"))
+        if "accepted" in result:
+            return bool(result.get("accepted"))
+    return bool(result)
 
 
 def _coerce_json_body(body: bytes) -> dict:
@@ -600,19 +663,55 @@ async def webhook_trigger(request: Request):
         return JSONResponse(status_code=401, content={"ok": False, "error": error})
 
     payload = _coerce_json_body(body)
-    event_name = str(
-        payload.get("event")
-        or payload.get("event_type")
-        or payload.get("type")
-        or request.headers.get("x-jarvis-event", "")
-        or "webhook.trigger"
+    delivery_id = str(
+        request.headers.get("x-jarvis-delivery", "")
+        or payload.get("delivery_id")
+        or ""
     ).strip()
+    timestamp_header = str(request.headers.get("x-jarvis-timestamp", "") or "").strip()
+    timestamp_unix: int | None = _parse_unix_seconds(timestamp_header)
+    if _webhook_secret_is_configured():
+        if not delivery_id:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "missing_delivery_id"})
+        if not timestamp_header:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "missing_timestamp"})
+        if timestamp_unix is None:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "stale_timestamp"})
+        now_unix = int(time.time())
+        if abs(now_unix - timestamp_unix) > _webhook_max_age_seconds():
+            return JSONResponse(status_code=400, content={"ok": False, "error": "stale_timestamp"})
+        event_name = str(
+            payload.get("event")
+            or payload.get("event_type")
+            or payload.get("type")
+            or request.headers.get("x-jarvis-event", "")
+            or "webhook.trigger"
+        ).strip()
+        if not _register_webhook_receipt(
+            "trigger",
+            delivery_id,
+            event_name=event_name,
+            body_sha256=hashlib.sha256(body).hexdigest(),
+        ):
+            return JSONResponse(status_code=409, content={"ok": False, "error": "replay_detected"})
+    else:
+        event_name = str(
+            payload.get("event")
+            or payload.get("event_type")
+            or payload.get("type")
+            or request.headers.get("x-jarvis-event", "")
+            or "webhook.trigger"
+        ).strip()
     kind = str(payload.get("kind") or "task").strip() or "task"
     terse_mode = str(payload.get("terse_mode") or "").strip()
     isolated_workspace = payload.get("isolated_workspace")
     meta = {
         "event_name": event_name,
+        "delivery_id": delivery_id,
+        "timestamp": timestamp_unix,
         "headers": {
+            "x-jarvis-delivery": request.headers.get("x-jarvis-delivery", ""),
+            "x-jarvis-timestamp": request.headers.get("x-jarvis-timestamp", ""),
             "x-jarvis-signature": request.headers.get("x-jarvis-signature", ""),
             "x-jarvis-signature-256": request.headers.get("x-jarvis-signature-256", ""),
             "content-type": request.headers.get("content-type", ""),
@@ -645,6 +744,15 @@ async def github_webhook(request: Request):
     payload = _coerce_json_body(body)
     event_name = str(request.headers.get("x-github-event", "") or payload.get("event") or "github").strip()
     delivery = str(request.headers.get("x-github-delivery", "")).strip()
+    if _webhook_secret_is_configured() and not delivery:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "missing_delivery_id"})
+    if delivery and not _register_webhook_receipt(
+        "github",
+        delivery,
+        event_name=event_name,
+        body_sha256=hashlib.sha256(body).hexdigest(),
+    ):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "replay_detected"})
     action = str(payload.get("action") or "").strip()
     repo = (payload.get("repository") or {}).get("full_name") if isinstance(payload.get("repository"), dict) else ""
     kind = str(payload.get("kind") or "task").strip() or "task"

@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +68,11 @@ class PersistentJarvisWebhookTests(unittest.TestCase):
     def tearDown(self) -> None:
         api._API_TOKEN = ""
 
+    def _reset_runtime_with_temp_db(self) -> str:
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        return str(Path(tmpdir.name) / "jarvis_tasks.sqlite3")
+
     def test_trigger_webhook_requires_signature_when_secret_is_configured(self) -> None:
         payload = {"prompt": "handle this webhook trigger"}
         body = json.dumps(payload).encode("utf-8")
@@ -96,6 +102,7 @@ class PersistentJarvisWebhookTests(unittest.TestCase):
         self.assertEqual(response.json()["error"], "webhook_secret_missing")
 
     def test_webhook_endpoints_create_tasks_and_return_ids(self) -> None:
+        db_path = self._reset_runtime_with_temp_db()
         generic_payload = {
             "prompt": "handle this generic webhook",
             "kind": "task",
@@ -124,14 +131,22 @@ class PersistentJarvisWebhookTests(unittest.TestCase):
             submitted.append(task)
             return task
 
-        with patch.dict(os.environ, {"JARVIS_WEBHOOK_SECRET": "test-secret"}, clear=False), \
+        with patch.dict(
+            os.environ,
+            {"JARVIS_WEBHOOK_SECRET": "test-secret", "JARVIS_TASK_DB_PATH": db_path},
+            clear=False,
+        ), \
              patch("api.task_runtime.submit_task", side_effect=fake_submit_task):
+            task_persistence.reset_for_tests()
+            task_runtime.reset_for_tests()
             generic_response = self.client.post(
                 "/webhooks/trigger",
                 content=generic_body,
                 headers={
                     "content-type": "application/json",
                     "x-jarvis-signature": _sign(generic_body, "test-secret"),
+                    "x-jarvis-delivery": "generic-delivery-001",
+                    "x-jarvis-timestamp": str(int(datetime.now(timezone.utc).timestamp())),
                 },
             )
             github_response = self.client.post(
@@ -141,6 +156,7 @@ class PersistentJarvisWebhookTests(unittest.TestCase):
                     "content-type": "application/json",
                     "x-github-event": "pull_request",
                     "x-hub-signature-256": _sign(github_body, "test-secret"),
+                    "x-github-delivery": "github-delivery-001",
                 },
             )
 
@@ -152,6 +168,163 @@ class PersistentJarvisWebhookTests(unittest.TestCase):
         self.assertEqual(github_response.json()["task"]["source"], "github_webhook")
         self.assertIn("generic webhook", submitted[0]["prompt"])
         self.assertIn("GitHub webhook event", submitted[1]["prompt"])
+
+    def test_trigger_webhook_requires_delivery_and_timestamp_when_secret_is_configured(self) -> None:
+        payload = {"prompt": "handle this webhook trigger"}
+        body = json.dumps(payload).encode("utf-8")
+        db_path = self._reset_runtime_with_temp_db()
+
+        with patch.dict(
+            os.environ,
+            {"JARVIS_WEBHOOK_SECRET": "test-secret", "JARVIS_TASK_DB_PATH": db_path},
+            clear=False,
+        ), patch("api.task_runtime.submit_task") as submit_mock:
+            task_persistence.reset_for_tests()
+            task_runtime.reset_for_tests()
+            missing_delivery = self.client.post(
+                "/webhooks/trigger",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "x-jarvis-signature": _sign(body, "test-secret"),
+                    "x-jarvis-timestamp": str(int(datetime.now(timezone.utc).timestamp())),
+                },
+            )
+            missing_timestamp = self.client.post(
+                "/webhooks/trigger",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "x-jarvis-signature": _sign(body, "test-secret"),
+                    "x-jarvis-delivery": "delivery-test-001",
+                },
+            )
+
+        self.assertEqual(missing_delivery.status_code, 400)
+        self.assertEqual(missing_delivery.json()["error"], "missing_delivery_id")
+        self.assertEqual(missing_timestamp.status_code, 400)
+        self.assertEqual(missing_timestamp.json()["error"], "missing_timestamp")
+        submit_mock.assert_not_called()
+
+    def test_trigger_webhook_rejects_stale_timestamp(self) -> None:
+        payload = {"prompt": "handle this webhook trigger"}
+        body = json.dumps(payload).encode("utf-8")
+        db_path = self._reset_runtime_with_temp_db()
+
+        with patch.dict(
+            os.environ,
+            {"JARVIS_WEBHOOK_SECRET": "test-secret", "JARVIS_TASK_DB_PATH": db_path},
+            clear=False,
+        ), patch("api.task_runtime.submit_task") as submit_mock:
+            task_persistence.reset_for_tests()
+            task_runtime.reset_for_tests()
+            response = self.client.post(
+                "/webhooks/trigger",
+                content=body,
+                headers={
+                    "content-type": "application/json",
+                    "x-jarvis-signature": _sign(body, "test-secret"),
+                    "x-jarvis-delivery": "delivery-stale-001",
+                    "x-jarvis-timestamp": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "stale_timestamp")
+        submit_mock.assert_not_called()
+
+    def test_trigger_webhook_duplicate_delivery_id_returns_replay_detected(self) -> None:
+        payload = {"prompt": "handle this webhook trigger"}
+        body = json.dumps(payload).encode("utf-8")
+        db_path = self._reset_runtime_with_temp_db()
+
+        submitted: list[dict] = []
+
+        def fake_submit_task(prompt: str, **kwargs):
+            task_id = f"task_test_{len(submitted) + 1}"
+            task = {
+                "id": task_id,
+                "status": "queued",
+                "prompt": prompt,
+                "kind": kwargs.get("kind", "task"),
+                "source": kwargs.get("source", "api"),
+                "meta": kwargs.get("meta", {}),
+            }
+            submitted.append(task)
+            return task
+
+        delivery = "delivery-dup-001"
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        headers = {
+            "content-type": "application/json",
+            "x-jarvis-signature": _sign(body, "test-secret"),
+            "x-jarvis-delivery": delivery,
+            "x-jarvis-timestamp": timestamp,
+        }
+
+        with patch.dict(
+            os.environ,
+            {"JARVIS_WEBHOOK_SECRET": "test-secret", "JARVIS_TASK_DB_PATH": db_path},
+            clear=False,
+        ), patch("api.task_runtime.submit_task", side_effect=fake_submit_task):
+            task_persistence.reset_for_tests()
+            task_runtime.reset_for_tests()
+            first = self.client.post("/webhooks/trigger", content=body, headers=headers)
+            second = self.client.post("/webhooks/trigger", content=body, headers=headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.json()["error"], "replay_detected")
+        self.assertEqual(len(submitted), 1)
+
+    def test_github_webhook_duplicate_delivery_id_returns_replay_detected(self) -> None:
+        payload = {
+            "action": "opened",
+            "repository": {"full_name": "openai/jarvis-ai"},
+            "pull_request": {"number": 17, "title": "Tighten runtime boot"},
+        }
+        body = json.dumps(payload).encode("utf-8")
+        db_path = self._reset_runtime_with_temp_db()
+
+        submitted: list[dict] = []
+
+        def fake_submit_task(prompt: str, **kwargs):
+            task_id = f"task_test_{len(submitted) + 1}"
+            task = {
+                "id": task_id,
+                "status": "queued",
+                "prompt": prompt,
+                "kind": kwargs.get("kind", "task"),
+                "source": kwargs.get("source", "api"),
+                "meta": kwargs.get("meta", {}),
+            }
+            submitted.append(task)
+            return task
+
+        delivery = "gh-delivery-dup-001"
+        timestamp = str(int(datetime.now(timezone.utc).timestamp()))
+        headers = {
+            "content-type": "application/json",
+            "x-github-event": "pull_request",
+            "x-hub-signature-256": _sign(body, "test-secret"),
+            "x-github-delivery": delivery,
+            "x-jarvis-timestamp": timestamp,
+        }
+
+        with patch.dict(
+            os.environ,
+            {"JARVIS_WEBHOOK_SECRET": "test-secret", "JARVIS_TASK_DB_PATH": db_path},
+            clear=False,
+        ), patch("api.task_runtime.submit_task", side_effect=fake_submit_task):
+            task_persistence.reset_for_tests()
+            task_runtime.reset_for_tests()
+            first = self.client.post("/webhooks/github", content=body, headers=headers)
+            second = self.client.post("/webhooks/github", content=body, headers=headers)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.json()["error"], "replay_detected")
+        self.assertEqual(len(submitted), 1)
 
 
 class PersistentJarvisRuntimePersistenceTests(unittest.TestCase):
@@ -224,3 +397,38 @@ class PersistentJarvisRuntimePersistenceTests(unittest.TestCase):
             if event.get("type") == "error" and event.get("reason") == "daemon_restart"
         ]
         self.assertEqual(len(restart_events), 1)
+
+    def test_webhook_task_persistence_snapshot_is_redacted_after_reboot(self) -> None:
+        prompt = "sensitive inbound webhook prompt"
+        with patch("task_runtime.route_stream", return_value=(iter(["ok"]), "UnitTestModel")), patch(
+            "task_runtime.evals.log_interaction",
+            return_value={"id": "interaction_test"},
+        ):
+            task = task_runtime.submit_task(
+                prompt,
+                kind="task",
+                source="webhook",
+                meta={"payload_meta": {"payload": {"secret": "value"}}},
+            )
+            task_id = str(task["id"])
+            completed = task_runtime.wait_for_task(task_id, timeout=2.0)
+
+        self.assertIsNotNone(completed)
+        if completed is None:
+            self.fail("task did not complete")
+        self.assertEqual(completed["status"], "succeeded")
+
+        persisted = task_persistence.load_snapshot(limit=10)
+        persisted_task = next(item for item in persisted["tasks"] if item["id"] == task_id)
+        self.assertEqual(persisted_task["prompt"], task_runtime._PERSIST_REDACTED_PROMPT)
+        self.assertEqual(persisted_task["effective_prompt"], task_runtime._PERSIST_REDACTED_EFFECTIVE_PROMPT)
+        self.assertEqual(persisted_task["result"], task_runtime._PERSIST_REDACTED_RESULT)
+
+        _clear_runtime_memory_only()
+        task_runtime.bootstrap()
+        restored = task_runtime.get_task(task_id)
+        self.assertIsNotNone(restored)
+        if restored is None:
+            self.fail("task not found after reboot")
+        self.assertEqual(restored["prompt"], task_runtime._PERSIST_REDACTED_PROMPT)
+        self.assertEqual(restored["result"], task_runtime._PERSIST_REDACTED_RESULT)
