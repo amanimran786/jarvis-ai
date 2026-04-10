@@ -19,11 +19,12 @@ from collections import Counter
 
 import evals
 import skills
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import LOCAL_DEFAULT, LOCAL_TUNED, SONNET, SYSTEM_PROMPT
 
 
-TRAINING_ROOT = Path(__file__).resolve().parent / "training"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TRAINING_ROOT = REPO_ROOT / "training"
 EXPORTS_DIR = TRAINING_ROOT / "exports"
 DISTILLED_DIR = TRAINING_ROOT / "distilled"
 MODELFILES_DIR = TRAINING_ROOT / "modelfiles"

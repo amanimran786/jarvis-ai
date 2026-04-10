@@ -6,7 +6,7 @@ import subprocess
 from functools import lru_cache
 from openai import OpenAI
 from config import OPENAI_API_KEY
-from screen_capture import capture_screenshot_temp
+from desktop.screen_capture import capture_screenshot_temp
 
 
 def _cv2():
@@ -108,7 +108,7 @@ def _extract_ocr_text(path: str) -> str:
 def _local_vision_summary(prompt: str, ocr_text: str) -> str:
     if not ocr_text.strip():
         return ""
-    from brain_ollama import ask_local_stream
+    from brains.brain_ollama import ask_local_stream
 
     summary_prompt = (
         f"{prompt}\n\n"
@@ -158,7 +158,7 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
     path = None
     try:
         path = _capture_frame()
-        from brain_ollama import ask_local_vision
+        from brains.brain_ollama import ask_local_vision
         local_vision = ask_local_vision(
             path, prompt,
             system_extra="Be concise. This response will be spoken aloud. No markdown."
@@ -197,7 +197,7 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
     """
     path = capture_screenshot_temp(preferred_format="jpg", fallback_formats=("png",))
     try:
-        from brain_ollama import ask_local_vision
+        from brains.brain_ollama import ask_local_vision
         local_vision = ask_local_vision(
             path, prompt,
             system_extra="Be concise. This response will be spoken aloud. No markdown."

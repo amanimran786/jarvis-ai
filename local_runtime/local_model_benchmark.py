@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from brain_ollama import ask_local, list_local_models
+from brains.brain_ollama import ask_local, list_local_models
 
 
 DEFAULT_PROMPTS = [

@@ -20,7 +20,7 @@ import difflib
 import tempfile
 import re
 from datetime import datetime
-from brain_claude import ask_claude
+from brains.brain_claude import ask_claude
 from config import OPUS
 import evals
 
@@ -34,9 +34,10 @@ IMPROVABLE_FILES = {
     "model_router.py":  "smart model selection and cost optimization",
     "memory.py":        "memory storage and context retrieval",
     "learner.py":       "self-learning and knowledge extraction",
-    "brain.py":         "OpenAI GPT interface",
-    "brain_claude.py":  "Anthropic Claude interface",
-    "brain_ollama.py":  "local Ollama model interface",
+    "brains/brain.py":         "OpenAI GPT interface",
+    "brains/brain_claude.py":  "Anthropic Claude interface",
+    "brains/brain_ollama.py":  "local Ollama model interface",
+    "brains/brain_gemini.py":  "Gemini interface",
     "tools.py":         "system tools (search, apps, timers, system control)",
     "voice.py":         "speech recognition and text-to-speech",
     "config.py":        "model configuration and system prompt",
@@ -54,6 +55,13 @@ IMPROVABLE_FILES = {
     "self_improve.py":  "self-improvement and code editing engine",
     "stealth.py":       "screen share invisibility",
     "main.py":          "startup logic and entry point",
+    "local_runtime/local_beta.py": "local beta testing harness",
+    "local_runtime/local_model_automation.py": "local model automation loop",
+    "local_runtime/local_model_benchmark.py": "local model benchmark runner",
+    "local_runtime/local_model_eval.py": "local model evaluation harness",
+    "local_runtime/local_stt.py": "local speech-to-text runtime",
+    "local_runtime/local_training.py": "local training and distillation tools",
+    "local_runtime/local_tts.py": "local text-to-speech runtime",
 }
 
 
@@ -465,10 +473,11 @@ def _validation_commands(filename: str) -> list[tuple[str, list[str]]]:
     smoke_imports = {
         "router.py": ["router", "orchestrator", "model_router", "browser", "terminal"],
         "browser.py": ["browser", "router"],
-        "model_router.py": ["model_router", "brain", "brain_claude", "brain_ollama"],
-        "brain.py": ["brain"],
-        "brain_claude.py": ["brain_claude"],
-        "brain_ollama.py": ["brain_ollama"],
+        "model_router.py": ["model_router", "brains.brain", "brains.brain_claude", "brains.brain_ollama"],
+        "brains/brain.py": ["brains.brain"],
+        "brains/brain_claude.py": ["brains.brain_claude"],
+        "brains/brain_ollama.py": ["brains.brain_ollama"],
+        "brains/brain_gemini.py": ["brains.brain_gemini"],
         "self_improve.py": ["self_improve", "evals"],
         "api.py": ["api", "router", "model_router"],
         "memory.py": ["memory"],
@@ -479,6 +488,13 @@ def _validation_commands(filename: str) -> list[tuple[str, list[str]]]:
         "source_ingest.py": ["source_ingest", "vault"],
         "skill_factory.py": ["skill_factory", "skills", "vault"],
         "skills.py": ["skills"],
+        "local_runtime/local_beta.py": ["local_runtime.local_beta"],
+        "local_runtime/local_model_automation.py": ["local_runtime.local_model_automation"],
+        "local_runtime/local_model_benchmark.py": ["local_runtime.local_model_benchmark"],
+        "local_runtime/local_model_eval.py": ["local_runtime.local_model_eval"],
+        "local_runtime/local_stt.py": ["local_runtime.local_stt"],
+        "local_runtime/local_training.py": ["local_runtime.local_training"],
+        "local_runtime/local_tts.py": ["local_runtime.local_tts"],
     }
     modules = smoke_imports.get(filename)
     if modules:

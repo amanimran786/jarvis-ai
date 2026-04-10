@@ -10,13 +10,13 @@ from fastapi.testclient import TestClient
 import api
 import cost_policy
 import evals
-import local_beta
-import local_model_automation
-import local_model_eval
-import local_training
+from local_runtime import local_beta
+from local_runtime import local_model_automation
+from local_runtime import local_model_eval
+from local_runtime import local_training
 import memory
 import model_router
-import overlay
+from desktop import overlay
 import orchestrator
 import prompt_modifiers
 import router
@@ -28,7 +28,7 @@ import graph_context
 import interview_profile
 import meeting_listener
 import ui
-import screen_capture
+from desktop import screen_capture
 import self_improve
 import skills
 import specialized_agents
@@ -554,24 +554,24 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(checks["parity"]["ok"], checks["parity"]["output"])
 
     def test_local_beta_fast_path(self):
-        with patch("local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 2, "failed": 1, "failed_case_ids": ["beta_memory"]}), \
-             patch("local_beta.result_text", return_value="Ran 3 beta cases. 2 passed and 1 failed."):
+        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 2, "failed": 1, "failed_case_ids": ["beta_memory"]}), \
+             patch("local_runtime.local_beta.result_text", return_value="Ran 3 beta cases. 2 passed and 1 failed."):
             stream, label = router.route_stream("beta test jarvis")
             text = "".join(stream)
         self.assertEqual(label, "Local Model")
         self.assertIn("beta cases", text)
 
     def test_engineering_beta_fast_path(self):
-        with patch("local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 3, "failed": 0, "suite": "engineering"}), \
-             patch("local_beta.result_text", return_value="Ran 3 engineering beta cases. 3 passed and 0 failed."):
+        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 3, "failed": 0, "suite": "engineering"}), \
+             patch("local_runtime.local_beta.result_text", return_value="Ran 3 engineering beta cases. 3 passed and 0 failed."):
             stream, label = router.route_stream("beta test engineering")
             text = "".join(stream)
         self.assertEqual(label, "Local Model")
         self.assertIn("engineering beta cases", text)
 
     def test_local_model_benchmark_fast_path(self):
-        with patch("local_model_benchmark.run_benchmark", return_value={"ok": True, "rows": [], "winner": {}}), \
-             patch("local_model_benchmark.result_text", return_value="Benchmark complete."):
+        with patch("local_runtime.local_model_benchmark.run_benchmark", return_value={"ok": True, "rows": [], "winner": {}}), \
+             patch("local_runtime.local_model_benchmark.result_text", return_value="Benchmark complete."):
             stream, label = router.route_stream("benchmark local models")
             text = "".join(stream)
         self.assertEqual(label, "Local Model")
@@ -852,7 +852,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("working_memory_ready", payload["status"])
 
     def test_local_automation_run_respects_policy_skip(self):
-        with patch("local_model_automation.run_cycle", return_value={"ok": False, "skipped": True, "error": "Skipped local model automation. Not enough evidence."}):
+        with patch("local_runtime.local_model_automation.run_cycle", return_value={"ok": False, "skipped": True, "error": "Skipped local model automation. Not enough evidence."}):
             response = self.client.post("/local/automation/run", json={"force": False})
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -965,27 +965,27 @@ class OverlayMeetingDetectionTests(unittest.TestCase):
         self.assertEqual(overlay.meeting_label_for_url("https://app.zoom.us/wc/join/123"), "ZOOM")
 
     def test_browser_meeting_detection_is_disabled_by_default(self):
-        with patch("overlay._running_app_names", return_value={"Safari"}), \
-             patch("overlay._all_process_names", return_value={"Safari"}), \
-             patch("overlay._browser_active_meeting_label", side_effect=AssertionError("should not probe browser tabs")), \
-             patch("overlay._browser_any_meeting_label", side_effect=AssertionError("should not scan browser tabs")), \
+        with patch("desktop.overlay._running_app_names", return_value={"Safari"}), \
+             patch("desktop.overlay._all_process_names", return_value={"Safari"}), \
+             patch("desktop.overlay._browser_active_meeting_label", side_effect=AssertionError("should not probe browser tabs")), \
+             patch("desktop.overlay._browser_any_meeting_label", side_effect=AssertionError("should not scan browser tabs")), \
              patch.dict("os.environ", {}, clear=True):
             self.assertIsNone(overlay._compute_meeting_app())
 
     def test_browser_meeting_detection_only_runs_when_explicitly_enabled(self):
-        with patch("overlay._running_app_names", return_value={"Safari"}), \
-             patch("overlay._all_process_names", return_value={"Safari"}), \
-             patch("overlay._frontmost_app_name", return_value="Safari"), \
-             patch("overlay._browser_active_meeting_label", return_value="MEET"), \
-             patch("overlay._browser_any_meeting_label", return_value=None), \
+        with patch("desktop.overlay._running_app_names", return_value={"Safari"}), \
+             patch("desktop.overlay._all_process_names", return_value={"Safari"}), \
+             patch("desktop.overlay._frontmost_app_name", return_value="Safari"), \
+             patch("desktop.overlay._browser_active_meeting_label", return_value="MEET"), \
+             patch("desktop.overlay._browser_any_meeting_label", return_value=None), \
              patch.dict("os.environ", {"JARVIS_BROWSER_MEETING_DETECTION": "1"}, clear=True):
             self.assertEqual(overlay._compute_meeting_app(), "MEET")
 
     def test_compute_meeting_app_skips_browsers_that_are_not_running(self):
-        with patch("overlay._running_app_names", return_value={"Finder", "Google Chrome"}), \
-             patch("overlay._all_process_names", return_value={"Microsoft Teams"}), \
-             patch("overlay._browser_active_meeting_label", side_effect=lambda app, _script: "MEET" if app == "Google Chrome" else (_ for _ in ()).throw(AssertionError("should not probe"))), \
-             patch("overlay._browser_any_meeting_label", return_value=None):
+        with patch("desktop.overlay._running_app_names", return_value={"Finder", "Google Chrome"}), \
+             patch("desktop.overlay._all_process_names", return_value={"Microsoft Teams"}), \
+             patch("desktop.overlay._browser_active_meeting_label", side_effect=lambda app, _script: "MEET" if app == "Google Chrome" else (_ for _ in ()).throw(AssertionError("should not probe"))), \
+             patch("desktop.overlay._browser_any_meeting_label", return_value=None):
             self.assertEqual(overlay._compute_meeting_app(), "TEAMS")
 
 
@@ -1247,7 +1247,7 @@ class MeetingListenerTests(unittest.TestCase):
             {"index": 8, "name": "BlackHole 2ch", "channels": 2},
         ]
         with patch("meeting_listener.list_audio_devices", return_value=devices), \
-             patch("overlay.detect_meeting_app", return_value="TEAMS"):
+             patch("desktop.overlay.detect_meeting_app", return_value="TEAMS"):
             preferred = meeting_listener.preferred_source_snapshot()
         self.assertEqual(preferred["kind"], "meeting_audio")
         self.assertEqual(preferred["device_index"], 5)
@@ -1258,7 +1258,7 @@ class MeetingListenerTests(unittest.TestCase):
             {"index": 5, "name": "Microsoft Teams Audio", "channels": 1},
         ]
         with patch("meeting_listener.list_audio_devices", return_value=devices), \
-             patch("overlay.detect_meeting_app", return_value="TEAMS"):
+             patch("desktop.overlay.detect_meeting_app", return_value="TEAMS"):
             self.assertEqual(meeting_listener.get_virtual_meeting_audio_device(), 5)
             preferred = meeting_listener.preferred_source_snapshot()
         self.assertEqual(preferred["kind"], "meeting_audio")
@@ -1269,7 +1269,7 @@ class MeetingListenerTests(unittest.TestCase):
             {"index": 3, "name": "MacBook Pro Microphone", "channels": 1},
         ]
         with patch("meeting_listener.list_audio_devices", return_value=devices), \
-             patch("overlay.detect_meeting_app", return_value="MEET"):
+             patch("desktop.overlay.detect_meeting_app", return_value="MEET"):
             self.assertIsNone(meeting_listener.get_virtual_meeting_audio_device())
             preferred = meeting_listener.preferred_source_snapshot()
         self.assertEqual(preferred["kind"], "microphone")
@@ -1591,8 +1591,8 @@ class ScreenCaptureTests(unittest.TestCase):
 
                 return Result()
 
-            with patch("screen_capture.subprocess.run", side_effect=fake_run), \
-                 patch("screen_capture.time.sleep"):
+            with patch("desktop.screen_capture.subprocess.run", side_effect=fake_run), \
+                 patch("desktop.screen_capture.time.sleep"):
                 result = screen_capture.capture_screenshot(path, image_format="png", retries=2)
 
         self.assertEqual(result, path)
@@ -1607,8 +1607,8 @@ class ScreenCaptureTests(unittest.TestCase):
                 stderr = "screencapture: could not create image from display 0"
                 stdout = ""
 
-            with patch("screen_capture.subprocess.run", return_value=Result()), \
-                 patch("screen_capture.time.sleep"):
+            with patch("desktop.screen_capture.subprocess.run", return_value=Result()), \
+                 patch("desktop.screen_capture.time.sleep"):
                 with self.assertRaises(RuntimeError) as ctx:
                     screen_capture.capture_screenshot(path, image_format="png", retries=1)
 
@@ -1650,11 +1650,11 @@ class LocalTrainingTests(unittest.TestCase):
             captured["path"] = str(path)
             captured["examples"] = examples
 
-        with patch("local_training._ensure_dirs"), \
-             patch("local_training.evals.load", return_value=fake_data), \
-             patch("local_training.skills.build_system_extra", return_value=("", [])), \
-             patch("local_training.ask_claude", return_value="You work on AI safety systems and you're building Jarvis, so the interesting part is how often you push toward local-first, inspectable AI workflows."), \
-             patch("local_training._write_jsonl", side_effect=fake_write):
+        with patch("local_runtime.local_training._ensure_dirs"), \
+             patch("local_runtime.local_training.evals.load", return_value=fake_data), \
+             patch("local_runtime.local_training.skills.build_system_extra", return_value=("", [])), \
+             patch("local_runtime.local_training.ask_claude", return_value="You work on AI safety systems and you're building Jarvis, so the interesting part is how often you push toward local-first, inspectable AI workflows."), \
+             patch("local_runtime.local_training._write_jsonl", side_effect=fake_write):
             result = local_training.distill_failures(limit=3)
 
         self.assertTrue(result["ok"])
@@ -1663,9 +1663,9 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertEqual(captured["examples"][0]["meta"]["teacher_source"], "failure_distillation")
 
     def test_zero_limit_distill_paths_do_not_call_teacher(self):
-        with patch("local_training._ensure_dirs"), \
-             patch("local_training._write_jsonl"), \
-             patch("local_training.ask_claude") as mock_teacher:
+        with patch("local_runtime.local_training._ensure_dirs"), \
+             patch("local_runtime.local_training._write_jsonl"), \
+             patch("local_runtime.local_training.ask_claude") as mock_teacher:
             result_failures = local_training.distill_failures(limit=0)
             result_expert = local_training.distill_expert_cases(limit=0)
         self.assertTrue(result_failures["ok"])
@@ -1686,11 +1686,11 @@ class LocalBetaTests(unittest.TestCase):
             "must_exclude_all": [],
             "expected": "Use Aman-specific context.",
         }
-        with patch("local_beta._selected_cases", return_value=[case]), \
+        with patch("local_runtime.local_beta._selected_cases", return_value=[case]), \
              patch("router.route_stream", return_value=(iter(["Generic answer."]), "Chat")), \
-             patch("local_beta.evals.log_failure") as mock_log:
+             patch("local_runtime.local_beta.evals.log_failure") as mock_log:
             with TemporaryDirectory() as tmp:
-                with patch("local_beta.RUNS_DIR", Path(tmp)):
+                with patch("local_runtime.local_beta.RUNS_DIR", Path(tmp)):
                     result = local_beta.run_beta_suite()
         self.assertTrue(result["ok"])
         self.assertEqual(result["failed"], 1)
@@ -1709,7 +1709,7 @@ class LocalBetaTests(unittest.TestCase):
             "expected": "Rank likely causes and include a debugging sequence.",
             "issue": "Prior answer was too generic.",
         }
-        with patch("local_beta.evals.recent_failures", return_value=[failure]):
+        with patch("local_runtime.local_beta.evals.recent_failures", return_value=[failure]):
             cases = local_beta._selected_cases(suite="engineering")
         prompts = {case["prompt"] for case in cases}
         self.assertIn(failure["user_input"], prompts)

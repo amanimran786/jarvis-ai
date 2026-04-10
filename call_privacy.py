@@ -33,7 +33,7 @@ def _meeting_label() -> str:
     if now < _cache_until:
         return _cached_meeting
     try:
-        import overlay
+        from desktop import overlay
         meeting = overlay.detect_meeting_app() or "NONE"
     except Exception:
         meeting = "NONE"
