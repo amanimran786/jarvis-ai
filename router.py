@@ -219,6 +219,26 @@ def _is_self_review_query(lower: str) -> bool:
     )
 
 
+def _is_confirm_improvement_query(lower: str) -> bool:
+    """User is approving a pending self-improvement."""
+    return (
+        _pending_improvements[0] is not None
+        and bool(re.search(
+            r"\b(apply|yes|go ahead|confirm|do it|looks good|approved|approve|sure|ok|okay)\b",
+            lower,
+        ))
+        and not re.search(r"\b(don'?t|do not|cancel|discard|reject|no)\b", lower)
+    )
+
+
+def _is_cancel_improvement_query(lower: str) -> bool:
+    """User is rejecting a pending self-improvement."""
+    return (
+        _pending_improvements[0] is not None
+        and bool(re.search(r"\b(cancel|discard|reject|no|don'?t apply|abort)\b", lower))
+    )
+
+
 def _runtime_status_reply(user_input: str) -> str:
     mode = get_mode()
     skill = skills.choose_skill(user_input, tool="chat")
@@ -580,6 +600,10 @@ _pending_msg_recipient: str = ""
 _awaiting_msg_recipient: bool = False
 _last_msg_recipient: str = ""
 
+# ── Pending self-improvement (approval gate) ──────────────────────────────────
+# Uses a list so inner functions can mutate it without `global` keyword.
+_pending_improvements: list = [None]
+
 
 def _set_pending_recipient(name: str):
     global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient
@@ -765,6 +789,29 @@ def route_stream(user_input: str) -> tuple:
     if get_mode() != "open-source" and _is_engineering_specialist_query(lower):
         result = specialized_agents.run(user_input)
         return _s(specialized_agents.result_text(result)), "Specialized Agents"
+    if _is_confirm_improvement_query(lower):
+        pending = _pending_improvements[0]
+
+        def _apply_confirmed_stream():
+            yield f"Applying the improvement to {pending['file']}..."
+            result = si.apply_pending_improvement(pending)
+            _pending_improvements[0] = None
+            if result.get("error"):
+                yield f" Could not apply: {result['error']}"
+            else:
+                yield (
+                    f" Done. Applied improvement to {result['file']}. "
+                    f"{result['lines_changed']} lines changed. "
+                    f"Backup saved as {result['backup']}. "
+                    f"Say 'restart yourself' to reload the updated code."
+                )
+
+        return _apply_confirmed_stream(), "Self-Improve"
+
+    if _is_cancel_improvement_query(lower):
+        _pending_improvements[0] = None
+        return _s("Improvement discarded. No changes were made."), "Self-Improve"
+
     if _is_self_review_query(lower):
         return _s(_self_review_text()), "Self-Review"
     if _is_self_improve_safety_query(lower):
@@ -1307,25 +1354,64 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             area = params.get("area", None)
             analysis = si.analyze_weakness(area)
             return _s(analysis), "Self-Improve"
-        # improve — actually run the pipeline
+        # improve — phase 1: generate and show diff, wait for approval
         target = params.get("target", params.get("area", ""))
         instruction = target if target else None
         gate = perms.can_self_improve(target or user_input)
         if not gate["ok"]:
             return _s(gate["reason"]), "Self-Improve"
 
-        def _improve_stream():
-            yield "Analyzing my own code and generating improvements. This will take a moment..."
-            result = si.self_improve(instruction=instruction)
-            if "error" in result:
-                yield f" Analysis complete: {result['error']}"
-            else:
-                yield (f" Done. Improved {result['file']}. "
-                       f"{result['lines_changed']} lines changed. "
-                       f"Backup saved as {result['backup']}. "
-                       f"Say 'restart yourself' to apply.")
+        def _prepare_stream():
+            yield "Analyzing my code and generating the improvement. This will take a moment..."
+            pending = si.prepare_improvement(instruction=instruction)
+            if pending.get("error"):
+                yield f" Could not prepare improvement: {pending['error']}"
+                return
+            # Stash pending state so apply action can retrieve it
+            _pending_improvements[0] = pending
+            diff_lines = [
+                ln for ln in pending["diff"].splitlines()
+                if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---"))
+            ]
+            preview = "\n".join(diff_lines[:30])
+            if len(diff_lines) > 30:
+                preview += f"\n... and {len(diff_lines) - 30} more lines"
+            yield (
+                f" Ready to improve {pending['file']}. "
+                f"{pending['lines_changed']} lines would change. "
+                f"Here is a preview of the diff:\n{preview}\n"
+                f"Say 'apply the improvement' or 'yes go ahead' to apply, "
+                f"or 'cancel' to discard."
+            )
 
-        return _improve_stream(), "Self-Improve"
+        return _prepare_stream(), "Self-Improve"
+
+    if tool == "self_improve_apply":
+        pending = _pending_improvements[0]
+        if not pending:
+            return _s("No pending improvement to apply. Ask me to improve myself first."), "Self-Improve"
+
+        def _apply_stream():
+            yield f"Applying the improvement to {pending['file']}..."
+            result = si.apply_pending_improvement(pending)
+            _pending_improvements[0] = None
+            if result.get("error"):
+                yield f" Could not apply: {result['error']}"
+            else:
+                yield (
+                    f" Done. Applied improvement to {result['file']}. "
+                    f"{result['lines_changed']} lines changed. "
+                    f"Backup saved as {result['backup']}. "
+                    f"Say 'restart yourself' to reload the updated code."
+                )
+
+        return _apply_stream(), "Self-Improve"
+
+    if tool == "self_improve_cancel":
+        had_pending = _pending_improvements[0] is not None
+        _pending_improvements[0] = None
+        msg_text = "Improvement discarded." if had_pending else "No pending improvement to cancel."
+        return _s(msg_text), "Self-Improve"
 
     # ── Meeting ───────────────────────────────────────────────────────────────
     if tool == "meeting":

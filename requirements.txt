@@ -21,3 +21,4 @@ ollama
 pypdf
 # self_improve uses stdlib only (difflib, shutil, subprocess)
 cryptography
+kokoro-onnx  # Local TTS — free, no API

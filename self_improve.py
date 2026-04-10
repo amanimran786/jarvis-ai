@@ -21,7 +21,7 @@ import tempfile
 import re
 from datetime import datetime
 from brains.brain_claude import ask_claude
-from config import OPUS
+from config import OPUS, LOCAL_CODER, LOCAL_REASONING
 import evals
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,6 +62,7 @@ IMPROVABLE_FILES = {
     "local_runtime/local_stt.py": "local speech-to-text runtime",
     "local_runtime/local_training.py": "local training and distillation tools",
     "local_runtime/local_tts.py": "local text-to-speech runtime",
+    "local_runtime/local_kokoro_tts.py": "Kokoro ONNX text-to-speech backend",
 }
 
 
@@ -206,6 +207,32 @@ def apply_improvement(filename: str, new_code: str) -> tuple[str, str]:
     return backup_path, diff
 
 
+# ── Model routing helpers ─────────────────────────────────────────────────────
+
+def _ask_for_analysis(prompt: str) -> str:
+    """Route analysis prompts: local deepseek-r1 in open-source mode, Opus otherwise."""
+    try:
+        import model_router
+        if model_router.is_open_source_mode():
+            from brains.brain_ollama import ask_local
+            return ask_local(prompt, model=LOCAL_REASONING)
+    except Exception:
+        pass
+    return ask_claude(prompt, model=OPUS)
+
+
+def _ask_for_code(prompt: str) -> str:
+    """Route code-generation prompts: local qwen2.5-coder in open-source mode, Opus otherwise."""
+    try:
+        import model_router
+        if model_router.is_open_source_mode():
+            from brains.brain_ollama import ask_local
+            return ask_local(prompt, model=LOCAL_CODER)
+    except Exception:
+        pass
+    return ask_claude(prompt, model=OPUS)
+
+
 # ── Self-analysis ─────────────────────────────────────────────────────────────
 
 def read_source(filename: str) -> str:
@@ -261,7 +288,7 @@ efficient, or useful. Be specific about:
 
 Keep your response concise — 3-4 sentences max."""
 
-    return ask_claude(prompt, model=OPUS)
+    return _ask_for_analysis(prompt)
 
 
 def _recent_crash_lines(limit: int = 5) -> list[str]:
@@ -418,7 +445,7 @@ Rules:
 - Return ONLY the complete new Python code for {filename}, nothing else
 - No explanation, no markdown, just the raw Python code"""
 
-    new_code = ask_claude(prompt, model=OPUS)
+    new_code = _ask_for_code(prompt)
 
     # Strip markdown code fences — handle leading blank lines and language tags
     new_code = new_code.strip()
@@ -453,7 +480,7 @@ Broken code:
 {broken_code}
 ```"""
 
-    fixed = ask_claude(prompt, model=OPUS).strip()
+    fixed = _ask_for_code(prompt).strip()
     if fixed.startswith("```"):
         lines = fixed.split("\n")[1:]
         if lines and lines[-1].strip() == "```":
@@ -495,6 +522,7 @@ def _validation_commands(filename: str) -> list[tuple[str, list[str]]]:
         "local_runtime/local_stt.py": ["local_runtime.local_stt"],
         "local_runtime/local_training.py": ["local_runtime.local_training"],
         "local_runtime/local_tts.py": ["local_runtime.local_tts"],
+        "local_runtime/local_kokoro_tts.py": ["local_runtime.local_kokoro_tts"],
     }
     modules = smoke_imports.get(filename)
     if modules:
@@ -552,6 +580,8 @@ def _parity_commands(filename: str) -> list[tuple[str, list[str]]]:
             "assert callable(self_improve.self_review); "
             "assert callable(self_improve.review_text); "
             "assert callable(self_improve.self_improve); "
+            "assert callable(self_improve.prepare_improvement); "
+            "assert callable(self_improve.apply_pending_improvement); "
             "review=self_improve.self_review(); "
             "assert isinstance(review, dict) and 'ok' in review; "
             "text=self_improve.review_text(review); "
@@ -595,16 +625,13 @@ def _run_validation(filename: str) -> dict:
     }
 
 
-def self_improve(instruction: str = None, filename: str = None) -> dict:
+def prepare_improvement(instruction: str = None, filename: str = None) -> dict:
     """
-    Full self-improvement pipeline:
-    1. Analyze code to find what to improve (if no instruction given)
-    2. Generate improved code using Opus
-    3. Back up original
-    4. Apply changes
-    5. Return summary for user approval/review
+    Phase 1 of the self-improvement pipeline (safe — no disk writes).
+    Generates improved code, validates syntax, and builds a diff preview.
+    Returns a 'pending' dict that must be confirmed before applying.
 
-    Returns dict with: file, backup, diff, summary
+    Call apply_pending_improvement(pending) to write changes to disk.
     """
     evidence_bundle = None
 
@@ -628,31 +655,32 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
         if not filename:
             filename = "router.py"  # default to routing improvements
 
-    print(f"[Self-Improve] Improving {filename}: {instruction[:80]}...")
+    print(f"[Self-Improve] Preparing improvement for {filename}: {instruction[:80]}...")
 
-    # Step 2: generate improved code
+    # Step 2: generate improved code (no disk writes yet)
     new_code = generate_improvement(filename, instruction, evidence_bundle=evidence_bundle)
 
-    # Step 3 & 4: backup and apply
+    # Step 3: validate syntax (before touching disk)
+    first_error = None
     try:
-        backup_path, diff = apply_improvement(filename, new_code)
+        _validate_python_code(filename, new_code)
     except Exception as e:
         first_error = str(e)
         if "syntax validation" in first_error.lower() or "invalid syntax" in first_error.lower():
             try:
-                repaired_code = repair_generated_code(filename, new_code, first_error)
-                repaired_code = _heuristic_comment_fix(repaired_code, first_error)
-                backup_path, diff = apply_improvement(filename, repaired_code)
+                new_code = repair_generated_code(filename, new_code, first_error)
+                new_code = _heuristic_comment_fix(new_code, first_error)
+                _validate_python_code(filename, new_code)
             except Exception as repair_error:
                 second_error = str(repair_error)
                 if "syntax validation" in second_error.lower() or "invalid syntax" in second_error.lower():
                     try:
-                        repaired_again = repair_generated_code(filename, repaired_code, second_error)
-                        repaired_again = _heuristic_comment_fix(repaired_again, second_error)
-                        backup_path, diff = apply_improvement(filename, repaired_again)
+                        new_code = repair_generated_code(filename, new_code, second_error)
+                        new_code = _heuristic_comment_fix(new_code, second_error)
+                        _validate_python_code(filename, new_code)
                     except Exception as final_error:
                         return {
-                            "error": f"Self-improve aborted before applying changes: {final_error}",
+                            "error": f"Code generation produced invalid syntax after 3 repair attempts: {final_error}",
                             "file": filename,
                             "instruction": instruction,
                             "initial_error": first_error,
@@ -660,17 +688,55 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
                         }
                 else:
                     return {
-                        "error": f"Self-improve aborted before applying changes: {repair_error}",
+                        "error": f"Self-improve aborted: {repair_error}",
                         "file": filename,
                         "instruction": instruction,
                         "initial_error": first_error,
                     }
         else:
             return {
-                "error": f"Self-improve aborted before applying changes: {e}",
+                "error": f"Self-improve aborted: {e}",
                 "file": filename,
                 "instruction": instruction,
             }
+
+    # Step 4: build diff preview (no disk writes)
+    current_code = read_source(filename)
+    diff = _diff(current_code, new_code, filename)
+    lines_changed = diff.count("\n+") + diff.count("\n-")
+
+    return {
+        "pending": True,
+        "file": filename,
+        "instruction": instruction,
+        "new_code": new_code,
+        "diff": diff,
+        "lines_changed": lines_changed,
+        "evidence_bundle": evidence_bundle,
+    }
+
+
+def apply_pending_improvement(pending: dict) -> dict:
+    """
+    Phase 2 of the self-improvement pipeline — only called after user approval.
+    Writes the pre-generated code to disk, runs validation, auto-reverts on failure.
+    """
+    if not pending or pending.get("error"):
+        return pending or {"error": "No pending improvement to apply."}
+
+    filename = pending["filename"] if "filename" in pending else pending["file"]
+    instruction = pending.get("instruction", "")
+    new_code = pending["new_code"]
+    evidence_bundle = pending.get("evidence_bundle")
+
+    try:
+        backup_path, diff = apply_improvement(filename, new_code)
+    except Exception as e:
+        return {
+            "error": f"Failed to write changes to disk: {e}",
+            "file": filename,
+            "instruction": instruction,
+        }
 
     validation = _run_validation(filename)
     if not validation["ok"]:
@@ -682,7 +748,7 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
             source="self_improve_validation",
         )
         return {
-            "error": f"Self-improve reverted after validation failed: {validation['summary']}",
+            "error": f"Applied change failed validation and was auto-reverted: {validation['summary']}",
             "file": filename,
             "instruction": instruction,
             "backup": os.path.basename(backup_path),
@@ -703,8 +769,30 @@ def self_improve(instruction: str = None, filename: str = None) -> dict:
     return result
 
 
+def self_improve(instruction: str = None, filename: str = None) -> dict:
+    """
+    Legacy single-shot pipeline (no approval gate).
+    Prefer prepare_improvement() + apply_pending_improvement() for interactive use.
+    """
+    pending = prepare_improvement(instruction=instruction, filename=filename)
+    if pending.get("error"):
+        return pending
+    return apply_pending_improvement(pending)
+
+
 def restart_jarvis() -> None:
     """Restart the Jarvis process to load updated code."""
     print("[Self-Improve] Restarting Jarvis to apply changes...")
+    # Reap multiprocessing children before re-exec so they don't orphan.
+    try:
+        import multiprocessing as _mp
+        for _child in _mp.active_children():
+            try:
+                _child.terminate()
+                _child.join(timeout=1.0)
+            except Exception:
+                pass
+    except Exception:
+        pass
     subprocess.Popen([sys.executable] + sys.argv)
     sys.exit(0)

@@ -52,6 +52,16 @@ _pyqt6_plugins = os.path.join(
 _pyqt6_plugins = os.path.normpath(_pyqt6_plugins)
 if os.path.isdir(_pyqt6_plugins):
     os.environ.setdefault("QT_PLUGIN_PATH", _pyqt6_plugins)
+    _pyqt6_platforms = os.path.join(_pyqt6_plugins, "platforms")
+    _qpa_path = os.getenv("QT_QPA_PLATFORM_PLUGIN_PATH", "")
+    # Some environments persist a broken conda path ("plug3ins"), which makes
+    # Qt abort before UI startup. Force a valid platforms directory here.
+    if _qpa_path:
+        normalized_qpa = os.path.normpath(_qpa_path)
+        if "plug3ins" in normalized_qpa.lower() or not os.path.isdir(normalized_qpa):
+            os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = _pyqt6_platforms
+    else:
+        os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", _pyqt6_platforms)
 
 import evals
 import jarvis_daemon
@@ -209,7 +219,8 @@ def _run_headless():
                 misses += 1
                 if misses >= 2:
                     return True
-                speak("Still here.")
+                # Don't speak on first miss — just wait silently so ambient noise
+                # doesn't cause Jarvis to constantly interject "Still here."
                 continue
             misses = 0
             lower = user_input.lower().strip()
@@ -219,6 +230,9 @@ def _run_headless():
             if lower in END_CONVERSATION:
                 speak("Alright.")
                 return True
+            # Ignore single-word noise captures ("um", "uh", "hm") without responding
+            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
+                continue
             if handle_memory(user_input):
                 continue
             try:
@@ -329,4 +343,7 @@ def _run():
 
 
 if __name__ == "__main__":
+    # Required for frozen app builds (PyInstaller) so multiprocessing child
+    # processes do not re-enter full application startup.
+    multiprocessing.freeze_support()
     _run()

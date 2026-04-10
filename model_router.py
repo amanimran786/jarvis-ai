@@ -436,6 +436,12 @@ def smart_stream(
 
     def _candidate_stream(candidate):
         if candidate.provider == "ollama":
+            # Update keepalive target so the next query finds this model already warm
+            try:
+                from brains.brain_ollama import start_keepalive
+                start_keepalive(candidate.model)
+            except Exception:
+                pass
             return ask_local_stream(
                 user_input,
                 candidate.model,

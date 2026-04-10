@@ -1141,12 +1141,16 @@ class VoiceWorker(QThread):
                         _summarize(exchanges)
                     self.status.emit("AWAITING WAKE WORD")
                     return
-                speak("Still here.")
-                self.message.emit("Still here.", "jarvis", "")
+                # Silent wait on first miss — avoids "Still here" spam from ambient noise
                 continue
 
             misses = 0
             lower = user_input.lower().strip()
+
+            # Drop single-word noise captures silently
+            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
+                continue
+
             self.message.emit(user_input, "user", "")
             exchanges.append(f"User: {user_input}")
 
