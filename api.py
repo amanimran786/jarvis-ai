@@ -783,6 +783,7 @@ def set_mode(req: ModeRequest):
 
 _port: int = 8765  # actual port after binding
 _host: str = "127.0.0.1"
+_API_STARTED = False  # Guard against multiple start() calls
 
 
 def _find_free_port(start: int = 8765, attempts: int = 10, host: str = "127.0.0.1") -> int:
@@ -824,7 +825,12 @@ hw.register_api_routes(app)
 
 def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     """Start the API server in a background daemon thread."""
-    global _host, _port, _API_TOKEN
+    global _host, _port, _API_TOKEN, _API_STARTED
+    
+    if _API_STARTED:
+        return threading.current_thread()
+    
+    _API_STARTED = True
     _host = host or "127.0.0.1"
     _port = _find_free_port(port, host=_host)
     _API_TOKEN = os.getenv("JARVIS_API_TOKEN", "").strip() or secrets.token_urlsafe(24)
