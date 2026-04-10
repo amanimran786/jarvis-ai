@@ -18,9 +18,11 @@ Endpoints:
 
 import json
 import os
+import hmac
+import secrets
 import threading
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -72,6 +74,47 @@ def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
 
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
+_API_TOKEN = ""
+_PUBLIC_PATHS = {"/status"}
+
+
+def _host_without_port(host_header: str) -> str:
+    host = (host_header or "").strip()
+    if host.startswith("[") and "]" in host:
+        return host[1:host.index("]")]
+    return host.split(":", 1)[0].strip().lower()
+
+
+def _allowed_hostnames() -> set[str]:
+    allowed = {"127.0.0.1", "localhost", "::1", "testserver"}
+    host = (get_host() or "127.0.0.1").strip().lower()
+    if host in {"0.0.0.0", "::", "*"}:
+        allowed.update(ip.lower() for ip in hw.local_ipv4_addresses())
+    elif host:
+        allowed.add(host)
+    return allowed
+
+
+def _token_authorized(request: Request) -> bool:
+    expected = (_API_TOKEN or "").strip()
+    if not expected:
+        return True
+    bearer = request.headers.get("Authorization", "")
+    if bearer.lower().startswith("bearer "):
+        supplied = bearer[7:].strip()
+    else:
+        supplied = request.headers.get("X-Jarvis-Token", "").strip()
+    return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
+@app.middleware("http")
+async def _guard_requests(request: Request, call_next):
+    host = _host_without_port(request.headers.get("host", ""))
+    if host and host not in _allowed_hostnames():
+        return JSONResponse(status_code=400, content={"ok": False, "error": "host_not_allowed"})
+    if request.url.path not in _PUBLIC_PATHS and not _token_authorized(request):
+        return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+    return await call_next(request)
 
 
 # ── Request models ─────────────────────────────────────────────────────────────
@@ -659,30 +702,25 @@ def get_base_url() -> str:
     return urls[0] if urls else f"http://{_host}:{_port}"
 
 
+def get_api_token() -> str:
+    return _API_TOKEN
+
+
 hw.register_api_routes(app)
 
 
 def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     """Start the API server in a background daemon thread."""
-    global _host, _port
+    global _host, _port, _API_TOKEN
     _host = host or "127.0.0.1"
     _port = _find_free_port(port, host=_host)
+    _API_TOKEN = os.getenv("JARVIS_API_TOKEN", "").strip() or secrets.token_urlsafe(24)
 
     def _run():
         uvicorn.run(app, host=_host, port=_port, log_level="warning")
 
     t = threading.Thread(target=_run, daemon=True, name="JarvisAPI")
     t.start()
-    # Write port to file so jarvis_cli.py can find it
-    try:
-        port_file = runtime_state.port_file_path()
-        port_file.write_text(str(_port), encoding="utf-8")
-        runtime_state.write_api_endpoint(_host, _port)
-    except Exception as exc:
-        try:
-            runtime_state.update(last_error=f"port file write failed: {exc}")
-        except Exception:
-            pass
     print(f"[API] Jarvis API running at http://{_host}:{_port}")
 
     # Pre-load the reasoning model in the background so first query is instant

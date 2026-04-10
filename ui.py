@@ -33,7 +33,7 @@ from PyQt6.QtGui import (
 )
 
 from router import route_stream, set_timer_callback
-from voice import speak, speak_stream, listen, wait_for_wake_word
+from voice import speak, speak_stream, listen, wait_for_wake_word, request_stop as _voice_request_stop, clear_stop_request as _voice_clear_stop_request
 import memory as mem
 import briefing
 import tools
@@ -1112,8 +1112,10 @@ class VoiceWorker(QThread):
 
     def stop(self):
         self._active = False
+        _voice_request_stop()
 
     def run(self):
+        _voice_clear_stop_request()
         while self._active:
             self.status.emit("AWAITING WAKE WORD")
             wait_for_wake_word()
@@ -2535,6 +2537,15 @@ class JarvisWindow(QMainWindow):
     def closeEvent(self, event):
         if hasattr(self, "voice_worker"):
             self.voice_worker.stop()
+            self.voice_worker.wait(4000)
+        try:
+            _meeting_stop()
+        except Exception:
+            pass
+        try:
+            hotkeys.stop()
+        except Exception:
+            pass
         event.accept()
 
 

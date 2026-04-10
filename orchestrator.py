@@ -99,6 +99,15 @@ def classify(user_input: str) -> ToolDecision:
     if fast:
         return _attach_skill(user_input, fast)
 
+    # In open-source mode, skip specialized agents for short queries.
+    # Specialized agents run 3-5 model calls sequentially — acceptable for cloud
+    # (fast), but with R1:14b locally that's 5+ minutes for a simple question.
+    # Only route to specialized agents in open-source mode for genuinely complex
+    # queries (20+ words) where the multi-role output quality justifies the wait.
+    word_count = len(user_input.split())
+    if model_router.is_open_source_mode() and word_count < 20:
+        return _attach_skill(user_input, _FALLBACK)
+
     # Use the fast heuristic specialist classifier in every mode.
     # This is local and deterministic, unlike the cloud classifier below.
     auto_specialized = _auto_specialized_classify(user_input.lower().strip())
