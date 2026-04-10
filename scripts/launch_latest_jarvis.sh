@@ -37,4 +37,6 @@ if needs_rebuild; then
   "$INSTALL_SCRIPT" --applications-only
 fi
 
-exec open -na "$APPLICATIONS_APP"
+# Use 'open -a' (without -n) to reuse existing instance if running
+# or start a new one if not running (normal macOS behavior)
+open -a "$APPLICATIONS_APP"
