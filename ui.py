@@ -281,7 +281,14 @@ def _device_copy_current_page_url() -> str | None:
     return None
 
 
-def _build_runtime_app_icon(size: int = 512) -> QIcon:
+def _build_runtime_app_icon(size: int = 512) -> QIcon | None:
+    if getattr(sys, "frozen", False):
+        return None
+
+    icon = _load_packaged_app_icon()
+    if icon is not None:
+        return icon
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
 
@@ -318,14 +325,44 @@ def _build_runtime_app_icon(size: int = 512) -> QIcon:
     return QIcon(pixmap)
 
 
-def _apply_macos_identity(app: QApplication, icon: QIcon):
+def _load_packaged_app_icon() -> QIcon | None:
+    candidates: list[str] = []
+
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.extend([
+            os.path.normpath(os.path.join(exe_dir, "..", "Resources", "jarvis.icns")),
+            os.path.normpath(os.path.join(exe_dir, "..", "Resources", "assets", "icon_1024.png")),
+            os.path.normpath(os.path.join(exe_dir, "..", "Resources", "assets", "jarvis.icns")),
+        ])
+
+    repo_root = os.path.dirname(__file__)
+    candidates.extend([
+        os.path.join(repo_root, "assets", "jarvis.icns"),
+        os.path.join(repo_root, "assets", "icon_1024.png"),
+    ])
+
+    seen: set[str] = set()
+    for path in candidates:
+        normalized = os.path.normpath(path)
+        if normalized in seen or not os.path.exists(normalized):
+            continue
+        seen.add(normalized)
+        icon = QIcon(normalized)
+        if not icon.isNull():
+            return icon
+    return None
+
+
+def _apply_macos_identity(app: QApplication, icon: QIcon | None):
     app.setApplicationName("Jarvis")
     if hasattr(app, "setApplicationDisplayName"):
         app.setApplicationDisplayName("Jarvis")
     if hasattr(app, "setDesktopFileName"):
         app.setDesktopFileName("Jarvis")
-    app.setWindowIcon(icon)
-    QApplication.setWindowIcon(icon)
+    if icon is not None and not icon.isNull():
+        app.setWindowIcon(icon)
+        QApplication.setWindowIcon(icon)
 
     if NSProcessInfo is not None:
         try:
@@ -3222,7 +3259,8 @@ def run():
         or default_classic
     )
     window = JarvisWindow() if use_classic else OrbShellWindow()
-    window.setWindowIcon(runtime_icon)
+    if runtime_icon is not None and not runtime_icon.isNull():
+        window.setWindowIcon(runtime_icon)
     window.show()
     QTimer.singleShot(0, lambda: _activate_macos_app(window))
     sys.exit(app.exec())

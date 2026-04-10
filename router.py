@@ -45,6 +45,7 @@ import usage_tracker
 import prompt_modifiers
 import self_improve as si
 import hardware as hw
+import runtime_state
 import messages as msg
 import call_privacy
 import provider_router
@@ -1355,10 +1356,11 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         "bridge status", "jarvis bridge", "lan status", "same wifi bridge", "local network bridge",
         "what is my bridge url", "what's my bridge url", "copy bridge url", "show bridge url"
     ]):
-        bridge_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        snap = runtime_state.snapshot()
+        bridge_host = str(snap.get("api_host") or os.getenv("JARVIS_API_HOST", "127.0.0.1")).strip() or "127.0.0.1"
         try:
-            bridge_port = int(os.getenv("JARVIS_API_PORT", "8765"))
-        except ValueError:
+            bridge_port = int(snap.get("api_port") or os.getenv("JARVIS_API_PORT", "8765"))
+        except (TypeError, ValueError):
             bridge_port = 8765
         bridge = hw.bridge_status(api_host=bridge_host, api_port=bridge_port)
         urls = bridge.get("urls", [])

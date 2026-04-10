@@ -1638,5 +1638,94 @@ class MainStartupGuardTests(unittest.TestCase):
         self.assertIn("should not be launched from conda", str(exc.exception))
 
 
+class RuntimeEndpointDiscoveryTests(unittest.TestCase):
+    def test_discover_api_endpoint_prefers_runtime_metadata(self):
+        import runtime_state
+
+        metadata = {
+            "host": "127.0.0.1",
+            "port": 8766,
+            "pid": 123,
+            "written_at": "2026-04-09T00:00:00+00:00",
+        }
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "online"}).encode("utf-8")
+
+        def _urlopen(req, timeout=0.5):
+            url = getattr(req, "full_url", str(req))
+            self.assertEqual(url, "http://127.0.0.1:8766/status")
+            return _Resp()
+
+        with patch("runtime_state.read_api_endpoint", return_value={**metadata, "base_url": "http://127.0.0.1:8766"}), \
+             patch("runtime_state.port_file_path") as port_file_mock, \
+             patch("runtime_state.urllib.request.urlopen", side_effect=_urlopen), \
+             patch.dict(os.environ, {}, clear=True):
+            port_file_mock.return_value.read_text.side_effect = FileNotFoundError
+            result = runtime_state.discover_api_endpoint()
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["port"], 8766)
+        self.assertEqual(result["base_url"], "http://127.0.0.1:8766")
+
+    def test_discover_api_endpoint_falls_back_to_port_file(self):
+        import runtime_state
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "online"}).encode("utf-8")
+
+        with patch("runtime_state.read_api_endpoint", return_value=None), \
+             patch("runtime_state.port_file_path") as port_file_mock, \
+             patch("runtime_state.urllib.request.urlopen", return_value=_Resp()), \
+             patch.dict(os.environ, {}, clear=True):
+            port_file_mock.return_value.read_text.return_value = "8772"
+            result = runtime_state.discover_api_endpoint()
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["port"], 8772)
+
+
+class JarvisCliEndpointTests(unittest.TestCase):
+    def test_get_uses_runtime_discovery_each_call(self):
+        import jarvis_cli
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "online"}).encode("utf-8")
+
+        captured = []
+
+        def _urlopen(req, timeout=10):
+            captured.append(getattr(req, "full_url", str(req)))
+            return _Resp()
+
+        with patch("runtime_state.discover_api_endpoint", return_value={"base_url": "http://127.0.0.1:8766"}), \
+             patch("jarvis_cli.urllib.request.urlopen", side_effect=_urlopen):
+            payload = jarvis_cli.get("/status")
+
+        self.assertEqual(payload["status"], "online")
+        self.assertEqual(captured, ["http://127.0.0.1:8766/status"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

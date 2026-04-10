@@ -211,8 +211,13 @@ def chat(req: ChatRequest):
                 stream, model = route_stream(req.message)
                 chunks = []
                 for chunk in stream:
-                    chunks.append(chunk)
-                    yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
+                    if chunk:
+                        chunks.append(chunk)
+                        yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
+                    else:
+                        # Empty keepalive from DeepSeek R1 think phase —
+                        # send SSE comment to hold the connection open
+                        yield ": keepalive\n\n"
                 response = "".join(chunks)
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 context_stats = ctx.record_request_stats(model, source="api_stream")
@@ -259,6 +264,7 @@ def status(refresh: bool = False):
         "status": "online",
         "mode": model_router.get_mode(),
         "api_host": get_host(),
+        "api_port": get_port(),
         "api_urls": get_base_urls(),
         "local_available": model_router._has_local(),
         "context": ctx.get_stats(),
@@ -672,6 +678,7 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     try:
         port_file = runtime_state.port_file_path()
         port_file.write_text(str(_port), encoding="utf-8")
+        runtime_state.write_api_endpoint(_host, _port)
     except Exception as exc:
         try:
             runtime_state.update(last_error=f"port file write failed: {exc}")

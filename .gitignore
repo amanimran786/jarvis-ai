@@ -6,6 +6,7 @@ token.json
 # Runtime state
 .jarvis_port
 .jarvis_crash.log
+.jarvis_build_stamp
 
 # Persistent runtime data
 memory.json
@@ -48,6 +49,7 @@ build/
 
 # macOS
 .DS_Store
+assets/icon.iconset/
 
 # Graphify build artifacts
 graphify-out/.graphify_*
