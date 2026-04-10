@@ -402,6 +402,12 @@ Extensions:
 - `GET /plugins`
 - `GET /plugins/{plugin_id}`
 
+OSINT local endpoints:
+
+- `GET /osint/status`
+- `POST /osint/username`
+- `POST /osint/domain-typos`
+
 Managed runtime:
 
 - `GET /agents`
@@ -461,7 +467,13 @@ ollama pull nomic-embed-text
 ollama pull llava:7b
 ```
 
-### 4. Run Jarvis
+### 4. (Optional) Install local OSINT tools
+
+```bash
+pip install maigret dnstwist
+```
+
+### 5. Run Jarvis
 
 ```bash
 ./run.sh
@@ -473,7 +485,7 @@ Headless:
 ./run.sh --no-ui
 ```
 
-### 5. Build and install the desktop app
+### 6. Build and install the desktop app
 
 ```bash
 bash scripts/install_jarvis_app.sh

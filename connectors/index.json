@@ -46,6 +46,17 @@
       "status_hint": "high_trust_only"
     },
     {
+      "id": "osint_local",
+      "name": "OSINT Local Tools",
+      "description": "Local OSINT username and typo-squat scanning via Maigret and DNSTwist.",
+      "transport": "local_subprocess",
+      "auth": "local_token",
+      "local_only": true,
+      "tools": ["osint_username", "osint_domain_typos"],
+      "capabilities": ["username_footprint", "domain_typosquat_scan"],
+      "status_hint": "ready_when_tools_installed"
+    },
+    {
       "id": "google_workspace",
       "name": "Google Workspace",
       "description": "Gmail and Calendar integration for mail triage, meeting context, and scheduling.",

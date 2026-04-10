@@ -28,6 +28,8 @@ TOOLS = {
     "self_improve": "Modify Jarvis source code when explicitly requested.",
     "meeting": "Smart Listen meeting mode.",
     "message": "Send iMessage/SMS via Messages app.",
+    "osint_username": "Local username footprint scan using Maigret.",
+    "osint_domain_typos": "Local typo-squatting scan for a domain using DNSTwist.",
 }
 
 
@@ -182,6 +184,34 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         verifier="json_object",
         idempotent=False,
     ),
+    "osint_username": ToolSpec(
+        name="osint_username",
+        description="Scan username presence across platforms with local Maigret.",
+        args_schema={
+            "username": {"type": "string"},
+            "timeout_seconds": {"type": "int", "default": 45},
+            "top_sites": {"type": "int", "default": 200},
+            "max_results": {"type": "int", "default": 25},
+        },
+        required=("username",),
+        side_effects=False,
+        timeout_seconds=120,
+        verifier="json_object",
+    ),
+    "osint_domain_typos": ToolSpec(
+        name="osint_domain_typos",
+        description="Scan typo-squat domains with local DNSTwist.",
+        args_schema={
+            "domain": {"type": "string"},
+            "timeout_seconds": {"type": "int", "default": 60},
+            "max_results": {"type": "int", "default": 25},
+            "registered_only": {"type": "bool", "default": True},
+        },
+        required=("domain",),
+        side_effects=False,
+        timeout_seconds=120,
+        verifier="json_object",
+    ),
 }
 
 
@@ -225,7 +255,20 @@ def validate_args(tool_name: str, params: dict) -> tuple[bool, dict, str]:
             elif expected == "float":
                 value = float(value)
             elif expected == "bool":
-                value = bool(value)
+                if isinstance(value, bool):
+                    value = value
+                elif isinstance(value, (int, float)):
+                    value = bool(value)
+                elif isinstance(value, str):
+                    lowered = value.strip().lower()
+                    if lowered in {"1", "true", "yes", "on"}:
+                        value = True
+                    elif lowered in {"0", "false", "no", "off"}:
+                        value = False
+                    else:
+                        raise ValueError("invalid boolean")
+                else:
+                    raise ValueError("invalid boolean")
             else:
                 value = str(value)
         except (TypeError, ValueError):

@@ -29,6 +29,19 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIn("malware_get_alert", text)
         self.assertIn("malware_submit_hash", text)
 
+    def test_callable_summary_includes_osint_tools(self):
+        text = tool_registry.callable_tool_summaries()
+        self.assertIn("osint_username", text)
+        self.assertIn("osint_domain_typos", text)
+
+    def test_validate_args_normalizes_bool_strings(self):
+        ok, normalized, error = tool_registry.validate_args(
+            "osint_domain_typos",
+            {"domain": "example.com", "registered_only": "false"},
+        )
+        self.assertTrue(ok, error)
+        self.assertIs(normalized["registered_only"], False)
+
 
 class ExecutionEngineContractTests(unittest.TestCase):
     def test_execute_step_records_trace(self):
