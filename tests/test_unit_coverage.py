@@ -1638,12 +1638,14 @@ class MainStartupGuardTests(unittest.TestCase):
              patch("main._project_venv_python", return_value="/tmp/jarvis-venv/bin/python"), \
              patch("main.os.path.exists", return_value=True), \
              patch("main.os.path.realpath", side_effect=lambda p: p), \
-             patch("main.os.execv") as execv_mock:
+             patch.dict("main.os.environ", {}, clear=True), \
+             patch("main.os.execve") as execve_mock:
             main._ensure_supported_gui_runtime()
 
-        execv_mock.assert_called_once_with(
+        execve_mock.assert_called_once_with(
             "/tmp/jarvis-venv/bin/python",
             ["/tmp/jarvis-venv/bin/python", "main.py"],
+            {"_JARVIS_GUI_REEXEC_ATTEMPTED": "1"},
         )
 
     def test_gui_launch_from_conda_without_venv_exits_cleanly(self):

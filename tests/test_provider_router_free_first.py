@@ -40,7 +40,9 @@ class ProviderRouterFreeFirstTests(unittest.TestCase):
                     yield ""
                 return _gen()
 
-            with patch("model_router._has_local", return_value=True), \
+            with patch("provider_router.PAID_FALLBACK_ENABLED", True), \
+                 patch("provider_router.LOCAL_STRICT_FIRST", True), \
+                 patch("model_router._has_local", return_value=True), \
                  patch("model_router._best_local", return_value="jarvis-local"), \
                  patch("model_router.ask_local_stream", side_effect=broken_local), \
                  patch("model_router.ask_stream", return_value=iter(["cloud fallback answer"])):
