@@ -508,6 +508,8 @@ For the deeper system docs, start here:
 - [docs/jarvis_architecture/07_MEMPALACE_GRAPHIFY_ADOPTION.md](docs/jarvis_architecture/07_MEMPALACE_GRAPHIFY_ADOPTION.md)
 - [docs/persistent-jarvis-v1.md](docs/persistent-jarvis-v1.md)
 
+Webhook hardening env vars: `JARVIS_WEBHOOK_MAX_AGE_SECONDS` and `JARVIS_PERSIST_REDACT_SOURCES` (see `docs/persistent-jarvis-v1.md`).
+
 ## Final Mental Model
 
 If you remember only one thing, remember this:

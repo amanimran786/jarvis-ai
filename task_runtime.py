@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -30,6 +31,20 @@ _TERSE_PREFIXES = {
     "ultra": "CAVEMAN ULTRA",
 }
 
+_PERSIST_REDACT_SOURCES_DEFAULT = "webhook,github_webhook"
+_PERSIST_REDACTED_PROMPT = "[REDACTED_PROMPT]"
+_PERSIST_REDACTED_EFFECTIVE_PROMPT = "[REDACTED_EFFECTIVE_PROMPT]"
+_PERSIST_REDACTED_RESULT = "[REDACTED_RESULT]"
+_SENSITIVE_META_BLOB_KEYS = {
+    "payload",
+    "raw_payload",
+    "payload_raw",
+    "event_payload",
+    "body",
+    "raw_body",
+    "request_body",
+}
+
 _BOOTSTRAPPED = False
 
 
@@ -43,6 +58,43 @@ def _copy(value: Any) -> Any:
     if isinstance(value, list):
         return [_copy(v) for v in value]
     return value
+
+
+def _persist_redact_sources() -> set[str]:
+    raw = os.getenv("JARVIS_PERSIST_REDACT_SOURCES", _PERSIST_REDACT_SOURCES_DEFAULT)
+    return {
+        source.strip().lower()
+        for source in str(raw).split(",")
+        if source and source.strip()
+    }
+
+
+def _strip_meta_payload_blobs(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in _SENSITIVE_META_BLOB_KEYS:
+                continue
+            sanitized[key] = _strip_meta_payload_blobs(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_strip_meta_payload_blobs(item) for item in value]
+    return value
+
+
+def _sanitize_task_for_persistence(task: dict[str, Any]) -> dict[str, Any]:
+    persisted = _copy(task)
+    source = str(persisted.get("source") or "").strip().lower()
+    if source not in _persist_redact_sources():
+        return persisted
+    persisted["prompt"] = _PERSIST_REDACTED_PROMPT
+    persisted["effective_prompt"] = _PERSIST_REDACTED_EFFECTIVE_PROMPT
+    persisted["result"] = _PERSIST_REDACTED_RESULT
+    meta = persisted.get("meta")
+    if isinstance(meta, (dict, list)):
+        persisted["meta"] = _strip_meta_payload_blobs(meta)
+    return persisted
 
 
 def _default_agents() -> list[dict[str, Any]]:
@@ -174,7 +226,7 @@ def _persist_task(task_id: str) -> None:
     task = _TASKS.get(task_id)
     if not task:
         return
-    task_persistence.upsert_task(_copy(task))
+    task_persistence.upsert_task(_sanitize_task_for_persistence(task))
 
 
 def _touch_agent(agent_id: str, *, status: str | None = None, current_task_id: str | None = None, last_error: str | None = None) -> None:
