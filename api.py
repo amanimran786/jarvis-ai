@@ -998,6 +998,7 @@ def run_local_training(req: LocalTrainingRunRequest):
     kwargs = {
         "export_limit": req.export_limit,
         "distill_limit": req.distill_limit,
+        "expert_distill_limit": req.expert_distill_limit,
         "teacher_model": req.teacher_model,
         "cloud_only_export": req.cloud_only_export,
     }
@@ -1017,6 +1018,18 @@ def build_local_training_handoff(req: LocalTrainingHandoffRequest):
     if req.targets:
         kwargs["targets"] = req.targets
     result = local_training.build_finetune_handoff(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/teach")
+def record_local_training_teach(req: LocalTrainingTeachRequest):
+    result = local_training.record_teacher_example(
+        req.prompt,
+        req.answer,
+        source=req.source,
+        tags=req.tags,
+        meta=req.meta,
+    )
     return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
 
 
@@ -1080,6 +1093,108 @@ def run_local_beta(req: LocalBetaRunRequest):
         suite=req.suite,
     )
     return {"ok": result.get("ok", False), "message": local_beta.result_text(result), "result": result}
+
+
+@app.get("/pending")
+async def pending_approvals_page(request: Request):
+    """Mobile-friendly approval page — open on your phone to approve/reject pending changes."""
+    from fastapi.responses import HTMLResponse
+    import router as _router
+    pending = _router._pending_improvements[0]
+
+    if pending:
+        file = pending.get("file", "?")
+        lines = pending.get("lines_changed", "?")
+        diff = pending.get("diff", "")[:2000]
+        diff_html = diff.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+        body = f"""
+        <div class='card'>
+          <h2>Pending Code Change</h2>
+          <p><b>File:</b> {file}</p>
+          <p><b>Lines changed:</b> {lines}</p>
+          <pre class='diff'>{diff_html}</pre>
+          <div class='buttons'>
+            <form method='POST' action='/pending/approve' style='display:inline'>
+              <button type='submit' class='btn-approve'>Approve</button>
+            </form>
+            <form method='POST' action='/pending/reject' style='display:inline'>
+              <button type='submit' class='btn-reject'>Reject</button>
+            </form>
+          </div>
+        </div>"""
+    else:
+        body = "<div class='card'><h2>No pending approvals</h2><p>Jarvis has no changes waiting for review.</p></div>"
+
+    host = request.headers.get("host", "127.0.0.1:8765")
+    html = f"""<!DOCTYPE html>
+<html lang='en'>
+<head>
+  <meta charset='UTF-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+  <title>Jarvis — Pending Approvals</title>
+  <style>
+    body {{ font-family: -apple-system, sans-serif; background: #0d0d0d; color: #e0e0e0; padding: 16px; max-width: 600px; margin: auto; }}
+    h1 {{ color: #7ec8e3; font-size: 1.4em; }}
+    .card {{ background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-top: 16px; }}
+    .card h2 {{ color: #7ec8e3; margin-top: 0; }}
+    pre.diff {{ background: #111; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.78em; color: #a8d8a8; }}
+    .buttons {{ margin-top: 20px; display: flex; gap: 12px; }}
+    .btn-approve {{ background: #28a745; color: white; border: none; padding: 14px 28px; border-radius: 8px; font-size: 1.1em; cursor: pointer; flex: 1; }}
+    .btn-reject {{ background: #dc3545; color: white; border: none; padding: 14px 28px; border-radius: 8px; font-size: 1.1em; cursor: pointer; flex: 1; }}
+    .status {{ color: #aaa; margin-top: 8px; font-size: 0.85em; }}
+  </style>
+</head>
+<body>
+  <h1>Jarvis</h1>
+  <p class='status'>Connected to {host}</p>
+  {body}
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post("/pending/approve")
+async def approve_pending():
+    """Approve the pending self-improvement from any device."""
+    from fastapi.responses import HTMLResponse
+    import router as _router
+    import self_improve as _si
+    pending = _router._pending_improvements[0]
+    if not pending:
+        return HTMLResponse("<h2>No pending improvement to approve.</h2>", status_code=404)
+    result = _si.apply_pending_improvement(pending)
+    _router._pending_improvements[0] = None
+    if result.get("error"):
+        return HTMLResponse(f"<h2>Error applying change: {result['error']}</h2>", status_code=500)
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>body{{font-family:-apple-system,sans-serif;background:#0d0d0d;color:#e0e0e0;padding:24px;text-align:center}}.ok{{color:#28a745;font-size:2em}}</style>
+</head><body>
+<div class='ok'>&#10003; Approved</div>
+<p>Applied to <b>{result.get('file','?')}</b>. {result.get('lines_changed','?')} lines changed.</p>
+<p>Tell Jarvis <b>"restart yourself"</b> to reload the new code.</p>
+<a href='/pending' style='color:#7ec8e3'>Back</a>
+</body></html>""")
+
+
+@app.post("/pending/reject")
+async def reject_pending():
+    """Reject the pending self-improvement from any device."""
+    from fastapi.responses import HTMLResponse
+    import router as _router
+    _router._pending_improvements[0] = None
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang='en'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<style>body{font-family:-apple-system,sans-serif;background:#0d0d0d;color:#e0e0e0;padding:24px;text-align:center}.rej{color:#dc3545;font-size:2em}</style>
+</head><body>
+<div class='rej'>&#10007; Rejected</div>
+<p>Change discarded. No files were modified.</p>
+<a href='/pending' style='color:#7ec8e3'>Back</a>
+</body></html>""")
+
+
+# Add /pending to public paths so no Bearer token needed from phone browser
+_PUBLIC_PATHS.update({"/pending", "/pending/approve", "/pending/reject"})
 
 
 @app.get("/self/review")

@@ -105,7 +105,8 @@ def classify(user_input: str) -> ToolDecision:
     # Only route to specialized agents in open-source mode for genuinely complex
     # queries (20+ words) where the multi-role output quality justifies the wait.
     word_count = len(user_input.split())
-    if model_router.is_open_source_mode() and word_count < 20:
+    _no_cloud = model_router.is_open_source_mode() or model_router.get_mode() == "local"
+    if _no_cloud and word_count < 20:
         return _attach_skill(user_input, _FALLBACK)
 
     # Use the fast heuristic specialist classifier in every mode.
@@ -114,7 +115,8 @@ def classify(user_input: str) -> ToolDecision:
     if auto_specialized:
         return _attach_skill(user_input, auto_specialized)
 
-    if model_router.is_open_source_mode():
+    # In local or open-source mode skip cloud classification entirely.
+    if model_router.is_open_source_mode() or model_router.get_mode() == "local":
         return _attach_skill(user_input, _FALLBACK)
 
     # Full LLM classification

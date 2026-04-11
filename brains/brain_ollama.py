@@ -133,9 +133,10 @@ def _strip_markdown(text: str) -> str:
     text = re.sub(r'\*(.+?)\*', r'\1', text)
     text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)
     text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.M)
-    text = re.sub(r'^\s*\d+[.)]\s+', '', text, flags=re.M)
-    # Strip inline numbered list markers (e.g. "1. First 2. Second 3. Third")
-    text = re.sub(r'(?<=\s)\d+[.)]\s+', ' ', text)
+    # Strip numbered list markers at line start — with or without trailing space
+    text = re.sub(r'^\s*\d+[.)]\s*', '', text, flags=re.M)
+    # Strip inline numbered list markers (e.g. "1. First 2. Second" or "1.First 2.Second")
+    text = re.sub(r'(?<=\s)\d+[.)]\s*', ' ', text)
     text = re.sub(r'```\w*\n?', '', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
     # Collapse excess blank lines left after stripping

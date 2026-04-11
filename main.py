@@ -171,6 +171,13 @@ def _resolve_api_port() -> int:
         return 8765
 
 
+def _resolve_api_host() -> str:
+    # JARVIS_ALLOW_LAN=1 → listen on all interfaces so phone on same WiFi can reach the approval page
+    if os.getenv("JARVIS_ALLOW_LAN", "").lower() in {"1", "true", "yes", "on"}:
+        return "0.0.0.0"
+    return os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+
 def _run_headless():
     import briefing
     import google_services as gs
@@ -315,7 +322,7 @@ def _start_deferred_startup_tasks() -> None:
 def _run():
     _ensure_supported_gui_runtime()
     _install_crash_logging()
-    api_host = os.getenv("JARVIS_API_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    api_host = _resolve_api_host()
     api_port = _resolve_api_port()
 
     jarvis_daemon.start_daemon(host=api_host, port=api_port)

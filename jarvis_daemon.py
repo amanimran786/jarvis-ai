@@ -44,6 +44,24 @@ def _wait_for_api_ready(host: str, port: int, timeout: float = 8.0) -> bool:
     return False
 
 
+def _is_another_instance_running() -> bool:
+    """Return True if a healthy Jarvis API is already running (different process)."""
+    try:
+        existing = runtime_state.read_api_endpoint()
+        if not existing:
+            return False
+        pid = existing.get("pid")
+        if pid and pid != os.getpid():
+            base = existing.get("base_url", "")
+            if base:
+                with urllib.request.urlopen(f"{base}/status", timeout=1.5) as r:
+                    payload = json.load(r)
+                    return payload.get("status") == "online"
+    except Exception:
+        pass
+    return False
+
+
 def start_daemon(host: str | None = None, port: int | None = None, reason: str = "bootstrap") -> threading.Thread:
     """
     Start the local API daemon once and record basic runtime state.
@@ -52,6 +70,11 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
 
     resolved_host, resolved_port = _resolve_host_port(host=host, port=port)
     task_runtime.bootstrap()
+
+    # Guard: don't clobber the runtime meta if a healthy instance already exists
+    if _is_another_instance_running():
+        print("[Daemon] Another Jarvis instance is already running. Skipping startup.")
+        return threading.current_thread()
 
     with _BOOT_LOCK:
         if _BOOT_THREAD and _BOOT_THREAD.is_alive():
@@ -101,6 +124,14 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
             pass
         os.environ["JARVIS_API_TOKEN"] = api.get_api_token()
         runtime_state.write_api_endpoint(actual_host, actual_port)
+        if actual_host in {"0.0.0.0", "::"}:
+            try:
+                import hardware as _hw
+                lan_ips = _hw.local_ipv4_addresses()
+                if lan_ips:
+                    print(f"[API] LAN approval page: http://{lan_ips[0]}:{actual_port}/pending")
+            except Exception:
+                pass
         runtime_state.mark_started(
             host=actual_host,
             port=actual_port,

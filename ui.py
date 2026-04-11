@@ -7,6 +7,8 @@ import random
 import subprocess
 import shutil
 import time
+import json
+import traceback
 from datetime import datetime
 import learner
 import model_router
@@ -31,9 +33,10 @@ from PyQt6.QtGui import (
     QPainter, QPen, QBrush, QLinearGradient, QRadialGradient,
     QPainterPath, QFontDatabase, QCursor, QPixmap
 )
+from PyQt6 import sip
 
 from router import route_stream, set_timer_callback
-from voice import speak, speak_stream, listen, wait_for_wake_word, request_stop as _voice_request_stop, clear_stop_request as _voice_clear_stop_request
+from voice import speak, speak_stream, listen, wait_for_wake_word, trigger_wake_word as _voice_trigger_wake_word, request_stop as _voice_request_stop, clear_stop_request as _voice_clear_stop_request
 import memory as mem
 import briefing
 import tools
@@ -90,6 +93,8 @@ QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
 WAKE_PROMPT = "Say 'Hey Jarvis' to talk."
 WAKE_ACK = "I'm here. Go ahead."
 MIC_IDLE_TOOLTIP = "Jarvis is standing by for the wake word."
+_DEBUG_UI_SNAPSHOT_PATH = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_PATH", "").strip()
+_DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED", "").lower() in {"1", "true", "yes", "on"}
 
 
 # ── Glow helper ────────────────────────────────────────────────────────────────
@@ -109,15 +114,26 @@ def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
     """
 
 
-def _mic_chip_css(border: str, fill: str, text: str) -> str:
+def _mic_chip_css(
+    border: str,
+    fill: str,
+    text: str,
+    *,
+    border_width: int = 1,
+    radius: int = 10,
+    padding: str = "4px 10px",
+    min_width: int = 0,
+) -> str:
+    min_width_rule = f"min-width: {min_width}px;" if min_width else ""
     return f"""
         QLabel {{
             background: {fill};
             color: {text};
-            border: 1px solid {border};
-            border-radius: 10px;
-            padding: 4px 10px;
+            border: {border_width}px solid {border};
+            border-radius: {radius}px;
+            padding: {padding};
             letter-spacing: 1px;
+            {min_width_rule}
         }}
     """
 
@@ -228,6 +244,65 @@ class LiveUpdateBridge(QObject):
     transcript = pyqtSignal(str)
     suggestion = pyqtSignal(str)
     device_summary = pyqtSignal(str)
+
+
+def _append_ui_crash_log(label: str, stack: str) -> None:
+    try:
+        import runtime_state
+
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(runtime_state.crash_log_path(), "a", encoding="utf-8") as fh:
+            fh.write(f"[{stamp}] {label}\n{stack}\n")
+    except Exception:
+        pass
+
+
+def _log_ui_callback_exception(label: str) -> None:
+    stack = traceback.format_exc()
+    print(f"[UI Callback] {label} failed", file=sys.stderr, flush=True)
+    print(stack, file=sys.stderr, flush=True)
+    _append_ui_crash_log(f"UI callback failure: {label}", stack)
+
+
+def _connect_timer_timeout(timer: QTimer, label: str, callback) -> None:
+    def _wrapped():
+        try:
+            callback()
+        except Exception:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+            _log_ui_callback_exception(label)
+
+    timer.timeout.connect(_wrapped)
+
+
+def _safe_single_shot(delay_ms: int, label: str, callback) -> None:
+    def _wrapped():
+        try:
+            callback()
+        except Exception:
+            _log_ui_callback_exception(label)
+
+    QTimer.singleShot(delay_ms, _wrapped)
+
+
+def _safe_bridge_emit(bridge: QObject | None, signal_name: str, *args) -> bool:
+    if bridge is None:
+        return False
+    try:
+        if isinstance(bridge, QObject) and sip.isdeleted(bridge):
+            return False
+    except Exception:
+        return False
+    try:
+        getattr(bridge, signal_name).emit(*args)
+        return True
+    except RuntimeError as exc:
+        if "deleted" in str(exc).lower():
+            return False
+        raise
 
 
 def _trace_ui_event(window, surface: str, event: str, text: str = "", **fields):
@@ -412,6 +487,21 @@ def _apply_macos_identity(app: QApplication, icon: QIcon | None):
 
 
 def _activate_macos_app(window: QMainWindow):
+    try:
+        state = window.windowState()
+        if state & Qt.WindowState.WindowMinimized:
+            window.setWindowState(state & ~Qt.WindowState.WindowMinimized)
+    except Exception:
+        pass
+    try:
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.availableGeometry()
+            target_x = geo.x() + max(24, (geo.width() - window.width()) // 2)
+            target_y = geo.y() + max(24, (geo.height() - window.height()) // 2)
+            window.move(target_x, target_y)
+    except Exception:
+        pass
     if NSApplication is not None:
         try:
             ns_app = NSApplication.sharedApplication()
@@ -419,10 +509,99 @@ def _activate_macos_app(window: QMainWindow):
         except Exception:
             pass
     try:
+        window.show()
         window.raise_()
         window.activateWindow()
     except Exception:
         pass
+
+
+def _widget_debug_node(widget: QWidget) -> dict:
+    node = {
+        "class": widget.metaObject().className(),
+        "object_name": widget.objectName() or "",
+        "visible": bool(widget.isVisible()),
+        "enabled": bool(widget.isEnabled()),
+        "x": int(widget.x()),
+        "y": int(widget.y()),
+        "width": int(widget.width()),
+        "height": int(widget.height()),
+        "children": [],
+    }
+    text_fn = getattr(widget, "text", None)
+    if callable(text_fn):
+        try:
+            node["text"] = text_fn()
+        except Exception:
+            pass
+    tooltip = widget.toolTip() if hasattr(widget, "toolTip") else ""
+    if tooltip:
+        node["tooltip"] = tooltip
+    for child in widget.findChildren(QWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
+        node["children"].append(_widget_debug_node(child))
+    return node
+
+
+def _write_debug_ui_snapshot(window: QMainWindow, tag: str = "startup") -> None:
+    target = _DEBUG_UI_SNAPSHOT_PATH
+    if not target:
+        return
+    try:
+        if sip.isdeleted(window):
+            return
+        if target.lower().endswith(".png"):
+            png_path = target
+            base = os.path.splitext(target)[0]
+        else:
+            os.makedirs(target, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base = os.path.join(target, f"jarvis_ui_{tag}_{stamp}")
+            png_path = base + ".png"
+        if not window.isVisible():
+            print(f"[UI Debug] Skipping UI snapshot for hidden window: {tag}")
+            return
+        size = window.size()
+        if size.width() <= 0 or size.height() <= 0:
+            print(f"[UI Debug] Skipping UI snapshot for zero-sized window: {tag}")
+            return
+
+        # Avoid forcing a Cocoa backing-store flush via repaint/processEvents/grab.
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        window.render(pixmap)
+        if pixmap.isNull():
+            print(f"[UI Debug] Snapshot render returned an empty pixmap: {tag}")
+            return
+        pixmap.save(png_path, "PNG")
+        payload = {
+            "captured_at": datetime.now().isoformat(),
+            "window_title": window.windowTitle(),
+            "class": window.metaObject().className(),
+            "geometry": {
+                "x": int(window.x()),
+                "y": int(window.y()),
+                "width": int(window.width()),
+                "height": int(window.height()),
+            },
+            "tree": _widget_debug_node(window),
+        }
+        with open(base + ".json", "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        print(f"[UI Debug] Wrote UI snapshot to {png_path}")
+    except Exception as exc:
+        print(f"[UI Debug] Failed to write UI snapshot: {exc}")
+
+
+def _should_capture_debug_ui_snapshot(*, bundled_launch: bool) -> bool:
+    if not _DEBUG_UI_SNAPSHOT_PATH:
+        return False
+    if bundled_launch and sys.platform == "darwin" and not _DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED:
+        print(
+            "[UI Debug] Snapshot capture is disabled for bundled macOS launches "
+            "unless JARVIS_DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED=1."
+        )
+        return False
+    return True
 
 # ── Arc Reactor Widget ─────────────────────────────────────────────────────────
 
@@ -438,7 +617,7 @@ class ArcReactor(QWidget):
         self._pulse = 0.0
         self._pulse_dir = 1
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        _connect_timer_timeout(self._timer, f"{self.__class__.__name__}._tick", self._tick)
         self._timer.start(30)
 
     def _tick(self):
@@ -537,7 +716,7 @@ class JarvisOrb(QWidget):
 
         # Timer — 50fps
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        _connect_timer_timeout(self._timer, f"{self.__class__.__name__}._tick", self._tick)
         self._sync_animation_rate()
 
     # ── Public state control ──────────────────────────────────────────────────
@@ -810,7 +989,7 @@ class HUDBackground(QWidget):
         self._scan_dir = 1
         self._busy = False
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        _connect_timer_timeout(self._timer, f"{self.__class__.__name__}._tick", self._tick)
         self._sync_animation_rate()
 
     def set_busy(self, busy: bool):
@@ -939,7 +1118,7 @@ class PulseDot(QWidget):
         self._timer = None
         if animated:
             self._timer = QTimer(self)
-            self._timer.timeout.connect(self._tick)
+            _connect_timer_timeout(self._timer, f"{self.__class__.__name__}._tick", self._tick)
             self._timer.start(25)
 
     def set_color(self, color):
@@ -976,7 +1155,7 @@ class SignalBars(QWidget):
         self.setFixedSize(220, 34)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
+        _connect_timer_timeout(self._timer, f"{self.__class__.__name__}._tick", self._tick)
         self._sync_animation_rate()
 
     def set_intensity(self, intensity: float):
@@ -1164,8 +1343,9 @@ class VoiceWorker(QThread):
             misses = 0
             lower = user_input.lower().strip()
 
-            # Drop single-word noise captures silently
-            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
+            # Drop single-word noise captures and re-triggered wake words silently
+            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er",
+                                                       "jarvis"}:
                 continue
 
             self.message.emit(user_input, "user", "")
@@ -1390,10 +1570,16 @@ class JarvisWindow(QMainWindow):
         self._live_signals_bound = True
 
     def _on_transcript(self, text: str):
-        self._live_updates.transcript.emit(text)
+        try:
+            _safe_bridge_emit(self._live_updates, "transcript", text)
+        except Exception:
+            _log_ui_callback_exception("JarvisWindow._on_transcript")
 
     def _on_suggestion(self, suggestion: str):
-        self._live_updates.suggestion.emit(suggestion)
+        try:
+            _safe_bridge_emit(self._live_updates, "suggestion", suggestion)
+        except Exception:
+            _log_ui_callback_exception("JarvisWindow._on_suggestion")
 
     # ── Build UI ───────────────────────────────────────────────────────────────
 
@@ -1417,20 +1603,24 @@ class JarvisWindow(QMainWindow):
         # ── Header ──────────────────────────────────────────────────────────
         header = QWidget()
         self._header = header
-        header.setFixedHeight(70)
+        header.setFixedHeight(146)
         header.setAutoFillBackground(True)
         hp = header.palette()
         hp.setColor(QPalette.ColorRole.Window, QColor(C_BG2))
         header.setPalette(hp)
         header.setStyleSheet(_glass_panel_css(fill="rgba(3, 13, 20, 235)", radius=0) + f"border-bottom: 1px solid {C_BORDER};")
 
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(14, 8, 14, 8)
-        h_layout.setSpacing(12)
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(14, 8, 14, 8)
+        header_layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(12)
 
         # Arc reactor
         self._reactor = ArcReactor(size=48)
-        h_layout.addWidget(self._reactor)
+        top_row.addWidget(self._reactor)
 
         # Title block
         title_block = QVBoxLayout()
@@ -1449,12 +1639,12 @@ class JarvisWindow(QMainWindow):
 
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
-        h_layout.addLayout(title_block)
-        h_layout.addStretch()
+        top_row.addLayout(title_block)
+        top_row.addStretch()
 
         # Status block
         status_block = QVBoxLayout()
-        status_block.setSpacing(4)
+        status_block.setSpacing(3)
         status_block.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         status_row = QHBoxLayout()
@@ -1469,21 +1659,38 @@ class JarvisWindow(QMainWindow):
 
         self._voice_hint_label = QLabel(WAKE_PROMPT)
         self._voice_hint_label.setFont(QFont("Courier New", 7))
-        self._voice_hint_label.setWordWrap(True)
+        self._voice_hint_label.setWordWrap(False)
         self._voice_hint_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._voice_hint_label.setFixedWidth(190)
+        self._voice_hint_label.setFixedHeight(12)
         self._voice_hint_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
-        status_block.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignRight)
 
         self._mic_chip = QLabel("● MIC STANDBY")
-        self._mic_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._mic_chip.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
         self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._mic_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 185)", C_TEXT_DIM))
+        self._mic_chip.setMinimumHeight(34)
+        self._mic_chip.setStyleSheet(
+            _mic_chip_css(
+                C_BORDER,
+                "rgba(3, 18, 28, 185)",
+                C_TEXT_DIM,
+                border_width=2,
+                radius=13,
+                padding="4px 16px",
+                min_width=164,
+            )
+        )
         self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
+        self._mic_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mic_chip.mousePressEvent = lambda e: self._on_mic_chip_clicked()
+        self._install_mic_glow()
         status_block.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignRight)
+        status_block.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignRight)
 
         self._vision_chip = QLabel("◌ VISION CHECKING")
         self._vision_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
         self._vision_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._vision_chip.setMinimumHeight(22)
         self._vision_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 185)", C_TEXT_DIM))
         self._vision_chip.setToolTip("Jarvis is checking local vision health.")
         status_block.addWidget(self._vision_chip, alignment=Qt.AlignmentFlag.AlignRight)
@@ -1494,7 +1701,13 @@ class JarvisWindow(QMainWindow):
         self._mode_lbl = mode_lbl
         status_block.addWidget(mode_lbl, alignment=Qt.AlignmentFlag.AlignRight)
 
-        h_layout.addLayout(status_block)
+        top_row.addLayout(status_block)
+        header_layout.addLayout(top_row)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(8)
+        action_row.addStretch()
 
         # Overlay launch button
         self.overlay_btn = QPushButton("⬡ ASSIST")
@@ -1513,7 +1726,7 @@ class JarvisWindow(QMainWindow):
         """)
         self.overlay_btn.setToolTip("Toggle Meeting Assist overlay (Cmd+Opt+O)")
         self.overlay_btn.clicked.connect(_overlay_mod.toggle)
-        h_layout.addWidget(self.overlay_btn)
+        action_row.addWidget(self.overlay_btn)
 
         self.devices_btn = QPushButton("◎ DEVICES")
         self.devices_btn.setFixedHeight(28)
@@ -1535,7 +1748,7 @@ class JarvisWindow(QMainWindow):
         """)
         self.devices_btn.setToolTip("Show nearby devices and bridge actions")
         self.devices_btn.clicked.connect(self._toggle_device_panel)
-        h_layout.addWidget(self.devices_btn)
+        action_row.addWidget(self.devices_btn)
 
         self.compact_btn = QPushButton("▁")
         self.compact_btn.setFixedSize(28, 28)
@@ -1555,7 +1768,8 @@ class JarvisWindow(QMainWindow):
         """)
         self.compact_btn.setToolTip("Toggle compact meeting bar")
         self.compact_btn.clicked.connect(self._toggle_meeting_toolbar_mode)
-        h_layout.addWidget(self.compact_btn)
+        action_row.addWidget(self.compact_btn)
+        header_layout.addLayout(action_row)
 
         root.addWidget(header)
 
@@ -1855,10 +2069,10 @@ class JarvisWindow(QMainWindow):
         root.addWidget(self.device_panel)
 
         self._telemetry_timer = QTimer(self)
-        self._telemetry_timer.timeout.connect(self._refresh_telemetry)
+        _connect_timer_timeout(self._telemetry_timer, "JarvisWindow._refresh_telemetry", self._refresh_telemetry)
         self._telemetry_timer.start(2500)
         self._device_timer = QTimer(self)
-        self._device_timer.timeout.connect(self._refresh_nearby_devices)
+        _connect_timer_timeout(self._device_timer, "JarvisWindow._refresh_nearby_devices", self._refresh_nearby_devices)
         self._device_timer.start(15000)
         self._refresh_telemetry()
         self._refresh_nearby_devices()
@@ -1967,7 +2181,10 @@ class JarvisWindow(QMainWindow):
                 text = self._format_nearby_snapshot(snapshot)
             except Exception as exc:
                 text = f"Nearby device scan failed: {exc}"
-            self._live_updates.device_summary.emit(text)
+            try:
+                _safe_bridge_emit(self._live_updates, "device_summary", text)
+            except Exception:
+                _log_ui_callback_exception("JarvisWindow._refresh_nearby_devices.worker_emit")
 
         threading.Thread(target=_worker, daemon=True, name="JarvisNearbyDevices").start()
 
@@ -2062,10 +2279,10 @@ class JarvisWindow(QMainWindow):
         from voice import _done_speaking as _voice_speaking_event
         self._voice_event = _voice_speaking_event
         self._orb_poll = QTimer(self)
-        self._orb_poll.timeout.connect(self._sync_orb_to_voice)
+        _connect_timer_timeout(self._orb_poll, "JarvisWindow._sync_orb_to_voice", self._sync_orb_to_voice)
         self._orb_poll.start(80)
 
-        QTimer.singleShot(500, lambda: stealth.apply_stealth(int(self.winId())))
+        _safe_single_shot(500, "JarvisWindow.apply_stealth", lambda: stealth.apply_stealth(int(self.winId())))
 
         # Create overlay (hidden by default)
         self._overlay = _overlay_mod.get_overlay()
@@ -2081,7 +2298,11 @@ class JarvisWindow(QMainWindow):
         hotkeys.start()
 
         self._meeting_watchdog_timer = QTimer(self)
-        self._meeting_watchdog_timer.timeout.connect(self._meeting_watchdog_tick)
+        _connect_timer_timeout(
+            self._meeting_watchdog_timer,
+            "JarvisWindow._meeting_watchdog_tick",
+            self._meeting_watchdog_tick,
+        )
         self._meeting_watchdog_tick()
         self._meeting_watchdog_timer.start(1500)
 
@@ -2508,12 +2729,68 @@ class JarvisWindow(QMainWindow):
         self._voice_hint_label.setToolTip(tooltip or text)
         self._voice_hint_label.setStyleSheet(f"color: {color}; background: transparent;")
 
+    def _install_mic_glow(self):
+        # Disabled: the label-level shadow effect can blank the chip text in the
+        # frozen macOS build even though the QLabel text is still present.
+        return
+
+    def _pulse_mic_glow(self):
+        effect = getattr(self, "_mic_glow_effect", None)
+        if effect is None:
+            return
+        phase = (getattr(self, "_mic_glow_phase", 0) + 1) % 10
+        self._mic_glow_phase = phase
+        wave = 0.35 + (0.65 * abs(5 - phase) / 5.0)
+        alpha = int(70 + (115 * wave))
+        effect.setBlurRadius(18 + int(14 * wave))
+        effect.setColor(QColor(0, 255, 136, alpha))
+
+    def _set_mic_glow_active(self, active: bool):
+        self._install_mic_glow()
+        effect = getattr(self, "_mic_glow_effect", None)
+        timer = getattr(self, "_mic_glow_timer", None)
+        if effect is None or timer is None:
+            return
+        self._mic_glow_active = active
+        if active:
+            if not timer.isActive():
+                self._mic_glow_phase = 0
+                timer.start()
+            self._pulse_mic_glow()
+            return
+        if timer.isActive():
+            timer.stop()
+        effect.setBlurRadius(0)
+        effect.setColor(QColor(0, 255, 136, 0))
+
+    def _on_mic_chip_clicked(self):
+        """Handle click on the MIC STANDBY chip — bypass wake word or stop listening."""
+        status_label = getattr(self, "_status_label", None)
+        upper = (status_label.text() if status_label else "").upper()
+        if "LISTEN" in upper or "VOICE ACTIVE" in upper or "MIC LIVE" in upper or "MIC HOT" in upper:
+            # Currently active — stop listening
+            if hasattr(self, "voice_worker"):
+                self.voice_worker.stop()
+        else:
+            # Standby — trigger immediate listen (skip wake word)
+            _voice_trigger_wake_word()
+
     def _set_mic_chip(self, label: str, border: str, fill: str, text: str, tooltip: str):
         if not hasattr(self, "_mic_chip"):
             return
         self._mic_chip.setText(label)
         self._mic_chip.setToolTip(tooltip)
-        self._mic_chip.setStyleSheet(_mic_chip_css(border, fill, text))
+        self._mic_chip.setStyleSheet(
+            _mic_chip_css(
+                border,
+                fill,
+                text,
+                border_width=2,
+                radius=13,
+                padding="4px 16px",
+                min_width=164,
+            )
+        )
 
     def _vision_runtime_snapshot(self) -> dict[str, str]:
         try:
@@ -2599,6 +2876,7 @@ class JarvisWindow(QMainWindow):
                 C_WARNING,
                 runtime_tooltip or "Voice input is unavailable.",
             )
+            self._set_mic_glow_active(False)
             return
 
         upper = (raw_text or "").upper()
@@ -2615,6 +2893,7 @@ class JarvisWindow(QMainWindow):
                 C_CYAN if runtime_mode == "ready" else C_WARNING,
                 runtime_tooltip or runtime_detail or MIC_IDLE_TOOLTIP,
             )
+            self._set_mic_glow_active(False)
             return
         if "LISTENING" in upper or "VOICE ACTIVE" in upper:
             self._set_voice_hint("I'm listening now. Speak your prompt.", C_GREEN, "Jarvis is capturing microphone input.")
@@ -2625,6 +2904,7 @@ class JarvisWindow(QMainWindow):
                 C_GREEN,
                 "Jarvis is actively hearing you right now.",
             )
+            self._set_mic_glow_active(True)
             return
         if "PROCESS" in upper:
             self._set_voice_hint("Thinking through what you said.", C_WARNING, "Jarvis heard you and is working on the reply.")
@@ -2635,6 +2915,7 @@ class JarvisWindow(QMainWindow):
                 C_WARNING,
                 "Jarvis heard you and is processing the request.",
             )
+            self._set_mic_glow_active(False)
             return
         self._set_voice_hint(runtime_detail or WAKE_PROMPT, C_TEXT_DIM, runtime_tooltip or runtime_detail)
         self._set_mic_chip(
@@ -2644,6 +2925,7 @@ class JarvisWindow(QMainWindow):
             C_TEXT_DIM,
             runtime_tooltip or runtime_detail or MIC_IDLE_TOOLTIP,
         )
+        self._set_mic_glow_active(False)
 
     def _on_agent_alert(self, title: str, body: str, speak_it: bool):
         """Called from agent threads — must marshal to UI thread via QTimer."""
@@ -2651,7 +2933,7 @@ class JarvisWindow(QMainWindow):
             self._add_message(f"[{title}]  {body}", "jarvis", "Agent")
             if speak_it:
                 threading.Thread(target=speak, args=(body,), daemon=True).start()
-        QTimer.singleShot(0, _show)
+        _safe_single_shot(0, "JarvisWindow._on_agent_alert", _show)
 
     def _on_timer_done(self, label: str):
         msg = f"Time's up. Your {label} timer is done."
@@ -2688,9 +2970,13 @@ class JarvisWindow(QMainWindow):
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
         self._show_toolbar_message(text, sender, model)
-        QTimer.singleShot(50, lambda: self.scroll.verticalScrollBar().setValue(
-            self.scroll.verticalScrollBar().maximum()
-        ))
+        _safe_single_shot(
+            50,
+            "JarvisWindow._scroll_to_latest_message",
+            lambda: self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()
+            ),
+        )
 
     def _register_interaction(self, entry: dict):
         if entry and entry.get("response"):
@@ -2843,11 +3129,16 @@ class JarvisWindow(QMainWindow):
         if any(p in lower for p in ("restart yourself", "restart jarvis", "reload yourself", "apply changes")):
             self._add_message("Restarting systems now...", "jarvis", "")
             speak("Restarting to apply the latest changes.")
-            QTimer.singleShot(1500, si.restart_jarvis)
+            _safe_single_shot(1500, "JarvisWindow.restart_jarvis", si.restart_jarvis)
             return True
         return False
 
     def closeEvent(self, event):
+        for timer in self.findChildren(QTimer):
+            try:
+                timer.stop()
+            except Exception:
+                pass
         if hasattr(self, "voice_worker"):
             self.voice_worker.stop()
             self.voice_worker.wait(4000)
@@ -2912,17 +3203,25 @@ class OrbShellWindow(JarvisWindow):
         self._bind_live_update_signals()
         self._position_initial()
         self._adaptive_timer = QTimer(self)
-        self._adaptive_timer.timeout.connect(self._adaptive_tick)
+        _connect_timer_timeout(self._adaptive_timer, "OrbShellWindow._adaptive_tick", self._adaptive_tick)
 
         self._call_status_timer = QTimer(self)
-        self._call_status_timer.timeout.connect(self._refresh_live_call_status)
+        _connect_timer_timeout(
+            self._call_status_timer,
+            "OrbShellWindow._refresh_live_call_status",
+            self._refresh_live_call_status,
+        )
 
         self._collapse_timer = QTimer(self)
         self._collapse_timer.setSingleShot(True)
-        self._collapse_timer.timeout.connect(lambda: self._set_tray_visible(False))
+        _connect_timer_timeout(
+            self._collapse_timer,
+            "OrbShellWindow._collapse_tray",
+            lambda: self._set_tray_visible(False),
+        )
 
         self.setWindowOpacity(self._preferred_opacity)
-        QTimer.singleShot(120, self._finish_startup)
+        _safe_single_shot(120, "OrbShellWindow._finish_startup", self._finish_startup)
 
     def _action_btn_css(self, color: str) -> str:
         c = QColor(color)
@@ -3033,9 +3332,23 @@ class OrbShellWindow(JarvisWindow):
 
         self._mic_chip = QLabel("● MIC STANDBY")
         self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._mic_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        self._mic_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 165)", C_TEXT_DIM))
+        self._mic_chip.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._mic_chip.setMinimumHeight(34)
+        self._mic_chip.setStyleSheet(
+            _mic_chip_css(
+                C_BORDER,
+                "rgba(3, 18, 28, 165)",
+                C_TEXT_DIM,
+                border_width=2,
+                radius=13,
+                padding="4px 16px",
+                min_width=164,
+            )
+        )
         self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
+        self._mic_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mic_chip.mousePressEvent = lambda e: self._on_mic_chip_clicked()
+        self._install_mic_glow()
         orb_layout.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._vision_chip = QLabel("◌ VISION CHECKING")
@@ -3505,7 +3818,10 @@ end tell
         self._refresh_live_call_status()
 
     def _on_transcript(self, text: str):
-        self._live_updates.transcript.emit(text)
+        try:
+            _safe_bridge_emit(self._live_updates, "transcript", text)
+        except Exception:
+            _log_ui_callback_exception("OrbShellWindow._on_transcript")
 
     def _apply_live_transcript_update(self, text: str):
         _trace_ui_event(self, "orb-tray", "live_transcript", text)
@@ -3537,7 +3853,10 @@ end tell
         self._set_tray_visible(True)
 
     def _on_suggestion(self, suggestion: str):
-        self._live_updates.suggestion.emit(suggestion)
+        try:
+            _safe_bridge_emit(self._live_updates, "suggestion", suggestion)
+        except Exception:
+            _log_ui_callback_exception("OrbShellWindow._on_suggestion")
 
     def mouseDoubleClickEvent(self, event):
         self._set_tray_visible(not self.suggest_panel.isVisible())
@@ -3559,7 +3878,7 @@ end tell
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(120, lambda: stealth.apply_stealth(int(self.winId())))
+        _safe_single_shot(120, "OrbShellWindow.apply_stealth", lambda: stealth.apply_stealth(int(self.winId())))
 
 
 class EnterLineEdit(QTextEdit):
@@ -3650,7 +3969,11 @@ def run():
     if runtime_icon is not None and not runtime_icon.isNull():
         window.setWindowIcon(runtime_icon)
     window.show()
-    QTimer.singleShot(0, lambda: _activate_macos_app(window))
+    _safe_single_shot(0, "ui._activate_macos_app.initial", lambda: _activate_macos_app(window))
+    _safe_single_shot(450, "ui._activate_macos_app.settled", lambda: _activate_macos_app(window))
+    if _should_capture_debug_ui_snapshot(bundled_launch=bundled_launch):
+        _safe_single_shot(900, "ui._write_debug_ui_snapshot.initial", lambda: _write_debug_ui_snapshot(window, "initial"))
+        _safe_single_shot(2200, "ui._write_debug_ui_snapshot.settled", lambda: _write_debug_ui_snapshot(window, "settled"))
     app.exec()
     sys.exit(0)
 
