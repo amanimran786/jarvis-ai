@@ -24,11 +24,32 @@ _recognizer = sr.Recognizer()
 WAKE_WORDS = {"hey jarvis", "ok jarvis"}
 _last_tts_engine = ""
 
+# Preferred real microphones — avoid BlackHole (loopback bus, no physical mic)
+_PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
+_BLACKHOLE_SKIP = ["blackhole", "loopback", "virtual"]
+
+
+def _get_microphone() -> sr.Microphone:
+    """Return a Microphone on a real input device, skipping virtual loopback buses."""
+    try:
+        names = sr.Microphone.list_microphone_names()
+        for preferred in _PREFERRED_MICS:
+            for i, name in enumerate(names):
+                if preferred.lower() in name.lower():
+                    return sr.Microphone(device_index=i)
+        for i, name in enumerate(names):
+            if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
+                return sr.Microphone(device_index=i)
+    except Exception:
+        pass
+    return sr.Microphone()
+
 # Prevents mic from picking up Jarvis's own TTS output.
 # Cleared while Jarvis is speaking; listen() blocks until set again.
 _done_speaking = threading.Event()
 _done_speaking.set()  # initially not speaking
 _stop_requested = threading.Event()
+_manual_wake_trigger = threading.Event()  # set by UI to skip wake-word wait
 
 # ── Ambient noise calibration cache ──────────────────────────────────────────
 # Calibrate once per session and cache the energy threshold.
@@ -325,7 +346,7 @@ def listen() -> str | None:
     if _stop_requested.is_set():
         return None
 
-    with sr.Microphone() as source:
+    with _get_microphone() as source:
         print("Listening...")
         _ensure_calibrated(source)   # 300ms → ~0ms on cached calls
         try:
@@ -382,17 +403,31 @@ def _transcribe_wake_audio(audio) -> str | None:
         return None
 
 
+def trigger_wake_word() -> None:
+    """Manually trigger wake-word detection (skips waiting for the wake word)."""
+    _manual_wake_trigger.set()
+
+
 def wait_for_wake_word() -> None:
     """Listen for wake word using local STT first, with optional remote fallback."""
+    _manual_wake_trigger.clear()
     print("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
     while True:
         if _stop_requested.is_set():
+            return
+        if _manual_wake_trigger.is_set():
+            _manual_wake_trigger.clear()
+            print("\n[Wake word manually triggered]")
             return
         # Also wait here if Jarvis is speaking
         _done_speaking.wait(timeout=10)
         if _stop_requested.is_set():
             return
-        with sr.Microphone() as source:
+        if _manual_wake_trigger.is_set():
+            _manual_wake_trigger.clear()
+            print("\n[Wake word manually triggered]")
+            return
+        with _get_microphone() as source:
             _ensure_calibrated(source)
             try:
                 audio = _recognizer.listen(source, timeout=3, phrase_time_limit=4)
