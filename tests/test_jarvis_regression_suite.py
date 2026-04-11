@@ -1048,6 +1048,44 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("vision_status", payload["capabilities"])
         self.assertIn("vision_status_detail", payload["capabilities"])
 
+    def test_local_training_run_endpoint_passes_expert_distill_limit(self):
+        captured = {}
+
+        def fake_build_training_pack(**kwargs):
+            captured.update(kwargs)
+            return {
+                "ok": True,
+                "pack_path": "/tmp/pack.jsonl",
+                "manifest_path": "/tmp/pack.manifest.json",
+                "export": {"example_count": 3},
+                "distill": {"example_count": 1},
+                "expert_distill": {"example_count": 0},
+                "modelfile": {"path": "/tmp/Jarvis.Modelfile"},
+                "example_count": 4,
+                "teacher_examples": 2,
+                "teacher_model": "claude-sonnet-4-6",
+            }
+
+        with patch("api.local_training.build_training_pack", side_effect=fake_build_training_pack):
+            response = self.client.post(
+                "/local/training/run",
+                json={
+                    "export_limit": 10,
+                    "distill_limit": 0,
+                    "expert_distill_limit": 0,
+                    "teacher_model": "claude-sonnet-4-6",
+                    "cloud_only_export": False,
+                    "base_model": "deepseek-r1:14b",
+                    "target_name": "jarvis-local",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["expert_distill_limit"], 0)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("2 curated teacher examples", payload["message"])
+
     def test_extensions_endpoint_exposes_skills_connectors_and_plugins(self):
         response = self.client.get("/extensions")
         self.assertEqual(response.status_code, 200)
@@ -1990,6 +2028,70 @@ class CallPrivacyTests(unittest.TestCase):
 
 
 class LocalTrainingTests(unittest.TestCase):
+    def test_record_teacher_example_writes_curated_training_row(self):
+        captured = {}
+
+        def fake_write(path, examples):
+            captured["path"] = str(path)
+            captured["examples"] = examples
+
+        with patch("local_runtime.local_training._ensure_dirs"), \
+             patch("local_runtime.local_training._write_jsonl", side_effect=fake_write):
+            result = local_training.record_teacher_example(
+                "What is the difference between git merge and git rebase?",
+                "Git merge preserves branch topology, while rebase rewrites commits onto a new base for a linear history.",
+                tags=["git", "engineering"],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["example_count"], 1)
+        self.assertEqual(captured["examples"][0]["meta"]["teacher_source"], "manual_teacher")
+        self.assertEqual(captured["examples"][0]["messages"][1]["content"], "What is the difference between git merge and git rebase?")
+        self.assertIn("engineering", captured["examples"][0]["meta"]["tags"])
+
+    def test_build_training_pack_prefers_manual_teacher_examples_for_same_prompt(self):
+        exported = {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "Explain mutex vs semaphore"},
+                {"role": "assistant", "content": "Generic answer"},
+            ],
+            "meta": {"teacher_source": "successful_interaction"},
+        }
+        teacher = {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "Explain mutex vs semaphore"},
+                {"role": "assistant", "content": "A mutex protects exclusive ownership of one critical section, while a semaphore tracks permits and can coordinate multiple consumers."},
+            ],
+            "meta": {"teacher_source": "manual_teacher"},
+        }
+        captured = {}
+
+        def fake_write(path, examples):
+            captured["path"] = str(path)
+            captured["examples"] = examples
+
+        with TemporaryDirectory() as tmp:
+            packs_dir = Path(tmp) / "packs"
+            packs_dir.mkdir(parents=True, exist_ok=True)
+            with patch("local_runtime.local_training._ensure_dirs"), \
+                 patch("local_runtime.local_training.PACKS_DIR", packs_dir), \
+                 patch("local_runtime.local_training.export_sft_dataset", return_value={"ok": True, "path": str(Path(tmp) / "export.jsonl"), "example_count": 1}), \
+                 patch("local_runtime.local_training.distill_failures", return_value={"ok": True, "path": str(Path(tmp) / "distilled.jsonl"), "example_count": 0, "teacher_model": "teacher", "categories": []}), \
+                 patch("local_runtime.local_training.distill_expert_cases", return_value={"ok": True, "path": str(Path(tmp) / "expert.jsonl"), "example_count": 0, "teacher_model": "teacher", "case_ids": []}), \
+                 patch("local_runtime.local_training.build_modelfile", return_value={"ok": True, "path": str(Path(tmp) / "Jarvis.Modelfile"), "command": "ollama create jarvis-local"}), \
+                 patch("local_runtime.local_training._read_jsonl", side_effect=lambda path: [exported] if str(path).endswith("export.jsonl") else []), \
+                 patch("local_runtime.local_training._teacher_examples", return_value=[teacher]), \
+                 patch("local_runtime.local_training._write_jsonl", side_effect=fake_write):
+                result = local_training.build_training_pack()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["example_count"], 1)
+        self.assertEqual(captured["examples"][0]["messages"][2]["content"], teacher["messages"][2]["content"])
+        self.assertEqual(result["teacher_model"], "claude-sonnet-4-6")
+        self.assertEqual(result["teacher_examples"], 1)
+
     def test_distill_failures_uses_standalone_beta_failures(self):
         captured = {}
         fake_data = {
