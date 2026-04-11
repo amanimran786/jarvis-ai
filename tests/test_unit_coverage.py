@@ -1815,6 +1815,26 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(payload["skills"][0]["id"], "engineering_reasoning")
         self.assertEqual(captured, ["http://127.0.0.1:8766/skills"])
 
+    def test_cli_teach_posts_curated_example_payload(self):
+        import jarvis_cli
+
+        captured = {}
+
+        def fake_post(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {"ok": True, "message": "stored"}
+
+        with patch("jarvis_cli.post", side_effect=fake_post):
+            payload = jarvis_cli.teach("Prompt", "Ideal answer")
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(captured["path"], "/local/training/teach")
+        self.assertEqual(captured["body"]["prompt"], "Prompt")
+        self.assertEqual(captured["body"]["answer"], "Ideal answer")
+        self.assertEqual(captured["body"]["source"], "manual_teacher")
+        self.assertIn("codex", captured["body"]["tags"])
+
 
 class ExtensionRegistryTests(unittest.TestCase):
     def test_lists_connectors(self):

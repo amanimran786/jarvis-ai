@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TRAINING_ROOT = REPO_ROOT / "training"
 EXPORTS_DIR = TRAINING_ROOT / "exports"
 DISTILLED_DIR = TRAINING_ROOT / "distilled"
+TEACHER_DIR = TRAINING_ROOT / "teacher_examples"
 MODELFILES_DIR = TRAINING_ROOT / "modelfiles"
 PACKS_DIR = TRAINING_ROOT / "packs"
 HANDOFFS_DIR = TRAINING_ROOT / "handoffs"
@@ -75,7 +76,7 @@ EXPERT_DISTILL_CASES = [
 
 
 def _ensure_dirs() -> None:
-    for path in (EXPORTS_DIR, DISTILLED_DIR, MODELFILES_DIR, PACKS_DIR, HANDOFFS_DIR):
+    for path in (EXPORTS_DIR, DISTILLED_DIR, TEACHER_DIR, MODELFILES_DIR, PACKS_DIR, HANDOFFS_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -368,9 +369,61 @@ def _interaction_to_example(interaction: dict, source: str) -> dict:
             "timestamp": interaction.get("timestamp"),
             "teacher_source": source,
             "model": interaction.get("model"),
+            "interaction_source": interaction.get("source", ""),
             "context": interaction.get("context", {}),
         },
     }
+
+
+def record_teacher_example(
+    prompt: str,
+    answer: str,
+    *,
+    source: str = "manual_teacher",
+    tags: list[str] | None = None,
+    meta: dict | None = None,
+) -> dict:
+    _ensure_dirs()
+    prompt = (prompt or "").strip()
+    answer = (answer or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "Teacher example is missing a prompt."}
+    if not answer:
+        return {"ok": False, "error": "Teacher example is missing an answer."}
+
+    example = {
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": answer},
+        ],
+        "meta": {
+            "interaction_id": "",
+            "teacher_source": source,
+            "teacher_model": "human_curated",
+            "tags": tags or [],
+            "recorded_at": _timestamp(),
+            "meta": meta or {},
+        },
+    }
+    path = TEACHER_DIR / f"jarvis_teacher_{_timestamp()}_{_safe_slug(prompt)[:48]}.jsonl"
+    _write_jsonl(path, [example])
+    return {
+        "ok": True,
+        "path": str(path),
+        "example_count": 1,
+        "source": source,
+        "tags": tags or [],
+        "prompt": prompt,
+    }
+
+
+def _teacher_examples() -> list[dict]:
+    _ensure_dirs()
+    examples: list[dict] = []
+    for path in sorted(TEACHER_DIR.glob("*.jsonl")):
+        examples.extend(_read_jsonl(path))
+    return examples
 
 
 def export_sft_dataset(limit: int = 150, cloud_only: bool = True) -> dict:
@@ -624,6 +677,8 @@ def _example_key(example: dict) -> str:
 def _example_priority(example: dict) -> int:
     meta = example.get("meta", {})
     source = meta.get("teacher_source", "")
+    if source == "manual_teacher":
+        return 5
     if source == "expert_distillation":
         return 4
     if source == "failure_distillation":
@@ -652,9 +707,10 @@ def build_training_pack(
     exported_examples = _read_jsonl(Path(export_result["path"]))
     distilled_examples = _read_jsonl(Path(distill_result["path"]))
     expert_examples = _read_jsonl(Path(expert_result["path"]))
+    teacher_examples = _teacher_examples()
 
     deduped = {}
-    for example in exported_examples + distilled_examples + expert_examples:
+    for example in exported_examples + distilled_examples + expert_examples + teacher_examples:
         key = _example_key(example)
         existing = deduped.get(key)
         if existing is None or _example_priority(example) >= _example_priority(existing):
@@ -675,6 +731,7 @@ def build_training_pack(
         "export_examples": export_result["example_count"],
         "distilled_examples": distill_result["example_count"],
         "expert_distilled_examples": expert_result["example_count"],
+        "teacher_examples": len(teacher_examples),
         "merged_examples": len(merged_examples),
         "distilled_categories": distill_result.get("categories", []),
         "expert_case_ids": expert_result.get("case_ids", []),
@@ -690,6 +747,7 @@ def build_training_pack(
         "expert_distill": expert_result,
         "modelfile": modelfile_result,
         "example_count": len(merged_examples),
+        "teacher_examples": len(teacher_examples),
         "teacher_model": teacher_model,
     }
 
@@ -821,6 +879,7 @@ def status() -> dict:
     _ensure_dirs()
     exports = sorted(EXPORTS_DIR.glob("*.jsonl"))
     distilled = sorted(DISTILLED_DIR.glob("*.jsonl"))
+    teachings = sorted(TEACHER_DIR.glob("*.jsonl"))
     modelfiles = sorted(MODELFILES_DIR.glob("*.Modelfile"))
     packs = sorted(PACKS_DIR.glob("*.jsonl"))
     manifests = sorted(PACKS_DIR.glob("*.manifest.json"))
@@ -828,12 +887,14 @@ def status() -> dict:
     return {
         "exports": len(exports),
         "distilled": len(distilled),
+        "teachings": len(teachings),
         "modelfiles": len(modelfiles),
         "packs": len(packs),
         "manifests": len(manifests),
         "handoffs": len(handoffs),
         "latest_export": str(exports[-1]) if exports else "",
         "latest_distilled": str(distilled[-1]) if distilled else "",
+        "latest_teaching": str(teachings[-1]) if teachings else "",
         "latest_modelfile": str(modelfiles[-1]) if modelfiles else "",
         "latest_pack": str(packs[-1]) if packs else "",
         "latest_manifest": str(manifests[-1]) if manifests else "",
@@ -845,12 +906,17 @@ def status() -> dict:
 def result_text(result: dict) -> str:
     if not result.get("ok"):
         return result.get("error", "Local training step failed.")
+    if result.get("source") and result.get("example_count") == 1 and "prompt" in result:
+        return (
+            f"Stored 1 teacher example for local training at {result['path']}. "
+            "Jarvis can use it in the next training-pack build."
+        )
     if "example_count" in result and "teacher_model" in result:
         if "pack_path" in result:
             return (
                 f"Built a local training pack with {result['example_count']} total examples. "
                 f"Exported {result['export']['example_count']} strong examples, distilled {result['distill']['example_count']} corrected failure examples, "
-                f"and added {result['expert_distill']['example_count']} expert technology and science examples with {result['teacher_model']}, "
+                f"added {result['expert_distill']['example_count']} expert technology and science examples, and included {result.get('teacher_examples', 0)} curated teacher examples with {result['teacher_model']}, "
                 f"and wrote the merged pack to {result['pack_path']}."
             )
         if "case_ids" in result:
