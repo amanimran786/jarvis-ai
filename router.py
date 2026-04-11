@@ -620,6 +620,7 @@ _pending_msg_recipient: str = ""
 _awaiting_msg_recipient: bool = False
 _last_msg_recipient: str = ""
 _pending_message_draft: dict | None = None
+_fuzzy_contact_suggestions: list[str] = []
 
 # ── Pending self-improvement (approval gate) ──────────────────────────────────
 # Uses a list so inner functions can mutate it without `global` keyword.
@@ -663,6 +664,15 @@ def _clear_pending_message_draft():
 
 def _has_pending_message_draft() -> bool:
     return bool(_pending_message_draft and _pending_message_draft.get("recipient") and _pending_message_draft.get("body"))
+
+
+def _is_contact_selection(lower: str) -> str | None:
+    """Return the matched suggestion name if the user's input matches one of the
+    current fuzzy contact suggestions (case-insensitive substring match), else None."""
+    for name in _fuzzy_contact_suggestions:
+        if name.lower() in lower or lower in name.lower():
+            return name
+    return None
 
 
 def _message_confirmation_prompt(recipient: str, body: str) -> str:
@@ -721,16 +731,20 @@ def _looks_like_message_status_query(lower: str) -> bool:
 
 def _parse_message_compose(text: str) -> tuple[str, str] | None:
     message_patterns = [
-        r"^(?:message|text)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})\s+(.+)$",
-        r"^(?:send (?:a )?(?:message|text) to|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})\s+(.+)$",
+        r"^(?:message|text)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,1})\s+(.+)$",
+        r"^(?:send (?:a )?(?:message|text) to|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,1})\s+(.+)$",
     ]
+    _SENTENCE_WORDS = {"someone", "anyone", "nobody", "everybody", "who", "that", "this", "the", "a", "an", "my", "your"}
     for pattern in message_patterns:
         match = re.match(pattern, text.strip(), flags=re.IGNORECASE)
         if not match:
             continue
         recipient = _extract_contact_name(match.group(1))
         body = match.group(2).strip().strip("\"'")
-        if recipient and body:
+        # Reject recipients that are common English words, not names
+        if recipient and any(tok.lower() in _SENTENCE_WORDS for tok in recipient.split()):
+            continue
+        if recipient and _looks_like_contact_name(recipient) and body:
             return recipient, body
     return None
 
@@ -790,10 +804,65 @@ def _parse_message_recipient_only(text: str) -> str:
     return candidate if _looks_like_contact_name(candidate) else ""
 
 
+# ── Multi-intent helpers ──────────────────────────────────────────────────────
+
+_TOOL_HINT_PATTERNS = [
+    ("time",     r"\b(time|clock|what time|current time)\b"),
+    ("weather",  r"\b(weather|forecast|temperature|hot|cold outside)\b"),
+    ("calendar", r"\b(calendar|schedule|events?|meetings?|what do i have today|appointments?)\b"),
+    ("email",    r"\b(email|inbox|unread|emails?)\b"),
+]
+
+
+def _tool_hint(text: str) -> str | None:
+    for hint, pattern in _TOOL_HINT_PATTERNS:
+        if re.search(pattern, text):
+            return hint
+    return None
+
+
+def _dispatch_single_intent(query: str) -> str | None:
+    """Directly dispatch a single-tool query without going through the full router."""
+    from datetime import datetime
+    hint = _tool_hint(query)
+    if hint == "time":
+        return f"It's {datetime.now().strftime('%-I:%M %p')}."
+    if hint == "weather":
+        try:
+            return tools.get_weather()
+        except Exception:
+            return "Weather is unavailable right now."
+    if hint == "calendar":
+        try:
+            return gs.get_todays_events()
+        except Exception:
+            return "Calendar is unavailable. You may need to re-authorize Google access."
+    if hint == "email":
+        try:
+            return gs.get_unread_emails(max_results=3)
+        except Exception:
+            return "Email is unavailable. You may need to re-authorize Google access."
+    return None
+
+
+def _detect_multi_intent(lower: str) -> list[str] | None:
+    """Return [part_a, part_b] if the query combines two distinct tool categories."""
+    parts = re.split(r"\band\b", lower, maxsplit=1)
+    if len(parts) != 2:
+        return None
+    a, b = parts[0].strip(), parts[1].strip()
+    if not a or not b or len(a) < 3 or len(b) < 3:
+        return None
+    hint_a, hint_b = _tool_hint(a), _tool_hint(b)
+    if hint_a and hint_b and hint_a != hint_b:
+        return [a, b]
+    return None
+
+
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
-    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _pending_message_draft
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _pending_message_draft, _fuzzy_contact_suggestions
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
@@ -813,12 +882,39 @@ def route_stream(user_input: str) -> tuple:
             _clear_pending_message_draft()
             _clear_pending_recipient()
             _last_msg_recipient = recipient
-            return _s(msg.send_imessage(recipient, body)), "Messages"
+            send_result = msg.send_imessage(recipient, body)
+            # If send_imessage couldn't resolve the contact, offer fuzzy suggestions
+            if "did you mean" in send_result.lower() or (
+                "i couldn't find" in send_result.lower() and "did you mean" in send_result.lower()
+            ):
+                suggestions = msg.get_contact_names_matching(recipient)
+                if suggestions:
+                    _fuzzy_contact_suggestions.clear()
+                    _fuzzy_contact_suggestions.extend(suggestions)
+                    _awaiting_msg_recipient = True
+            elif "i found a few contacts" in send_result.lower():
+                # Ambiguous match — suggestions already listed in the response
+                suggestions = msg.get_contact_names_matching(recipient)
+                if suggestions:
+                    _fuzzy_contact_suggestions.clear()
+                    _fuzzy_contact_suggestions.extend(suggestions)
+                    _awaiting_msg_recipient = True
+            return _s(send_result), "Messages"
         return _s(_message_confirmation_prompt(recipient, body)), "Messages"
 
     if _awaiting_msg_recipient:
         if not lower:
             return _s("Who would you like to message?"), "Messages"
+        # ── Fuzzy suggestion follow-up: user is picking from previously offered names ──
+        if _fuzzy_contact_suggestions:
+            selected = _is_contact_selection(lower)
+            if selected:
+                _fuzzy_contact_suggestions.clear()
+                _set_pending_recipient(selected)
+                return _s(f"What would you like to say to {selected}?"), "Messages"
+            else:
+                names_list = ", ".join(_fuzzy_contact_suggestions)
+                return _s(f"I didn't catch that. Did you mean one of: {names_list}?"), "Messages"
         recipient = _parse_message_recipient_only(user_input)
         if recipient:
             _set_pending_recipient(recipient)
@@ -839,6 +935,29 @@ def route_stream(user_input: str) -> tuple:
 
     if not lower:
         return _s("Tell me what you want me to do."), "Chat"
+
+    # ── Wake-word / greeting acknowledgement ─────────────────────────────────
+    if lower in {
+        "jarvis", "hey jarvis", "ok jarvis", "okay jarvis",
+        "hello jarvis", "hi jarvis", "yo jarvis",
+    }:
+        return _s("I'm here. What do you need?"), "Chat"
+
+    # ── End-of-conversation acknowledgement ───────────────────────────────────
+    if lower in {
+        "that's all", "that's it", "that'll be all", "that's all for now",
+        "that will be all", "nothing else", "nothing more", "that's everything",
+        "i'm done", "all done", "we're done", "that's all i need",
+        "thank you jarvis", "thanks jarvis", "cheers jarvis",
+    }:
+        return _s("Alright, I'll be here when you need me."), "Chat"
+
+    # ── Multi-intent: answer two distinct questions in one query ──────────────
+    multi_parts = _detect_multi_intent(lower)
+    if multi_parts:
+        texts = [_dispatch_single_intent(p) for p in multi_parts]
+        if all(t is not None for t in texts):
+            return _s(" ".join(texts)), "Multi"
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
@@ -1004,6 +1123,21 @@ def route_stream(user_input: str) -> tuple:
     # Clipboard
     if any(p in lower for p in ("what's in my clipboard", "read my clipboard", "what did i copy")):
         return _s(terminal.get_clipboard()), "Clipboard"
+
+    # Shell command — fast path so local model doesn't hallucinate instead of executing
+    _shell_match = re.match(
+        r"(?:run|execute|shell|terminal|run the command|execute the command)\s*[:\-]?\s*(.+)",
+        lower, re.IGNORECASE
+    )
+    if _shell_match:
+        _raw_cmd = user_input[_shell_match.start(1):].strip().strip("\"'`")
+        if _raw_cmd and not re.search(r"\b(if|when|how|should|could|would|can you)\b", _raw_cmd):
+            _admin = any(kw in _raw_cmd.lower() for kw in ("sudo", "admin", "root", "chown", "chmod"))
+            _output = terminal.run_admin_command(_raw_cmd) if _admin else terminal.run_command(_raw_cmd)
+            return format_with_mini(
+                f"User ran: '{_raw_cmd}'. Output:\n{_output}\nReport the output in one spoken sentence.",
+                skill_id=None, tool="terminal", extra_system=modifier_system,
+            ), "Terminal"
 
     # Self-improve fast paths
     if any(p in lower for p in ("restore backup", "undo last change", "revert")):

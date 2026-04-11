@@ -103,10 +103,10 @@ Order of operations:
 assembled_context + user_input → model → raw_response
 ```
 - Model selection: route to appropriate model based on task type
-  - Fast/chat tasks: local model (Mistral, Llama3, Phi-3)
-  - Complex reasoning: GPT-4o / Claude 3.5+ (external API)
-  - Code: Codestral, DeepSeek-Coder, or GPT-4o
-  - Long-context: Gemini 1.5 Pro or Claude 3.5 (external)
+  - Fast/chat tasks: local Ollama model
+  - Complex reasoning: local reasoning model first, with optional cloud only outside open-source mode
+  - Code: local coding model first
+  - Long-context: local retrieval + local reasoning first, with optional cloud only as a non-default fallback
 - Temperature: varies by task (0.2 for factual/code, 0.7 for creative/strategy)
 
 ### Step 5 — Post-processing

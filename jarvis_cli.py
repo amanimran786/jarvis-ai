@@ -101,6 +101,9 @@ def _stream_chat(message: str) -> int:
                     print(obj["chunk"], end="", flush=True)
         print()  # trailing newline
         return 0
+    except urllib.error.HTTPError as _http_err:
+        print(f"Error: Jarvis returned HTTP {_http_err.code} — {_http_err.reason}. Check Jarvis logs.", file=sys.stderr)
+        return 1
     except urllib.error.URLError:
         print("Error: Jarvis is not running. Start it with: python main.py", file=sys.stderr)
         return 1
@@ -123,6 +126,9 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
         if exc.code == 404:
             return _stream_chat(message)
         print(f"Error: task submission failed ({exc.code})", file=sys.stderr)
+        return 1
+    except urllib.error.HTTPError as _http_err:
+        print(f"Error: Jarvis returned HTTP {_http_err.code} — {_http_err.reason}. Check Jarvis logs.", file=sys.stderr)
         return 1
     except urllib.error.URLError:
         print("Error: Jarvis is not running. Start it with: python main.py", file=sys.stderr)
@@ -344,6 +350,9 @@ def main():
     try:
         result = post("/chat", {"message": message, "source": "cli_chat", "meta": {"client": "jarvis_cli"}})
         print(f"[{result['model']}] {result['response']}")
+    except urllib.error.HTTPError as _http_err:
+        print(f"Error: Jarvis returned HTTP {_http_err.code} — check Jarvis logs.")
+        sys.exit(1)
     except urllib.error.URLError:
         print("Error: Jarvis is not running. Start it with: python main.py")
         sys.exit(1)

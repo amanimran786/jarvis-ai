@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import tempfile
@@ -110,18 +111,18 @@ def _build_long_term_profile(data: dict) -> dict:
 def load() -> dict:
     with _lock:
         if not os.path.exists(MEMORY_FILE):
-            return dict(_DEFAULTS)
+            return copy.deepcopy(_DEFAULTS)
         try:
             with open(MEMORY_FILE) as f:
                 content = f.read().strip()
             if not content:
-                return dict(_DEFAULTS)
+                return copy.deepcopy(_DEFAULTS)
             data = json.loads(content)
         except (json.JSONDecodeError, OSError):
             # Corrupted file — return defaults, don't crash
-            return dict(_DEFAULTS)
+            return copy.deepcopy(_DEFAULTS)
         for k, v in _DEFAULTS.items():
-            data.setdefault(k, v)
+            data.setdefault(k, copy.deepcopy(v))
         return data
 
 

@@ -263,9 +263,9 @@ This project is strong enough to be useful now, but it is not done.
 Important truth:
 
 - Jarvis is local-first today
-- Jarvis is not yet perfectly 100 percent local across every subsystem
-- some cloud fallback paths still exist in code
-- the repo is actively moving those remaining paths behind stricter open-source-mode boundaries
+- Jarvis defaults to `open-source` mode, which keeps core inference on local models only
+- paid fallbacks can still exist outside open-source mode for users who explicitly want them
+- the remaining work is mostly about making every subsystem consistently local-quality, not re-centering the stack around cloud APIs
 
 That honesty matters because the goal here is not marketing. The goal is to build the real thing.
 
