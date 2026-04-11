@@ -22,7 +22,15 @@ def _get_openai_client():
     return OpenAI(api_key=OPENAI_API_KEY)
 
 
-def _run_tesseract(path: str, psm: str) -> str:
+def _cloud_vision_allowed() -> bool:
+    try:
+        import model_router
+        return not model_router.is_open_source_mode()
+    except Exception:
+        return True
+
+
+def _run_tesseract(path: str, psm: str, timeout_seconds: float = 12) -> str:
     tesseract = shutil.which("tesseract")
     if not tesseract:
         return ""
@@ -31,7 +39,7 @@ def _run_tesseract(path: str, psm: str) -> str:
             [tesseract, path, "stdout", "--psm", psm],
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=timeout_seconds,
             check=False,
         )
         if proc.returncode != 0:
@@ -49,6 +57,92 @@ def _score_ocr_text(text: str) -> int:
     letters = sum(ch.isalpha() for ch in text)
     punctuation = sum(ch in ":;=()[]{}./_-<>" for ch in text)
     return len(text) + len(lines) * 24 + digits * 2 + letters + punctuation * 3
+
+
+def _quick_ocr_probe(path: str, prompt: str) -> dict[str, object]:
+    sample = _run_tesseract(path, "6", timeout_seconds=3)
+    signal = _ocr_signal(sample)
+    visual_prompt = _prompt_prefers_visual(prompt)
+    text_prompt = _prompt_prefers_text(prompt)
+    prefer_ocr = False
+
+    if signal["chars"] >= 120 and signal["words"] >= 18:
+        prefer_ocr = True
+    elif signal["lines"] >= 4 and signal["letters"] >= 80:
+        prefer_ocr = True
+    elif text_prompt and signal["chars"] >= 48:
+        prefer_ocr = True
+    elif visual_prompt and signal["chars"] < 80:
+        prefer_ocr = False
+
+    return {
+        "sample_text": sample,
+        "prefer_ocr": prefer_ocr,
+        "signal": signal,
+    }
+
+
+def _ocr_signal(text: str) -> dict[str, int]:
+    lines = [line for line in text.splitlines() if line.strip()]
+    words = [word for word in text.split() if word.strip()]
+    letters = sum(ch.isalpha() for ch in text)
+    digits = sum(ch.isdigit() for ch in text)
+    return {
+        "chars": len(text.strip()),
+        "lines": len(lines),
+        "words": len(words),
+        "letters": letters,
+        "digits": digits,
+    }
+
+
+def _prompt_prefers_text(prompt: str) -> bool:
+    lower = (prompt or "").lower()
+    triggers = (
+        "read",
+        "ocr",
+        "text",
+        "code",
+        "email",
+        "article",
+        "document",
+        "website",
+        "page",
+        "screen",
+        "screenshot",
+        "what does this say",
+        "summarize",
+    )
+    return any(token in lower for token in triggers)
+
+
+def _prompt_prefers_visual(prompt: str) -> bool:
+    lower = (prompt or "").lower()
+    triggers = (
+        "chart",
+        "graph",
+        "diagram",
+        "layout",
+        "photo",
+        "picture",
+        "person",
+        "object",
+        "color",
+        "scene",
+        "where",
+        "left",
+        "right",
+    )
+    return any(token in lower for token in triggers)
+
+
+def _should_prefer_ocr_for_screenshot(prompt: str, ocr_text: str) -> bool:
+    signal = _ocr_signal(ocr_text)
+    if signal["chars"] >= 120 and signal["words"] >= 18:
+        return True
+    if signal["lines"] >= 4 and signal["letters"] >= 80:
+        return True
+    return _prompt_prefers_text(prompt) and signal["chars"] >= 48
 
 
 def _preprocess_for_ocr(path: str) -> str:
@@ -124,6 +218,29 @@ def _local_vision_summary(prompt: str, ocr_text: str) -> str:
     ).strip()
 
 
+def _local_vision_unavailable_message() -> str:
+    try:
+        from brains import brain_ollama
+        caps = brain_ollama.local_capabilities()
+        candidates = caps.get("vision_candidates") or []
+        health = caps.get("vision_health") or {}
+        if candidates:
+            unstable = [model for model in candidates if model in health]
+            if unstable:
+                return (
+                    "Local vision is installed but currently unstable. "
+                    f"Jarvis quarantined {unstable[0]} for a short cooldown. "
+                    "Try again in a moment or pull an alternate model like: ollama pull minicpm-v"
+                )
+            return (
+                "Local vision is installed, but it did not return a usable answer for this image. "
+                "Try again or pull an alternate model like: ollama pull minicpm-v"
+            )
+    except Exception:
+        pass
+    return "No local vision model is available. Pull one with: ollama pull llava:7b"
+
+
 def _capture_frame() -> str:
     """Capture a single frame from the webcam and return path to saved image."""
     cv2 = _cv2()
@@ -153,7 +270,7 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
     Priority:
       1. Local multimodal model (llava/minicpm-v) — actual image understanding
       2. OCR + local LLM summary — text-heavy screens
-      3. GPT-4o Vision — cloud fallback only when no local vision model is available
+      3. GPT-4o Vision — paid fallback only outside open-source mode
     """
     path = None
     try:
@@ -168,9 +285,11 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
         local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
         if local_answer:
             return local_answer
+        if not _cloud_vision_allowed():
+            return "Open-source mode is active. " + _local_vision_unavailable_message()
         client = _get_openai_client()
         if client is None:
-            return "No local vision model is available. Pull one with: ollama pull llava:7b"
+            return _local_vision_unavailable_message()
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
         response = client.chat.completions.create(
@@ -193,10 +312,19 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
     Priority:
       1. Local multimodal model (llava/minicpm-v)
       2. OCR + local LLM summary
-      3. GPT-4o Vision — cloud fallback only
+      3. GPT-4o Vision — paid fallback only outside open-source mode
     """
-    path = capture_screenshot_temp(preferred_format="jpg", fallback_formats=("png",))
+    path = capture_screenshot_temp(preferred_format="png", fallback_formats=("jpg",))
     try:
+        probe = _quick_ocr_probe(path, prompt)
+        ocr_text = ""
+        prefer_ocr = bool(probe.get("prefer_ocr"))
+        if prefer_ocr:
+            ocr_text = _extract_ocr_text(path)
+            prefer_ocr = _should_prefer_ocr_for_screenshot(prompt, ocr_text or str(probe.get("sample_text") or ""))
+            local_answer = _local_vision_summary(prompt, ocr_text)
+            if local_answer:
+                return local_answer
         from brains.brain_ollama import ask_local_vision
         local_vision = ask_local_vision(
             path, prompt,
@@ -204,12 +332,16 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
         )
         if local_vision:
             return local_vision
-        local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
-        if local_answer:
-            return local_answer
+        if not prefer_ocr:
+            ocr_text = ocr_text or _extract_ocr_text(path)
+            local_answer = _local_vision_summary(prompt, ocr_text)
+            if local_answer:
+                return local_answer
+        if not _cloud_vision_allowed():
+            return "Open-source mode is active. " + _local_vision_unavailable_message()
         client = _get_openai_client()
         if client is None:
-            return "No local vision model is available. Pull one with: ollama pull llava:7b"
+            return _local_vision_unavailable_message()
         with open(path, "rb") as f:
             image_data = base64.b64encode(f.read()).decode("utf-8")
         response = client.chat.completions.create(

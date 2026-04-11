@@ -1481,6 +1481,13 @@ class JarvisWindow(QMainWindow):
         self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
         status_block.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignRight)
 
+        self._vision_chip = QLabel("◌ VISION CHECKING")
+        self._vision_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._vision_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._vision_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 185)", C_TEXT_DIM))
+        self._vision_chip.setToolTip("Jarvis is checking local vision health.")
+        status_block.addWidget(self._vision_chip, alignment=Qt.AlignmentFlag.AlignRight)
+
         mode_lbl = QLabel(f"MODE: {model_router.get_mode().upper()}")
         mode_lbl.setFont(QFont("Courier New", 7))
         mode_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
@@ -2035,6 +2042,7 @@ class JarvisWindow(QMainWindow):
             str(voice_runtime["color"]),
             self._voice_runtime_tooltip,
         )
+        self._refresh_vision_runtime()
 
         if self._voice_runtime_ready:
             self.voice_worker = VoiceWorker()
@@ -2080,7 +2088,23 @@ class JarvisWindow(QMainWindow):
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
     def _hotkey_screen(self):
-        self._set_status("SCANNING DISPLAY")
+        snapshot = self._refresh_vision_runtime()
+        if snapshot["mode"] == "degraded":
+            self._set_status("SCANNING DISPLAY / OCR FALLBACK")
+            self._add_message(
+                "Local vision is degraded, so this screen scan will bias toward OCR-first fallback.",
+                "jarvis",
+                "Vision",
+            )
+        elif snapshot["mode"] == "unavailable":
+            self._set_status("SCANNING DISPLAY / VISION OFFLINE")
+            self._add_message(
+                "Local vision is offline. Jarvis will rely on OCR and may miss non-text visual details in this scan.",
+                "jarvis",
+                "Vision",
+            )
+        else:
+            self._set_status("SCANNING DISPLAY")
         try:
             import camera
             result = camera.screenshot_and_describe(
@@ -2091,10 +2115,27 @@ class JarvisWindow(QMainWindow):
             self._add_message(result, "jarvis", "")
         except Exception as e:
             self._add_message(f"Screen capture failed: {e}", "jarvis", "")
+        self._refresh_vision_runtime(announce_degraded=True)
         self._set_status("ONLINE")
 
     def _hotkey_webcam(self):
-        self._set_status("CAMERA ACTIVE")
+        snapshot = self._refresh_vision_runtime()
+        if snapshot["mode"] == "degraded":
+            self._set_status("CAMERA ACTIVE / VISION DEGRADED")
+            self._add_message(
+                "Local vision is degraded. Camera analysis will stay local, but results may be less reliable until the model recovers.",
+                "jarvis",
+                "Vision",
+            )
+        elif snapshot["mode"] == "unavailable":
+            self._set_status("CAMERA ACTIVE / VISION OFFLINE")
+            self._add_message(
+                "Local vision is offline. Camera analysis may only recover text-like details until a local vision model is available again.",
+                "jarvis",
+                "Vision",
+            )
+        else:
+            self._set_status("CAMERA ACTIVE")
         try:
             import camera
             result = camera.see(
@@ -2105,6 +2146,7 @@ class JarvisWindow(QMainWindow):
             self._add_message(result, "jarvis", "")
         except Exception as e:
             self._add_message(f"Camera capture failed: {e}", "jarvis", "")
+        self._refresh_vision_runtime(announce_degraded=True)
         self._set_status("ONLINE")
 
     def _hotkey_clipboard(self):
@@ -2472,6 +2514,76 @@ class JarvisWindow(QMainWindow):
         self._mic_chip.setText(label)
         self._mic_chip.setToolTip(tooltip)
         self._mic_chip.setStyleSheet(_mic_chip_css(border, fill, text))
+
+    def _vision_runtime_snapshot(self) -> dict[str, str]:
+        try:
+            from brains import brain_ollama
+
+            caps = brain_ollama.local_capabilities()
+        except Exception as exc:
+            return {
+                "mode": "unavailable",
+                "label": "VISION OFFLINE",
+                "detail": "Local vision status is unavailable.",
+                "tooltip": str(exc),
+                "border": C_WARNING,
+                "fill": "rgba(255, 170, 0, 0.14)",
+                "text_color": C_WARNING,
+            }
+
+        mode = str(caps.get("vision_status") or "unavailable")
+        detail = str(caps.get("vision_status_detail") or "Local vision status is unavailable.")
+        model = str(caps.get("vision_model") or caps.get("vision_preferred") or "").strip()
+        model_suffix = f" ({model})" if model else ""
+
+        if mode == "ready":
+            return {
+                "mode": mode,
+                "label": f"◌ VISION READY{model_suffix}",
+                "detail": detail,
+                "tooltip": detail,
+                "border": C_CYAN,
+                "fill": "rgba(0, 212, 255, 0.12)",
+                "text_color": C_CYAN,
+            }
+        if mode == "degraded":
+            return {
+                "mode": mode,
+                "label": f"◌ VISION DEGRADED{model_suffix}",
+                "detail": detail,
+                "tooltip": detail,
+                "border": C_WARNING,
+                "fill": "rgba(255, 170, 0, 0.14)",
+                "text_color": C_WARNING,
+            }
+        return {
+            "mode": "unavailable",
+            "label": "◌ VISION OFFLINE",
+            "detail": detail,
+            "tooltip": detail,
+            "border": C_BORDER,
+            "fill": "rgba(3, 18, 28, 165)",
+            "text_color": C_TEXT_DIM,
+        }
+
+    def _set_vision_chip(self, snapshot: dict[str, str]) -> None:
+        if not hasattr(self, "_vision_chip"):
+            return
+        self._vision_chip.setText(snapshot["label"])
+        self._vision_chip.setToolTip(snapshot["tooltip"])
+        self._vision_chip.setStyleSheet(
+            _mic_chip_css(snapshot["border"], snapshot["fill"], snapshot["text_color"])
+        )
+
+    def _refresh_vision_runtime(self, announce_degraded: bool = False) -> dict[str, str]:
+        snapshot = self._vision_runtime_snapshot()
+        previous = getattr(self, "_vision_runtime_mode", "")
+        self._vision_runtime_mode = snapshot["mode"]
+        self._vision_runtime_detail = snapshot["detail"]
+        self._set_vision_chip(snapshot)
+        if announce_degraded and snapshot["mode"] != "ready" and snapshot["mode"] != previous:
+            self._add_message(snapshot["detail"], "jarvis", "Vision")
+        return snapshot
 
     def _apply_voice_hint_for_status(self, raw_text: str):
         runtime_mode = getattr(self, "_voice_runtime_mode", "unknown")
@@ -2925,6 +3037,13 @@ class OrbShellWindow(JarvisWindow):
         self._mic_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 165)", C_TEXT_DIM))
         self._mic_chip.setToolTip(MIC_IDLE_TOOLTIP)
         orb_layout.addWidget(self._mic_chip, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._vision_chip = QLabel("◌ VISION CHECKING")
+        self._vision_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._vision_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._vision_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 165)", C_TEXT_DIM))
+        self._vision_chip.setToolTip("Jarvis is checking local vision health.")
+        orb_layout.addWidget(self._vision_chip, alignment=Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(orb_shell, alignment=Qt.AlignmentFlag.AlignCenter)
 
