@@ -8,6 +8,7 @@ import re
 import os
 import atexit
 import threading
+import time
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
 import memory as mem
 import conversation_context as ctx
@@ -20,6 +21,13 @@ _REASONING_BOOST = (
     "state what you know with confidence, flag any uncertainty explicitly, then deliver "
     "your conclusion. Be precise. Speak in natural sentences — no bullets or markdown."
 )
+_VISION_SYSTEM_PROMPT = (
+    "You are Jarvis handling local vision analysis. "
+    "Describe only what is actually visible in the image. "
+    "If the image is blank, unclear, low-signal, or unreadable, say that directly. "
+    "Do not invent text, UI, objects, or scene details that are not supported by the pixels. "
+    "Keep the answer concise and spoken-language friendly."
+)
 
 try:
     import httpx
@@ -29,6 +37,7 @@ except Exception:
 
 # DeepSeek R1:14b reasons heavily before first token — 600s default, overridable via env
 _OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
+_OLLAMA_VISION_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_VISION_TIMEOUT_SECONDS", "30"))
 _CLIENT_SINGLETON = None
 _CLIENT_LOCK = threading.Lock()
 
@@ -46,6 +55,13 @@ def _client():
             timeout = httpx.Timeout(connect=5.0, read=_OLLAMA_TIMEOUT_SECONDS, write=15.0, pool=5.0)
             _CLIENT_SINGLETON = _ollama.Client(timeout=timeout)
         return _CLIENT_SINGLETON
+
+
+def _vision_client():
+    if httpx is None:
+        return _ollama.Client(timeout=_OLLAMA_VISION_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(connect=5.0, read=_OLLAMA_VISION_TIMEOUT_SECONDS, write=15.0, pool=5.0)
+    return _ollama.Client(timeout=timeout)
 
 
 def _close_client():
@@ -118,6 +134,8 @@ def _strip_markdown(text: str) -> str:
     text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)
     text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.M)
     text = re.sub(r'^\s*\d+[.)]\s+', '', text, flags=re.M)
+    # Strip inline numbered list markers (e.g. "1. First 2. Second 3. Third")
+    text = re.sub(r'(?<=\s)\d+[.)]\s+', ' ', text)
     text = re.sub(r'```\w*\n?', '', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
     # Collapse excess blank lines left after stripping
@@ -268,17 +286,71 @@ def list_local_models() -> list[str]:
         return []
 
 
+_LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "").strip()
 _LOCAL_VISION_MODELS = ("llava:7b", "llava", "minicpm-v", "moondream", "llava-llama3")
 _LOCAL_EMBED_MODEL = os.getenv("LOCAL_EMBED_MODEL", "nomic-embed-text")
+_VISION_FAILURE_COOLDOWN_SECONDS = float(os.getenv("OLLAMA_VISION_FAILURE_COOLDOWN_SECONDS", "180"))
+_vision_failures: dict[str, dict[str, float | int | str]] = {}
+_vision_failures_lock = threading.Lock()
+
+
+def _vision_candidates() -> list[str]:
+    """Return available local vision models in preference order."""
+    available = list_local_models()
+    ranked: list[str] = []
+    preferred = [item.strip() for item in _LOCAL_VISION_MODEL.split(",") if item.strip()]
+    for candidate in [*preferred, *_LOCAL_VISION_MODELS]:
+        prefix = candidate.split(":")[0]
+        for model in available:
+            if (model == candidate or prefix in model) and model not in ranked:
+                ranked.append(model)
+    return ranked
+
+
+def _vision_health_snapshot() -> dict[str, dict[str, float | int | str]]:
+    with _vision_failures_lock:
+        return {model: data.copy() for model, data in _vision_failures.items()}
+
+
+def _vision_model_on_cooldown(model: str) -> bool:
+    now = time.monotonic()
+    with _vision_failures_lock:
+        data = _vision_failures.get(model)
+        if not data:
+            return False
+        until = float(data.get("cooldown_until", 0.0) or 0.0)
+        if until <= now:
+            _vision_failures.pop(model, None)
+            return False
+        return True
+
+
+def _mark_vision_success(model: str) -> None:
+    with _vision_failures_lock:
+        _vision_failures.pop(model, None)
+
+
+def _mark_vision_failure(model: str, error: Exception | str) -> None:
+    now = time.monotonic()
+    message = str(error)
+    with _vision_failures_lock:
+        previous = _vision_failures.get(model, {})
+        failures = int(previous.get("failures", 0) or 0) + 1
+        _vision_failures[model] = {
+            "failures": failures,
+            "last_error": message,
+            "last_failed_at": now,
+            "cooldown_until": now + _VISION_FAILURE_COOLDOWN_SECONDS,
+        }
 
 
 def _best_vision_model() -> str | None:
-    """Return the best available local vision model, or None if none pulled."""
-    available = list_local_models()
-    for candidate in _LOCAL_VISION_MODELS:
-        if any(candidate.split(":")[0] in m for m in available):
-            return next(m for m in available if candidate.split(":")[0] in m)
-    return None
+    """Return the best available healthy local vision model, or None if none pulled."""
+    candidates = _vision_candidates()
+    for model in candidates:
+        if not _vision_model_on_cooldown(model):
+            return model
+    return candidates[0] if candidates else None
 
 
 def _best_embed_model() -> str | None:
@@ -289,6 +361,47 @@ def _best_embed_model() -> str | None:
     return None
 
 
+def _vision_runtime_status() -> dict[str, str | None]:
+    candidates = _vision_candidates()
+    healthy = [model for model in candidates if not _vision_model_on_cooldown(model)]
+    health = _vision_health_snapshot()
+    preferred = healthy[0] if healthy else (candidates[0] if candidates else None)
+
+    if not candidates:
+        return {
+            "state": "unavailable",
+            "detail": "No local vision model installed. Pull one with: ollama pull llava:7b",
+            "preferred": preferred,
+        }
+
+    if healthy and not health:
+        return {
+            "state": "ready",
+            "detail": f"Local vision ready via {healthy[0]}.",
+            "preferred": healthy[0],
+        }
+
+    if healthy:
+        cooled = [model for model in candidates if model not in healthy]
+        detail = f"Local vision ready via {healthy[0]}."
+        if cooled:
+            detail += f" {cooled[0]} is cooling down after a recent failure."
+        return {
+            "state": "degraded",
+            "detail": detail,
+            "preferred": healthy[0],
+        }
+
+    cooled = candidates[0]
+    return {
+        "state": "degraded",
+        "detail": (
+            f"Local vision is installed but temporarily unhealthy. {cooled} is cooling down after a recent failure."
+        ),
+        "preferred": cooled,
+    }
+
+
 def ask_local_vision(image_path: str, prompt: str, system_extra: str = "") -> str:
     """Analyse an image with a local multimodal model (llava/minicpm-v).
 
@@ -296,31 +409,44 @@ def ask_local_vision(image_path: str, prompt: str, system_extra: str = "") -> st
     Reads the image from disk, encodes it as base64, and sends via the Ollama
     multimodal chat API.
     """
-    model = _best_vision_model()
-    if not model:
+    candidates = _vision_candidates()
+    if not candidates:
         return ""
     try:
         import base64
         with open(image_path, "rb") as f:
             image_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-        system = SYSTEM_PROMPT
-        if system_extra:
-            system += "\n\n" + system_extra
-        messages = [
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": prompt,
-                "images": [image_b64],
-            },
-        ]
-        response = _client().chat(model=model, messages=messages, stream=False)
-        raw = (response.message.content or "").strip()
-        return _strip_markdown(raw)
     except Exception as e:
-        print(f"[Ollama Vision] {model} failed: {e}")
+        print(f"[Ollama Vision] failed to read image: {e}")
         return ""
+
+    system = _VISION_SYSTEM_PROMPT
+    if system_extra:
+        system += "\n\n" + system_extra
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": prompt,
+            "images": [image_b64],
+        },
+    ]
+
+    for model in candidates:
+        if _vision_model_on_cooldown(model):
+            continue
+        try:
+            response = _vision_client().chat(model=model, messages=messages, stream=False)
+            raw = (response.message.content or "").strip()
+            if raw:
+                _mark_vision_success(model)
+                return _strip_markdown(raw)
+            _mark_vision_failure(model, "empty vision response")
+        except Exception as e:
+            _mark_vision_failure(model, e)
+            print(f"[Ollama Vision] {model} failed: {e}")
+            continue
+    return ""
 
 
 def embed(text: str) -> list[float] | None:
@@ -358,8 +484,24 @@ def warm_model_cache(model: str = LOCAL_REASONING) -> None:
         print(f"[Ollama] Cache warm failed (non-fatal): {e}")
 
 
+def warm_vision_cache() -> None:
+    """Pre-load the best available vision model so first image analysis is faster."""
+    target = _best_vision_model()
+    if not target:
+        return
+    try:
+        print(f"[Ollama] Warming vision cache for {target}...")
+        _client().generate(model=target, prompt="", keep_alive="5m")
+        print(f"[Ollama] Vision model {target} loaded and ready.")
+        _mark_vision_success(target)
+    except Exception as e:
+        _mark_vision_failure(target, e)
+        print(f"[Ollama] Vision warm failed (non-fatal): {e}")
+
+
 def local_capabilities() -> dict:
     models = list_local_models()
+    vision_runtime = _vision_runtime_status()
 
     def _selected(preferred: str) -> str | None:
         if not models:
@@ -375,6 +517,12 @@ def local_capabilities() -> dict:
         "selected_coder": _selected(LOCAL_CODER),
         "selected_reasoning": _selected(LOCAL_REASONING),
         "vision_model": _best_vision_model(),
+        "vision_preferred": _LOCAL_VISION_MODEL or None,
+        "vision_candidates": _vision_candidates(),
+        "vision_health": _vision_health_snapshot(),
+        "vision_status": vision_runtime["state"],
+        "vision_status_detail": vision_runtime["detail"],
+        "vision_timeout_seconds": _OLLAMA_VISION_TIMEOUT_SECONDS,
         "embedding_model": _best_embed_model(),
         "reasoning_boost_enabled": True,
         "timeout_seconds": _OLLAMA_TIMEOUT_SECONDS,

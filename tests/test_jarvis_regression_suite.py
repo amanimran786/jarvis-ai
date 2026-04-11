@@ -23,6 +23,7 @@ import router
 import browser
 import call_privacy
 import camera
+from brains import brain_ollama
 import config
 import graph_context
 import interview_profile
@@ -97,12 +98,36 @@ class LocalTtsTests(unittest.TestCase):
 
 
 class LocalVisionFallbackTests(unittest.TestCase):
+    def test_screenshot_describe_routes_text_heavy_shots_to_ocr_before_local_vision(self):
+        with TemporaryDirectory() as td:
+            shot = Path(td) / "shot.jpg"
+            shot.write_bytes(b"fake image")
+            with patch("camera.capture_screenshot_temp", return_value=str(shot)), \
+                 patch("camera._quick_ocr_probe", return_value={"prefer_ocr": True, "sample_text": "Incident report"}), \
+                 patch("camera._extract_ocr_text", return_value="Incident report\nService outage in us-west-2\nMitigation in progress\nETA 15 minutes"), \
+                 patch("camera._local_vision_summary", return_value="OCR-first summary"), \
+                 patch("brains.brain_ollama.ask_local_vision", side_effect=AssertionError("should not hit local vision for text-heavy screenshots")):
+                text = camera.screenshot_and_describe("Describe what's on this screen.")
+        self.assertEqual(text, "OCR-first summary")
+
+    def test_screenshot_describe_preserves_vision_first_when_probe_is_inconclusive(self):
+        with TemporaryDirectory() as td:
+            shot = Path(td) / "shot.jpg"
+            shot.write_bytes(b"fake image")
+            with patch("camera.capture_screenshot_temp", return_value=str(shot)), \
+                 patch("camera._quick_ocr_probe", return_value={"prefer_ocr": False, "sample_text": ""}), \
+                 patch("brains.brain_ollama.ask_local_vision", return_value="Local vision first"), \
+                 patch("camera._extract_ocr_text", side_effect=AssertionError("should not run full OCR before local vision when probe is inconclusive")):
+                text = camera.screenshot_and_describe("Describe the layout on this screen.")
+        self.assertEqual(text, "Local vision first")
+
     def test_screenshot_describe_prefers_local_ocr_summary_before_openai(self):
         with TemporaryDirectory() as td:
             shot = Path(td) / "shot.jpg"
             shot.write_bytes(b"fake image")
             fake_openai = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **_: (_ for _ in ()).throw(AssertionError("should not call openai vision")))))
             with patch("camera.capture_screenshot_temp", return_value=str(shot)), \
+                 patch("camera._quick_ocr_probe", return_value={"prefer_ocr": False, "sample_text": ""}), \
                  patch("camera._extract_ocr_text", return_value="System design interview prompt on screen"), \
                  patch("camera._local_vision_summary", return_value="Local OCR summary of the screen"), \
                  patch("camera._get_openai_client", return_value=fake_openai):
@@ -114,11 +139,85 @@ class LocalVisionFallbackTests(unittest.TestCase):
             shot = Path(td) / "shot.jpg"
             shot.write_bytes(b"fake image")
             with patch("camera.capture_screenshot_temp", return_value=str(shot)), \
+                 patch("camera._quick_ocr_probe", return_value={"prefer_ocr": False, "sample_text": ""}), \
                  patch("camera._extract_ocr_text", return_value=""), \
                  patch("camera._local_vision_summary", return_value=""), \
                  patch("camera._get_openai_client", return_value=None):
                 text = camera.screenshot_and_describe("Describe what's on this screen.")
-        self.assertIn("no local vision model is available", text.lower())
+        self.assertIn("local vision", text.lower())
+
+    def test_screenshot_describe_blocks_cloud_vision_in_open_source_mode(self):
+        with TemporaryDirectory() as td:
+            shot = Path(td) / "shot.jpg"
+            shot.write_bytes(b"fake image")
+            with patch("camera.capture_screenshot_temp", return_value=str(shot)), \
+                 patch("camera._quick_ocr_probe", return_value={"prefer_ocr": False, "sample_text": ""}), \
+                 patch("camera._extract_ocr_text", return_value=""), \
+                 patch("camera._local_vision_summary", return_value=""), \
+                 patch("camera._cloud_vision_allowed", return_value=False), \
+                 patch("camera._get_openai_client", side_effect=AssertionError("should not call openai vision in open-source mode")):
+                text = camera.screenshot_and_describe("Describe what's on this screen.")
+        self.assertIn("open-source mode is active", text.lower())
+
+    def test_ollama_vision_falls_back_to_second_local_model_after_failure(self):
+        with TemporaryDirectory() as td:
+            shot = Path(td) / "shot.jpg"
+            shot.write_bytes(b"fake image")
+
+            class _Resp:
+                def __init__(self, text):
+                    self.message = SimpleNamespace(content=text)
+
+            calls = []
+
+            def _chat(*, model, messages, stream=False):
+                calls.append(model)
+                if model == "llava:7b":
+                    raise RuntimeError("model runner has unexpectedly stopped")
+                return _Resp("Second model succeeded.")
+
+            with patch.dict(brain_ollama._vision_failures, {}, clear=True), \
+                 patch("brains.brain_ollama._vision_candidates", return_value=["llava:7b", "minicpm-v"]), \
+                 patch("brains.brain_ollama._vision_client", return_value=SimpleNamespace(chat=_chat)):
+                text = brain_ollama.ask_local_vision(str(shot), "Describe this image.")
+                failure_snapshot = dict(brain_ollama._vision_failures)
+
+        self.assertEqual(text, "Second model succeeded.")
+        self.assertEqual(calls, ["llava:7b", "minicpm-v"])
+        self.assertIn("llava:7b", failure_snapshot)
+
+    def test_ollama_vision_skips_models_on_cooldown(self):
+        with TemporaryDirectory() as td:
+            shot = Path(td) / "shot.jpg"
+            shot.write_bytes(b"fake image")
+
+            class _Resp:
+                def __init__(self, text):
+                    self.message = SimpleNamespace(content=text)
+
+            calls = []
+
+            def _chat(*, model, messages, stream=False):
+                calls.append(model)
+                return _Resp(f"{model} answered.")
+
+            with patch.dict(
+                brain_ollama._vision_failures,
+                {"llava:7b": {"cooldown_until": 10**12, "failures": 2, "last_error": "boom", "last_failed_at": 1.0}},
+                clear=True,
+            ), patch("brains.brain_ollama._vision_candidates", return_value=["llava:7b", "minicpm-v"]), \
+                 patch("brains.brain_ollama._vision_client", return_value=SimpleNamespace(chat=_chat)):
+                text = brain_ollama.ask_local_vision(str(shot), "Describe this image.")
+
+        self.assertEqual(text, "minicpm-v answered.")
+        self.assertEqual(calls, ["minicpm-v"])
+
+    def test_vision_candidates_honor_preferred_local_model(self):
+        with patch.object(brain_ollama, "_LOCAL_VISION_MODEL", "minicpm-v"), \
+             patch("brains.brain_ollama.list_local_models", return_value=["llava:7b", "minicpm-v:8b", "moondream:latest"]):
+            candidates = brain_ollama._vision_candidates()
+        self.assertEqual(candidates[0], "minicpm-v:8b")
+        self.assertIn("llava:7b", candidates)
 
     def test_speak_falls_back_to_elevenlabs_when_local_tts_fails(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -919,6 +1018,8 @@ class ApiSurfaceTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("cost_policy", payload)
         self.assertIn("api_port", payload)
+        self.assertIn("local_vision", payload)
+        self.assertIn("state", payload["local_vision"])
 
     def test_cost_policy_endpoint(self):
         response = self.client.get("/cost-policy")
@@ -944,6 +1045,8 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("stt", payload["capabilities"])
         self.assertIn("tts", payload["capabilities"])
         self.assertIn("semantic_memory", payload["capabilities"])
+        self.assertIn("vision_status", payload["capabilities"])
+        self.assertIn("vision_status_detail", payload["capabilities"])
 
     def test_extensions_endpoint_exposes_skills_connectors_and_plugins(self):
         response = self.client.get("/extensions")

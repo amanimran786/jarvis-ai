@@ -542,6 +542,23 @@ def eval_summary(hours: int = 24 * 7):
 @app.get("/status")
 def status(refresh: bool = False):
     call_assist = runtime_state.refresh_call_assist(force_refresh=refresh)
+    try:
+        from brains import brain_ollama
+
+        local_caps = brain_ollama.local_capabilities()
+        local_vision = {
+            "state": local_caps.get("vision_status", "unavailable"),
+            "detail": local_caps.get("vision_status_detail", "Local vision status is unavailable."),
+            "selected_model": local_caps.get("vision_model"),
+            "preferred_model": local_caps.get("vision_preferred"),
+        }
+    except Exception as exc:
+        local_vision = {
+            "state": "unavailable",
+            "detail": str(exc),
+            "selected_model": None,
+            "preferred_model": None,
+        }
     return {
         "status": "online",
         "mode": model_router.get_mode(),
@@ -549,6 +566,7 @@ def status(refresh: bool = False):
         "api_port": get_port(),
         "api_urls": get_base_urls(),
         "local_available": model_router._has_local(),
+        "local_vision": local_vision,
         "context": ctx.get_stats(),
         "usage_24h": usage_tracker.summarize(hours=24, include_recent=0),
         "cost_policy": cost_policy.policy_status(),
@@ -1189,8 +1207,10 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     # Pre-load the reasoning model in the background so first query is instant
     import model_router as _mr
     if _mr.is_open_source_mode():
-        from brains.brain_ollama import warm_model_cache
+        from brains.brain_ollama import warm_model_cache, warm_vision_cache
         warm_thread = threading.Thread(target=warm_model_cache, daemon=True, name="OllamaWarm")
         warm_thread.start()
+        vision_warm_thread = threading.Thread(target=warm_vision_cache, daemon=True, name="OllamaVisionWarm")
+        vision_warm_thread.start()
 
     return t
