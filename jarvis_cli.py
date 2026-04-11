@@ -17,6 +17,7 @@ Usage:
   python jarvis_cli.py --task-status <task_id>
   python jarvis_cli.py --task fix the login bug   # streaming, Multica-compatible
   python jarvis_cli.py --task-code refactor the auth middleware
+  python jarvis_cli.py --teach "user prompt" "ideal Jarvis answer"
   python jarvis_cli.py -p fix the login bug        # alias for --task
 """
 
@@ -68,7 +69,14 @@ def post(path: str, body: dict) -> dict:
 
 def _stream_chat(message: str) -> int:
     base = _base()
-    data = json.dumps({"message": message, "stream": True}).encode()
+    data = json.dumps(
+        {
+            "message": message,
+            "stream": True,
+            "source": "cli_chat",
+            "meta": {"client": "jarvis_cli"},
+        }
+    ).encode()
     req = urllib.request.Request(
         base + "/chat", data=data,
         headers={"Content-Type": "application/json", **_auth_headers()}
@@ -107,6 +115,7 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
         "source": "cli_task",
         "terse_mode": terse_mode,
         "isolated_workspace": isolated_workspace,
+        "meta": {"client": "jarvis_cli"},
     }
     try:
         created = post("/tasks", payload)
@@ -166,6 +175,19 @@ def get(path: str) -> dict:
         return json.loads(resp.read())
 
 
+def teach(prompt: str, answer: str) -> dict:
+    return post(
+        "/local/training/teach",
+        {
+            "prompt": prompt,
+            "answer": answer,
+            "source": "manual_teacher",
+            "tags": ["cli", "codex"],
+            "meta": {"client": "jarvis_cli"},
+        },
+    )
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python jarvis_cli.py <message>")
@@ -184,6 +206,7 @@ def main():
         print("       python jarvis_cli.py --task-status <task_id>")
         print("       python jarvis_cli.py --task <task>   (streaming, Multica-compatible)")
         print("       python jarvis_cli.py --task-code <task>   (isolated coding task)")
+        print('       python jarvis_cli.py --teach "<prompt>" "<ideal answer>"')
         print("       python jarvis_cli.py -p <task>       (alias for --task)")
         sys.exit(1)
 
@@ -202,6 +225,14 @@ def main():
             sys.exit(1)
         task = " ".join(sys.argv[2:])
         sys.exit(stream_task(task, kind="code", terse_mode="full", isolated_workspace=True))
+
+    if flag == "--teach":
+        if len(sys.argv) != 4:
+            print('Usage: python jarvis_cli.py --teach "<prompt>" "<ideal answer>"', file=sys.stderr)
+            sys.exit(1)
+        result = teach(sys.argv[2], sys.argv[3])
+        print(result.get("message") or json.dumps(result))
+        sys.exit(0 if result.get("ok") else 1)
 
     if flag == "--status":
         s = get("/status")
@@ -311,7 +342,7 @@ def main():
 
     message = " ".join(sys.argv[1:])
     try:
-        result = post("/chat", {"message": message})
+        result = post("/chat", {"message": message, "source": "cli_chat", "meta": {"client": "jarvis_cli"}})
         print(f"[{result['model']}] {result['response']}")
     except urllib.error.URLError:
         print("Error: Jarvis is not running. Start it with: python main.py")

@@ -339,6 +339,8 @@ async def _guard_requests(request: Request, call_next):
 class ChatRequest(BaseModel):
     message: str
     stream: bool = False
+    source: str = "api"
+    meta: dict | None = None
 
 
 class TaskRequest(BaseModel):
@@ -411,6 +413,7 @@ class LocalTrainingModelfileRequest(BaseModel):
 class LocalTrainingRunRequest(BaseModel):
     export_limit: int = 150
     distill_limit: int = 8
+    expert_distill_limit: int = 3
     teacher_model: str = "claude-sonnet-4-6"
     cloud_only_export: bool = True
     base_model: str = ""
@@ -420,6 +423,14 @@ class LocalTrainingRunRequest(BaseModel):
 class LocalTrainingHandoffRequest(BaseModel):
     pack_path: str = ""
     targets: list[str] = []
+
+
+class LocalTrainingTeachRequest(BaseModel):
+    prompt: str
+    answer: str
+    source: str = "manual_teacher"
+    tags: list[str] = []
+    meta: dict | None = None
 
 
 class LocalModelEvalRunRequest(BaseModel):
@@ -478,6 +489,8 @@ class OsintDomainTyposRequest(BaseModel):
 @app.post("/chat")
 def chat(req: ChatRequest):
     """Send a message to Jarvis and get a response."""
+    source = (req.source or "api").strip() or "api"
+    client_meta = req.meta or {}
     if req.stream:
         def generate():
             with _CHAT_LOCK:
@@ -494,11 +507,18 @@ def chat(req: ChatRequest):
                         yield ": keepalive\n\n"
                 response = "".join(chunks)
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
-                context_stats = ctx.record_request_stats(model, source="api_stream")
-                interaction = evals.log_interaction(req.message, response, model, source="api_stream", context=context_stats)
+                stream_source = f"{source}_stream"
+                context_stats = ctx.record_request_stats(model, source=stream_source)
+                interaction = evals.log_interaction(
+                    req.message,
+                    response,
+                    model,
+                    source=stream_source,
+                    context={**context_stats, "client_meta": client_meta},
+                )
                 evals.maybe_log_automatic_failure(interaction)
                 try:
-                    semantic_memory.log_conversation_turn(req.message, response, model=model, source="api_stream")
+                    semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
                 except Exception:
                     pass
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
@@ -510,11 +530,17 @@ def chat(req: ChatRequest):
         stream, model = route_stream(req.message)
         response = "".join(stream)
         usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
-        context_stats = ctx.record_request_stats(model, source="api")
-        interaction = evals.log_interaction(req.message, response, model, context=context_stats)
+        context_stats = ctx.record_request_stats(model, source=source)
+        interaction = evals.log_interaction(
+            req.message,
+            response,
+            model,
+            source=source,
+            context={**context_stats, "client_meta": client_meta},
+        )
         evals.maybe_log_automatic_failure(interaction)
         try:
-            semantic_memory.log_conversation_turn(req.message, response, model=model, source="api")
+            semantic_memory.log_conversation_turn(req.message, response, model=model, source=source)
         except Exception:
             pass
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
