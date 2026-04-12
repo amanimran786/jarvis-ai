@@ -289,6 +289,10 @@ def speak(text: str) -> None:
     try:
         _speak_with_fallbacks(text)
     finally:
+        # Invalidate the noise calibration so the next listen() recalibrates
+        # in post-speech silence rather than reusing a threshold measured while
+        # the room was loud (which would suppress the user's voice).
+        invalidate_noise_calibration()
         _done_speaking.set()
 
 
@@ -413,19 +417,25 @@ def listen() -> str | None:
     """Record audio and transcribe with local faster-whisper when available."""
     if _stop_requested.is_set():
         return None
-    # Wait until Jarvis finishes speaking — prevents TTS feedback loop.
-    # A short dynamic pause after TTS is handled by the _done_speaking event;
-    # no hard-coded sleep needed.
+    # Track whether TTS was playing so we know to wait for acoustics to settle.
+    was_speaking = not _done_speaking.is_set()
     _done_speaking.wait(timeout=30)
     if _stop_requested.is_set():
         return None
 
+    # After TTS completes, let room acoustics settle before opening the mic.
+    # Without this pause, the 0.3s calibration window captures TTS reverb and
+    # sets the energy threshold too high — user speech then falls below the
+    # threshold and listen() times out silently every time.
+    if was_speaking:
+        _time.sleep(0.4)
+
     try:
         with _open_microphone_source() as source:
             _debug_log("Listening...")
-            _ensure_calibrated(source)   # 300ms → ~0ms on cached calls
+            _ensure_calibrated(source)   # recalibrates fresh after any TTS
             try:
-                audio = _recognizer.listen(source, timeout=6, phrase_time_limit=60)
+                audio = _recognizer.listen(source, timeout=8, phrase_time_limit=60)
             except sr.WaitTimeoutError:
                 return None
     except RuntimeError as exc:
