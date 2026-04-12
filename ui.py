@@ -90,9 +90,10 @@ C_WARNING   = "#FFAA00"       # processing state
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
-WAKE_PROMPT = "Say 'Hey Jarvis' to talk."
+WAKE_PROMPT = "Say 'Jarvis' to talk."
 WAKE_ACK = "I'm here. Go ahead."
 MIC_IDLE_TOOLTIP = "Jarvis is standing by for the wake word."
+VOICE_STATUS_PREFIX = "VOICE:"
 _DEBUG_UI_SNAPSHOT_PATH = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_PATH", "").strip()
 _DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED", "").lower() in {"1", "true", "yes", "on"}
 
@@ -1313,11 +1314,11 @@ class VoiceWorker(QThread):
     def run(self):
         _voice_clear_stop_request()
         while self._active:
-            self.status.emit("AWAITING WAKE WORD")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}AWAITING WAKE WORD")
             wait_for_wake_word()
             if not self._active:
                 break
-            self.status.emit("VOICE ACTIVE")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}VOICE ACTIVE")
             self._conversation()
 
     def _conversation(self):
@@ -1327,7 +1328,7 @@ class VoiceWorker(QThread):
         exchanges = []
 
         while self._active:
-            self.status.emit("LISTENING")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}LISTENING")
             user_input = listen()
 
             if not user_input:
@@ -1335,7 +1336,7 @@ class VoiceWorker(QThread):
                 if misses >= 2:
                     if exchanges:
                         _summarize(exchanges)
-                    self.status.emit("AWAITING WAKE WORD")
+                    self.status.emit(f"{VOICE_STATUS_PREFIX}AWAITING WAKE WORD")
                     return
                 # Silent wait on first miss — avoids "Still here" spam from ambient noise
                 continue
@@ -1344,8 +1345,7 @@ class VoiceWorker(QThread):
             lower = user_input.lower().strip()
 
             # Drop single-word noise captures and re-triggered wake words silently
-            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er",
-                                                       "jarvis"}:
+            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
                 continue
 
             self.message.emit(user_input, "user", "")
@@ -1366,7 +1366,7 @@ class VoiceWorker(QThread):
                 self.message.emit("Alright, I'll be here.", "jarvis", "")
                 return
 
-            self.status.emit("PROCESSING")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}PROCESSING")
             try:
                 stream, model = route_stream(user_input)
                 response = speak_stream(stream)
@@ -1553,6 +1553,7 @@ class JarvisWindow(QMainWindow):
         self._voice_runtime_mode = "unknown"
         self._voice_runtime_detail = ""
         self._voice_runtime_tooltip = ""
+        self._voice_status_raw = "AWAITING WAKE WORD"
         self._build_ui()
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
@@ -2254,6 +2255,7 @@ class JarvisWindow(QMainWindow):
         self._voice_runtime_mode = str(voice_runtime["mode"])
         self._voice_runtime_detail = str(voice_runtime["detail"])
         self._voice_runtime_tooltip = str(voice_runtime["tooltip"])
+        self._voice_status_raw = "AWAITING WAKE WORD" if self._voice_runtime_ready else str(voice_runtime["label"])
         self._set_voice_hint(
             self._voice_runtime_detail,
             str(voice_runtime["color"]),
@@ -2262,11 +2264,7 @@ class JarvisWindow(QMainWindow):
         self._refresh_vision_runtime()
 
         if self._voice_runtime_ready:
-            self.voice_worker = VoiceWorker()
-            self.voice_worker.message.connect(self._add_message)
-            self.voice_worker.interaction.connect(self._register_interaction)
-            self.voice_worker.status.connect(self._set_status)
-            self.voice_worker.start()
+            self._ensure_voice_worker_running()
         else:
             self._set_status(str(voice_runtime["label"]))
             self._add_message(
@@ -2305,6 +2303,32 @@ class JarvisWindow(QMainWindow):
         )
         self._meeting_watchdog_tick()
         self._meeting_watchdog_timer.start(1500)
+
+    def _attach_voice_worker(self, worker: VoiceWorker) -> None:
+        self.voice_worker = worker
+        self.voice_worker.message.connect(self._add_message)
+        self.voice_worker.interaction.connect(self._register_interaction)
+        self.voice_worker.status.connect(self._set_status)
+
+    def _ensure_voice_worker_running(self) -> bool:
+        if not getattr(self, "_voice_runtime_ready", False):
+            return False
+        worker = getattr(self, "voice_worker", None)
+        if worker is not None and worker.isRunning():
+            return True
+        _voice_clear_stop_request()
+        worker = VoiceWorker()
+        self._attach_voice_worker(worker)
+        worker.start()
+        return True
+
+    def _restart_voice_worker_to_standby(self) -> bool:
+        worker = getattr(self, "voice_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            worker.wait(4000)
+        self._voice_status_raw = "AWAITING WAKE WORD"
+        return self._ensure_voice_worker_running()
 
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
@@ -2765,15 +2789,14 @@ class JarvisWindow(QMainWindow):
 
     def _on_mic_chip_clicked(self):
         """Handle click on the MIC STANDBY chip — bypass wake word or stop listening."""
-        status_label = getattr(self, "_status_label", None)
-        upper = (status_label.text() if status_label else "").upper()
+        upper = str(getattr(self, "_voice_status_raw", "")).upper()
         if "LISTEN" in upper or "VOICE ACTIVE" in upper or "MIC LIVE" in upper or "MIC HOT" in upper:
-            # Currently active — stop listening
-            if hasattr(self, "voice_worker"):
-                self.voice_worker.stop()
+            # Currently active — return to standby without permanently killing voice control.
+            self._restart_voice_worker_to_standby()
         else:
             # Standby — trigger immediate listen (skip wake word)
-            _voice_trigger_wake_word()
+            if self._ensure_voice_worker_running():
+                _voice_trigger_wake_word()
 
     def _set_mic_chip(self, label: str, border: str, fill: str, text: str, tooltip: str):
         if not hasattr(self, "_mic_chip"):
@@ -3016,13 +3039,27 @@ class JarvisWindow(QMainWindow):
 
     def _set_status(self, text: str):
         raw_text = text or ""
+        is_voice_status = raw_text.startswith(VOICE_STATUS_PREFIX)
+        if is_voice_status:
+            raw_text = raw_text[len(VOICE_STATUS_PREFIX):]
+            self._voice_status_raw = raw_text
         upper = raw_text.upper()
+
+        # Guard: while VoiceWorker is actively capturing audio, unrelated task
+        # statuses (TextWorker PROCESSING/ONLINE, scans, clipboard reads) must
+        # not stomp the voice-active orb, status label, and signal bars.
+        # The mic chip is still refreshed via _apply_voice_hint_for_status.
+        if not is_voice_status:
+            voice_raw = getattr(self, "_voice_status_raw", "")
+            if any(t in voice_raw.upper() for t in ("LISTENING", "VOICE ACTIVE")):
+                self._apply_voice_hint_for_status(voice_raw)
+                return
         display_text = {
             "AWAITING WAKE WORD": "MIC READY",
             "VOICE ACTIVE": "MIC LIVE",
         }.get(raw_text, raw_text)
         if self._status_label.text() == display_text:
-            self._apply_voice_hint_for_status(raw_text)
+            self._apply_voice_hint_for_status(getattr(self, "_voice_status_raw", raw_text))
             return
         self._status_label.setText(display_text)
         busy = False
@@ -3050,7 +3087,9 @@ class JarvisWindow(QMainWindow):
             self._signal_bars.set_intensity(0.28)
         if hasattr(self, "_hud_bg"):
             self._hud_bg.set_busy(busy)
-        self._apply_voice_hint_for_status(raw_text)
+        # Keep microphone state tied to explicit voice lifecycle events instead of
+        # unrelated task activity such as text prompts, scans, or clipboard reads.
+        self._apply_voice_hint_for_status(getattr(self, "_voice_status_raw", raw_text))
 
     def _send_text(self):
         text = self.input_field.text().strip()
@@ -3089,6 +3128,24 @@ class JarvisWindow(QMainWindow):
 
     def _handle_memory(self, text: str) -> bool:
         lower = text.lower().strip()
+
+        # Wake-word typed in text box → activate mic instead of routing to LLM.
+        if lower in {
+            "jarvis", "hey jarvis", "ok jarvis", "okay jarvis",
+            "hello jarvis", "hi jarvis", "yo jarvis",
+        }:
+            voice_raw = getattr(self, "_voice_status_raw", "")
+            voice_listening = any(t in voice_raw.upper() for t in ("LISTENING", "VOICE ACTIVE"))
+            if voice_listening:
+                # Mic is already hot — silently swallow the typed wake-word
+                return True
+            if getattr(self, "_voice_runtime_ready", False):
+                # Waiting for wake word — skip straight into voice
+                _voice_trigger_wake_word()
+                self._add_message("Mic activated. Go ahead.", "jarvis", "")
+                return True
+            # No voice hardware — fall through to router's text response
+
         if lower.startswith("remember "):
             fact = text[9:].strip()
             mem.add_fact(fact)
