@@ -130,7 +130,7 @@ _manual_wake_trigger = threading.Event()  # set by UI to skip wake-word wait
 # adjust_for_ambient_noise() costs 300ms per call — we call it once and reuse.
 import time as _time
 _CALIBRATION_LOCK = threading.Lock()
-_CALIBRATION_TTL = 120.0          # re-calibrate every 2 minutes
+_CALIBRATION_TTL = 12.0           # re-calibrate every 12 s — fresh after each TTS turn
 _calibrated_at: float = 0.0
 _calibrated_threshold: float | None = None
 
@@ -417,23 +417,21 @@ def listen() -> str | None:
     """Record audio and transcribe with local faster-whisper when available."""
     if _stop_requested.is_set():
         return None
-    # Track whether TTS was playing so we know to wait for acoustics to settle.
-    was_speaking = not _done_speaking.is_set()
     _done_speaking.wait(timeout=30)
     if _stop_requested.is_set():
         return None
 
-    # After TTS completes, let room acoustics settle before opening the mic.
-    # Without this pause, the 0.3s calibration window captures TTS reverb and
-    # sets the energy threshold too high — user speech then falls below the
-    # threshold and listen() times out silently every time.
-    if was_speaking:
-        _time.sleep(0.4)
+    # Unconditional pause — lets the mic stream initialise and any TTS room
+    # echo die away before calibration samples ambient noise.  Without this,
+    # calibration runs against reverb and sets the threshold too high,
+    # silencing the user's voice every time.  The original code always had a
+    # 0.3 s sleep here; restoring that behaviour.
+    _time.sleep(0.3)
 
     try:
         with _open_microphone_source() as source:
             _debug_log("Listening...")
-            _ensure_calibrated(source)   # recalibrates fresh after any TTS
+            _ensure_calibrated(source)
             try:
                 audio = _recognizer.listen(source, timeout=8, phrase_time_limit=60)
             except sr.WaitTimeoutError:
