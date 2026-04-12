@@ -3,6 +3,8 @@ import tempfile
 import subprocess
 import threading
 from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 import speech_recognition as sr
 from openai import OpenAI
 from config import (
@@ -28,6 +30,7 @@ _last_tts_engine = ""
 # Preferred real microphones — avoid BlackHole (loopback bus, no physical mic)
 _PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
 _BLACKHOLE_SKIP = ["blackhole", "loopback", "virtual"]
+_VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
 
 
 def _debug_log(*args, **kwargs) -> None:
@@ -35,6 +38,13 @@ def _debug_log(*args, **kwargs) -> None:
     try:
         print(*args, **kwargs)
     except (BrokenPipeError, OSError, ValueError):
+        pass
+    try:
+        _VOICE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = " ".join(str(arg) for arg in args)
+        with _VOICE_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(f"[{datetime.now().isoformat(timespec='seconds')}] {line}\n")
+    except Exception:
         pass
 
 
@@ -55,7 +65,7 @@ def _get_microphone() -> sr.Microphone:
 
 
 def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
-    """Yield likely-real input devices first, with the default device as a fallback."""
+    """Yield the user's current default input first, then real-device fallbacks."""
     candidates: list[tuple[str, sr.Microphone]] = []
     seen: set[int | None] = set()
 
@@ -70,6 +80,9 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
         seen.add(index)
         candidates.append((label, sr.Microphone(device_index=index)))
 
+    # Respect whatever input device macOS is currently configured to use.
+    _append(None, "Default input device")
+
     for preferred in _PREFERRED_MICS:
         for i, name in enumerate(names):
             if preferred.lower() in name.lower():
@@ -78,8 +91,6 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
     for i, name in enumerate(names):
         if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
             _append(i, name)
-
-    _append(None, "Default input device")
     return candidates
 
 
@@ -117,6 +128,15 @@ def _open_microphone_source():
 
     detail = str(last_error) if last_error is not None else "No microphone devices are available."
     raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
+
+
+def _capture_audio_window(source, *, duration: float, reason: str):
+    """
+    Record a fixed window of audio instead of waiting for speech_recognition's
+    phrase gate to decide that the user started talking.
+    """
+    _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
+    return _recognizer.record(source, duration=duration)
 
 # Prevents mic from picking up Jarvis's own TTS output.
 # Cleared while Jarvis is speaking; listen() blocks until set again.
@@ -432,10 +452,11 @@ def listen() -> str | None:
         with _open_microphone_source() as source:
             _debug_log("Listening...")
             _ensure_calibrated(source)
-            try:
-                audio = _recognizer.listen(source, timeout=8, phrase_time_limit=60)
-            except sr.WaitTimeoutError:
-                return None
+            audio = _capture_audio_window(
+                source,
+                duration=6.0,
+                reason="manual prompt",
+            )
     except RuntimeError as exc:
         _debug_log(f"[Mic] {exc}")
         return None
@@ -524,11 +545,11 @@ def wait_for_wake_word() -> None:
         try:
             with _open_microphone_source() as source:
                 _ensure_calibrated(source)
-                try:
-                    audio = _recognizer.listen(source, timeout=3, phrase_time_limit=4)
-                except sr.WaitTimeoutError:
-                    _debug_log(".", end="", flush=True)
-                    continue
+                audio = _capture_audio_window(
+                    source,
+                    duration=2.0,
+                    reason="wake word",
+                )
         except RuntimeError as exc:
             _debug_log(f"[Mic] {exc}")
             _time.sleep(0.5)
@@ -538,6 +559,7 @@ def wait_for_wake_word() -> None:
         if _wake_word_match(text or ""):
             _debug_log(f"\n[Wake word detected: '{text}']")
             return
+        _debug_log(".", end="", flush=True)
 
 
 def tts_engine() -> str:

@@ -24,6 +24,11 @@ _MODEL = None
 _IMPORT_ERROR: str = ""
 
 
+def _missing_vad_asset_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "silero_vad_v6.onnx" in text or ("no_suchfile" in text and "vad" in text)
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -145,13 +150,19 @@ def _wav_bytes_to_numpy(wav_bytes: bytes):
 def _run_transcription(audio_input, *, language: str | None = None) -> dict[str, Any]:
     """Core transcription — accepts file path or numpy float32 array."""
     model = _get_model()
-    segments, info = model.transcribe(
-        audio_input,
-        language=language or LOCAL_STT_LANGUAGE or None,
-        beam_size=FASTER_WHISPER_BEAM_SIZE,
-        vad_filter=FASTER_WHISPER_VAD_FILTER,
-        condition_on_previous_text=False,
-    )
+    kwargs = {
+        "language": language or LOCAL_STT_LANGUAGE or None,
+        "beam_size": FASTER_WHISPER_BEAM_SIZE,
+        "vad_filter": FASTER_WHISPER_VAD_FILTER,
+        "condition_on_previous_text": False,
+    }
+    try:
+        segments, info = model.transcribe(audio_input, **kwargs)
+    except Exception as exc:
+        if not kwargs["vad_filter"] or not _missing_vad_asset_error(exc):
+            raise
+        kwargs["vad_filter"] = False
+        segments, info = model.transcribe(audio_input, **kwargs)
     text = " ".join(segment.text.strip() for segment in segments if segment.text).strip()
     return {
         "ok": bool(text),
