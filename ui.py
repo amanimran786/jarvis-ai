@@ -1333,12 +1333,12 @@ class VoiceWorker(QThread):
 
             if not user_input:
                 misses += 1
-                if misses >= 2:
+                if misses >= 3:
                     if exchanges:
                         _summarize(exchanges)
                     self.status.emit(f"{VOICE_STATUS_PREFIX}AWAITING WAKE WORD")
                     return
-                # Silent wait on first miss — avoids "Still here" spam from ambient noise
+                # Silent wait — avoids "Still here" spam; gives 3 chances to speak
                 continue
 
             misses = 0
