@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 ROOT = Path.cwd().resolve()
@@ -47,8 +47,11 @@ def iter_datas():
 
 
 datas = iter_datas()
+datas += collect_data_files("faster_whisper")
 hiddenimports = sorted(set(
     collect_submodules("PyQt6")
+    + collect_submodules("faster_whisper")
+    + collect_submodules("ctranslate2")
     + [
         "api",
         "agents",
@@ -168,5 +171,9 @@ app = BUNDLE(
         "CFBundleShortVersionString": "1.0",
         "CFBundleVersion": "1",
         "NSHighResolutionCapable": True,
+        "NSMicrophoneUsageDescription": "Jarvis needs microphone access so it can hear your voice commands and conversations you explicitly ask it to process.",
+        "NSCameraUsageDescription": "Jarvis needs camera access for webcam vision features you explicitly trigger.",
+        "NSContactsUsageDescription": "Jarvis needs Contacts access to look up people when you ask it to message or call them.",
+        "NSAppleEventsUsageDescription": "Jarvis needs automation access to control apps like Safari, Messages, and Terminal when you ask it to take action.",
     },
 )

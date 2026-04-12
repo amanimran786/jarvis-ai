@@ -2259,6 +2259,75 @@ class _StubButton:
         self.style = style
 
 
+class VoiceStatusUiRegressionTests(unittest.TestCase):
+    class _Sink:
+        def __init__(self):
+            self.calls = []
+
+        def set_color(self, value):
+            self.calls.append(("color", value))
+
+        def set_state(self, value):
+            self.calls.append(("state", value))
+
+        def set_intensity(self, value):
+            self.calls.append(("intensity", value))
+
+    def _fake_window(self, *, voice_status="AWAITING WAKE WORD", label_text="ONLINE"):
+        return SimpleNamespace(
+            _voice_status_raw=voice_status,
+            _status_label=_StubTextWidget(label_text),
+            _status_dot=self._Sink(),
+            _orb=self._Sink(),
+            _signal_bars=self._Sink(),
+            _hud_bg=SimpleNamespace(set_busy=unittest.mock.Mock()),
+            _apply_voice_hint_for_status=unittest.mock.Mock(),
+        )
+
+    def test_non_voice_status_keeps_existing_mic_state(self):
+        window = self._fake_window()
+
+        ui.JarvisWindow._set_status(window, "PROCESSING")
+
+        self.assertEqual(window._voice_status_raw, "AWAITING WAKE WORD")
+        window._apply_voice_hint_for_status.assert_called_once_with("AWAITING WAKE WORD")
+        self.assertEqual(window._status_label.text(), "PROCESSING")
+
+    def test_voice_prefixed_status_updates_mic_state(self):
+        window = self._fake_window()
+
+        ui.JarvisWindow._set_status(window, f"{ui.VOICE_STATUS_PREFIX}LISTENING")
+
+        self.assertEqual(window._voice_status_raw, "LISTENING")
+        window._apply_voice_hint_for_status.assert_called_once_with("LISTENING")
+        self.assertEqual(window._status_label.text(), "LISTENING")
+
+    def test_mic_chip_click_uses_voice_state_not_status_label_text(self):
+        window = SimpleNamespace(
+            _voice_status_raw="LISTENING",
+            _status_label=_StubTextWidget("ONLINE"),
+            _restart_voice_worker_to_standby=unittest.mock.Mock(),
+        )
+
+        with patch("ui._voice_trigger_wake_word") as trigger_mock:
+            ui.JarvisWindow._on_mic_chip_clicked(window)
+
+        window._restart_voice_worker_to_standby.assert_called_once_with()
+        trigger_mock.assert_not_called()
+
+    def test_mic_chip_click_wakes_if_worker_needs_recovery(self):
+        window = SimpleNamespace(
+            _voice_status_raw="AWAITING WAKE WORD",
+            _ensure_voice_worker_running=unittest.mock.Mock(return_value=True),
+        )
+
+        with patch("ui._voice_trigger_wake_word") as trigger_mock:
+            ui.JarvisWindow._on_mic_chip_clicked(window)
+
+        window._ensure_voice_worker_running.assert_called_once_with()
+        trigger_mock.assert_called_once_with()
+
+
 class LiveAssistRenderingTests(unittest.TestCase):
     def test_meeting_watchdog_respects_manual_full_window_restore(self):
         window = SimpleNamespace(

@@ -278,8 +278,8 @@ ELEVENLABS_TTS_FALLBACK_ENABLED = "elevenlabs" in TTS_BACKENDS
 OPENAI_TTS_FALLBACK_ENABLED = "openai" in TTS_BACKENDS
 
 LOCAL_TTS_ENGINE = os.getenv("JARVIS_LOCAL_TTS_ENGINE", "say").strip().lower() or "say"
-LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Samantha").strip() or "Samantha"
-LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 190)
+LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Reed (English (US))").strip() or "Reed (English (US))"
+LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 175)
 
 JARVIS_KOKORO_VOICE = os.getenv("JARVIS_KOKORO_VOICE", "af_sarah").strip() or "af_sarah"
 JARVIS_KOKORO_TTS_ENABLED = _env_flag("JARVIS_KOKORO_TTS_ENABLED", True)

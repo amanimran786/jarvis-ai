@@ -1673,6 +1673,21 @@ class MainStartupGuardTests(unittest.TestCase):
         self.assertIn("disabled", joined.lower())
         self.assertIn("avoid opening user apps", joined.lower())
 
+    def test_packaged_app_declares_macos_privacy_usage_strings(self):
+        spec_text = (Path(_REPO_ROOT) / "Jarvis.spec").read_text(encoding="utf-8")
+
+        self.assertIn("NSMicrophoneUsageDescription", spec_text)
+        self.assertIn("NSCameraUsageDescription", spec_text)
+        self.assertIn("NSContactsUsageDescription", spec_text)
+        self.assertIn("NSAppleEventsUsageDescription", spec_text)
+
+    def test_packaged_app_bundles_local_stt_modules(self):
+        spec_text = (Path(_REPO_ROOT) / "Jarvis.spec").read_text(encoding="utf-8")
+
+        self.assertIn('collect_submodules("faster_whisper")', spec_text)
+        self.assertIn('collect_submodules("ctranslate2")', spec_text)
+        self.assertIn('collect_data_files("faster_whisper")', spec_text)
+
 
 class RuntimeEndpointDiscoveryTests(unittest.TestCase):
     def test_read_api_endpoint_preserves_token(self):
