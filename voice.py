@@ -19,13 +19,20 @@ from config import (
 import call_privacy
 from local_runtime import local_stt
 from local_runtime import local_tts
-from local_runtime import local_kokoro_tts
+# Use subprocess bridge so frozen .app doesn't need kokoro-onnx bundled
+try:
+    from local_runtime import local_kokoro_subprocess_tts as local_kokoro_tts
+except ImportError:
+    from local_runtime import local_kokoro_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
 
 WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis", "okay jarvis"}
 _last_tts_engine = ""
+MANUAL_PROMPT_WINDOW_SECONDS = 8.0
+WAKE_WORD_WINDOW_SECONDS = 3.0
+_kokoro_disabled_reason = ""
 
 # Preferred real microphones — avoid BlackHole (loopback bus, no physical mic)
 _PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
@@ -65,7 +72,18 @@ def _get_microphone() -> sr.Microphone:
 
 
 def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
-    """Yield the user's current default input first, then real-device fallbacks."""
+    """Return microphone candidates ordered by preference.
+
+    Priority:
+      1. Exact or substring match against _PREFERRED_MICS (highest priority first).
+      2. Fuzzy word match: any single significant word from a preferred name appears
+         in the device name (handles e.g. "AirPods" matching "AirPods Pro Mic").
+      3. Any real non-virtual device not in _BLACKHOLE_SKIP.
+      4. macOS default input device as last resort.
+
+    This ensures the Default input device is only used when nothing better exists,
+    rather than always winning by being inserted first.
+    """
     candidates: list[tuple[str, sr.Microphone]] = []
     seen: set[int | None] = set()
 
@@ -80,17 +98,30 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
         seen.add(index)
         candidates.append((label, sr.Microphone(device_index=index)))
 
-    # Respect whatever input device macOS is currently configured to use.
-    _append(None, "Default input device")
-
+    # Tier 1: substring match — "MacBook Pro Microphone" in device name
     for preferred in _PREFERRED_MICS:
         for i, name in enumerate(names):
             if preferred.lower() in name.lower():
                 _append(i, name)
 
+    # Tier 2: fuzzy word match — any word from the preferred name appears in
+    # the device name (handles slight naming differences like "AirPods" vs "AirPods Pro Mic")
+    _FUZZY_SKIP_WORDS = {"microphone", "mic", "the", "a", "an", "input", "output"}
+    for preferred in _PREFERRED_MICS:
+        words = [w for w in preferred.lower().split() if w not in _FUZZY_SKIP_WORDS and len(w) > 2]
+        for i, name in enumerate(names):
+            name_lower = name.lower()
+            if any(word in name_lower for word in words):
+                _append(i, name)
+
+    # Tier 3: any real non-virtual device
     for i, name in enumerate(names):
         if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
             _append(i, name)
+
+    # Tier 4: macOS default input (last resort — may be a loopback or virtual device)
+    _append(None, "Default input device")
+
     return candidates
 
 
@@ -265,11 +296,27 @@ def _speak_local(text: str) -> bool:
 
 
 def _speak_kokoro(text: str) -> bool:
+    global _kokoro_disabled_reason
+    if _kokoro_disabled_reason:
+        return False
     result = local_kokoro_tts.speak(text)
     if not result.get("ok"):
         error = result.get("error")
         if error:
-            _debug_log(f"[Kokoro TTS] {error}")
+            normalized = error.lower()
+            if any(
+                phrase in normalized
+                for phrase in (
+                    "kokoro-onnx not installed",
+                    "kokoro model unavailable",
+                    "no module named",
+                    "failed to load model",
+                )
+            ):
+                _kokoro_disabled_reason = error
+                _debug_log(f"[Kokoro TTS] disabling Kokoro for this session: {error}")
+            else:
+                _debug_log(f"[Kokoro TTS] {error}")
         return False
     return True
 
@@ -384,11 +431,14 @@ def _transcribe_audio_file(path: str) -> str | None:
         return None
 
 
-def speak_stream(text_chunks) -> str:
+def speak_stream(text_chunks, *, on_text=None) -> str:
     """
     Speak a streaming response sentence by sentence.
     Plays each sentence as soon as it's complete while the next is generating.
     Returns the full response text.
+
+    on_text: optional callable(accumulated_text: str) called after each sentence
+             is spoken — lets callers update a live UI bubble in real time.
     """
     buffer = ""
     full_text = ""
@@ -400,6 +450,8 @@ def speak_stream(text_chunks) -> str:
         if full_text.strip():
             _debug_log(f"Jarvis: {full_text}")
             _debug_log("[Voice] Suppressed streaming audio because meeting-safe mode is active.")
+            if on_text:
+                on_text(full_text)
         return full_text
 
     for chunk in text_chunks:
@@ -424,9 +476,13 @@ def speak_stream(text_chunks) -> str:
             buffer = buffer[end_idx + 1:]
             if sentence:
                 speak(sentence)
+                if on_text:
+                    on_text(full_text)
 
     if buffer.strip():
         speak(buffer.strip())
+        if on_text:
+            on_text(full_text)
 
     return full_text
 
@@ -454,7 +510,7 @@ def listen() -> str | None:
             _ensure_calibrated(source)
             audio = _capture_audio_window(
                 source,
-                duration=6.0,
+                duration=MANUAL_PROMPT_WINDOW_SECONDS,
                 reason="manual prompt",
             )
     except RuntimeError as exc:
@@ -547,7 +603,7 @@ def wait_for_wake_word() -> None:
                 _ensure_calibrated(source)
                 audio = _capture_audio_window(
                     source,
-                    duration=2.0,
+                    duration=WAKE_WORD_WINDOW_SECONDS,
                     reason="wake word",
                 )
         except RuntimeError as exc:

@@ -1698,6 +1698,35 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertTrue(snapshot["local_stt_available"])
         self.assertEqual(snapshot["local_stt_status"]["model"], "small.en")
 
+    def test_status_snapshot_uses_real_local_stt_status_path(self):
+        previous_backend = meeting_listener._last_stt_backend
+        previous_detail = meeting_listener._last_stt_backend_detail
+        previous_device_index = meeting_listener._device_index
+        try:
+            meeting_listener._last_stt_backend = "faster-whisper"
+            meeting_listener._last_stt_backend_detail = "faster-whisper"
+            meeting_listener._device_index = None
+            with patch(
+                "meeting_listener.preferred_source_snapshot",
+                return_value={"device_index": 3, "device_name": "MacBook Pro Microphone"},
+            ), patch("meeting_listener._device_name", return_value="MacBook Pro Microphone"), \
+                 patch("local_runtime.local_stt.configured_engine", return_value="faster-whisper"), \
+                 patch("local_runtime.local_stt.local_available", return_value=True), \
+                 patch("local_runtime.local_stt.openai_fallback_allowed", return_value=False), \
+                 patch("local_runtime.local_stt.LOCAL_STT_MODEL", "base.en"), \
+                 patch("local_runtime.local_stt.FASTER_WHISPER_DEVICE", "cpu"), \
+                 patch("local_runtime.local_stt.FASTER_WHISPER_COMPUTE_TYPE", "int8"):
+                snapshot = meeting_listener.status_snapshot()
+        finally:
+            meeting_listener._last_stt_backend = previous_backend
+            meeting_listener._last_stt_backend_detail = previous_detail
+            meeting_listener._device_index = previous_device_index
+        self.assertEqual(snapshot["active_device_index"], 3)
+        self.assertEqual(snapshot["active_device_name"], "MacBook Pro Microphone")
+        self.assertEqual(snapshot["local_stt_status"]["active_engine"], "faster-whisper")
+        self.assertEqual(snapshot["local_stt_status"]["device"], "cpu")
+        self.assertEqual(snapshot["local_stt_status"]["compute_type"], "int8")
+
     def test_generate_suggestion_uses_strong_tier_for_interview_style_prompt(self):
         previous_history = list(meeting_listener._transcript_history)
         try:
@@ -1771,6 +1800,11 @@ class MeetingListenerTests(unittest.TestCase):
 
 
 class ModelRouterFallbackTests(unittest.TestCase):
+    def test_runtime_voice_query_detection_stays_narrow(self):
+        self.assertTrue(model_router._is_runtime_voice_query("Jarvis, what voice are you using right now?"))
+        self.assertTrue(model_router._is_runtime_voice_query("Which STT backend are you using currently?"))
+        self.assertFalse(model_router._is_runtime_voice_query("What is a good local TTS library for Python?"))
+
     def test_smart_stream_injects_general_grounding_rules(self):
         previous = model_router.get_mode()
         try:
@@ -1808,6 +1842,45 @@ class ModelRouterFallbackTests(unittest.TestCase):
         injected = ask_mock.call_args.kwargs["system_extra"]
         self.assertIn("Relevant Graphify repo context", injected)
         self.assertIn("JarvisWindow [ui.py:L1]", injected)
+
+    def test_smart_stream_runtime_voice_query_prefers_live_runtime_facts_over_stale_context(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router.skills.build_system_extra", return_value=("Stale skill context", [SimpleNamespace(id="jarvis-local-vault-overview")])), \
+                 patch("model_router.vault.build_context", return_value="Stale vault context"), \
+                 patch("model_router._smem.context_for_query", return_value="Stale semantic memory"), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.tts_runtime_config", return_value={
+                     "backends": ["kokoro", "say", "elevenlabs", "openai"],
+                     "primary_backend": "kokoro",
+                     "local": {"voice": "Reed (English (US))", "rate_wpm": 175},
+                     "kokoro": {"enabled": True, "voice": "af_sarah"},
+                 }), \
+                 patch("model_router.stt_runtime_config", return_value={
+                     "backends": ["faster-whisper", "openai"],
+                     "language": "en",
+                     "faster_whisper": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
+                 }), \
+                 patch("model_router.local_tts.status", return_value={"ready": True}), \
+                 patch("model_router.local_stt.status", return_value={"active_engine": "faster-whisper", "language": "en"}), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded runtime answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("Jarvis, what voice are you using right now?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded runtime answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Jarvis runtime voice facts", injected)
+        self.assertIn("Configured TTS backends in priority order: kokoro, say, elevenlabs, openai", injected)
+        self.assertIn("Active STT engine: faster-whisper", injected)
+        self.assertNotIn("Stale skill context", injected)
+        self.assertNotIn("Stale vault context", injected)
+        self.assertNotIn("Stale semantic memory", injected)
 
 
 class GraphContextTests(unittest.TestCase):
