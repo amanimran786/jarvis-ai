@@ -44,7 +44,7 @@
     {
       "id": "career_interview_ops",
       "name": "Career Interview Ops",
-      "description": "Handle company-specific interview prep, story-bank building, and application-state tracking using Aman's real context and sourced evidence.",
+      "description": "Handle offer evaluation, company-specific interview prep, story-bank building, and application-state tracking using Aman's real career-ops files and sourced evidence.",
       "tool": "chat",
       "cost_hint": "haiku",
       "triggers": [
@@ -56,7 +56,14 @@
         "application status",
         "why are you a fit",
         "interview questions",
-        "salary negotiation"
+        "salary negotiation",
+        "evaluate offer",
+        "job offer",
+        "score this role",
+        "application tracker",
+        "pipeline status",
+        "rejection pattern",
+        "how do i compare to this role"
       ],
       "path": "career_interview_ops/SKILL.md",
       "resources": [
@@ -65,6 +72,26 @@
         "../kb/career/application_states.md",
         "../kb/career/candidate_profile_template.md"
       ]
+    },
+    {
+      "id": "career_ops_runner",
+      "name": "Career Ops Runner",
+      "description": "Run career-ops Node.js scripts via the terminal connector: rejection pattern analysis, pipeline health checks, tracker merges, and job scanning.",
+      "tool": "terminal",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "scan jobs",
+        "analyze rejections",
+        "check pipeline",
+        "run career scan",
+        "career ops",
+        "merge tracker",
+        "pipeline health",
+        "verify pipeline",
+        "rejection analysis"
+      ],
+      "path": "career_ops_runner/SKILL.md",
+      "resources": []
     },
     {
       "id": "code_implementation",

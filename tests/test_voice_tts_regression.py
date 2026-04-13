@@ -6,6 +6,9 @@ import voice
 
 
 class VoiceTtsRegressionTests(unittest.TestCase):
+    def tearDown(self):
+        voice._kokoro_disabled_reason = ""
+
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
              patch("voice.TTS_BACKENDS", ("say", "elevenlabs", "openai")), \
@@ -31,6 +34,23 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         eleven_mock.assert_called_once_with("Fallback path.")
         openai_mock.assert_called_once_with("Fallback path.")
         self.assertTrue(voice._done_speaking.is_set())
+
+    def test_speak_disables_kokoro_after_session_level_unavailable_error(self):
+        voice._kokoro_disabled_reason = ""
+
+        with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
+             patch("voice.TTS_BACKENDS", ("kokoro", "say")), \
+             patch(
+                 "voice.local_kokoro_tts.speak",
+                 return_value={"ok": False, "engine": "kokoro", "error": "kokoro-onnx not installed"},
+             ) as kokoro_mock, \
+             patch("voice.local_tts.speak", return_value={"ok": True, "engine": "say"}) as local_mock:
+            voice.speak("First beta response.")
+            voice.speak("Second beta response.")
+
+        kokoro_mock.assert_called_once_with("First beta response.")
+        self.assertEqual(local_mock.call_count, 2)
+        self.assertEqual(voice._kokoro_disabled_reason, "kokoro-onnx not installed")
 
     def test_speak_skips_tts_entirely_when_audio_is_suppressed(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=True), \
@@ -187,6 +207,7 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         self.assertEqual(text, "what time is it")
         capture_mock.assert_called_once()
+        self.assertEqual(capture_mock.call_args.kwargs["duration"], voice.MANUAL_PROMPT_WINDOW_SECONDS)
 
 
 if __name__ == "__main__":

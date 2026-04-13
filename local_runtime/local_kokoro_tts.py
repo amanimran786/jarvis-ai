@@ -92,7 +92,17 @@ def _kokoro_importable() -> bool:
     try:
         import kokoro_onnx  # noqa: F401
         return True
-    except ImportError:
+    except Exception as exc:
+        # Write the real exception to a debug file — visible even in frozen .app
+        try:
+            import pathlib, datetime, traceback as _tb
+            _log = pathlib.Path.home() / "Library" / "Application Support" / "Jarvis" / "kokoro_debug.log"
+            _log.parent.mkdir(parents=True, exist_ok=True)
+            with open(_log, "a") as _f:
+                _f.write(f"[{datetime.datetime.now()}] {type(exc).__name__}: {exc}\n")
+                _f.write(_tb.format_exc() + "\n")
+        except Exception:
+            pass
         return False
 
 
