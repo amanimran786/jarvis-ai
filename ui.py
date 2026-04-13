@@ -1302,6 +1302,8 @@ class VoiceWorker(QThread):
     message = pyqtSignal(str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
+    stream_start = pyqtSignal(str)   # model name — creates live bubble
+    stream_chunk = pyqtSignal(str)   # accumulated text so far
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1369,7 +1371,8 @@ class VoiceWorker(QThread):
             self.status.emit(f"{VOICE_STATUS_PREFIX}PROCESSING")
             try:
                 stream, model = route_stream(user_input)
-                response = speak_stream(stream)
+                self.stream_start.emit(model)
+                response = speak_stream(stream, on_text=lambda t: self.stream_chunk.emit(t))
                 context_stats = ctx.record_request_stats(model, source="voice_ui")
                 entry = evals.log_interaction(user_input, response, model, source="voice_ui", context=context_stats)
                 evals.maybe_log_automatic_failure(entry)
@@ -1406,6 +1409,8 @@ class TextWorker(QThread):
     message = pyqtSignal(str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
+    stream_start = pyqtSignal(str)   # model name — creates live bubble
+    stream_chunk = pyqtSignal(str)   # accumulated text so far
 
     def __init__(self, user_input: str, parent=None):
         super().__init__(parent)
@@ -1415,9 +1420,11 @@ class TextWorker(QThread):
         self.status.emit("PROCESSING")
         try:
             stream, model = route_stream(self.user_input)
+            self.stream_start.emit(model)
             chunks = []
             for chunk in stream:
                 chunks.append(chunk)
+                self.stream_chunk.emit("".join(chunks))
             response = "".join(chunks)
             context_stats = ctx.record_request_stats(model, source="text_ui")
             entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
@@ -1517,6 +1524,11 @@ class MessageBubble(QFrame):
             _glow(msg, C_CYAN, 8)
 
         layout.addWidget(msg)
+        self._msg_label = msg
+
+    def set_text(self, text: str) -> None:
+        """Update bubble text in place — used for live streaming display."""
+        self._msg_label.setText(text)
 
 
 # ── Main Window ────────────────────────────────────────────────────────────────
@@ -1537,6 +1549,7 @@ class JarvisWindow(QMainWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._streaming_bubble = None
         self._auto_listen_suppressed_meeting = None
         self._auto_listen_engaged_meeting = None
         self._meeting_toolbar_mode = False
@@ -2309,6 +2322,8 @@ class JarvisWindow(QMainWindow):
         self.voice_worker.message.connect(self._add_message)
         self.voice_worker.interaction.connect(self._register_interaction)
         self.voice_worker.status.connect(self._set_status)
+        self.voice_worker.stream_start.connect(self._start_stream_bubble)
+        self.voice_worker.stream_chunk.connect(self._update_stream_bubble)
 
     def _ensure_voice_worker_running(self) -> bool:
         if not getattr(self, "_voice_runtime_ready", False):
@@ -2988,7 +3003,47 @@ class JarvisWindow(QMainWindow):
         if self._meeting_toolbar_mode:
             self._update_meeting_toolbar_layout()
 
+    def _start_stream_bubble(self, model: str):
+        """Create a live bubble that will be updated as text streams in."""
+        bubble = MessageBubble("▌", "jarvis", model)
+        count = self.chat_layout.count()
+        self.chat_layout.insertWidget(count - 1, bubble)
+        self._streaming_bubble = bubble
+        _safe_single_shot(
+            50,
+            "JarvisWindow._scroll_stream_start",
+            lambda: self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()
+            ),
+        )
+
+    def _update_stream_bubble(self, text: str):
+        """Update the live bubble with the latest accumulated text."""
+        if self._streaming_bubble is not None:
+            self._streaming_bubble.set_text(text)
+            _safe_single_shot(
+                30,
+                "JarvisWindow._scroll_stream_chunk",
+                lambda: self.scroll.verticalScrollBar().setValue(
+                    self.scroll.verticalScrollBar().maximum()
+                ),
+            )
+
     def _add_message(self, text: str, sender: str, model: str):
+        # If a streaming bubble already has this text, finalize it instead of
+        # creating a duplicate bubble.
+        if sender == "jarvis" and self._streaming_bubble is not None:
+            self._streaming_bubble.set_text(text)
+            self._streaming_bubble = None
+            self._show_toolbar_message(text, sender, model)
+            _safe_single_shot(
+                50,
+                "JarvisWindow._scroll_to_latest_message",
+                lambda: self.scroll.verticalScrollBar().setValue(
+                    self.scroll.verticalScrollBar().maximum()
+                ),
+            )
+            return
         bubble = MessageBubble(text, sender, model)
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
@@ -3105,6 +3160,8 @@ class JarvisWindow(QMainWindow):
         worker.message.connect(self._add_message)
         worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
+        worker.stream_start.connect(self._start_stream_bubble)
+        worker.stream_chunk.connect(self._update_stream_bubble)
         worker.start()
         self._workers.append(worker)
 
@@ -3234,6 +3291,7 @@ class OrbShellWindow(JarvisWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._streaming_bubble = None
         self._session_started = datetime.now()
         self._drag_pos = None
         self._tray_locked = False
@@ -3946,10 +4004,10 @@ class EnterLineEdit(QTextEdit):
         self.setAcceptRichText(False)
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setTabChangesFocus(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumHeight(42)
-        self.setMaximumHeight(110)
+        self.setMaximumHeight(200)
         self.textChanged.connect(self._sync_height)
         self._sync_height()
 
@@ -3972,7 +4030,7 @@ class EnterLineEdit(QTextEdit):
     def _sync_height(self):
         doc_height = self.document().size().height()
         target = int(doc_height + 18)
-        target = max(42, min(110, target))
+        target = max(42, min(200, target))
         if self.height() != target:
             self.setFixedHeight(target)
 
