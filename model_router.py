@@ -42,6 +42,7 @@ import skills
 import vault
 import graph_context as _gctx
 import semantic_memory as _smem
+import memory as _mem
 import provider_router
 import telemetry
 
@@ -336,6 +337,62 @@ def _runtime_voice_grounding() -> str:
     )
 
 
+def _trim_context_line(text: str, limit: int = 180) -> str:
+    compact = " ".join((text or "").split()).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
+
+
+def _user_snapshot_grounding() -> str:
+    try:
+        memory_status = _mem.memory_status()
+    except Exception:
+        return ""
+
+    durable = memory_status.get("long_term_profile") or {}
+    working = memory_status.get("working_memory") or {}
+    lines: list[str] = []
+
+    summary = _trim_context_line(durable.get("summary", ""), 220)
+    if summary:
+        lines.append(f"- Durable profile: {summary}")
+
+    active_projects = working.get("active_projects") or []
+    if active_projects:
+        lines.append(
+            "- Active projects: " + "; ".join(_trim_context_line(item, 90) for item in active_projects[:2])
+        )
+
+    assist_preferences = working.get("assist_preferences") or []
+    if assist_preferences:
+        lines.append(
+            "- Assist preferences: " + "; ".join(_trim_context_line(item, 90) for item in assist_preferences[:2])
+        )
+
+    recurring_topics = working.get("recurring_topics") or []
+    if recurring_topics:
+        lines.append("- Recurring topics: " + ", ".join(recurring_topics[:4]))
+
+    if not lines:
+        return ""
+    return "Compact user snapshot:\n" + "\n".join(lines)
+
+
+def _semantic_memory_hint(hits: list[dict] | None) -> str:
+    if not hits:
+        return ""
+    lines = [
+        "Semantic memory guidance:",
+        "- If the retrieved memory is directly relevant, prefer it over generic advice.",
+        "- Use retrieved user and project context to personalize the answer when it genuinely helps.",
+    ]
+    top = _trim_context_line(hits[0].get("content", ""), 220)
+    if top:
+        lines.append(f"- Most relevant retrieved memory: {top}")
+    return "\n".join(lines)
+
+
 def _classify_complexity(text: str, skill_id: str | None = None, active_skills: list | None = None) -> str:
     """
     Returns: 'local', 'mini', 'haiku', 'sonnet', 'opus'
@@ -427,6 +484,10 @@ def smart_stream(
     if runtime_voice_query:
         voice_grounding = _runtime_voice_grounding()
         system_extra = voice_grounding + ("\n\n" + system_extra if system_extra else "")
+    else:
+        user_snapshot = _user_snapshot_grounding()
+        if user_snapshot:
+            system_extra = user_snapshot + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     # ── Parallel context assembly ──────────────────────────────────────────────
@@ -444,10 +505,12 @@ def smart_stream(
 
     def _get_smem():
         if runtime_voice_query:
-            return ""
-        return _smem.context_for_query(user_input, top_k=3, max_chars=1200)
+            return [], ""
+        hits = _smem.retrieve(user_input, top_k=3)
+        return hits, _smem.format_for_prompt(hits, max_chars=1200)
 
     vault_extra = graph_extra = smem_ctx = ""
+    smem_hits: list[dict] = []
     with ThreadPoolExecutor(max_workers=3, thread_name_prefix="ctx") as _pool:
         _fv = _pool.submit(_get_vault)
         _fg = _pool.submit(_get_graph)
@@ -461,7 +524,7 @@ def smart_stream(
         except Exception:
             pass
         try:
-            smem_ctx = _fs.result(timeout=4.0) or ""
+            smem_hits, smem_ctx = _fs.result(timeout=4.0)
         except Exception:
             pass
 
@@ -469,6 +532,9 @@ def smart_stream(
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
     if graph_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + graph_extra
+    semantic_hint = _semantic_memory_hint(smem_hits)
+    if semantic_hint:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + semantic_hint
     if smem_ctx:
         system_extra = system_extra + ("\n\n" if system_extra else "") + smem_ctx
 

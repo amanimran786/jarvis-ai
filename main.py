@@ -291,7 +291,7 @@ def _run_deferred_startup_tasks() -> None:
     try:
         try:
             from local_runtime.local_kokoro_subprocess_tts import prewarm_phrase_cache
-        except ImportError:
+        except Exception:
             from local_runtime.local_kokoro_tts import prewarm_phrase_cache
         prewarm_phrase_cache()
     except Exception:
