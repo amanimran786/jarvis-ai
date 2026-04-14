@@ -478,6 +478,16 @@ class OrchestratorTests(unittest.TestCase):
             model_router.set_mode(previous)
         self.assertEqual(decision.tool, "chat")
 
+    def test_open_source_mode_keeps_short_calendar_queries_tool_aware(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("orchestrator.ask_claude", side_effect=AssertionError("should not call claude")):
+                decision = orchestrator.classify("What do I have today?")
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "calendar")
+
     def test_science_prompt_auto_invokes_specialized_agent(self):
         previous = model_router.get_mode()
         try:
@@ -715,6 +725,32 @@ class RouterTests(unittest.TestCase):
         text = "".join(stream)
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say to chunky", text.lower())
+
+    def test_message_request_extracts_phone_number_from_number_phrase(self):
+        stream, label = router.route_stream("now message this number 5107071879")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to 5107071879", text.lower())
+        self.assertNotIn("this number", text.lower())
+
+    def test_message_tool_normalizes_number_phrase_recipient_param(self):
+        import orchestrator
+        decision = orchestrator.ToolDecision(
+            tool="message",
+            confidence=0.99,
+            action="send",
+            params={"recipient": "this number 5107071879"},
+            raw='{"tool":"message"}',
+        )
+        with patch("orchestrator.classify", return_value=decision):
+            stream, label = router._orchestrate(
+                "now message this number 5107071879",
+                "now message this number 5107071879",
+            )
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to 5107071879", text.lower())
+        self.assertNotIn("this number", text.lower())
 
     def test_awaiting_recipient_accepts_contact_name_label(self):
         router._set_awaiting_recipient()
@@ -1851,7 +1887,8 @@ class ModelRouterFallbackTests(unittest.TestCase):
                  patch("model_router._best_local", return_value="jarvis-local"), \
                  patch("model_router.skills.build_system_extra", return_value=("Stale skill context", [SimpleNamespace(id="jarvis-local-vault-overview")])), \
                  patch("model_router.vault.build_context", return_value="Stale vault context"), \
-                 patch("model_router._smem.context_for_query", return_value="Stale semantic memory"), \
+                 patch("model_router._smem.retrieve", return_value=[{"content": "Stale semantic memory", "score": 0.91}]), \
+                 patch("model_router._smem.format_for_prompt", return_value="Stale semantic memory"), \
                  patch("model_router._gctx.context_for_query", return_value=""), \
                  patch("model_router.tts_runtime_config", return_value={
                      "backends": ["kokoro", "say", "elevenlabs", "openai"],
@@ -1881,6 +1918,42 @@ class ModelRouterFallbackTests(unittest.TestCase):
         self.assertNotIn("Stale skill context", injected)
         self.assertNotIn("Stale vault context", injected)
         self.assertNotIn("Stale semantic memory", injected)
+
+    def test_smart_stream_prioritizes_user_snapshot_and_semantic_guidance(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.memory_status", return_value={
+                     "working_memory": {
+                         "active_projects": ["Jarvis AI: local-first desktop assistant"],
+                         "assist_preferences": ["communication_style: direct"],
+                         "recurring_topics": ["python", "ai safety"],
+                     },
+                     "long_term_profile": {
+                         "summary": "Aman is building Jarvis as a local-first assistant."
+                     },
+                 }), \
+                 patch("model_router._smem.retrieve", return_value=[
+                     {"content": "Aman prefers answers tied to his Jarvis project.", "score": 0.98}
+                 ]), \
+                 patch("model_router._smem.format_for_prompt", return_value="[Relevant context from Jarvis knowledge base]\n• [0.98] Aman prefers answers tied to his Jarvis project."), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.vault.build_context", return_value=""), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("How should we improve Jarvis next?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Compact user snapshot", injected)
+        self.assertIn("Aman is building Jarvis as a local-first assistant.", injected)
+        self.assertIn("Semantic memory guidance", injected)
+        self.assertIn("Most relevant retrieved memory: Aman prefers answers tied to his Jarvis project.", injected)
 
 
 class GraphContextTests(unittest.TestCase):

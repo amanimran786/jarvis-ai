@@ -1,5 +1,5 @@
 {
-  "doc_count": 10,
+  "doc_count": 21,
   "docs": [
     {
       "path": "indexes/keyword_index.md",
@@ -254,6 +254,210 @@
             "act",
             "there",
             "failure"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/README.md",
+      "title": "Import Inbox",
+      "preview": "Import Inbox Use this folder for raw source material that should eventually become part of Jarvis's local brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recommended workflow: 1. Drop the raw export here unchanged 2. Add a short provenance note if the export format is not obvious 3. Distill durable facts, preferences, projects, and summaries into vault/wi",
+      "keywords": [
+        "raw",
+        "exports",
+        "openai",
+        "source",
+        "brain",
+        "claude",
+        "chatgpt",
+        "export",
+        "import",
+        "inbox",
+        "use",
+        "folder",
+        "material",
+        "should",
+        "eventually",
+        "become",
+        "part",
+        "jarvis",
+        "local",
+        "keep"
+      ],
+      "chars": 572,
+      "sections": [
+        {
+          "heading": "Import Inbox",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Use this folder for raw source material that should eventually become part of Jarvis's local brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recommended workflow: 1. Drop the raw export here unchanged 2. Add a short provenance note if the export format is not obvious 3. Distill durable facts, preferences, projects, and summaries into vault/wiki/brain/ 4. Avoid treating raw transcripts as the final knowledge layer",
+          "keywords": [
+            "raw",
+            "exports",
+            "openai",
+            "source",
+            "brain",
+            "claude",
+            "chatgpt",
+            "export",
+            "use",
+            "folder",
+            "material",
+            "should"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/chatgpt/README.md",
+      "title": "ChatGPT Import Staging",
+      "preview": "ChatGPT Import Staging Place ChatGPT exports here before processing them into the main Jarvis brain. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in dedicated project pages - preferences or habits that should live in identity or preference notes",
+      "keywords": [
+        "chatgpt",
+        "should",
+        "project",
+        "notes",
+        "import",
+        "staging",
+        "place",
+        "exports",
+        "here",
+        "before",
+        "processing",
+        "them",
+        "into",
+        "main",
+        "jarvis",
+        "brain",
+        "reviewing",
+        "export",
+        "separate",
+        "enduring"
+      ],
+      "chars": 354,
+      "sections": [
+        {
+          "heading": "ChatGPT Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Place ChatGPT exports here before processing them into the main Jarvis brain. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in dedicated project pages - preferences or habits that should live in identity or preference notes",
+          "keywords": [
+            "should",
+            "project",
+            "notes",
+            "place",
+            "chatgpt",
+            "exports",
+            "here",
+            "before",
+            "processing",
+            "them",
+            "into",
+            "main"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/claude/README.md",
+      "title": "Claude Import Staging",
+      "preview": "Claude Import Staging Place Claude conversation exports, summaries, or ZIP contents here before processing. Good candidates for distillation: - stable user preferences - project history - recurring goals - useful explanations worth keeping - decisions and personal operating principles Keep sensitive raw data here until it has been reviewed and rewritten into cleaner notes.",
+      "keywords": [
+        "claude",
+        "here",
+        "import",
+        "staging",
+        "place",
+        "conversation",
+        "exports",
+        "summaries",
+        "zip",
+        "contents",
+        "before",
+        "processing",
+        "good",
+        "candidates",
+        "distillation",
+        "stable",
+        "user",
+        "preferences",
+        "project",
+        "history"
+      ],
+      "chars": 375,
+      "sections": [
+        {
+          "heading": "Claude Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Place Claude conversation exports, summaries, or ZIP contents here before processing. Good candidates for distillation: - stable user preferences - project history - recurring goals - useful explanations worth keeping - decisions and personal operating principles Keep sensitive raw data here until it has been reviewed and rewritten into cleaner notes.",
+          "keywords": [
+            "here",
+            "place",
+            "claude",
+            "conversation",
+            "exports",
+            "summaries",
+            "zip",
+            "contents",
+            "before",
+            "processing",
+            "good",
+            "candidates"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/openai/README.md",
+      "title": "OpenAI Import Staging",
+      "preview": "OpenAI Import Staging Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory.",
+      "keywords": [
+        "openai",
+        "import",
+        "staging",
+        "use",
+        "folder",
+        "related",
+        "exports",
+        "structured",
+        "data",
+        "should",
+        "reviewed",
+        "before",
+        "entering",
+        "main",
+        "vault",
+        "optional",
+        "helps",
+        "keep",
+        "raw",
+        "source"
+      ],
+      "chars": 260,
+      "sections": [
+        {
+          "heading": "OpenAI Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory.",
+          "keywords": [
+            "use",
+            "folder",
+            "openai",
+            "related",
+            "exports",
+            "structured",
+            "data",
+            "should",
+            "reviewed",
+            "before",
+            "entering",
+            "main"
           ]
         }
       ]
@@ -600,6 +804,585 @@
             "gitignored",
             "memory",
             "knowledge"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/00 Home.md",
+      "title": "Jarvis Brain Home",
+      "preview": "Jarvis Brain Home This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - 10 Identity for stable user identity, role, strengths, and goals - 20 Projects for active and important ongoing work - 30 Preferences for communication, product, and operating preferences - 40 Timeline for major events, milestones, and decisions - 50 Synthesis for distilled takeaways from exports and long conversations Use this note as the first place to connect new knowledge after rev",
+      "keywords": [
+        "note",
+        "jarvis",
+        "brain",
+        "identity",
+        "preferences",
+        "home",
+        "top",
+        "level",
+        "map",
+        "local",
+        "obsidian",
+        "compatible",
+        "core",
+        "set",
+        "stable",
+        "user",
+        "role",
+        "strengths",
+        "goals",
+        "projects"
+      ],
+      "chars": 519,
+      "sections": [
+        {
+          "heading": "Jarvis Brain Home",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - 10 Identity for stable user identity, role, strengths, and goals - 20 Projects for active and important ongoing work - 30 Preferences for communication, product, and operating preferences - 40 Timeline for major events, milestones, and decisions - 50 Synthesis for distilled takeaways from exports and long conversations Use this note as the first place to connect new knowledge after reviewing raw imports.",
+          "keywords": [
+            "note",
+            "identity",
+            "preferences",
+            "top",
+            "level",
+            "map",
+            "jarvis",
+            "local",
+            "obsidian",
+            "compatible",
+            "brain",
+            "core"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/10 Identity.md",
+      "title": "Identity",
+      "preview": "Identity Purpose: capture durable facts about the user that should shape Jarvis's tone, priorities, and responses. Suggested sections: Core Identity - name - role or professional identity - domains of expertise - long-term ambitions Working Style - preferred communication style - preferred depth of explanation - decision-making style - collaboration preferences Current North Star - what Jarvis is being built into - what \"good\" feels like for the product - constraints that matter, such as local-f",
+      "keywords": [
+        "identity",
+        "style",
+        "jarvis",
+        "preferred",
+        "purpose",
+        "capture",
+        "durable",
+        "facts",
+        "about",
+        "user",
+        "should",
+        "shape",
+        "tone",
+        "priorities",
+        "responses",
+        "suggested",
+        "sections",
+        "core",
+        "name",
+        "role"
+      ],
+      "chars": 522,
+      "sections": [
+        {
+          "heading": "Identity",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Purpose: capture durable facts about the user that should shape Jarvis's tone, priorities, and responses. Suggested sections:",
+          "keywords": [
+            "purpose",
+            "capture",
+            "durable",
+            "facts",
+            "about",
+            "user",
+            "should",
+            "shape",
+            "jarvis",
+            "tone",
+            "priorities",
+            "responses"
+          ]
+        },
+        {
+          "heading": "Core Identity",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "- name - role or professional identity - domains of expertise - long-term ambitions",
+          "keywords": [
+            "name",
+            "role",
+            "professional",
+            "identity",
+            "domains",
+            "expertise",
+            "long",
+            "term",
+            "ambitions"
+          ]
+        },
+        {
+          "heading": "Working Style",
+          "level": 2,
+          "page": null,
+          "line_start": 14,
+          "text": "- preferred communication style - preferred depth of explanation - decision-making style - collaboration preferences",
+          "keywords": [
+            "preferred",
+            "style",
+            "communication",
+            "depth",
+            "explanation",
+            "decision",
+            "making",
+            "collaboration",
+            "preferences"
+          ]
+        },
+        {
+          "heading": "Current North Star",
+          "level": 2,
+          "page": null,
+          "line_start": 21,
+          "text": "- what Jarvis is being built into - what \"good\" feels like for the product - constraints that matter, such as local-first and zero API cost",
+          "keywords": [
+            "jarvis",
+            "being",
+            "built",
+            "into",
+            "good",
+            "feels",
+            "like",
+            "product",
+            "constraints",
+            "matter",
+            "such",
+            "local"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/20 Projects.md",
+      "title": "Projects",
+      "preview": "Projects Purpose: hold the active project landscape Jarvis should keep in mind. Suggested sections: Jarvis - current product direction - active technical priorities - known issues - major architectural decisions Other Active Work - current initiatives - experiments - content, interviews, or business work tied to the user For each major project, create deeper linked notes as needed rather than overloading this page.",
+      "keywords": [
+        "active",
+        "project",
+        "jarvis",
+        "current",
+        "major",
+        "work",
+        "projects",
+        "purpose",
+        "hold",
+        "landscape",
+        "should",
+        "keep",
+        "mind",
+        "suggested",
+        "sections",
+        "product",
+        "direction",
+        "technical",
+        "priorities",
+        "known"
+      ],
+      "chars": 418,
+      "sections": [
+        {
+          "heading": "Projects",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Purpose: hold the active project landscape Jarvis should keep in mind. Suggested sections:",
+          "keywords": [
+            "purpose",
+            "hold",
+            "active",
+            "project",
+            "landscape",
+            "jarvis",
+            "should",
+            "keep",
+            "mind",
+            "suggested",
+            "sections"
+          ]
+        },
+        {
+          "heading": "Jarvis",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "- current product direction - active technical priorities - known issues - major architectural decisions",
+          "keywords": [
+            "current",
+            "product",
+            "direction",
+            "active",
+            "technical",
+            "priorities",
+            "known",
+            "issues",
+            "major",
+            "architectural",
+            "decisions"
+          ]
+        },
+        {
+          "heading": "Other Active Work",
+          "level": 2,
+          "page": null,
+          "line_start": 14,
+          "text": "- current initiatives - experiments - content, interviews, or business work tied to the user For each major project, create deeper linked notes as needed rather than overloading this page.",
+          "keywords": [
+            "current",
+            "initiatives",
+            "experiments",
+            "content",
+            "interviews",
+            "business",
+            "work",
+            "tied",
+            "user",
+            "each",
+            "major",
+            "project"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/30 Preferences.md",
+      "title": "Preferences",
+      "preview": "Preferences Purpose: capture stable preferences that improve how Jarvis responds and acts. Suggested sections: Communication - preferred tone - preferred response length - how much initiative Jarvis should take Product Taste - UI direction - voice style - interaction philosophy Engineering Preferences - local-first expectations - code quality expectations - verification requirements - packaging or deployment constraints that should not be broken",
+      "keywords": [
+        "preferences",
+        "jarvis",
+        "preferred",
+        "should",
+        "expectations",
+        "purpose",
+        "capture",
+        "stable",
+        "improve",
+        "responds",
+        "acts",
+        "suggested",
+        "sections",
+        "communication",
+        "tone",
+        "response",
+        "length",
+        "much",
+        "initiative",
+        "take"
+      ],
+      "chars": 449,
+      "sections": [
+        {
+          "heading": "Preferences",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Purpose: capture stable preferences that improve how Jarvis responds and acts. Suggested sections:",
+          "keywords": [
+            "purpose",
+            "capture",
+            "stable",
+            "preferences",
+            "improve",
+            "jarvis",
+            "responds",
+            "acts",
+            "suggested",
+            "sections"
+          ]
+        },
+        {
+          "heading": "Communication",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "- preferred tone - preferred response length - how much initiative Jarvis should take",
+          "keywords": [
+            "preferred",
+            "tone",
+            "response",
+            "length",
+            "much",
+            "initiative",
+            "jarvis",
+            "should",
+            "take"
+          ]
+        },
+        {
+          "heading": "Product Taste",
+          "level": 2,
+          "page": null,
+          "line_start": 13,
+          "text": "- UI direction - voice style - interaction philosophy",
+          "keywords": [
+            "direction",
+            "voice",
+            "style",
+            "interaction",
+            "philosophy"
+          ]
+        },
+        {
+          "heading": "Engineering Preferences",
+          "level": 2,
+          "page": null,
+          "line_start": 19,
+          "text": "- local-first expectations - code quality expectations - verification requirements - packaging or deployment constraints that should not be broken",
+          "keywords": [
+            "expectations",
+            "local",
+            "first",
+            "code",
+            "quality",
+            "verification",
+            "requirements",
+            "packaging",
+            "deployment",
+            "constraints",
+            "should",
+            "not"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/40 Timeline.md",
+      "title": "Timeline",
+      "preview": "Timeline Purpose: capture major decisions, milestones, and shifts over time. Suggested sections: Product Milestones - launches - major fixes - capability upgrades Personal or Professional Milestones - interviews - collaborations - strategic pivots Use dated bullets or dated headings so Jarvis can reason about recency and sequence.",
+      "keywords": [
+        "milestones",
+        "major",
+        "dated",
+        "timeline",
+        "purpose",
+        "capture",
+        "decisions",
+        "shifts",
+        "over",
+        "time",
+        "suggested",
+        "sections",
+        "product",
+        "launches",
+        "fixes",
+        "capability",
+        "upgrades",
+        "personal",
+        "professional",
+        "interviews"
+      ],
+      "chars": 332,
+      "sections": [
+        {
+          "heading": "Timeline",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Purpose: capture major decisions, milestones, and shifts over time. Suggested sections:",
+          "keywords": [
+            "purpose",
+            "capture",
+            "major",
+            "decisions",
+            "milestones",
+            "shifts",
+            "over",
+            "time",
+            "suggested",
+            "sections"
+          ]
+        },
+        {
+          "heading": "Product Milestones",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "- launches - major fixes - capability upgrades",
+          "keywords": [
+            "launches",
+            "major",
+            "fixes",
+            "capability",
+            "upgrades"
+          ]
+        },
+        {
+          "heading": "Personal or Professional Milestones",
+          "level": 2,
+          "page": null,
+          "line_start": 13,
+          "text": "- interviews - collaborations - strategic pivots Use dated bullets or dated headings so Jarvis can reason about recency and sequence.",
+          "keywords": [
+            "dated",
+            "interviews",
+            "collaborations",
+            "strategic",
+            "pivots",
+            "use",
+            "bullets",
+            "headings",
+            "jarvis",
+            "can",
+            "reason",
+            "about"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/50 Synthesis.md",
+      "title": "Synthesis",
+      "preview": "Synthesis Purpose: distill large exports and long conversations into concise reusable understanding. Suggested sections: Claude Export Synthesis - recurring themes - stable preferences - repeated goals - useful phrases or patterns worth preserving ChatGPT Export Synthesis - recurring interests - reusable explanations - important project context - behavioral patterns worth remembering This note should hold conclusions, not raw transcripts.",
+      "keywords": [
+        "synthesis",
+        "reusable",
+        "export",
+        "recurring",
+        "patterns",
+        "worth",
+        "purpose",
+        "distill",
+        "large",
+        "exports",
+        "long",
+        "conversations",
+        "into",
+        "concise",
+        "understanding",
+        "suggested",
+        "sections",
+        "claude",
+        "themes",
+        "stable"
+      ],
+      "chars": 442,
+      "sections": [
+        {
+          "heading": "Synthesis",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Purpose: distill large exports and long conversations into concise reusable understanding. Suggested sections:",
+          "keywords": [
+            "purpose",
+            "distill",
+            "large",
+            "exports",
+            "long",
+            "conversations",
+            "into",
+            "concise",
+            "reusable",
+            "understanding",
+            "suggested",
+            "sections"
+          ]
+        },
+        {
+          "heading": "Claude Export Synthesis",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "- recurring themes - stable preferences - repeated goals - useful phrases or patterns worth preserving",
+          "keywords": [
+            "recurring",
+            "themes",
+            "stable",
+            "preferences",
+            "repeated",
+            "goals",
+            "useful",
+            "phrases",
+            "patterns",
+            "worth",
+            "preserving"
+          ]
+        },
+        {
+          "heading": "ChatGPT Export Synthesis",
+          "level": 2,
+          "page": null,
+          "line_start": 14,
+          "text": "- recurring interests - reusable explanations - important project context - behavioral patterns worth remembering This note should hold conclusions, not raw transcripts.",
+          "keywords": [
+            "recurring",
+            "interests",
+            "reusable",
+            "explanations",
+            "important",
+            "project",
+            "context",
+            "behavioral",
+            "patterns",
+            "worth",
+            "remembering",
+            "note"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/README.md",
+      "title": "Jarvis Brain",
+      "preview": "Jarvis Brain This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tasks - link projects, people, and timeline events when they reinforce each other - distill transcript exports instead of pasting them wholesale Suggested maintenance flow: 1. ingest raw exports into vault/raw/imports/ 2. summarize or rewrite th",
+      "keywords": [
+        "jarvis",
+        "notes",
+        "exports",
+        "them",
+        "raw",
+        "vault",
+        "brain",
+        "folder",
+        "obsidian",
+        "friendly",
+        "source",
+        "truth",
+        "long",
+        "lived",
+        "human",
+        "readable",
+        "knowledge",
+        "design",
+        "rules",
+        "write"
+      ],
+      "chars": 572,
+      "sections": [
+        {
+          "heading": "Jarvis Brain",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tasks - link projects, people, and timeline events when they reinforce each other - distill transcript exports instead of pasting them wholesale Suggested maintenance flow: 1. ingest raw exports into vault/raw/imports/ 2. summarize or rewrite them here 3. refresh the vault index so Jarvis can ground on the new notes",
+          "keywords": [
+            "jarvis",
+            "notes",
+            "exports",
+            "them",
+            "raw",
+            "vault",
+            "folder",
+            "obsidian",
+            "friendly",
+            "source",
+            "truth",
+            "long"
           ]
         }
       ]

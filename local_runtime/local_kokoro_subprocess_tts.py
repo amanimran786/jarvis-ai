@@ -239,6 +239,7 @@ def _daemon_synthesize(text: str, voice: str) -> str | None:
     Acquires _daemon_lock for the full round-trip to serialise concurrent callers.
     Falls back to None on any error (caller will use one-shot fallback).
     """
+    global _daemon_proc, _daemon_ready
     with _daemon_lock:
         if not _daemon_alive() or not _daemon_ready:
             # Try to restart inline (cold-start penalty, but only on failure)
@@ -248,7 +249,6 @@ def _daemon_synthesize(text: str, voice: str) -> str | None:
                     _daemon_proc_local.kill()
                 except Exception:
                     pass
-            global _daemon_proc, _daemon_ready
             _daemon_proc = None
             _daemon_ready = False
             if not _start_daemon():

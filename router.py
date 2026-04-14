@@ -713,6 +713,8 @@ def _extract_contact_name(text: str) -> str:
     cleaned = re.sub(r"^(?:contact\s*name|name|recipient|contact)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:contact|recipient)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:to\s+)?(?:contact\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:now\s+)?(?:this|that|the)\s+(?:phone\s+)?number\s+", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:phone\s+)?number\s+", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:send|message|text|say)\s+(?:to\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned
@@ -768,8 +770,12 @@ def _looks_like_contact_name(name: str) -> bool:
         return False
     if len(cleaned) > 64:
         return False
-    if re.search(r"[0-9@]", cleaned):
+    if "@" in cleaned:
         return True
+    if re.search(r"[0-9]", cleaned):
+        letters = [tok.lower() for tok in re.findall(r"[A-Za-z]+", cleaned)]
+        filler = {"this", "that", "the", "number", "phone", "mobile", "cell", "at"}
+        return all(tok in filler for tok in letters)
     tokens = [tok for tok in re.split(r"\s+", cleaned) if tok]
     if not tokens or len(tokens) > 4:
         return False
@@ -777,6 +783,20 @@ def _looks_like_contact_name(name: str) -> bool:
     if any(tok.lower() in blocked for tok in tokens):
         return False
     return True
+
+
+def _normalize_message_recipient(text: str) -> str:
+    candidate = _extract_contact_name(text)
+    phone_match = re.search(r"(\+?\d[\d\-\(\)\s]{6,}\d)", candidate)
+    if phone_match:
+        phone = re.sub(r"[\s\-\(\)]", "", phone_match.group(1))
+        prefix = candidate[:phone_match.start()].strip()
+        suffix = candidate[phone_match.end():].strip()
+        filler = {"this", "that", "the", "number", "phone", "mobile", "cell", "at"}
+        around = " ".join(part for part in (prefix, suffix) if part).strip()
+        if not around or all(tok.lower() in filler for tok in re.findall(r"[A-Za-z]+", around)):
+            return phone
+    return candidate
 
 
 def _parse_message_recipient_only(text: str) -> str:
@@ -800,7 +820,16 @@ def _parse_message_recipient_only(text: str) -> str:
         candidate = re.split(r"\s+(?:saying|says|that)\s+", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip()
         return candidate if _looks_like_contact_name(candidate) else ""
 
-    candidate = _extract_contact_name(raw)
+    number_phrase = re.search(
+        r"\b(?:send|message|text)\b.*?\b(?:this|that|the)?\s*(?:phone\s+)?number\b[:\s-]*(\+?\d[\d\-\(\)\s]{6,}\d)\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if number_phrase:
+        candidate = _normalize_message_recipient(number_phrase.group(1))
+        return candidate if _looks_like_contact_name(candidate) else ""
+
+    candidate = _normalize_message_recipient(raw)
     return candidate if _looks_like_contact_name(candidate) else ""
 
 
@@ -1450,6 +1479,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             m = re.search(r"(?:text|message|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})", user_input, flags=re.IGNORECASE)
             if m:
                 recipient = m.group(1)
+        recipient = _normalize_message_recipient(recipient)
         if recipient and body:
             _clear_pending_recipient()
             _set_pending_message_draft(recipient, body)
