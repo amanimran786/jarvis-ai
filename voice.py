@@ -19,10 +19,11 @@ from config import (
 import call_privacy
 from local_runtime import local_stt
 from local_runtime import local_tts
-# Use subprocess bridge so frozen .app doesn't need kokoro-onnx bundled
+# Prefer the subprocess bridge when it imports cleanly, but keep runtime stable
+# while that path is still being debugged.
 try:
     from local_runtime import local_kokoro_subprocess_tts as local_kokoro_tts
-except ImportError:
+except Exception:
     from local_runtime import local_kokoro_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None

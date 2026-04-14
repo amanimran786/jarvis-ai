@@ -107,6 +107,9 @@ def classify(user_input: str) -> ToolDecision:
     word_count = len(user_input.split())
     _no_cloud = model_router.is_open_source_mode() or model_router.get_mode() == "local"
     if _no_cloud and word_count < 20:
+        local_short = _local_short_query_classify(user_input.lower().strip())
+        if local_short:
+            return _attach_skill(user_input, local_short)
         return _attach_skill(user_input, _FALLBACK)
 
     # Use the fast heuristic specialist classifier in every mode.
@@ -227,6 +230,24 @@ def _fast_classify(lower: str) -> ToolDecision | None:
             return ToolDecision("message", 0.95, "send")
     if re.search(r"^(text|send a text to|send a message to|message)\s+\w+", lower):
         return ToolDecision("message", 0.95, "send")
+    return None
+
+
+def _local_short_query_classify(lower: str) -> ToolDecision | None:
+    """Keep common short voice queries tool-aware even without cloud classification."""
+    if re.search(r"\b(next event|next meeting|what(?:'s| is) next|what do i have (today|tomorrow)|what(?:'s| is) on (my )?(calendar|schedule)|calendar (today|tomorrow)|schedule (today|tomorrow)|meetings? (today|tomorrow)|events? (today|tomorrow)|any meetings?)\b", lower):
+        return ToolDecision("calendar", 0.91, "read")
+    if re.search(r"\b(check (my )?inbox|check email|new emails?|unread emails?|any emails?|gmail)\b", lower):
+        return ToolDecision("email", 0.9, "read")
+    if re.search(r"\b(open notes|show notes|my notes|search notes|take a note|write a note|save a note|note this)\b", lower):
+        action = "write" if any(term in lower for term in ("take a note", "write a note", "save a note", "note this")) else "read"
+        return ToolDecision("notes", 0.9, action)
+    if re.search(r"\b(meeting mode|smart listen|meeting status|start listening|stop listening)\b", lower):
+        return ToolDecision("meeting", 0.9, "manage")
+    if re.search(r"\b(search for|look up|google|find on the web|browse to|open this page|open that page)\b", lower):
+        return ToolDecision("browser", 0.88, "browse")
+    if re.search(r"\b(what do you remember|what do you know about me|briefing|catch me up|what did i miss)\b", lower):
+        return ToolDecision("memory", 0.86, "recall")
     return None
 
 
