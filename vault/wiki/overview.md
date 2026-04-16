@@ -24,6 +24,8 @@ Keep source material organized. Build small searchable indexes. Load only the re
 
 Useful entry points from here:
 
+- [[06 Vault Support Hub]]
+- [[07 Import Source Hub]]
 - [[jarvis-vault-strategy]]
 - [[eval-pattern-self-improve]]
-- [[ingested-file-readme-md]]
+- [[Product Surface Bridge]]

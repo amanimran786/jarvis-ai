@@ -7,6 +7,8 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[00 Home]] keeps the top-level map.
 - [[03 Brain Schema]] defines the metadata and task contract for new durable notes.
 - [[04 Capture Workflow]] defines how new durable notes should be created and promoted.
+- [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges.
+- [[07 Import Source Hub]] groups the staged import families and provenance flow.
 - [[10 Identity]] holds stable user identity and strengths.
 - [[20 Projects]] keeps active work visible.
 - [[30 Preferences]] preserves how Aman likes to work and collaborate.
@@ -53,14 +55,11 @@ This note is the manual navigation surface for the curated Jarvis brain.
 
 ## Support Surfaces
 
-- [Vault Overview](../overview.md) explains how raw, compiled, curated, and index layers fit together.
-- [Vault README](../../README.md) is the human-readable operating contract for the whole vault.
-- [Keyword Index](../../indexes/keyword_index.md) is the quickest generated lookup surface.
-- [Source Map](../../indexes/source_map.md) traces raw files into compiled notes.
-- [Topics Index](../../indexes/topics.md) is the generated topic entrypoint.
+- [[06 Vault Support Hub]] is the main support-layer anchor.
+- [[07 Import Source Hub]] is the main import-layer anchor.
 - [[jarvis-vault-strategy]] is the storage and retrieval design bridge.
 - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example.
-- [[ingested-file-readme-md]] is the compiled product-surface bridge back to repo truth.
+- [[Product Surface Bridge]] is the compiled product-surface bridge back to repo truth.
 
 ## Obsidian Usage
 

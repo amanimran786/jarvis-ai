@@ -136,6 +136,24 @@
       "height": 220
     },
     {
+      "id": "supporthub",
+      "type": "file",
+      "file": "06 Vault Support Hub.md",
+      "x": -420,
+      "y": 120,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "importhub",
+      "type": "file",
+      "file": "07 Import Source Hub.md",
+      "x": -420,
+      "y": 420,
+      "width": 320,
+      "height": 220
+    },
+    {
       "id": "maintenance",
       "type": "file",
       "file": "93 Vault Maintenance.md",
@@ -316,6 +334,22 @@
       "label": "provenance"
     },
     {
+      "id": "e15b",
+      "fromNode": "home",
+      "toNode": "supporthub",
+      "fromSide": "left",
+      "toSide": "right",
+      "label": "support"
+    },
+    {
+      "id": "e15c",
+      "fromNode": "home",
+      "toNode": "importhub",
+      "fromSide": "left",
+      "toSide": "right",
+      "label": "imports"
+    },
+    {
       "id": "e16",
       "fromNode": "inventory",
       "toNode": "synthesis",
@@ -330,6 +364,22 @@
       "fromSide": "bottom",
       "toSide": "top",
       "label": "upkeep"
+    },
+    {
+      "id": "e17b",
+      "fromNode": "supporthub",
+      "toNode": "schema",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "contract"
+    },
+    {
+      "id": "e17c",
+      "fromNode": "importhub",
+      "toNode": "inventory",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "provenance"
     },
     {
       "id": "e18",

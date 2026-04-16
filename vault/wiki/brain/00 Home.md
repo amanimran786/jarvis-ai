@@ -8,6 +8,8 @@ Core note set:
 - [[03 Brain Schema]] for the vault metadata, task, and linking contract
 - [[04 Capture Workflow]] for how durable notes should be created and promoted
 - [[05 Source Inventory]] for imported data sources and staging status
+- [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges
+- [[07 Import Source Hub]] for raw import families and provenance flow
 - [[10 Identity]] for stable user identity, role, strengths, and goals
 - [[20 Projects]] for active and important ongoing work
 - [[30 Preferences]] for communication, product, and operating preferences
@@ -40,14 +42,11 @@ Core note set:
 
 Supporting surfaces:
 
-- [Vault Overview](../overview.md) for the raw-to-compiled-to-brain map
-- [Vault README](../../README.md) for the human-readable vault contract
-- [Keyword Index](../../indexes/keyword_index.md) for the fastest generated lookup layer
-- [Source Map](../../indexes/source_map.md) for raw-to-compiled provenance
-- [Topics Index](../../indexes/topics.md) for compiled topic navigation
+- [[06 Vault Support Hub]] for the support-layer map
+- [[07 Import Source Hub]] for the import-layer map
 - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge
 - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule
-- [[ingested-file-readme-md]] for the compiled product-surface bridge
+- [[Product Surface Bridge]] for the compiled product-surface bridge
 
 Use this note as the first place to connect new knowledge after reviewing raw imports.
 

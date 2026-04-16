@@ -40,7 +40,7 @@ Use this note for:
 - Decision: Use the local vault as the shared source of truth for both Jarvis and Obsidian rather than creating a separate hidden memory store.
 - Why: Human-readable notes are easier to maintain, verify, edit, and grow over time.
 - Tradeoffs: Distillation work is required; raw exports cannot simply be dumped in and expected to become good memory.
-- Files or systems affected: `vault/README.md`, `vault/wiki/brain/`, `vault/raw/imports/`
+- Files or systems affected: `vault/Vault Guide.md`, `vault/wiki/brain/`, `vault/raw/imports/`
 - Revisit when: the note volume grows enough that we need stronger indexing, backlinks, or structured metadata.
 
 ### Local-first is a product constraint, not a fallback mode

@@ -2,7 +2,7 @@
 
 This note tracks the major raw data sources that have been staged for Jarvis's local brain.
 
-Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]], [[91 Vault Changelog]]
+Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[07 Import Source Hub]], [[50 Synthesis]], [[91 Vault Changelog]]
 
 ## 2026-04-15 Import Snapshot
 
@@ -30,7 +30,7 @@ Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Sy
 
 The staged raw files are for provenance and extraction. The actual Jarvis brain should still be distilled into concise markdown notes rather than treated as a transcript dump.
 
-Use this note as the provenance bridge between `vault/raw/imports/`, [[50 Synthesis]], and the reusable memory layers like [[10 Identity]], [[20 Projects]], and [[60 Interview Story Bank]].
+Use this note as the provenance bridge between [[07 Import Source Hub]], `vault/raw/imports/`, [[50 Synthesis]], and the reusable memory layers like [[10 Identity]], [[20 Projects]], and [[60 Interview Story Bank]].
 
 ## Additional Local Sources Consulted
 

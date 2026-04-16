@@ -1,4 +1,4 @@
-# Jarvis Vault
+# Vault Guide
 
 The vault is Jarvis's local markdown knowledge layer.
 

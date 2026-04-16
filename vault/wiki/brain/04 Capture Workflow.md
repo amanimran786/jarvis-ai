@@ -25,7 +25,7 @@ related:
 
 Purpose: imitate the best QuickAdd and Templater workflows without relying on plugin scripting for core Jarvis behavior.
 
-Linked notes: [[03 Brain Schema]], [[05 Source Inventory]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[91 Vault Changelog]]
+Linked notes: [[03 Brain Schema]], [[05 Source Inventory]], [[07 Import Source Hub]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[91 Vault Changelog]]
 
 ## Capture Contract
 
@@ -55,10 +55,12 @@ Every durable capture should follow the same flow:
 
 ## Support Surfaces
 
+- [[06 Vault Support Hub]] groups the support-layer references that this workflow depends on.
+- [[07 Import Source Hub]] groups the raw import entry points that feed this workflow.
 - [Vault Overview](../overview.md) is the quickest explanation of how raw, compiled, and curated notes relate.
 - [Source Map](../../indexes/source_map.md) should reflect every raw-to-compiled step that this workflow creates.
 - [Topics Index](../../indexes/topics.md) and [Keyword Index](../../indexes/keyword_index.md) are downstream generated outputs from successful capture and wiki rebuilds.
-- [Vault README](../../README.md) should stay aligned with this workflow so the human-readable contract matches the actual vault behavior.
+- [Vault Guide](../../Vault%20Guide.md) should stay aligned with this workflow so the human-readable contract matches the actual vault behavior.
 
 ## Promotion Rules
 

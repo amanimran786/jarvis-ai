@@ -1,17 +1,17 @@
-# Ingested File: README.md
+# Product Surface Bridge
 
-Source file: `raw/readme-md.md`
+Source file: `raw/Product Surface Source.md`
 
 Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]
 
 ## Summary
-Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
+Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
 
 ## Key Terms
 local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, wiki
 
 ## Citation Map
-- Ingested File: README.md at line 1: Source path: /Users/truthseeker/jarvis-ai/README.md
+- Product Surface Source at line 1: Source path: /Users/truthseeker/jarvis-ai/README.md
 - Jarvis AI at line 5: A personal voice + text AI assistant for macOS.
 - Features at line 9: - **Voice + text interface** — speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** — Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** — remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** — lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** — Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** — indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** — raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** — background knowledge feed, fact extraction, and daily reflection - **Live browser control** — open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** — volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** — can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** — Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** — floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** — image and screen analysis from the camera and desktop - **Self-improvement** — Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** — windows hidden from screen share using macOS APIs
 - Requirements at line 28: - macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode

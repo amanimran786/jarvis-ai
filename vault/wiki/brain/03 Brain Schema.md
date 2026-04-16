@@ -24,7 +24,7 @@ related:
 
 Purpose: keep the Jarvis brain queryable, linkable, and durable without depending on any Obsidian plugin runtime.
 
-Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[93 Vault Maintenance]]
+Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[04 Capture Workflow]], [[06 Vault Support Hub]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[93 Vault Maintenance]]
 
 ## Principle
 
@@ -157,7 +157,8 @@ Do not make Jarvis depend on those plugins to read or write the brain correctly.
 
 ## Supporting Surfaces
 
+- [[06 Vault Support Hub]] is the grouped support-layer anchor for these references.
 - [Vault Overview](../overview.md) explains where schema applies across raw, compiled, and curated layers.
 - [Source Map](../../indexes/source_map.md) is the provenance layer that should stay compatible with this schema.
 - [Keyword Index](../../indexes/keyword_index.md) and [Topics Index](../../indexes/topics.md) are generated read surfaces, not schema owners.
-- [Vault README](../../README.md) is the human-readable vault contract that should stay aligned with this note.
+- [Vault Guide](../../Vault%20Guide.md) is the human-readable vault contract that should stay aligned with this note.

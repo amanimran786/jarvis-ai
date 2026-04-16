@@ -1,21 +1,21 @@
 {
-  "doc_count": 53,
+  "doc_count": 55,
   "docs": [
     {
       "path": "indexes/keyword_index.md",
       "title": "Vault Keyword Index",
-      "preview": "Vault Keyword Index Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists. - should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Ingested File: README.md, Jarvis Vault Strategy - local: Ingested File: README.md, Jarvis Vault Strategy - jarvis: Ingested File: README.md, Jarvis Vault Strategy - context: Ingested File: README.md,",
+      "preview": "Vault Keyword Index Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists. - should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Product Surface Bridge, Jarvis Vault Strategy - local: Product Surface Bridge, Jarvis Vault Strategy - jarvis: Product Surface Bridge, Jarvis Vault Strategy - context: Product Surface Bridge, Jarvis ",
       "keywords": [
         "vault",
+        "surface",
         "eval",
         "pattern",
         "self",
         "improve",
         "jarvis",
         "strategy",
-        "ingested",
-        "file",
-        "readme",
+        "product",
+        "bridge",
         "index",
         "source",
         "keyword",
@@ -27,25 +27,25 @@
         "changelog",
         "maintenance"
       ],
-      "chars": 1012,
+      "chars": 996,
       "sections": [
         {
           "heading": "Vault Keyword Index",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists. - should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Ingested File: README.md, Jarvis Vault Strategy - local: Ingested File: README.md, Jarvis Vault Strategy - jarvis: Ingested File: README.md, Jarvis Vault Strategy - context: Ingested File: README.md, Jarvis Vault Strategy - recent: Eval Pattern: self_improve - eval: Eval Pattern: self_improve - improve: Eval Pattern: self_improve - evidence: Eval Pattern: self_improve - self: Eval Pattern: self_improve - enough: Eval Pattern: self_improve - pattern: Eval Pattern: self_improve - markdown: Jarvis Vault Strategy - prompt: Jarvis Vault Strategy - topic: Jarvis Vault Strategy - screen: Ingested File: README.md - can: Ingested File: README.md - mode: Ingested File: README.md - skill: Ingested File: README.md",
+          "text": "Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists. - should: Eval Pattern: self_improve, Jarvis Vault Strategy - vault: Product Surface Bridge, Jarvis Vault Strategy - local: Product Surface Bridge, Jarvis Vault Strategy - jarvis: Product Surface Bridge, Jarvis Vault Strategy - context: Product Surface Bridge, Jarvis Vault Strategy - recent: Eval Pattern: self_improve - eval: Eval Pattern: self_improve - improve: Eval Pattern: self_improve - evidence: Eval Pattern: self_improve - self: Eval Pattern: self_improve - enough: Eval Pattern: self_improve - pattern: Eval Pattern: self_improve - markdown: Jarvis Vault Strategy - prompt: Jarvis Vault Strategy - topic: Jarvis Vault Strategy - screen: Product Surface Bridge - can: Product Surface Bridge - mode: Product Surface Bridge - skill: Product Surface Bridge",
           "keywords": [
             "vault",
+            "surface",
             "eval",
             "pattern",
             "self",
             "improve",
             "jarvis",
             "strategy",
-            "ingested",
-            "file",
-            "readme",
+            "product",
+            "bridge",
             "source",
             "use"
           ]
@@ -55,37 +55,37 @@
     {
       "path": "indexes/source_map.md",
       "title": "Vault Source Map",
-      "preview": "Vault Source Map This map traces raw inputs into compiled wiki pages. For review and upkeep, pair it with [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]]. - raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/readme-md.md -> wiki/compiled/ingested-file-readme-md.md - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-vault-stra",
+      "preview": "Vault Source Map This map traces raw inputs into compiled wiki pages. For review and upkeep, pair it with [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]]. - raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/Product Surface Source.md -> wiki/compiled/Product Surface Bridge.md - Product Surface Source at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-",
       "keywords": [
         "vault",
         "line",
+        "source",
         "raw",
         "compiled",
         "wiki",
         "jarvis",
-        "readme",
+        "product",
+        "surface",
         "strategy",
-        "source",
         "map",
         "eval",
         "self",
         "improve",
-        "ingested",
-        "file",
         "traces",
         "inputs",
         "into",
         "pages",
-        "review"
+        "review",
+        "upkeep"
       ],
-      "chars": 541,
+      "chars": 551,
       "sections": [
         {
           "heading": "Vault Source Map",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This map traces raw inputs into compiled wiki pages. For review and upkeep, pair it with [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]]. - raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/readme-md.md -> wiki/compiled/ingested-file-readme-md.md - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-vault-strategy.md - Jarvis Vault Strategy at line 1",
+          "text": "This map traces raw inputs into compiled wiki pages. For review and upkeep, pair it with [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]]. - raw/eval-self-improve-patterns.md -> wiki/compiled/eval-pattern-self-improve.md - 423574acb974 at line 3 - raw/Product Surface Source.md -> wiki/compiled/Product Surface Bridge.md - Product Surface Source at line 1 - Jarvis AI at line 5 - Features at line 9 - raw/jarvis_vault_strategy.md -> wiki/compiled/jarvis-vault-strategy.md - Jarvis Vault Strategy at line 1",
           "keywords": [
             "vault",
             "line",
@@ -93,12 +93,12 @@
             "compiled",
             "wiki",
             "jarvis",
-            "readme",
+            "source",
+            "product",
+            "surface",
             "strategy",
             "eval",
-            "self",
-            "improve",
-            "ingested"
+            "self"
           ]
         }
       ]
@@ -108,28 +108,28 @@
       "title": "Vault Topics",
       "preview": "Vault Topics Compiled topic pages: 3 Use [[02 Brain Dashboard]] to jump from topics into the curated brain, [[05 Source Inventory]] to trace source provenance, and [[91 Vault Changelog]] to see what changed over time. Eval Pattern: self_improve Page: wiki/compiled/eval-pattern-self-improve.md Source: raw/eval-self-improve-patterns.md Keywords: recent, eval, improve, evidence, self, should, enough, pattern Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is e",
       "keywords": [
-        "jarvis",
         "vault",
+        "jarvis",
+        "source",
         "self",
         "line",
-        "source",
         "eval",
         "improve",
         "should",
-        "readme",
+        "product",
+        "surface",
         "strategy",
         "compiled",
         "pattern",
-        "ingested",
-        "file",
         "local",
         "page",
         "wiki",
         "raw",
         "keywords",
-        "recent"
+        "recent",
+        "evidence"
       ],
-      "chars": 1641,
+      "chars": 1618,
       "sections": [
         {
           "heading": "Vault Topics",
@@ -174,22 +174,22 @@
           ]
         },
         {
-          "heading": "Ingested File: README.md",
+          "heading": "Product Surface Bridge",
           "level": 2,
           "page": null,
           "line_start": 15,
-          "text": "Page: wiki/compiled/ingested-file-readme-md.md Source: raw/readme-md.md Keywords: local, jarvis, vault, screen, can, mode, context, skill Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Citations: - Ingested File: README.md at line 1 - Jarvis AI at line 5 - Features at line 9 - Requirements at line 28 - Setup at line 35",
+          "text": "Page: wiki/compiled/Product Surface Bridge.md Source: raw/Product Surface Source.md Keywords: local, jarvis, vault, screen, can, mode, context, skill Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Citations: - Product Surface Source at line 1 - Jarvis AI at line 5 - Features at line 9 - Requirements at line 28 - Setup at line 35",
           "keywords": [
-            "readme",
-            "jarvis",
-            "line",
-            "ingested",
-            "file",
             "source",
+            "line",
+            "product",
+            "surface",
+            "jarvis",
             "local",
             "page",
             "wiki",
             "compiled",
+            "bridge",
             "raw",
             "keywords"
           ]
@@ -218,480 +218,9 @@
       ]
     },
     {
-      "path": "raw/eval-self-improve-patterns.md",
-      "title": "Eval Pattern: self_improve",
-      "preview": "Eval Pattern: self_improve Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete",
-      "keywords": [
-        "improve",
-        "should",
-        "self",
-        "recent",
-        "evidence",
-        "eval",
-        "jarvis",
-        "vault",
-        "brain",
-        "runtime",
-        "decision",
-        "log",
-        "changelog",
-        "maintenance",
-        "enough",
-        "changes",
-        "not",
-        "pattern",
-        "related",
-        "notes"
-      ],
-      "chars": 942,
-      "sections": [
-        {
-          "heading": "Eval Pattern: self_improve",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]]",
-          "keywords": [
-            "jarvis",
-            "vault",
-            "related",
-            "brain",
-            "notes",
-            "runtime",
-            "agent",
-            "engineering",
-            "principles",
-            "decision",
-            "log",
-            "roadmap"
-          ]
-        },
-        {
-          "heading": "423574acb974",
-          "level": 2,
-          "page": null,
-          "line_start": 5,
-          "text": "Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete: Not enough recent eval evidence. Need at least 2 recent logged failures.",
-          "keywords": [
-            "recent",
-            "evidence",
-            "improve",
-            "should",
-            "enough",
-            "eval",
-            "issue",
-            "self",
-            "only",
-            "act",
-            "there",
-            "failure"
-          ]
-        },
-        {
-          "heading": "Why This Belongs In The Brain",
-          "level": 2,
-          "page": null,
-          "line_start": 11,
-          "text": "- supports the local-first guardrail that self-improve should be evidence-gated, not impulse-driven - reinforces the runtime principle that maintenance and mutation should stay explicit, bounded, and reviewable - should be referenced when logging future self-improve policy changes in [[70 Jarvis Decision Log]] or [[91 Vault Changelog]]",
-          "keywords": [
-            "should",
-            "self",
-            "improve",
-            "supports",
-            "local",
-            "first",
-            "guardrail",
-            "evidence",
-            "gated",
-            "not",
-            "impulse",
-            "driven"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/README.md",
-      "title": "Import Inbox",
-      "preview": "Import Inbox Use this folder for raw source material that should eventually become part of Jarvis's local brain. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: keep raw provenance traceable while routing durable facts into the curated brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recomme",
-      "keywords": [
-        "raw",
-        "source",
-        "brain",
-        "exports",
-        "openai",
-        "workflow",
-        "synthesis",
-        "keep",
-        "provenance",
-        "traceable",
-        "durable",
-        "facts",
-        "into",
-        "claude",
-        "chatgpt",
-        "export",
-        "projects",
-        "import",
-        "inbox",
-        "use"
-      ],
-      "chars": 860,
-      "sections": [
-        {
-          "heading": "Import Inbox",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Use this folder for raw source material that should eventually become part of Jarvis's local brain. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: keep raw provenance traceable while routing durable facts into the curated brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recommended workflow: 1. Drop the raw export here unchanged 2. Add a short provenance note if the export format is not obvious 3. Distill durable facts, preferences, projects, and summaries into [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[60 Interview Story Bank]], or [[61 Role Targeting Map]] 4. Avoid treating raw transcripts as the final knowledge layer",
-          "keywords": [
-            "raw",
-            "source",
-            "brain",
-            "exports",
-            "openai",
-            "workflow",
-            "synthesis",
-            "keep",
-            "provenance",
-            "traceable",
-            "durable",
-            "facts"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/chatgpt/2026-04-15-export/IMPORT_NOTE.md",
-      "title": "ChatGPT Export Import Note",
-      "preview": "ChatGPT Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive. Use it to confirm recurring themes, project continuity, and story repetition, not as canonical memory. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/fe8df7223ee4f8be8a31a031ccd810cc8b987ab36f2e811fd05d4417746ef266-2026-04-14-00-12-59-7dae0aecb7454a3b99b11953144b",
-      "keywords": [
-        "json",
-        "conversations",
-        "export",
-        "identity",
-        "interview",
-        "story",
-        "synthesis",
-        "projects",
-        "bank",
-        "role",
-        "targeting",
-        "map",
-        "conversation",
-        "archive",
-        "recurring",
-        "project",
-        "continuity",
-        "2026",
-        "downloads",
-        "staged"
-      ],
-      "chars": 1278,
-      "sections": [
-        {
-          "heading": "ChatGPT Export Import Note",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive. Use it to confirm recurring themes, project continuity, and story repetition, not as canonical memory. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/fe8df7223ee4f8be8a31a031ccd810cc8b987ab36f2e811fd05d4417746ef266-2026-04-14-00-12-59-7dae0aecb7454a3b99b11953144bbad2 Files staged here: - chat.html - export_manifest.json - conversations-000.json - conversations-001.json - conversations-002.json - conversations-003.json - conversations-004.json The original export folder also contains a large attachment archive including audio, images, and generated media. Those originals are intentionally left in Downloads for full-fidelity reference while the core conversation data is staged here for Obsidian and Jarvis distillation. Primary distillation targets: - recurring career and interview patterns -> [[60 Interview Story Bank]] and [[61 Role Targeting Map]] - stable identity or working-style signals -> [[10 Identity]] - Jarvis and other active project continuity -> [[20 Projects]] - high-level cross-export takeaways -> [[50 Synthesis]]",
-          "keywords": [
-            "json",
-            "conversations",
-            "identity",
-            "interview",
-            "story",
-            "export",
-            "synthesis",
-            "projects",
-            "bank",
-            "role",
-            "targeting",
-            "map"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/chatgpt/README.md",
-      "title": "ChatGPT Import Staging",
-      "preview": "ChatGPT Import Staging Place ChatGPT exports here before processing them into the main Jarvis brain. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[20 Projects]], [[10 Identity]] Purpose: stage broad conversation history, then extract only the durable identity, project, and synthesis signals. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in [[20 Proj",
-      "keywords": [
-        "synthesis",
-        "identity",
-        "should",
-        "chatgpt",
-        "into",
-        "notes",
-        "projects",
-        "only",
-        "project",
-        "import",
-        "staging",
-        "place",
-        "exports",
-        "here",
-        "before",
-        "processing",
-        "them",
-        "main",
-        "jarvis",
-        "brain"
-      ],
-      "chars": 636,
-      "sections": [
-        {
-          "heading": "ChatGPT Import Staging",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Place ChatGPT exports here before processing them into the main Jarvis brain. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[20 Projects]], [[10 Identity]] Purpose: stage broad conversation history, then extract only the durable identity, project, and synthesis signals. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in [[20 Projects]] - preferences or habits that should live in [[10 Identity]] - cross-session themes that should be condensed into [[50 Synthesis]]",
-          "keywords": [
-            "synthesis",
-            "identity",
-            "should",
-            "into",
-            "notes",
-            "projects",
-            "only",
-            "project",
-            "place",
-            "chatgpt",
-            "exports",
-            "here"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/claude/2026-04-15-export/IMPORT_NOTE.md",
-      "title": "Claude Export Import Note",
-      "preview": "Claude Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction. Prefer this source when identity or long-term context conflicts with noisier archives. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 Files staged here: - users.json - proje",
-      "keywords": [
-        "identity",
-        "export",
-        "json",
-        "source",
-        "projects",
-        "interview",
-        "primary",
-        "durable",
-        "context",
-        "claude",
-        "synthesis",
-        "story",
-        "bank",
-        "role",
-        "targeting",
-        "map",
-        "structured",
-        "users",
-        "memories",
-        "project"
-      ],
-      "chars": 993,
-      "sections": [
-        {
-          "heading": "Claude Export Import Note",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction. Prefer this source when identity or long-term context conflicts with noisier archives. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 Files staged here: - users.json - projects.json - memories.json - conversations.json This is the clean structured Claude export and should be the primary source for extracting durable memories, identity cues, and project context. Primary distillation targets: - durable identity, working style, and priorities -> [[10 Identity]] - ongoing project and Jarvis context -> [[20 Projects]] - cross-export conclusions -> [[50 Synthesis]] - reusable career and interview framing -> [[60 Interview Story Bank]] and [[61 Role Targeting Map]]",
-          "keywords": [
-            "identity",
-            "json",
-            "source",
-            "projects",
-            "interview",
-            "primary",
-            "export",
-            "durable",
-            "context",
-            "synthesis",
-            "story",
-            "bank"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/claude/README.md",
-      "title": "Claude Import Staging",
-      "preview": "Claude Import Staging Place Claude conversation exports, summaries, or ZIP contents here before processing. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]] Purpose: stage the strongest durable memory source, then promote only stable identity, project, and decision signals into the curated brain. Good candidates for distillation: - stable user preferences -> [[10 Identity]] - project history -> [[20 Projects]] - recurring goals",
-      "keywords": [
-        "identity",
-        "claude",
-        "here",
-        "notes",
-        "source",
-        "synthesis",
-        "projects",
-        "only",
-        "stable",
-        "project",
-        "into",
-        "import",
-        "staging",
-        "place",
-        "conversation",
-        "exports",
-        "summaries",
-        "zip",
-        "contents",
-        "before"
-      ],
-      "chars": 715,
-      "sections": [
-        {
-          "heading": "Claude Import Staging",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Place Claude conversation exports, summaries, or ZIP contents here before processing. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]] Purpose: stage the strongest durable memory source, then promote only stable identity, project, and decision signals into the curated brain. Good candidates for distillation: - stable user preferences -> [[10 Identity]] - project history -> [[20 Projects]] - recurring goals - useful explanations worth keeping only when they strengthen [[50 Synthesis]] - decisions and personal operating principles Keep sensitive raw data here until it has been reviewed and rewritten into cleaner notes.",
-          "keywords": [
-            "identity",
-            "here",
-            "notes",
-            "source",
-            "synthesis",
-            "projects",
-            "only",
-            "stable",
-            "project",
-            "into",
-            "place",
-            "claude"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/imports/openai/README.md",
-      "title": "OpenAI Import Staging",
-      "preview": "OpenAI Import Staging Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: hold future OpenAI-origin raw material in the same provenance-first flow as Claude and ChatGPT imports. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory. If this folder is use",
-      "keywords": [
-        "openai",
-        "raw",
-        "material",
-        "folder",
-        "source",
-        "synthesis",
-        "import",
-        "staging",
-        "use",
-        "related",
-        "exports",
-        "structured",
-        "data",
-        "should",
-        "reviewed",
-        "before",
-        "entering",
-        "main",
-        "vault",
-        "connected"
-      ],
-      "chars": 689,
-      "sections": [
-        {
-          "heading": "OpenAI Import Staging",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: hold future OpenAI-origin raw material in the same provenance-first flow as Claude and ChatGPT imports. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory. If this folder is used later, route durable material into [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[60 Interview Story Bank]], or [[61 Role Targeting Map]] instead of leaving it as raw archive only.",
-          "keywords": [
-            "raw",
-            "material",
-            "folder",
-            "openai",
-            "source",
-            "synthesis",
-            "use",
-            "related",
-            "exports",
-            "structured",
-            "data",
-            "should"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/jarvis_vault_strategy.md",
-      "title": "Jarvis Vault Strategy",
-      "preview": "Jarvis Vault Strategy Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regene",
-      "keywords": [
-        "vault",
-        "jarvis",
-        "should",
-        "strategy",
-        "local",
-        "runtime",
-        "notes",
-        "capture",
-        "workflow",
-        "decision",
-        "log",
-        "agent",
-        "engineering",
-        "principles",
-        "roadmap",
-        "changelog",
-        "maintenance",
-        "markdown",
-        "prompt",
-        "context"
-      ],
-      "chars": 1334,
-      "sections": [
-        {
-          "heading": "Jarvis Vault Strategy",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regenerated from local files instead of being hidden in model context. When a request can be answered from local markdown, Jarvis should load only the smallest relevant snippets for that request. The vault is not a giant prompt dump. It is a searchable local knowledge layer.",
-          "keywords": [
-            "vault",
-            "jarvis",
-            "should",
-            "local",
-            "markdown",
-            "prompt",
-            "context",
-            "topic",
-            "request",
-            "related",
-            "brain",
-            "notes"
-          ]
-        },
-        {
-          "heading": "Strategy Connections",
-          "level": 2,
-          "page": null,
-          "line_start": 11,
-          "text": "- [[04 Capture Workflow]] defines how raw material should become durable notes without skipping review - [[70 Jarvis Decision Log]] is where retrieval and memory-policy changes should be recorded - [[78 AI Runtime Agent Engineering Principles]] is the runtime lens for keeping vault reads explicit and cheap - [[80 Jarvis Roadmap]] is where this strategy becomes product direction instead of just storage structure - [[91 Vault Changelog]] and [[93 Vault Maintenance]] are the provenance and upkeep layer that keep the strategy self-sustaining",
-          "keywords": [
-            "vault",
-            "should",
-            "jarvis",
-            "runtime",
-            "strategy",
-            "capture",
-            "workflow",
-            "defines",
-            "raw",
-            "material",
-            "become",
-            "durable"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "raw/readme-md.md",
-      "title": "Ingested File: README.md",
-      "preview": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Brain links: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]] Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Features - **Voice + text interface** \u2014 speec",
+      "path": "raw/Product Surface Source.md",
+      "title": "Product Surface Source",
+      "preview": "Product Surface Source Source path: /Users/truthseeker/jarvis-ai/README.md Brain links: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]] Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI. Features - **Voice + text interface** \u2014 speech-",
       "keywords": [
         "jarvis",
         "vault",
@@ -711,13 +240,13 @@
         "current",
         "raw",
         "indexes",
-        "file",
+        "source",
         "macos"
       ],
-      "chars": 7261,
+      "chars": 7259,
       "sections": [
         {
-          "heading": "Ingested File: README.md",
+          "heading": "Product Surface Source",
           "level": 1,
           "page": null,
           "line_start": 1,
@@ -1011,52 +540,523 @@
       ]
     },
     {
+      "path": "raw/eval-self-improve-patterns.md",
+      "title": "Eval Pattern: self_improve",
+      "preview": "Eval Pattern: self_improve Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete",
+      "keywords": [
+        "improve",
+        "should",
+        "self",
+        "recent",
+        "evidence",
+        "eval",
+        "jarvis",
+        "vault",
+        "brain",
+        "runtime",
+        "decision",
+        "log",
+        "changelog",
+        "maintenance",
+        "enough",
+        "changes",
+        "not",
+        "pattern",
+        "related",
+        "notes"
+      ],
+      "chars": 942,
+      "sections": [
+        {
+          "heading": "Eval Pattern: self_improve",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]]",
+          "keywords": [
+            "jarvis",
+            "vault",
+            "related",
+            "brain",
+            "notes",
+            "runtime",
+            "agent",
+            "engineering",
+            "principles",
+            "decision",
+            "log",
+            "roadmap"
+          ]
+        },
+        {
+          "heading": "423574acb974",
+          "level": 2,
+          "page": null,
+          "line_start": 5,
+          "text": "Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes. User input: improve yourself Response: Analyzing my own code and generating improvements. This will take a moment... Analysis complete: Not enough recent eval evidence. Need at least 2 recent logged failures.",
+          "keywords": [
+            "recent",
+            "evidence",
+            "improve",
+            "should",
+            "enough",
+            "eval",
+            "issue",
+            "self",
+            "only",
+            "act",
+            "there",
+            "failure"
+          ]
+        },
+        {
+          "heading": "Why This Belongs In The Brain",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "text": "- supports the local-first guardrail that self-improve should be evidence-gated, not impulse-driven - reinforces the runtime principle that maintenance and mutation should stay explicit, bounded, and reviewable - should be referenced when logging future self-improve policy changes in [[70 Jarvis Decision Log]] or [[91 Vault Changelog]]",
+          "keywords": [
+            "should",
+            "self",
+            "improve",
+            "supports",
+            "local",
+            "first",
+            "guardrail",
+            "evidence",
+            "gated",
+            "not",
+            "impulse",
+            "driven"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/Import Inbox.md",
+      "title": "Import Inbox",
+      "preview": "Import Inbox Use this folder for raw source material that should eventually become part of Jarvis's local brain. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: keep raw provenance traceable while routing durable facts into the curated brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recomme",
+      "keywords": [
+        "raw",
+        "source",
+        "brain",
+        "exports",
+        "openai",
+        "workflow",
+        "synthesis",
+        "keep",
+        "provenance",
+        "traceable",
+        "durable",
+        "facts",
+        "into",
+        "claude",
+        "chatgpt",
+        "export",
+        "projects",
+        "import",
+        "inbox",
+        "use"
+      ],
+      "chars": 860,
+      "sections": [
+        {
+          "heading": "Import Inbox",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Use this folder for raw source material that should eventually become part of Jarvis's local brain. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: keep raw provenance traceable while routing durable facts into the curated brain. Keep imports separated by source so they stay traceable: - claude/ for Claude exports - chatgpt/ for ChatGPT exports - openai/ for OpenAI API or other OpenAI-related exports if needed Recommended workflow: 1. Drop the raw export here unchanged 2. Add a short provenance note if the export format is not obvious 3. Distill durable facts, preferences, projects, and summaries into [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[60 Interview Story Bank]], or [[61 Role Targeting Map]] 4. Avoid treating raw transcripts as the final knowledge layer",
+          "keywords": [
+            "raw",
+            "source",
+            "brain",
+            "exports",
+            "openai",
+            "workflow",
+            "synthesis",
+            "keep",
+            "provenance",
+            "traceable",
+            "durable",
+            "facts"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/chatgpt/2026-04-15-export/IMPORT_NOTE.md",
+      "title": "ChatGPT Export Import Note",
+      "preview": "ChatGPT Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive. Use it to confirm recurring themes, project continuity, and story repetition, not as canonical memory. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/fe8df7223ee4f8be8a31a031ccd810cc8b987ab36f2e811fd05d4417746ef266-2026-04-14-00-12-59-7dae0aecb7454a3b99b11953144b",
+      "keywords": [
+        "json",
+        "conversations",
+        "export",
+        "identity",
+        "interview",
+        "story",
+        "synthesis",
+        "projects",
+        "bank",
+        "role",
+        "targeting",
+        "map",
+        "conversation",
+        "archive",
+        "recurring",
+        "project",
+        "continuity",
+        "2026",
+        "downloads",
+        "staged"
+      ],
+      "chars": 1278,
+      "sections": [
+        {
+          "heading": "ChatGPT Export Import Note",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive. Use it to confirm recurring themes, project continuity, and story repetition, not as canonical memory. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/fe8df7223ee4f8be8a31a031ccd810cc8b987ab36f2e811fd05d4417746ef266-2026-04-14-00-12-59-7dae0aecb7454a3b99b11953144bbad2 Files staged here: - chat.html - export_manifest.json - conversations-000.json - conversations-001.json - conversations-002.json - conversations-003.json - conversations-004.json The original export folder also contains a large attachment archive including audio, images, and generated media. Those originals are intentionally left in Downloads for full-fidelity reference while the core conversation data is staged here for Obsidian and Jarvis distillation. Primary distillation targets: - recurring career and interview patterns -> [[60 Interview Story Bank]] and [[61 Role Targeting Map]] - stable identity or working-style signals -> [[10 Identity]] - Jarvis and other active project continuity -> [[20 Projects]] - high-level cross-export takeaways -> [[50 Synthesis]]",
+          "keywords": [
+            "json",
+            "conversations",
+            "identity",
+            "interview",
+            "story",
+            "export",
+            "synthesis",
+            "projects",
+            "bank",
+            "role",
+            "targeting",
+            "map"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/chatgpt/ChatGPT Import Guide.md",
+      "title": "ChatGPT Import Staging",
+      "preview": "ChatGPT Import Staging Place ChatGPT exports here before processing them into the main Jarvis brain. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[20 Projects]], [[10 Identity]] Purpose: stage broad conversation history, then extract only the durable identity, project, and synthesis signals. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in [[20 Proj",
+      "keywords": [
+        "synthesis",
+        "identity",
+        "should",
+        "chatgpt",
+        "into",
+        "notes",
+        "projects",
+        "only",
+        "project",
+        "import",
+        "staging",
+        "place",
+        "exports",
+        "here",
+        "before",
+        "processing",
+        "them",
+        "main",
+        "jarvis",
+        "brain"
+      ],
+      "chars": 636,
+      "sections": [
+        {
+          "heading": "ChatGPT Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Place ChatGPT exports here before processing them into the main Jarvis brain. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[20 Projects]], [[10 Identity]] Purpose: stage broad conversation history, then extract only the durable identity, project, and synthesis signals. When reviewing an export, separate: - enduring facts worth remembering - one-off conversations that should stay archived only - project notes that belong in [[20 Projects]] - preferences or habits that should live in [[10 Identity]] - cross-session themes that should be condensed into [[50 Synthesis]]",
+          "keywords": [
+            "synthesis",
+            "identity",
+            "should",
+            "into",
+            "notes",
+            "projects",
+            "only",
+            "project",
+            "place",
+            "chatgpt",
+            "exports",
+            "here"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/claude/2026-04-15-export/IMPORT_NOTE.md",
+      "title": "Claude Export Import Note",
+      "preview": "Claude Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction. Prefer this source when identity or long-term context conflicts with noisier archives. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 Files staged here: - users.json - proje",
+      "keywords": [
+        "identity",
+        "export",
+        "json",
+        "source",
+        "projects",
+        "interview",
+        "primary",
+        "durable",
+        "context",
+        "claude",
+        "synthesis",
+        "story",
+        "bank",
+        "role",
+        "targeting",
+        "map",
+        "structured",
+        "users",
+        "memories",
+        "project"
+      ],
+      "chars": 993,
+      "sections": [
+        {
+          "heading": "Claude Export Import Note",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction. Prefer this source when identity or long-term context conflicts with noisier archives. Imported on 2026-04-15 from: - /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 Files staged here: - users.json - projects.json - memories.json - conversations.json This is the clean structured Claude export and should be the primary source for extracting durable memories, identity cues, and project context. Primary distillation targets: - durable identity, working style, and priorities -> [[10 Identity]] - ongoing project and Jarvis context -> [[20 Projects]] - cross-export conclusions -> [[50 Synthesis]] - reusable career and interview framing -> [[60 Interview Story Bank]] and [[61 Role Targeting Map]]",
+          "keywords": [
+            "identity",
+            "json",
+            "source",
+            "projects",
+            "interview",
+            "primary",
+            "export",
+            "durable",
+            "context",
+            "synthesis",
+            "story",
+            "bank"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/claude/Claude Import Guide.md",
+      "title": "Claude Import Staging",
+      "preview": "Claude Import Staging Place Claude conversation exports, summaries, or ZIP contents here before processing. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]] Purpose: stage the strongest durable memory source, then promote only stable identity, project, and decision signals into the curated brain. Good candidates for distillation: - stable user preferences -> [[10 Identity]] - project history -> [[20 Projects]] - recurring goals",
+      "keywords": [
+        "identity",
+        "claude",
+        "here",
+        "notes",
+        "source",
+        "synthesis",
+        "projects",
+        "only",
+        "stable",
+        "project",
+        "into",
+        "import",
+        "staging",
+        "place",
+        "conversation",
+        "exports",
+        "summaries",
+        "zip",
+        "contents",
+        "before"
+      ],
+      "chars": 715,
+      "sections": [
+        {
+          "heading": "Claude Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Place Claude conversation exports, summaries, or ZIP contents here before processing. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]] Purpose: stage the strongest durable memory source, then promote only stable identity, project, and decision signals into the curated brain. Good candidates for distillation: - stable user preferences -> [[10 Identity]] - project history -> [[20 Projects]] - recurring goals - useful explanations worth keeping only when they strengthen [[50 Synthesis]] - decisions and personal operating principles Keep sensitive raw data here until it has been reviewed and rewritten into cleaner notes.",
+          "keywords": [
+            "identity",
+            "here",
+            "notes",
+            "source",
+            "synthesis",
+            "projects",
+            "only",
+            "stable",
+            "project",
+            "into",
+            "place",
+            "claude"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/imports/openai/OpenAI Import Guide.md",
+      "title": "OpenAI Import Staging",
+      "preview": "OpenAI Import Staging Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: hold future OpenAI-origin raw material in the same provenance-first flow as Claude and ChatGPT imports. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory. If this folder is use",
+      "keywords": [
+        "openai",
+        "raw",
+        "material",
+        "folder",
+        "source",
+        "synthesis",
+        "import",
+        "staging",
+        "use",
+        "related",
+        "exports",
+        "structured",
+        "data",
+        "should",
+        "reviewed",
+        "before",
+        "entering",
+        "main",
+        "vault",
+        "connected"
+      ],
+      "chars": 689,
+      "sections": [
+        {
+          "heading": "OpenAI Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: hold future OpenAI-origin raw material in the same provenance-first flow as Claude and ChatGPT imports. This is optional, but it helps keep raw source material organized when multiple tools are feeding Jarvis's local memory. If this folder is used later, route durable material into [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[60 Interview Story Bank]], or [[61 Role Targeting Map]] instead of leaving it as raw archive only.",
+          "keywords": [
+            "raw",
+            "material",
+            "folder",
+            "openai",
+            "source",
+            "synthesis",
+            "use",
+            "related",
+            "exports",
+            "structured",
+            "data",
+            "should"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "raw/jarvis_vault_strategy.md",
+      "title": "Jarvis Vault Strategy",
+      "preview": "Jarvis Vault Strategy Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regene",
+      "keywords": [
+        "vault",
+        "jarvis",
+        "should",
+        "strategy",
+        "local",
+        "runtime",
+        "notes",
+        "capture",
+        "workflow",
+        "decision",
+        "log",
+        "agent",
+        "engineering",
+        "principles",
+        "roadmap",
+        "changelog",
+        "maintenance",
+        "markdown",
+        "prompt",
+        "context"
+      ],
+      "chars": 1334,
+      "sections": [
+        {
+          "heading": "Jarvis Vault Strategy",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap. Raw source material belongs in one place, compiled topic pages belong in another, and cross-topic indexes should be regenerated from local files instead of being hidden in model context. When a request can be answered from local markdown, Jarvis should load only the smallest relevant snippets for that request. The vault is not a giant prompt dump. It is a searchable local knowledge layer.",
+          "keywords": [
+            "vault",
+            "jarvis",
+            "should",
+            "local",
+            "markdown",
+            "prompt",
+            "context",
+            "topic",
+            "request",
+            "related",
+            "brain",
+            "notes"
+          ]
+        },
+        {
+          "heading": "Strategy Connections",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "text": "- [[04 Capture Workflow]] defines how raw material should become durable notes without skipping review - [[70 Jarvis Decision Log]] is where retrieval and memory-policy changes should be recorded - [[78 AI Runtime Agent Engineering Principles]] is the runtime lens for keeping vault reads explicit and cheap - [[80 Jarvis Roadmap]] is where this strategy becomes product direction instead of just storage structure - [[91 Vault Changelog]] and [[93 Vault Maintenance]] are the provenance and upkeep layer that keep the strategy self-sustaining",
+          "keywords": [
+            "vault",
+            "should",
+            "jarvis",
+            "runtime",
+            "strategy",
+            "capture",
+            "workflow",
+            "defines",
+            "raw",
+            "material",
+            "become",
+            "durable"
+          ]
+        }
+      ]
+    },
+    {
       "path": "wiki/brain/00 Home.md",
       "title": "Jarvis Brain Home",
-      "preview": "Jarvis Brain Home This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for act",
+      "preview": "Jarvis Brain Home This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Sourc",
       "keywords": [
         "jarvis",
         "brain",
         "interview",
-        "should",
         "product",
+        "vault",
+        "should",
         "variant",
         "framing",
-        "vault",
         "notes",
         "role",
+        "source",
+        "support",
+        "hub",
         "style",
+        "map",
+        "import",
         "safety",
         "about",
         "systems",
-        "engineering",
-        "raw",
-        "compiled",
-        "note",
-        "map",
-        "core"
+        "engineering"
       ],
-      "chars": 4132,
+      "chars": 4199,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - for the raw-to-compiled-to-brain map - for the human-readable vault contract - for the fastest generated lookup layer - for raw-to-compiled provenance - for compiled topic navigation - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[ingested-file-readme-md]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[Product Surface Bridge]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
-            "brain",
             "interview",
-            "should",
+            "brain",
             "product",
+            "vault",
+            "should",
             "variant",
             "framing",
-            "vault",
             "notes",
             "role",
-            "style",
-            "safety"
+            "source",
+            "support"
           ]
         }
       ]
@@ -1064,30 +1064,30 @@
     {
       "path": "wiki/brain/02 Brain Dashboard.md",
       "title": "Brain Dashboard",
-      "preview": "Brain Dashboard This note is the manual navigation surface for the curated Jarvis brain. Core Map - [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline",
+      "preview": "Brain Dashboard This note is the manual navigation surface for the curated Jarvis brain. Core Map - [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] ",
       "keywords": [
         "jarvis",
         "brain",
+        "vault",
         "variant",
         "map",
+        "product",
         "notes",
-        "vault",
         "should",
         "covers",
         "framing",
         "gives",
-        "product",
         "new",
         "durable",
+        "support",
+        "hub",
+        "layer",
         "work",
         "reusable",
-        "raw",
         "note",
-        "curated",
-        "preserves",
-        "career"
+        "import"
       ],
-      "chars": 4576,
+      "chars": 4614,
       "sections": [
         {
           "heading": "Brain Dashboard",
@@ -1110,7 +1110,7 @@
           "level": 2,
           "page": null,
           "line_start": 5,
-          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
+          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
           "keywords": [
             "jarvis",
             "variant",
@@ -1130,7 +1130,7 @@
           "heading": "Use This Dashboard For",
           "level": 2,
           "page": null,
-          "line_start": 40,
+          "line_start": 42,
           "text": "- orienting inside the brain quickly - checking the capture and metadata rules before adding new durable notes - checking whether a fact belongs in identity, project, synthesis, or stories - deciding which durable note should absorb new source material - jumping into the next curation tasks without searching raw imports",
           "keywords": [
             "checking",
@@ -1151,7 +1151,7 @@
           "heading": "Source Paths",
           "level": 2,
           "page": null,
-          "line_start": 48,
+          "line_start": 50,
           "text": "- Raw imports live under vault/raw/imports/ - Curated long-term notes live under vault/wiki/brain/ - The visual Obsidian map lives in [[81 Jarvis Brain Map]]",
           "keywords": [
             "raw",
@@ -1172,28 +1172,28 @@
           "heading": "Support Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 54,
-          "text": "- explains how raw, compiled, curated, and index layers fit together. - is the human-readable operating contract for the whole vault. - is the quickest generated lookup surface. - traces raw files into compiled notes. - is the generated topic entrypoint. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[ingested-file-readme-md]] is the compiled product-surface bridge back to repo truth.",
+          "line_start": 56,
+          "text": "- [[06 Vault Support Hub]] is the main support-layer anchor. - [[07 Import Source Hub]] is the main import-layer anchor. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[Product Surface Bridge]] is the compiled product-surface bridge back to repo truth.",
           "keywords": [
-            "compiled",
-            "raw",
-            "vault",
-            "generated",
-            "surface",
             "bridge",
+            "vault",
+            "support",
+            "hub",
+            "main",
+            "layer",
+            "anchor",
+            "import",
             "self",
             "improve",
-            "explains",
-            "curated",
-            "index",
-            "layers"
+            "product",
+            "surface"
           ]
         },
         {
           "heading": "Obsidian Usage",
           "level": 2,
           "page": null,
-          "line_start": 65,
+          "line_start": 64,
           "text": "- Open Graph View to see how the curated notes cluster. - Open [[81 Jarvis Brain Map]] for a cleaner designed map of the same structure. - Use vault/templates/ when creating new durable note types. - Use backlinks from any brain note to see where Jarvis should deepen the knowledge next.",
           "keywords": [
             "open",
@@ -1222,12 +1222,13 @@
         "should",
         "note",
         "brain",
-        "contract",
         "vault",
+        "contract",
         "write",
         "only",
         "policy",
         "task",
+        "hub",
         "generated",
         "canonical",
         "schema",
@@ -1235,10 +1236,9 @@
         "durable",
         "read",
         "append",
-        "into",
-        "changes"
+        "into"
       ],
-      "chars": 5564,
+      "chars": 5675,
       "sections": [
         {
           "heading": "---",
@@ -1266,10 +1266,12 @@
           "level": 1,
           "page": null,
           "line_start": 23,
-          "text": "Purpose: keep the Jarvis brain queryable, linkable, and durable without depending on any Obsidian plugin runtime. Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[93 Vault Maintenance]]",
+          "text": "Purpose: keep the Jarvis brain queryable, linkable, and durable without depending on any Obsidian plugin runtime. Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[04 Capture Workflow]], [[06 Vault Support Hub]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[93 Vault Maintenance]]",
           "keywords": [
             "jarvis",
             "brain",
+            "vault",
+            "hub",
             "purpose",
             "keep",
             "queryable",
@@ -1277,9 +1279,7 @@
             "durable",
             "without",
             "depending",
-            "any",
-            "obsidian",
-            "plugin"
+            "any"
           ]
         },
         {
@@ -1518,20 +1518,20 @@
           "level": 2,
           "page": null,
           "line_start": 158,
-          "text": "- explains where schema applies across raw, compiled, and curated layers. - is the provenance layer that should stay compatible with this schema. - and are generated read surfaces, not schema owners. - is the human-readable vault contract that should stay aligned with this note.",
+          "text": "- [[06 Vault Support Hub]] is the grouped support-layer anchor for these references. - explains where schema applies across raw, compiled, and curated layers. - is the provenance layer that should stay compatible with this schema. - and are generated read surfaces, not schema owners. - is the human-readable vault contract that should stay aligned with this note.",
           "keywords": [
             "schema",
+            "vault",
+            "support",
+            "layer",
             "should",
             "stay",
-            "explains",
-            "applies",
-            "across",
-            "raw",
-            "compiled",
-            "curated",
-            "layers",
-            "provenance",
-            "layer"
+            "hub",
+            "grouped",
+            "anchor",
+            "these",
+            "references",
+            "explains"
           ]
         }
       ]
@@ -1546,23 +1546,23 @@
         "brain",
         "notes",
         "note",
-        "capture",
-        "should",
         "raw",
-        "wiki",
+        "capture",
         "workflow",
+        "hub",
+        "should",
+        "source",
+        "wiki",
         "changelog",
         "add",
         "over",
-        "source",
         "decision",
         "log",
-        "hub",
+        "import",
         "durable",
-        "template",
-        "update"
+        "template"
       ],
-      "chars": 3023,
+      "chars": 3230,
       "sections": [
         {
           "heading": "---",
@@ -1590,9 +1590,11 @@
           "level": 1,
           "page": null,
           "line_start": 24,
-          "text": "Purpose: imitate the best QuickAdd and Templater workflows without relying on plugin scripting for core Jarvis behavior. Linked notes: [[03 Brain Schema]], [[05 Source Inventory]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[91 Vault Changelog]]",
+          "text": "Purpose: imitate the best QuickAdd and Templater workflows without relying on plugin scripting for core Jarvis behavior. Linked notes: [[03 Brain Schema]], [[05 Source Inventory]], [[07 Import Source Hub]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[91 Vault Changelog]]",
           "keywords": [
             "jarvis",
+            "source",
+            "hub",
             "purpose",
             "imitate",
             "best",
@@ -1601,9 +1603,7 @@
             "workflows",
             "without",
             "relying",
-            "plugin",
-            "scripting",
-            "core"
+            "plugin"
           ]
         },
         {
@@ -1674,27 +1674,27 @@
           "level": 2,
           "page": null,
           "line_start": 56,
-          "text": "- is the quickest explanation of how raw, compiled, and curated notes relate. - should reflect every raw-to-compiled step that this workflow creates. - and are downstream generated outputs from successful capture and wiki rebuilds. - should stay aligned with this workflow so the human-readable contract matches the actual vault behavior.",
+          "text": "- [[06 Vault Support Hub]] groups the support-layer references that this workflow depends on. - [[07 Import Source Hub]] groups the raw import entry points that feed this workflow. - is the quickest explanation of how raw, compiled, and curated notes relate. - should reflect every raw-to-compiled step that this workflow creates. - and are downstream generated outputs from successful capture and wiki rebuilds. - should stay aligned with this workflow so the human-readable contract matches the actual vault behavior.",
           "keywords": [
+            "workflow",
             "raw",
+            "vault",
+            "support",
+            "hub",
+            "groups",
+            "import",
             "compiled",
             "should",
-            "workflow",
-            "quickest",
-            "explanation",
-            "curated",
-            "notes",
-            "relate",
-            "reflect",
-            "every",
-            "step"
+            "layer",
+            "references",
+            "depends"
           ]
         },
         {
           "heading": "Promotion Rules",
           "level": 2,
           "page": null,
-          "line_start": 63,
+          "line_start": 65,
           "text": "Promote material into the curated brain only when it improves one of these: - identity grounding - project continuity - reusable stories - technical playbooks - product decisions - roadmap clarity If it does not improve one of those, keep it in raw sources or a temporary working note.",
           "keywords": [
             "one",
@@ -1715,7 +1715,7 @@
           "heading": "Mutation Rules",
           "level": 2,
           "page": null,
-          "line_start": 76,
+          "line_start": 78,
           "text": "When Jarvis gains more direct vault tools later, prefer: - heading-level edits over whole-file rewrites - frontmatter patching over freeform metadata drift - explicit note references over hidden context - template-backed note creation over ad hoc structures - [[92 Agent Inbox]] for open-ended background curation that should stay reviewable before it becomes canonical memory - append_only notes for continuous agent maintenance work - propose_only notes when Jarvis should gather candidate changes under vault/wiki/candidates/ without directly rewriting the canon - explicit promotion when a candidate update is accepted into the canonical note",
           "keywords": [
             "over",
@@ -1736,7 +1736,7 @@
           "heading": "Major-Change Rule",
           "level": 2,
           "page": null,
-          "line_start": 89,
+          "line_start": 91,
           "text": "If a capture changes the way Jarvis should reason, route, remember, or present itself, add an entry to [[91 Vault Changelog]] and link the affected note from [[70 Jarvis Decision Log]] or [[80 Jarvis Roadmap]].",
           "keywords": [
             "jarvis",
@@ -1758,15 +1758,15 @@
     {
       "path": "wiki/brain/05 Source Inventory.md",
       "title": "Source Inventory",
-      "preview": "Source Inventory This note tracks the major raw data sources that have been staged for Jarvis's local brain. Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]], [[91 Vault Changelog]] 2026-04-15 Import Snapshot Claude export - staged path: vault/raw/imports/claude/2026-04-15-export/ - original source: /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 - files staged: users.json, projects.json, memories.json",
+      "preview": "Source Inventory This note tracks the major raw data sources that have been staged for Jarvis's local brain. Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[07 Import Source Hub]], [[50 Synthesis]], [[91 Vault Changelog]] 2026-04-15 Import Snapshot Claude export - staged path: vault/raw/imports/claude/2026-04-15-export/ - original source: /Users/truthseeker/Downloads/data-e2ead73c-e61d-468f-9dec-2f4afed70e9b-1776240051-67e193ea-batch-0000 - files staged: users.json, pr",
       "keywords": [
+        "source",
         "export",
         "users",
         "json",
         "staged",
         "truthseeker",
         "downloads",
-        "source",
         "raw",
         "synthesis",
         "vault",
@@ -1779,16 +1779,16 @@
         "jarvis",
         "brain",
         "notes",
-        "imports"
+        "import"
       ],
-      "chars": 2782,
+      "chars": 2834,
       "sections": [
         {
           "heading": "Source Inventory",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note tracks the major raw data sources that have been staged for Jarvis's local brain. Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]], [[91 Vault Changelog]]",
+          "text": "This note tracks the major raw data sources that have been staged for Jarvis's local brain. Linked notes: [[00 Home]], [[03 Brain Schema]], [[04 Capture Workflow]], [[07 Import Source Hub]], [[50 Synthesis]], [[91 Vault Changelog]]",
           "keywords": [
             "brain",
             "note",
@@ -1851,7 +1851,7 @@
           "level": 2,
           "page": null,
           "line_start": 23,
-          "text": "1. identity and stable personal context 2. Jarvis product direction and recurring project threads 3. communication and collaboration preferences 4. timeline milestones and major decisions 5. reusable synthesis from long conversation history The staged raw files are for provenance and extraction. The actual Jarvis brain should still be distilled into concise markdown notes rather than treated as a transcript dump. Use this note as the provenance bridge between vault/raw/imports/, [[50 Synthesis]], and the reusable memory layers like [[10 Identity]], [[20 Projects]], and [[60 Interview Story Bank]].",
+          "text": "1. identity and stable personal context 2. Jarvis product direction and recurring project threads 3. communication and collaboration preferences 4. timeline milestones and major decisions 5. reusable synthesis from long conversation history The staged raw files are for provenance and extraction. The actual Jarvis brain should still be distilled into concise markdown notes rather than treated as a transcript dump. Use this note as the provenance bridge between [[07 Import Source Hub]], vault/raw/imports/, [[50 Synthesis]], and the reusable memory layers like [[10 Identity]], [[20 Projects]], and [[60 Interview Story Bank]].",
           "keywords": [
             "identity",
             "jarvis",
@@ -1907,6 +1907,255 @@
             "amanimranresume2026",
             "pdf",
             "highest"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/06 Vault Support Hub.md",
+      "title": "---",
+      "preview": "--- type: brain_meta area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - vault - support - navigation related: - \"[[00 Home]]\" - \"[[02 Brain Dashboard]]\" - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[93 Vault Maintenance]]\" --- Vault Support Hub Purpose: collapse the support-layer guides, indexes, and overview notes into one deliberate navigation node so the Obsid",
+      "keywords": [
+        "vault",
+        "brain",
+        "support",
+        "jarvis",
+        "curated",
+        "2026",
+        "navigation",
+        "home",
+        "dashboard",
+        "schema",
+        "capture",
+        "workflow",
+        "maintenance",
+        "hub",
+        "guides",
+        "indexes",
+        "notes",
+        "graph",
+        "strategy",
+        "type"
+      ],
+      "chars": 1017,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: brain_meta area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - vault - support - navigation related: - \"[[00 Home]]\" - \"[[02 Brain Dashboard]]\" - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[93 Vault Maintenance]]\" ---",
+          "keywords": [
+            "brain",
+            "vault",
+            "2026",
+            "type",
+            "meta",
+            "area",
+            "owner",
+            "jarvis",
+            "write",
+            "policy",
+            "curated",
+            "review"
+          ]
+        },
+        {
+          "heading": "Vault Support Hub",
+          "level": 1,
+          "page": null,
+          "line_start": 25,
+          "text": "Purpose: collapse the support-layer guides, indexes, and overview notes into one deliberate navigation node so the Obsidian graph stays readable. Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[03 Brain Schema]], [[04 Capture Workflow]], [[93 Vault Maintenance]]",
+          "keywords": [
+            "notes",
+            "brain",
+            "purpose",
+            "collapse",
+            "support",
+            "layer",
+            "guides",
+            "indexes",
+            "overview",
+            "into",
+            "one",
+            "deliberate"
+          ]
+        },
+        {
+          "heading": "Support Guides",
+          "level": 2,
+          "page": null,
+          "line_start": 31,
+          "text": "- - - -",
+          "keywords": []
+        },
+        {
+          "heading": "Generated Indexes",
+          "level": 2,
+          "page": null,
+          "line_start": 38,
+          "text": "- - -",
+          "keywords": []
+        },
+        {
+          "heading": "Strategy Bridges",
+          "level": 2,
+          "page": null,
+          "line_start": 44,
+          "text": "- [[jarvis-vault-strategy]] - [[eval-pattern-self-improve]] - [[Product Surface Bridge]]",
+          "keywords": [
+            "jarvis",
+            "vault",
+            "strategy",
+            "eval",
+            "pattern",
+            "self",
+            "improve",
+            "product",
+            "surface",
+            "bridge"
+          ]
+        },
+        {
+          "heading": "Use This Hub For",
+          "level": 2,
+          "page": null,
+          "line_start": 50,
+          "text": "- orienting new vault contributors quickly - tracing how support docs relate to the curated brain - keeping the graph clustered around a few durable anchors instead of many filename-shaped leaf nodes",
+          "keywords": [
+            "orienting",
+            "new",
+            "vault",
+            "contributors",
+            "quickly",
+            "tracing",
+            "support",
+            "docs",
+            "relate",
+            "curated",
+            "brain",
+            "keeping"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/07 Import Source Hub.md",
+      "title": "---",
+      "preview": "--- type: brain_meta area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - vault - imports - provenance related: - \"[[05 Source Inventory]]\" - \"[[04 Capture Workflow]]\" - \"[[50 Synthesis]]\" - \"[[60 Interview Story Bank]]\" --- Import Source Hub Purpose: give the raw import layer one deliberate anchor so staged source families connect into the brain through provenance and distil",
+      "keywords": [
+        "source",
+        "inventory",
+        "synthesis",
+        "import",
+        "brain",
+        "provenance",
+        "interview",
+        "story",
+        "bank",
+        "raw",
+        "vault",
+        "curated",
+        "2026",
+        "capture",
+        "workflow",
+        "into",
+        "through",
+        "distillation",
+        "folders",
+        "notes"
+      ],
+      "chars": 1095,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: brain_meta area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - vault - imports - provenance related: - \"[[05 Source Inventory]]\" - \"[[04 Capture Workflow]]\" - \"[[50 Synthesis]]\" - \"[[60 Interview Story Bank]]\" ---",
+          "keywords": [
+            "vault",
+            "source",
+            "2026",
+            "type",
+            "brain",
+            "meta",
+            "area",
+            "owner",
+            "jarvis",
+            "write",
+            "policy",
+            "curated"
+          ]
+        },
+        {
+          "heading": "Import Source Hub",
+          "level": 1,
+          "page": null,
+          "line_start": 24,
+          "text": "Purpose: give the raw import layer one deliberate anchor so staged source families connect into the brain through provenance and distillation instead of floating as isolated folders. Linked notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[60 Interview Story Bank]]",
+          "keywords": [
+            "source",
+            "purpose",
+            "give",
+            "raw",
+            "import",
+            "layer",
+            "one",
+            "deliberate",
+            "anchor",
+            "staged",
+            "families",
+            "connect"
+          ]
+        },
+        {
+          "heading": "Import Entry Points",
+          "level": 2,
+          "page": null,
+          "line_start": 30,
+          "text": "- - - -",
+          "keywords": []
+        },
+        {
+          "heading": "Distillation Targets",
+          "level": 2,
+          "page": null,
+          "line_start": 37,
+          "text": "- [[05 Source Inventory]] - [[10 Identity]] - [[20 Projects]] - [[50 Synthesis]] - [[60 Interview Story Bank]] - [[61 Role Targeting Map]]",
+          "keywords": [
+            "source",
+            "inventory",
+            "identity",
+            "projects",
+            "synthesis",
+            "interview",
+            "story",
+            "bank",
+            "role",
+            "targeting",
+            "map"
+          ]
+        },
+        {
+          "heading": "Rules",
+          "level": 2,
+          "page": null,
+          "line_start": 46,
+          "text": "- raw exports stay raw - provenance belongs in [[05 Source Inventory]] - durable conclusions move into the curated brain, not the import folders - noisy transcript history should route through [[50 Synthesis]] before it touches canonical notes",
+          "keywords": [
+            "raw",
+            "exports",
+            "stay",
+            "provenance",
+            "belongs",
+            "source",
+            "inventory",
+            "durable",
+            "conclusions",
+            "move",
+            "into",
+            "curated"
           ]
         }
       ]
@@ -5313,7 +5562,7 @@
         "instead",
         "memory"
       ],
-      "chars": 7590,
+      "chars": 7595,
       "sections": [
         {
           "heading": "Jarvis Decision Log",
@@ -5378,7 +5627,7 @@
           "level": 3,
           "page": null,
           "line_start": 37,
-          "text": "- Date: 2026-04-15 - Decision: Use the local vault as the shared source of truth for both Jarvis and Obsidian rather than creating a separate hidden memory store. - Why: Human-readable notes are easier to maintain, verify, edit, and grow over time. - Tradeoffs: Distillation work is required; raw exports cannot simply be dumped in and expected to become good memory. - Files or systems affected: vault/README.md, vault/wiki/brain/, vault/raw/imports/ - Revisit when: the note volume grows enough that we need stronger indexing, backlinks, or structured metadata.",
+          "text": "- Date: 2026-04-15 - Decision: Use the local vault as the shared source of truth for both Jarvis and Obsidian rather than creating a separate hidden memory store. - Why: Human-readable notes are easier to maintain, verify, edit, and grow over time. - Tradeoffs: Distillation work is required; raw exports cannot simply be dumped in and expected to become good memory. - Files or systems affected: vault/Vault Guide.md, vault/wiki/brain/, vault/raw/imports/ - Revisit when: the note volume grows enough that we need stronger indexing, backlinks, or structured metadata.",
           "keywords": [
             "vault",
             "memory",
@@ -8448,25 +8697,25 @@
         "vault",
         "brain",
         "notes",
-        "jarvis",
         "added",
+        "jarvis",
         "capture",
-        "inbox",
-        "candidate",
         "into",
         "instead",
+        "inbox",
+        "candidate",
         "stale",
         "under",
         "curator",
         "note",
         "can",
+        "only",
         "explicit",
         "review",
         "task",
-        "changelog",
-        "schema"
+        "changelog"
       ],
-      "chars": 7023,
+      "chars": 7487,
       "sections": [
         {
           "heading": "---",
@@ -8699,17 +8948,17 @@
           "level": 3,
           "page": null,
           "line_start": 99,
-          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes",
+          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact",
           "keywords": [
             "notes",
             "candidate",
-            "stale",
             "added",
-            "inbox",
             "into",
             "instead",
-            "review",
+            "stale",
             "vault",
+            "inbox",
+            "review",
             "can",
             "items",
             "maintenance"
@@ -9007,6 +9256,57 @@
       ]
     },
     {
+      "path": "wiki/brain/Jarvis Brain Guide.md",
+      "title": "Jarvis Brain",
+      "preview": "Jarvis Brain This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Use [[02 Brain Dashboard]] as the entry point, [[05 Source Inventory]] for imported-source provenance, [[91 Vault Changelog]] for major changes, and [[93 Vault Maintenance]] for upkeep tasks that should not be mixed into durable brain notes. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tas",
+      "keywords": [
+        "vault",
+        "maintenance",
+        "notes",
+        "jarvis",
+        "brain",
+        "source",
+        "into",
+        "durable",
+        "tasks",
+        "exports",
+        "instead",
+        "them",
+        "raw",
+        "folder",
+        "obsidian",
+        "friendly",
+        "truth",
+        "long",
+        "lived",
+        "human"
+      ],
+      "chars": 929,
+      "sections": [
+        {
+          "heading": "Jarvis Brain",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Use [[02 Brain Dashboard]] as the entry point, [[05 Source Inventory]] for imported-source provenance, [[91 Vault Changelog]] for major changes, and [[93 Vault Maintenance]] for upkeep tasks that should not be mixed into durable brain notes. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tasks - link projects, people, and timeline events when they reinforce each other - distill transcript exports instead of pasting them wholesale Suggested maintenance flow: 1. ingest raw exports into vault/raw/imports/ 2. summarize or rewrite them here 3. refresh the vault index so Jarvis can ground on the new notes 4. route cleanup and maintenance work into [[93 Vault Maintenance]] instead of scattering it through durable notes",
+          "keywords": [
+            "vault",
+            "maintenance",
+            "notes",
+            "source",
+            "into",
+            "durable",
+            "jarvis",
+            "brain",
+            "tasks",
+            "exports",
+            "instead",
+            "them"
+          ]
+        }
+      ]
+    },
+    {
       "path": "wiki/brain/Local Reasoning Model.md",
       "title": "---",
       "preview": "--- type: brain_note area: engineering owner: jarvis write_policy: curated review_required: true status: active source: repo confidence: medium created: 2026-04-15 updated: 2026-04-16 version: 3 tags: - brain - local-model - reasoning related: - \"[[00 Home]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[80 Jarvis Roadmap]]\" --- Local Reasoning Model Purpose: capture the current local reasoning-model posture that Jarvis should optimize around. Linked notes: [[00 Home]], [[20 Projects]]",
@@ -9163,58 +9463,7 @@
       ]
     },
     {
-      "path": "wiki/brain/README.md",
-      "title": "Jarvis Brain",
-      "preview": "Jarvis Brain This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Use [[02 Brain Dashboard]] as the entry point, [[05 Source Inventory]] for imported-source provenance, [[91 Vault Changelog]] for major changes, and [[93 Vault Maintenance]] for upkeep tasks that should not be mixed into durable brain notes. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tas",
-      "keywords": [
-        "vault",
-        "maintenance",
-        "notes",
-        "jarvis",
-        "brain",
-        "source",
-        "into",
-        "durable",
-        "tasks",
-        "exports",
-        "instead",
-        "them",
-        "raw",
-        "folder",
-        "obsidian",
-        "friendly",
-        "truth",
-        "long",
-        "lived",
-        "human"
-      ],
-      "chars": 929,
-      "sections": [
-        {
-          "heading": "Jarvis Brain",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "This folder is the Obsidian-friendly source of truth for Jarvis's long-lived human-readable knowledge. Use [[02 Brain Dashboard]] as the entry point, [[05 Source Inventory]] for imported-source provenance, [[91 Vault Changelog]] for major changes, and [[93 Vault Maintenance]] for upkeep tasks that should not be mixed into durable brain notes. Design rules: - write short notes that are easy to verify - prefer one concept per section - keep durable identity separate from temporary tasks - link projects, people, and timeline events when they reinforce each other - distill transcript exports instead of pasting them wholesale Suggested maintenance flow: 1. ingest raw exports into vault/raw/imports/ 2. summarize or rewrite them here 3. refresh the vault index so Jarvis can ground on the new notes 4. route cleanup and maintenance work into [[93 Vault Maintenance]] instead of scattering it through durable notes",
-          "keywords": [
-            "vault",
-            "maintenance",
-            "notes",
-            "source",
-            "into",
-            "durable",
-            "jarvis",
-            "brain",
-            "tasks",
-            "exports",
-            "instead",
-            "them"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "wiki/candidates/README.md",
+      "path": "wiki/candidates/Candidate Layer Guide.md",
       "title": "---",
       "preview": "--- type: brain_meta area: vault owner: jarvis write_policy: append_only review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - vault - candidates related: - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[92 Agent Inbox]]\" --- Candidate Layer Purpose: hold staged note updates when Jarvis should propose changes without writing directly into a canonical note. Use [[02 Brain Dashboard]] for the curated brain surface, [[",
       "keywords": [
@@ -9302,6 +9551,141 @@
             "work",
             "canon",
             "jarvis"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/compiled/Product Surface Bridge.md",
+      "title": "Product Surface Bridge",
+      "preview": "Product Surface Bridge Source file: raw/Product Surface Source.md Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]] Summary Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI",
+      "keywords": [
+        "vault",
+        "jarvis",
+        "local",
+        "line",
+        "source",
+        "skill",
+        "screen",
+        "skills",
+        "context",
+        "prompt",
+        "product",
+        "raw",
+        "self",
+        "mode",
+        "use",
+        "surface",
+        "macos",
+        "memory",
+        "live",
+        "can"
+      ],
+      "chars": 5286,
+      "sections": [
+        {
+          "heading": "Product Surface Bridge",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "Source file: raw/Product Surface Source.md Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]",
+          "keywords": [
+            "source",
+            "jarvis",
+            "file",
+            "raw",
+            "product",
+            "surface",
+            "connected",
+            "notes",
+            "roadmap",
+            "runtime",
+            "agent",
+            "engineering"
+          ]
+        },
+        {
+          "heading": "Summary",
+          "level": 2,
+          "page": null,
+          "line_start": 7,
+          "text": "Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+          "keywords": [
+            "source",
+            "jarvis",
+            "product",
+            "surface",
+            "path",
+            "users",
+            "truthseeker",
+            "readme",
+            "personal",
+            "voice",
+            "text",
+            "assistant"
+          ]
+        },
+        {
+          "heading": "Key Terms",
+          "level": 2,
+          "page": null,
+          "line_start": 10,
+          "text": "local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, wiki",
+          "keywords": [
+            "local",
+            "jarvis",
+            "vault",
+            "screen",
+            "can",
+            "mode",
+            "context",
+            "skill",
+            "prompt",
+            "self",
+            "skills",
+            "wiki"
+          ]
+        },
+        {
+          "heading": "Citation Map",
+          "level": 2,
+          "page": null,
+          "line_start": 13,
+          "text": "- Product Surface Source at line 1: Source path: /Users/truthseeker/jarvis-ai/README.md - Jarvis AI at line 5: A personal voice + text AI assistant for macOS. - Features at line 9: - **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs - Requirements at line 28: - macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode - Setup at line 35: 1. - Running at line 79: ``bash - GUI mode (default) at line 82: ./run.sh - Headless / terminal-only at line 85: ./run.sh --no-ui Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto - Skills at line 99: Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it. - Hotkeys at line 115: All hotkeys use Cmd + Option and work system-wide, even during screen share. - Configuration at line 154: All model identifiers and the system prompt live in config.py. - Vault at line 174: Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base.",
+          "keywords": [
+            "vault",
+            "local",
+            "line",
+            "jarvis",
+            "skill",
+            "skills",
+            "screen",
+            "context",
+            "prompt",
+            "only",
+            "markdown",
+            "current"
+          ]
+        },
+        {
+          "heading": "Brain Use",
+          "level": 2,
+          "page": null,
+          "line_start": 27,
+          "text": "- use this page as product-surface evidence, not as the canonical roadmap; the canonical layer is [[80 Jarvis Roadmap]] - use it with [[78 AI Runtime Agent Engineering Principles]] when README claims need to be checked against real runtime behavior - use it with [[70 Jarvis Decision Log]] and [[91 Vault Changelog]] when public-facing product claims change - keep vault-structure interpretation aligned with [[04 Capture Workflow]] so source docs do not become the brain directly",
+          "keywords": [
+            "use",
+            "product",
+            "not",
+            "canonical",
+            "roadmap",
+            "jarvis",
+            "runtime",
+            "claims",
+            "vault",
+            "page",
+            "surface",
+            "evidence"
           ]
         }
       ]
@@ -9436,141 +9820,6 @@
             "needs",
             "explicit",
             "failure",
-            "evidence"
-          ]
-        }
-      ]
-    },
-    {
-      "path": "wiki/compiled/ingested-file-readme-md.md",
-      "title": "Ingested File: README.md",
-      "preview": "Ingested File: README.md Source file: raw/readme-md.md Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]] Summary Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, an",
-      "keywords": [
-        "vault",
-        "jarvis",
-        "local",
-        "line",
-        "skill",
-        "screen",
-        "skills",
-        "readme",
-        "context",
-        "prompt",
-        "source",
-        "raw",
-        "self",
-        "mode",
-        "use",
-        "macos",
-        "memory",
-        "live",
-        "can",
-        "only"
-      ],
-      "chars": 5308,
-      "sections": [
-        {
-          "heading": "Ingested File: README.md",
-          "level": 1,
-          "page": null,
-          "line_start": 1,
-          "text": "Source file: raw/readme-md.md Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]",
-          "keywords": [
-            "jarvis",
-            "source",
-            "file",
-            "raw",
-            "readme",
-            "connected",
-            "notes",
-            "roadmap",
-            "runtime",
-            "agent",
-            "engineering",
-            "principles"
-          ]
-        },
-        {
-          "heading": "Summary",
-          "level": 2,
-          "page": null,
-          "line_start": 7,
-          "text": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
-          "keywords": [
-            "jarvis",
-            "readme",
-            "ingested",
-            "file",
-            "source",
-            "path",
-            "users",
-            "truthseeker",
-            "personal",
-            "voice",
-            "text",
-            "assistant"
-          ]
-        },
-        {
-          "heading": "Key Terms",
-          "level": 2,
-          "page": null,
-          "line_start": 10,
-          "text": "local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, wiki",
-          "keywords": [
-            "local",
-            "jarvis",
-            "vault",
-            "screen",
-            "can",
-            "mode",
-            "context",
-            "skill",
-            "prompt",
-            "self",
-            "skills",
-            "wiki"
-          ]
-        },
-        {
-          "heading": "Citation Map",
-          "level": 2,
-          "page": null,
-          "line_start": 13,
-          "text": "- Ingested File: README.md at line 1: Source path: /Users/truthseeker/jarvis-ai/README.md - Jarvis AI at line 5: A personal voice + text AI assistant for macOS. - Features at line 9: - **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs - Requirements at line 28: - macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode - Setup at line 35: 1. - Running at line 79: ``bash - GUI mode (default) at line 82: ./run.sh - Headless / terminal-only at line 85: ./run.sh --no-ui Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto - Skills at line 99: Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it. - Hotkeys at line 115: All hotkeys use Cmd + Option and work system-wide, even during screen share. - Configuration at line 154: All model identifiers and the system prompt live in config.py. - Vault at line 174: Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base.",
-          "keywords": [
-            "vault",
-            "local",
-            "line",
-            "jarvis",
-            "skill",
-            "skills",
-            "screen",
-            "context",
-            "prompt",
-            "only",
-            "markdown",
-            "current"
-          ]
-        },
-        {
-          "heading": "Brain Use",
-          "level": 2,
-          "page": null,
-          "line_start": 27,
-          "text": "- use this page as product-surface evidence, not as the canonical roadmap; the canonical layer is [[80 Jarvis Roadmap]] - use it with [[78 AI Runtime Agent Engineering Principles]] when README claims need to be checked against real runtime behavior - use it with [[70 Jarvis Decision Log]] and [[91 Vault Changelog]] when public-facing product claims change - keep vault-structure interpretation aligned with [[04 Capture Workflow]] so source docs do not become the brain directly",
-          "keywords": [
-            "use",
-            "product",
-            "not",
-            "canonical",
-            "roadmap",
-            "jarvis",
-            "runtime",
-            "claims",
-            "vault",
-            "page",
-            "surface",
             "evidence"
           ]
         }
@@ -9722,6 +9971,7 @@
         "material",
         "raw",
         "into",
+        "product",
         "layer",
         "local",
         "over",
@@ -9731,13 +9981,12 @@
         "evidence",
         "should",
         "retrieval",
-        "product",
         "runtime",
         "brain",
         "maintenance",
-        "self"
+        "surface"
       ],
-      "chars": 1355,
+      "chars": 1408,
       "sections": [
         {
           "heading": "Jarvis Local Vault Overview",
@@ -9786,20 +10035,20 @@
           "level": 2,
           "page": null,
           "line_start": 18,
-          "text": "- vault/raw/ is source evidence and import material - vault/wiki/compiled/ is the deterministic bridge from raw material into searchable summaries - vault/wiki/brain/ is the curated canonical layer - vault/indexes/ is the retrieval infrastructure, not the source of truth Useful entry points from here: - [[jarvis-vault-strategy]] - [[eval-pattern-self-improve]] - [[ingested-file-readme-md]]",
+          "text": "- vault/raw/ is source evidence and import material - vault/wiki/compiled/ is the deterministic bridge from raw material into searchable summaries - vault/wiki/brain/ is the curated canonical layer - vault/indexes/ is the retrieval infrastructure, not the source of truth Useful entry points from here: - [[06 Vault Support Hub]] - [[07 Import Source Hub]] - [[jarvis-vault-strategy]] - [[eval-pattern-self-improve]] - [[Product Surface Bridge]]",
           "keywords": [
             "vault",
-            "raw",
             "source",
+            "raw",
+            "import",
             "material",
             "wiki",
+            "bridge",
+            "hub",
             "evidence",
-            "import",
             "compiled",
             "deterministic",
-            "bridge",
-            "into",
-            "searchable"
+            "into"
           ]
         }
       ]

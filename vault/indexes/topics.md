@@ -12,13 +12,13 @@ Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when
 Citations:
 - 423574acb974 at line 3
 
-## Ingested File: README.md
-Page: `wiki/compiled/ingested-file-readme-md.md`
-Source: `raw/readme-md.md`
+## Product Surface Bridge
+Page: `wiki/compiled/Product Surface Bridge.md`
+Source: `raw/Product Surface Source.md`
 Keywords: local, jarvis, vault, screen, can, mode, context, skill
-Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
+Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
 Citations:
-- Ingested File: README.md at line 1
+- Product Surface Source at line 1
 - Jarvis AI at line 5
 - Features at line 9
 - Requirements at line 28
