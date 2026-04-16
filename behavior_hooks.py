@@ -67,6 +67,20 @@ MODIFY_VERBS = (
     ">>",
 )
 
+_INTERPRETER_PROTECTED_WRITE_PATTERNS = (
+    r"""open\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*,\s*['"][^'"]*(w|a|\+)""",
+    r"""path\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*\)\.(write_text|write_bytes|unlink|rename)""",
+    r"""path\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*\)\.open\(\s*['"][^'"]*(w|a|\+)""",
+    r"""os\.(remove|unlink)\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*\)""",
+    r"""os\.rename\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*,""",
+    r"""shutil\.(move|copy|copy2)\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*,""",
+    r"""(?:require\(['"]fs['"]\)|fs)\.(writefilesync|appendfilesync|unlinksync|rmsync|renamesync|copyfilesync)\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]""",
+    r"""file\.(write|delete|unlink|rename)\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]""",
+    r"""file\.open\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*,\s*['"][^'"]*(w|a|\+)""",
+    r"""unlink\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*\)""",
+    r"""rename\(\s*['"](?P<path>/system|/library|/bin|/sbin|/usr/bin|/etc)(?:/[^'"]*)?['"]\s*,""",
+)
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -103,6 +117,18 @@ def _is_protected_path(path: str) -> bool:
     return any(normalized == prefix or normalized.startswith(prefix + os.sep) for prefix in PROTECTED_PREFIXES)
 
 
+def _protected_prefix_mentioned_in_interpreter_write(command: str) -> str | None:
+    lower = (command or "").lower()
+    for pattern in _INTERPRETER_PROTECTED_WRITE_PATTERNS:
+        match = re.search(pattern, lower)
+        if match:
+            path = match.group("path")
+            for prefix in PROTECTED_PREFIXES:
+                if path == prefix.lower() or path.startswith(prefix.lower() + "/"):
+                    return prefix
+    return None
+
+
 def pre_shell_command(command: str, cwd: str | None = None, admin: bool = False) -> dict:
     lower = (command or "").lower().strip()
     patterns = HARD_BLOCKED_COMMAND_PATTERNS if max_permissive_profile_enabled() else BLOCKED_COMMAND_PATTERNS
@@ -112,6 +138,20 @@ def pre_shell_command(command: str, cwd: str | None = None, admin: bool = False)
                 "ok": False,
                 "reason": f"Blocked by behavior gate: '{pattern}' is not allowed.",
                 "rule": "blocked_pattern",
+            }
+            _record({"phase": "pre_shell", "admin": admin, "command": command, "cwd": cwd or "", **result})
+            return result
+
+    interpreter_prefix = _protected_prefix_mentioned_in_interpreter_write(lower)
+    if interpreter_prefix:
+        if not (max_permissive_profile_enabled() and admin):
+            result = {
+                "ok": False,
+                "reason": (
+                    f"Blocked by behavior gate: modifying protected system path {interpreter_prefix} "
+                    f"{'requires admin approval.' if max_permissive_profile_enabled() else 'is not allowed through Jarvis shell tools.'}"
+                ),
+                "rule": "protected_path_shell_requires_admin" if max_permissive_profile_enabled() else "protected_path_shell",
             }
             _record({"phase": "pre_shell", "admin": admin, "command": command, "cwd": cwd or "", **result})
             return result

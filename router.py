@@ -128,6 +128,24 @@ def _parse_source_target(text: str) -> str | None:
     return target or None
 
 
+def _parse_background_vault_task(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:queue|run|start|submit)\b\s+(?:a\s+)?(?:background\s+)?(?:vault|brain|obsidian)\s+task\b\s*:?\s+(.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        return match.group(1).strip()
+    match = re.search(
+        r"\b(?:have|let)\b\s+(?:the\s+)?vault\s+curator\b(?:\s+work\s+on)?(?:\s+in\s+the\s+background)?\s*:?\s+(.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def _parse_skill_topic(text: str) -> str | None:
     match = re.search(r"\b(?:create|generate|make|build)\b\s+(?:a\s+)?skill(?:\s+from\s+the\s+vault)?(?:\s+(?:about|for))\s+(.+)", text, re.IGNORECASE)
     if not match:
@@ -1236,6 +1254,21 @@ def route_stream(user_input: str) -> tuple:
         if topic:
             return _s(skill_factory.result_text(skill_factory.create_skill_from_vault(topic))), "Skill"
         return _s("Tell me what topic you want the skill to cover."), "Skill"
+
+    background_vault_task = _parse_background_vault_task(user_input)
+    if background_vault_task:
+        import task_runtime
+
+        task = task_runtime.submit_task(
+            background_vault_task,
+            kind="vault",
+            source="chat_background_vault",
+            meta={"requested_via": "router", "task_lane": "vault"},
+        )
+        vault_capture.add_agent_inbox_item(background_vault_task)
+        return _s(
+            f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
+        ), "Tasks"
 
     # ── Vault capture fast-path (write-back to Obsidian brain notes) ──────────
     # Handles: "add task X", "save to vault: ...", "update changelog: ...",

@@ -200,8 +200,28 @@ def deep_research(
 
 def format_for_voice(result: dict) -> str:
     """Condense a research result to a spoken summary (2-3 sentences)."""
-    prompt = (
-        f"Summarize this research report in 2-3 spoken sentences. "
-        f"No markdown, no bullets — natural spoken language:\n\n{result['report'][:2000]}"
-    )
-    return ask_claude(prompt, model=HAIKU)
+    system_extra = ""
+    query = str(result.get("query", "") or "")
+    technical = False
+    if query:
+        try:
+            import model_router
+            technical = model_router._is_engineering_companion_query(query, "chat")
+            if technical:
+                system_extra = model_router._engineering_companion_grounding(query)
+        except Exception:
+            system_extra = ""
+    if technical:
+        prompt = (
+            "Summarize this research report in 2-3 spoken sentences. "
+            "Lead with the conclusion or recommendation first. "
+            "Then name the key tradeoff, cause, uncertainty, or next verification step. "
+            "No markdown, no bullets — natural spoken language:\n\n"
+            f"{result['report'][:2000]}"
+        )
+    else:
+        prompt = (
+            f"Summarize this research report in 2-3 spoken sentences. "
+            f"No markdown, no bullets — natural spoken language:\n\n{result['report'][:2000]}"
+        )
+    return ask_claude(prompt, model=HAIKU, system_extra=system_extra or None)

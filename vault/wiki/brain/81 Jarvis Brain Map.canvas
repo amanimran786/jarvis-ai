@@ -1,0 +1,415 @@
+{
+  "nodes": [
+    {
+      "id": "home",
+      "type": "file",
+      "file": "00 Home.md",
+      "x": 0,
+      "y": 120,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "dashboard",
+      "type": "file",
+      "file": "02 Brain Dashboard.md",
+      "x": 360,
+      "y": -40,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "schema",
+      "type": "file",
+      "file": "03 Brain Schema.md",
+      "x": 360,
+      "y": 220,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "capture",
+      "type": "file",
+      "file": "04 Capture Workflow.md",
+      "x": 760,
+      "y": 560,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "identity",
+      "type": "file",
+      "file": "10 Identity.md",
+      "x": 760,
+      "y": -220,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "projects",
+      "type": "file",
+      "file": "20 Projects.md",
+      "x": 760,
+      "y": 40,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "preferences",
+      "type": "file",
+      "file": "30 Preferences.md",
+      "x": 760,
+      "y": 300,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "timeline",
+      "type": "file",
+      "file": "40 Timeline.md",
+      "x": 1160,
+      "y": -220,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "synthesis",
+      "type": "file",
+      "file": "50 Synthesis.md",
+      "x": 1160,
+      "y": 40,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "stories",
+      "type": "file",
+      "file": "60 Interview Story Bank.md",
+      "x": 1560,
+      "y": -100,
+      "width": 340,
+      "height": 240
+    },
+    {
+      "id": "decisions",
+      "type": "file",
+      "file": "70 Jarvis Decision Log.md",
+      "x": 1560,
+      "y": 200,
+      "width": 340,
+      "height": 240
+    },
+    {
+      "id": "roadmap",
+      "type": "file",
+      "file": "80 Jarvis Roadmap.md",
+      "x": 1960,
+      "y": 40,
+      "width": 340,
+      "height": 240
+    },
+    {
+      "id": "tasks",
+      "type": "file",
+      "file": "90 Task Hub.md",
+      "x": 1160,
+      "y": 340,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "changelog",
+      "type": "file",
+      "file": "91 Vault Changelog.md",
+      "x": 1560,
+      "y": 500,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "inventory",
+      "type": "file",
+      "file": "05 Source Inventory.md",
+      "x": -40,
+      "y": 420,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "maintenance",
+      "type": "file",
+      "file": "93 Vault Maintenance.md",
+      "x": 1160,
+      "y": 620,
+      "width": 320,
+      "height": 220
+    },
+    {
+      "id": "localreasoning",
+      "type": "file",
+      "file": "Local Reasoning Model.md",
+      "x": 1960,
+      "y": 340,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "overview",
+      "type": "file",
+      "file": "../overview.md",
+      "x": -420,
+      "y": -40,
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "strategy",
+      "type": "file",
+      "file": "../compiled/jarvis-vault-strategy.md",
+      "x": -420,
+      "y": 240,
+      "width": 300,
+      "height": 200
+    },
+    {
+      "id": "sourcemap",
+      "type": "file",
+      "file": "../../indexes/source_map.md",
+      "x": 360,
+      "y": 560,
+      "width": 300,
+      "height": 180
+    },
+    {
+      "id": "topics",
+      "type": "file",
+      "file": "../../indexes/topics.md",
+      "x": 360,
+      "y": 780,
+      "width": 300,
+      "height": 180
+    },
+    {
+      "id": "keywordindex",
+      "type": "file",
+      "file": "../../indexes/keyword_index.md",
+      "x": 40,
+      "y": 780,
+      "width": 300,
+      "height": 180
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "home",
+      "toNode": "dashboard",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "query surface"
+    },
+    {
+      "id": "e2",
+      "fromNode": "home",
+      "toNode": "identity",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "who"
+    },
+    {
+      "id": "e3",
+      "fromNode": "home",
+      "toNode": "projects",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "what"
+    },
+    {
+      "id": "e4",
+      "fromNode": "home",
+      "toNode": "preferences",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "how"
+    },
+    {
+      "id": "e5",
+      "fromNode": "identity",
+      "toNode": "timeline",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e6",
+      "fromNode": "projects",
+      "toNode": "synthesis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e7",
+      "fromNode": "synthesis",
+      "toNode": "stories",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e8",
+      "fromNode": "synthesis",
+      "toNode": "decisions",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e9",
+      "fromNode": "decisions",
+      "toNode": "roadmap",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "e10",
+      "fromNode": "dashboard",
+      "toNode": "tasks",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "open work"
+    },
+    {
+      "id": "e11",
+      "fromNode": "home",
+      "toNode": "schema",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "contract"
+    },
+    {
+      "id": "e12",
+      "fromNode": "schema",
+      "toNode": "capture",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "capture rules"
+    },
+    {
+      "id": "e13",
+      "fromNode": "capture",
+      "toNode": "tasks",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "follow-up"
+    },
+    {
+      "id": "e14",
+      "fromNode": "decisions",
+      "toNode": "changelog",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "provenance"
+    },
+    {
+      "id": "e15",
+      "fromNode": "home",
+      "toNode": "inventory",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "provenance"
+    },
+    {
+      "id": "e16",
+      "fromNode": "inventory",
+      "toNode": "synthesis",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "distill"
+    },
+    {
+      "id": "e17",
+      "fromNode": "tasks",
+      "toNode": "maintenance",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "upkeep"
+    },
+    {
+      "id": "e18",
+      "fromNode": "changelog",
+      "toNode": "maintenance",
+      "fromSide": "left",
+      "toSide": "right",
+      "label": "state"
+    },
+    {
+      "id": "e19",
+      "fromNode": "roadmap",
+      "toNode": "localreasoning",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "model posture"
+    },
+    {
+      "id": "e20",
+      "fromNode": "localreasoning",
+      "toNode": "synthesis",
+      "fromSide": "left",
+      "toSide": "right",
+      "label": "quality"
+    },
+    {
+      "id": "e21",
+      "fromNode": "overview",
+      "toNode": "home",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "entry"
+    },
+    {
+      "id": "e22",
+      "fromNode": "overview",
+      "toNode": "schema",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "structure"
+    },
+    {
+      "id": "e23",
+      "fromNode": "strategy",
+      "toNode": "capture",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "promotion"
+    },
+    {
+      "id": "e24",
+      "fromNode": "strategy",
+      "toNode": "maintenance",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "upkeep"
+    },
+    {
+      "id": "e25",
+      "fromNode": "schema",
+      "toNode": "sourcemap",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "provenance"
+    },
+    {
+      "id": "e26",
+      "fromNode": "capture",
+      "toNode": "topics",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "build outputs"
+    },
+    {
+      "id": "e27",
+      "fromNode": "dashboard",
+      "toNode": "keywordindex",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "lookup"
+    }
+  ]
+}

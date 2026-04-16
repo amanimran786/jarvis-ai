@@ -85,7 +85,25 @@ def run_task(
         f"Steps completed: {[s.description for s in completed]}\n"
         f"Final output preview: {step_results.get(len(steps), '')[:500]}"
     )
-    summary = ask_claude(summary_prompt, model=HAIKU)
+    system_extra = ""
+    technical = False
+    try:
+        import model_router
+        technical = model_router._is_engineering_companion_query(task, "chat")
+        if technical:
+            system_extra = model_router._engineering_companion_grounding(task)
+    except Exception:
+        system_extra = ""
+    if technical:
+        summary_prompt = (
+            "Summarize what was accomplished in this task in 2-3 spoken sentences. "
+            "Lead with the conclusion or fix first. "
+            "Then name the key tradeoff, root cause, or next verification step.\n"
+            f"Task: {task}\n"
+            f"Steps completed: {[s.description for s in completed]}\n"
+            f"Final output preview: {step_results.get(len(steps), '')[:500]}"
+        )
+    summary = ask_claude(summary_prompt, model=HAIKU, system_extra=system_extra or None)
 
     _prog("Task complete", summary[:100])
 

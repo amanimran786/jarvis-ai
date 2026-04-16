@@ -19,6 +19,7 @@ RAW_DIR = VAULT_ROOT / "raw"
 WIKI_DIR = VAULT_ROOT / "wiki"
 INDEXES_DIR = VAULT_ROOT / "indexes"
 OUTPUTS_DIR = VAULT_ROOT / "outputs"
+TEMPLATES_DIR = VAULT_ROOT / "templates"
 INDEX_FILE = INDEXES_DIR / "index.json"
 
 _TEXT_EXTENSIONS = {".md", ".markdown", ".txt"}
@@ -38,10 +39,100 @@ _KNOWLEDGE_PATTERNS = (
     "search the vault",
     "search your knowledge",
 )
+_BRAIN_PATTERNS = (
+    "my background",
+    "my experience",
+    "my projects",
+    "my priorities",
+    "my preferences",
+    "what are we building",
+    "what are we working on",
+    "what am i working on",
+    "jarvis roadmap",
+    "jarvis goals",
+    "jarvis priorities",
+    "career story",
+    "interview stories",
+    "target roles",
+    "role fit",
+    "why anthropic",
+    "why openai",
+    "why apple",
+    "why youtube",
+    "openai fit",
+    "anthropic fit",
+    "apple fit",
+    "youtube fit",
+)
+_MEMORY_PATTERNS = (
+    "what do you know about me",
+    "catch me up",
+    "what did i miss",
+    "what should i focus on",
+    "where are we",
+    "what are my priorities",
+    "what's my background",
+)
+
+
+def _path_bias(path: str) -> int:
+    normalized = (path or "").replace("\\", "/").lower()
+    if normalized.startswith("wiki/brain/"):
+        return 25
+    if normalized.startswith("wiki/"):
+        return 10
+    if normalized.startswith("indexes/"):
+        return 4
+    if normalized.startswith("raw/imports/"):
+        return -12
+    if normalized.startswith("raw/"):
+        return -4
+    return 0
+
+
+def _is_brain_query(query: str) -> bool:
+    lower = (query or "").lower().strip()
+    if not lower:
+        return False
+    if any(pattern in lower for pattern in _BRAIN_PATTERNS):
+        return True
+    short_query = len(lower.split()) <= 8
+    if not short_query:
+        return False
+    first_person_project = (
+        any(token in lower for token in ("my ", "our ", "we ", "jarvis"))
+        and any(token in lower for token in ("project", "projects", "priority", "priorities", "preference", "preferences", "background", "experience", "roadmap", "goal", "goals"))
+    )
+    career_targeting = (
+        any(token in lower for token in ("career", "interview", "role", "story", "stories", "fit"))
+        and any(token in lower for token in ("openai", "anthropic", "apple", "youtube", "jarvis", "background", "experience"))
+    )
+    return first_person_project or career_targeting
+
+
+def _is_memory_context_query(query: str) -> bool:
+    lower = (query or "").lower().strip()
+    return any(pattern in lower for pattern in _MEMORY_PATTERNS)
+
+
+def _rewrite_context_query(query: str, tool: str | None = None) -> str:
+    lower = (query or "").lower().strip()
+    if tool == "memory":
+        if "what do you know about me" in lower:
+            return "identity my background my projects my preferences"
+        if any(pattern in lower for pattern in ("catch me up", "what did i miss", "where are we")):
+            return "my priorities jarvis roadmap current focus"
+        if "what should i focus on" in lower:
+            return "my priorities jarvis roadmap"
+    if "what are we building" in lower or "what are we working on" in lower:
+        return "jarvis roadmap current focus"
+    if "my priorities" in lower:
+        return "my priorities current focus"
+    return query
 
 
 def init_vault() -> None:
-    for path in (RAW_DIR, WIKI_DIR, INDEXES_DIR, OUTPUTS_DIR):
+    for path in (RAW_DIR, WIKI_DIR, INDEXES_DIR, OUTPUTS_DIR, TEMPLATES_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -246,6 +337,7 @@ def search(query: str, topn: int = 3) -> list[dict]:
         score = section_match[0] if section_match else _score_text(query, doc.get("title", ""), doc.get("keywords", []), doc.get("preview", ""))
         if score <= 0:
             continue
+        score += _path_bias(doc.get("path", ""))
         section = section_match[1] if section_match else None
         excerpt_source = (section or {}).get("text") or doc.get("preview", "")
         excerpt = excerpt_source[:320]
@@ -267,7 +359,11 @@ def should_query(query: str, tool: str | None = None) -> bool:
     lower = (query or "").lower()
     if tool in {"deep_research", "knowledge"}:
         return True
+    if tool == "memory" and _is_memory_context_query(query):
+        return True
     if any(pattern in lower for pattern in _KNOWLEDGE_PATTERNS):
+        return True
+    if _is_brain_query(query):
         return True
     if "?" in lower and len(lower.split()) >= 8:
         return True
@@ -277,7 +373,17 @@ def should_query(query: str, tool: str | None = None) -> bool:
 def build_context(query: str, tool: str | None = None, topn: int = 3) -> str:
     if not should_query(query, tool=tool):
         return ""
-    results = search(query, topn=topn)
+    brain_query = _is_brain_query(query)
+    rewritten_query = _rewrite_context_query(query, tool=tool)
+    results = search(rewritten_query, topn=min(topn, 2) if brain_query else topn)
+    if brain_query:
+        curated_hits = [
+            item for item in results
+            if str(item.get("path", "")).replace("\\", "/").lower().startswith("wiki/brain/")
+            and int(item.get("score", 0)) >= 6
+        ]
+        if curated_hits:
+            results = curated_hits[: min(topn, 2)]
     if not results:
         return ""
 

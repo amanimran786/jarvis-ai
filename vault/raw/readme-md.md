@@ -2,6 +2,8 @@
 
 Source path: `/Users/truthseeker/jarvis-ai/README.md`
 
+Brain links: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]
+
 # Jarvis AI
 
 A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
@@ -183,6 +185,13 @@ Jarvis now includes a local markdown vault:
 Use phrases like `refresh the vault index`, `search the vault for X`, or `what's in your local knowledge base`. Jarvis also searches the vault automatically for knowledge-seeking requests and injects only the most relevant snippets into the active request.
 
 You can also say `build the vault wiki` or `compile the wiki`. That runs the deterministic `wiki_builder.py` pipeline, which turns files in `vault/raw/` into compiled pages under `vault/wiki/compiled/` and refreshes the topic and keyword indexes in `vault/indexes/`.
+
+## Brain Relevance
+
+- the product surface described here should stay aligned with [[80 Jarvis Roadmap]]
+- runtime and routing claims here should be checked against [[78 AI Runtime Agent Engineering Principles]]
+- major shifts in these promises should be captured in [[70 Jarvis Decision Log]] and [[91 Vault Changelog]]
+- vault-specific changes should follow [[04 Capture Workflow]] instead of drifting into ad hoc structure
 
 ## Self-Improve Safety
 

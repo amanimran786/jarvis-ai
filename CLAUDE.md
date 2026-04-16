@@ -181,6 +181,27 @@ Do not use Context7 as a substitute for:
 - preserving existing Jarvis patterns
 - verifying packaged macOS app behavior
 
+### Obsidian Brain Contract
+
+The vault is not just a note dump. It is a shared operating surface for Jarvis and Obsidian.
+
+When changing the brain:
+
+- keep raw evidence in `vault/raw/` or `vault/raw/imports/`
+- keep durable curated notes in `vault/wiki/brain/`
+- follow `vault/wiki/brain/03 Brain Schema.md` for metadata, linking, and task style
+- follow `vault/wiki/brain/04 Capture Workflow.md` for promotion and placement rules
+- update `vault/wiki/brain/91 Vault Changelog.md` when a major brain change lands
+
+Prefer:
+
+- concise YAML frontmatter on new operational notes and templates
+- plain markdown tasks that stay useful without plugins
+- deterministic templates under `vault/templates/`
+- `.canvas` files for visual maps instead of plugin-specific drawing formats
+
+Do not turn the brain into plugin-dependent app logic. Borrow the good conventions from Obsidian Git, Dataview, Tasks, QuickAdd, Templater, JSON Canvas, and thin local bridge tools, but keep Jarvis able to read and write the vault correctly as plain markdown.
+
 ## Repo Facts To Preserve
 
 ### Runtime / Entry Points

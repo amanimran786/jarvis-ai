@@ -267,11 +267,26 @@ def _normalize_terse_mode(value: str = "") -> str:
 
 
 def _task_prompt(prompt: str, terse_mode: str = "") -> str:
+    return _task_prompt_for_kind(prompt, kind="chat", terse_mode=terse_mode)
+
+
+def _task_prompt_for_kind(prompt: str, *, kind: str = "chat", terse_mode: str = "") -> str:
+    normalized_kind = (kind or "chat").strip().lower() or "chat"
+    base_prompt = prompt
+    if normalized_kind in {"vault", "knowledge", "memory"}:
+        lower = prompt.lower()
+        if "vault curator" not in lower:
+            base_prompt = (
+                "Use the vault curator to handle this vault task. "
+                "Prefer explicit note refs, heading-level edits, template-backed note creation, "
+                "and the agent inbox when the work should stay queued instead of mutating a canonical note immediately. "
+                f"{prompt}"
+            )
     normalized = _normalize_terse_mode(terse_mode)
     if not normalized:
-        return prompt
+        return base_prompt
     prefix = _TERSE_PREFIXES[normalized]
-    return f"{prefix}: {prompt}"
+    return f"{prefix}: {base_prompt}"
 
 
 def _should_isolate_workspace(kind: str, isolated_workspace: bool | None) -> bool:
@@ -454,7 +469,7 @@ def submit_task(
         "source": source or "api",
         "status": "queued",
         "prompt": prompt,
-        "effective_prompt": _task_prompt(prompt, normalized_terse_mode),
+        "effective_prompt": _task_prompt_for_kind(prompt, kind=normalized_kind, terse_mode=normalized_terse_mode),
         "assigned_agent_id": chosen_agent_id,
         "created_at": created_at,
         "assigned_at": "",

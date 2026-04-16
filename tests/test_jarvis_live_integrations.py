@@ -1,11 +1,13 @@
 import os
 import json
+import socket
 import subprocess
 import time
 import urllib.error
 import urllib.request
 import unittest
 from pathlib import Path
+from contextlib import contextmanager
 
 from fastapi.testclient import TestClient
 
@@ -21,7 +23,12 @@ ALLOW_SIDE_EFFECTS = os.getenv("JARVIS_ALLOW_SIDE_EFFECTS") == "1"
 TEST_IMESSAGE_RECIPIENT = os.getenv("JARVIS_TEST_IMESSAGE_RECIPIENT", "").strip()
 TEST_IMESSAGE_BODY = os.getenv("JARVIS_TEST_IMESSAGE_BODY", "Jarvis live integration test.").strip()
 RUN_PACKAGED_SMOKE = os.getenv("JARVIS_RUN_PACKAGED_SMOKE") == "1"
-PACKAGED_APP = Path("/Users/truthseeker/jarvis-ai/dist/Jarvis.app/Contents/MacOS/Jarvis")
+PACKAGED_APP = Path(
+    os.getenv(
+        "JARVIS_PACKAGED_APP",
+        "/Users/truthseeker/Applications/Jarvis.app/Contents/MacOS/Jarvis",
+    )
+)
 PACKAGED_SMOKE_PORT = os.getenv("JARVIS_PACKAGED_SMOKE_PORT", "9876")
 
 
@@ -39,8 +46,79 @@ def side_effect_only(fn):
 def packaged_smoke_only(fn):
     return unittest.skipUnless(
         RUN_PACKAGED_SMOKE and PACKAGED_APP.is_file(),
-        "Set JARVIS_RUN_PACKAGED_SMOKE=1 and build dist/Jarvis.app first to run the packaged-app smoke test.",
+        "Set JARVIS_RUN_PACKAGED_SMOKE=1 and ensure the installed Jarvis app exists to run the packaged-app smoke test.",
     )(fn)
+
+
+def _reserve_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@contextmanager
+def packaged_app_process():
+    port = str(_reserve_local_port())
+    env = os.environ.copy()
+    env.update(
+        {
+            "JARVIS_API_HOST": "127.0.0.1",
+            "JARVIS_API_PORT": port,
+            "JARVIS_API_TOKEN": "jarvis-packaged-smoke-token",
+        }
+    )
+    proc = subprocess.Popen(
+        [str(PACKAGED_APP), "--no-ui"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        yield proc, port
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+
+def wait_for_packaged_json(
+    path: str,
+    *,
+    port: str,
+    headers: dict | None = None,
+    payload: dict | None = None,
+    deadline_seconds: int = 45,
+    request_timeout: float = 1.5,
+    proc=None,
+):
+    url = f"http://127.0.0.1:{port}{path}"
+    deadline = time.time() + deadline_seconds
+    last_error = ""
+    while time.time() < deadline:
+        if proc is not None and proc.poll() is not None:
+            stdout, stderr = proc.communicate(timeout=1)
+            raise AssertionError(
+                f"Packaged app exited before serving {path}.\n"
+                f"returncode={proc.returncode}\n"
+                f"stdout={stdout}\n"
+                f"stderr={stderr}"
+            )
+        try:
+            body = None if payload is None else json.dumps(payload).encode("utf-8")
+            request = urllib.request.Request(url, data=body, headers=headers or {}, method="GET" if payload is None else "POST")
+            if payload is not None:
+                request.add_header("Content-Type", "application/json")
+            with urllib.request.urlopen(request, timeout=request_timeout) as response:
+                return json.load(response)
+        except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            time.sleep(0.5)
+    raise AssertionError(f"Packaged app did not serve {path} within the timeout window. Last error: {last_error}")
 
 
 class LiveApiReadOnlyTests(unittest.TestCase):
@@ -80,6 +158,21 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         self.assertEqual(label, "Specialized Agents")
         self.assertIn("Specialized agents used", text)
 
+    @live_only
+    def test_router_operator_read_only_shell_smoke(self):
+        stream, label = route_stream("Use the operator to run command: pwd")
+        text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertTrue(text.strip())
+        self.assertTrue("/Users/" in text or "/private/" in text)
+
+    @live_only
+    def test_router_vault_curator_read_smoke(self):
+        stream, label = route_stream("Use the vault curator to read [[80 Jarvis Roadmap]].")
+        text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertIn("Jarvis Roadmap", text)
+
 
 class LiveGoogleReadOnlyTests(unittest.TestCase):
     @live_only
@@ -115,53 +208,32 @@ class LiveSideEffectTests(unittest.TestCase):
 class PackagedAppSmokeTests(unittest.TestCase):
     @packaged_smoke_only
     def test_packaged_app_starts_and_serves_status(self):
-        env = os.environ.copy()
-        env.update(
-            {
-                "JARVIS_API_HOST": "127.0.0.1",
-                "JARVIS_API_PORT": PACKAGED_SMOKE_PORT,
-            }
-        )
-        proc = subprocess.Popen(
-            [str(PACKAGED_APP), "--no-ui"],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        payload = None
-        try:
-            deadline = time.time() + 45
-            url = f"http://127.0.0.1:{PACKAGED_SMOKE_PORT}/status"
-            while time.time() < deadline:
-                if proc.poll() is not None:
-                    stdout, stderr = proc.communicate(timeout=1)
-                    self.fail(
-                        "Packaged app exited before serving /status.\n"
-                        f"returncode={proc.returncode}\n"
-                        f"stdout={stdout}\n"
-                        f"stderr={stderr}"
-                    )
-                try:
-                    with urllib.request.urlopen(url, timeout=1.5) as response:
-                        payload = json.load(response)
-                    break
-                except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError):
-                    time.sleep(0.5)
-
-            self.assertIsNotNone(payload, "Packaged app did not serve /status within the timeout window.")
+        with packaged_app_process() as (proc, port):
+            payload = wait_for_packaged_json("/status", port=port, proc=proc)
             self.assertEqual(payload["status"], "online")
             self.assertEqual(payload["api_host"], "127.0.0.1")
             self.assertTrue(payload.get("api_urls"))
-        finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=5)
+
+    @packaged_smoke_only
+    def test_packaged_app_chat_serves_vault_curator_read(self):
+        headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
+        payload = {
+            "message": "Use the vault curator to read [[80 Jarvis Roadmap]].",
+            "stream": False,
+            "source": "packaged_smoke",
+        }
+        with packaged_app_process() as (proc, port):
+            wait_for_packaged_json("/status", port=port, proc=proc)
+            response = wait_for_packaged_json(
+                "/chat",
+                port=port,
+                headers=headers,
+                payload=payload,
+                request_timeout=15.0,
+                proc=proc,
+            )
+            self.assertEqual(response["model"], "Specialized Agents")
+            self.assertIn("Jarvis Roadmap", response["response"])
 
 
 if __name__ == "__main__":

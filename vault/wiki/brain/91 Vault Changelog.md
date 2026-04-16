@@ -5,8 +5,8 @@ status: active
 source: repo
 confidence: high
 created: 2026-04-15
-updated: 2026-04-15
-version: 3
+updated: 2026-04-16
+version: 4
 tags:
   - vault
   - changelog
@@ -57,6 +57,15 @@ vault_capture.py integrated and all intent tests pass
 - recorded that semantic retrieval uses `ollama-embeddings` with `TF-IDF` fallback still in code
 - recorded that local STT is configured for `faster-whisper`, but the current development shell audit showed an import/runtime gap, so packaged-app verification and shell verification should not be conflated
 
+### Self-sustaining vault lane
+
+- added [[92 Agent Inbox]] as the bounded queue for ongoing background brain-maintenance work
+- taught `vault_curator` to append explicit inbox items instead of only mutating canonical notes
+- added a background `vault` task lane so Jarvis can keep curating the brain while other work continues
+- kept canonical note changes explicit by routing unresolved or open-ended curation into the inbox first
+- added note ownership and `write_policy` metadata to the template/schema contract
+- blocked `generated` and `propose_only` notes from direct curator append paths inside `vault_edit.py`
+
 ## 2026-04-15 (session 2)
 
 ### Obsidian write-back pipeline
@@ -84,3 +93,22 @@ vault_capture.py integrated and all intent tests pass
 - decisions and stories now have field-by-field instructions so the LLM path produces consistent structured output
 
 Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story Bank]] · [[20 Projects]] · [[80 Jarvis Roadmap]]
+
+## 2026-04-16
+
+### Candidate staging lane
+
+- added `vault/wiki/candidates/` as the explicit staging layer between inbox work and canonical notes
+- taught `vault_curator` to stage writes for `propose_only` notes into candidate notes instead of failing dead-end
+- kept `vault_edit.append_under_heading()` strict so canonical notes still fail closed unless the write policy allows direct mutation
+- documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]]
+- added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift
+- added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it
+- added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces `promote`, `requeue`, or `archive` style actions without taking them implicitly
+- added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved
+- tightened native curator behavior so `review_required: true` curated notes stage into candidates instead of appending directly
+- tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into `Done` instead of cluttering active sections
+- added `apply recommended action` support so stale review output can turn into a bounded maintenance command instead of only a suggestion
+- added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually
+- added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review
+- agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes

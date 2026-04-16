@@ -2,6 +2,8 @@
 
 Source file: `raw/readme-md.md`
 
+Connected notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]
+
 ## Summary
 Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.
 
@@ -21,3 +23,10 @@ local, jarvis, vault, screen, can, mode, context, skill, prompt, self, skills, w
 - Hotkeys at line 115: All hotkeys use Cmd + Option and work system-wide, even during screen share.
 - Configuration at line 154: All model identifiers and the system prompt live in config.py.
 - Vault at line 174: Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base.
+
+## Brain Use
+
+- use this page as product-surface evidence, not as the canonical roadmap; the canonical layer is [[80 Jarvis Roadmap]]
+- use it with [[78 AI Runtime Agent Engineering Principles]] when README claims need to be checked against real runtime behavior
+- use it with [[70 Jarvis Decision Log]] and [[91 Vault Changelog]] when public-facing product claims change
+- keep vault-structure interpretation aligned with [[04 Capture Workflow]] so source docs do not become the brain directly

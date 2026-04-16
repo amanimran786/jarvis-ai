@@ -2368,8 +2368,11 @@ class JarvisWindow(QMainWindow):
         try:
             import camera
             result = camera.screenshot_and_describe(
-                "Analyze this screenshot in detail. The user is sharing this with you privately "
-                "during a call. Describe what you see, highlight anything important or actionable."
+                camera._engineering_vision_prompt(
+                    "Analyze this screenshot in detail. The user is sharing this with you privately "
+                    "during a call. Describe what you see, highlight anything important or actionable.",
+                    force=True,
+                )
             )
             speak(result)
             self._add_message(result, "jarvis", "")
@@ -2480,6 +2483,10 @@ class JarvisWindow(QMainWindow):
         _trace_ui_event(self, "classic-toolbar", "live_suggestion", suggestion)
         _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_panel.show()
+        hint = meeting_listener.actionable_hint(suggestion)
+        _force_text_widget_update(self.transcript_label, hint or "Live suggestion ready.")
+        if hasattr(self, "_subtitle"):
+            self._subtitle.setText(hint or "Smart Listen active")
         if suggestion:
             self._add_message(suggestion, "jarvis", "Meeting")
         self._update_meeting_toolbar_layout()
@@ -2488,9 +2495,6 @@ class JarvisWindow(QMainWindow):
         self._apply_live_suggestion_update(suggestion)
 
     def _refresh_live_call_status(self):
-        # The classic window does not expose the richer orbital call-status panel.
-        # Keep this as a shared no-op so event-driven transcript/suggestion updates
-        # can safely call into it without special-casing the window type.
         return
 
     # ── Briefing ───────────────────────────────────────────────────────────────
@@ -3895,9 +3899,16 @@ end tell
         else:
             privacy_line = "Privacy: quiet mode off"
             self.privacy_btn.setStyleSheet(self._action_btn_css(C_TEXT_DIM))
-        self._call_status_label.setText(
-            f"{meeting_line}\n{audio_line}\n{privacy_line}\nScreen scan: {scan_ready}"
-        )
+        hint_line = meeting_listener.actionable_hint(last_suggestion)
+        status_lines = [
+            meeting_line,
+            audio_line,
+            privacy_line,
+            f"Screen scan: {scan_ready}",
+        ]
+        if hint_line:
+            status_lines.append(hint_line)
+        self._call_status_label.setText("\n".join(status_lines))
         self._call_status_label.setStyleSheet(self._call_status_css(tone))
 
     def _toggle_meeting_safe_mode(self):
@@ -3957,6 +3968,7 @@ end tell
         preview = suggestion.strip().replace("\n", " ")
         if len(preview) > 180:
             preview = preview[:177].rstrip() + "..."
+        hint = meeting_listener.actionable_hint(suggestion)
         _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
         if suggestion:
@@ -3964,7 +3976,7 @@ end tell
         self._current_summary = f"SUGGESTION: {preview}"
         self._peek_label.setText(self._current_summary)
         self._top_chip.setText("SMART LISTEN ACTIVE")
-        self.transcript_label.setText("Live suggestion ready.")
+        self.transcript_label.setText(hint or "Live suggestion ready.")
         self._set_tray_visible(True)
 
     def _on_suggestion(self, suggestion: str):

@@ -70,6 +70,7 @@ datas = iter_datas()
 datas += collect_data_files("faster_whisper")
 datas += collect_data_files("kokoro_onnx")
 datas += collect_data_files("espeakng_loader")
+datas = [(src, dest) for src, dest in datas if Path(src).is_file()]
 hiddenimports = sorted(set(
     collect_submodules("PyQt6")
     + collect_submodules("faster_whisper")

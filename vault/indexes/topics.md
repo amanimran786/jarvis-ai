@@ -2,6 +2,8 @@
 
 Compiled topic pages: 3
 
+Use [[02 Brain Dashboard]] to jump from topics into the curated brain, [[05 Source Inventory]] to trace source provenance, and [[91 Vault Changelog]] to see what changed over time.
+
 ## Eval Pattern: self_improve
 Page: `wiki/compiled/eval-pattern-self-improve.md`
 Source: `raw/eval-self-improve-patterns.md`

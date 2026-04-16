@@ -1,5 +1,7 @@
 # Vault Keyword Index
 
+Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists.
+
 - should: Eval Pattern: self_improve, Jarvis Vault Strategy
 - vault: Ingested File: README.md, Jarvis Vault Strategy
 - local: Ingested File: README.md, Jarvis Vault Strategy
