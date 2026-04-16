@@ -11,11 +11,48 @@ from config import LOCAL_TTS_ENABLED, LOCAL_TTS_RATE_WPM, LOCAL_TTS_VOICE
 
 DEFAULT_ENGINE = "say"
 DEFAULT_MACOS_VOICE = "Samantha"
-DEFAULT_RATE_WPM = 190
+DEFAULT_RATE_WPM = 175
 MAX_TEXT_LENGTH = 4000
+_VOICE_CACHE: list[str] | None = None
+_PREFERRED_VOICES = [
+    "Reed (English (US))",
+    "Eddy (English (US))",
+    "Flo (English (US))",
+    "Samantha",
+]
+
+
+def _available_voices() -> list[str]:
+    global _VOICE_CACHE
+    if _VOICE_CACHE is not None:
+        return _VOICE_CACHE
+    try:
+        proc = subprocess.run(
+            [_say_binary(), "-v", "?"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        voices: list[str] = []
+        for line in (proc.stdout or "").splitlines():
+            name = line[:20].strip()
+            if name:
+                voices.append(name)
+        _VOICE_CACHE = voices
+        return voices
+    except Exception:
+        _VOICE_CACHE = []
+        return _VOICE_CACHE
 
 def _configured_voice() -> str:
-    return LOCAL_TTS_VOICE or DEFAULT_MACOS_VOICE
+    requested = (LOCAL_TTS_VOICE or "").strip()
+    available = _available_voices()
+    if requested and requested in available:
+        return requested
+    for preferred in _PREFERRED_VOICES:
+        if preferred in available:
+            return preferred
+    return requested or DEFAULT_MACOS_VOICE
 
 
 def _configured_rate() -> int:
