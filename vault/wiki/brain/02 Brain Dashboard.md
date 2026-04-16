@@ -45,6 +45,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[90 Task Hub]] tracks the next curation and product-memory work.
 - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes.
 - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands.
+- [[94 Brain Health]] gives a deterministic snapshot of graph quality, stale context packs, and weakly linked brain notes.
 - [[91 Vault Changelog]] preserves major brain upgrades and provenance.
 
 ## Use This Dashboard For

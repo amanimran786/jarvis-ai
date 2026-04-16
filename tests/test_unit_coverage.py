@@ -1451,6 +1451,44 @@ class VaultMutationTests(unittest.TestCase):
             self.assertIn("updated: 2026-04-16", updated)
             self.assertIn("version: 5", updated)
 
+    def test_refresh_brain_health_note_writes_generated_note(self):
+        import vault
+        import vault_health
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            (root / "wiki" / "brain").mkdir(parents=True, exist_ok=True)
+            (root / "wiki" / "brain" / "00 Home.md").write_text(
+                "# Jarvis Brain Home\n\nLinks: [[20 Projects]]\n",
+                encoding="utf-8",
+            )
+            (root / "wiki" / "brain" / "20 Projects.md").write_text(
+                "---\nupdated: 2026-04-01\n---\n# Projects\n\nNo outbound links.\n",
+                encoding="utf-8",
+            )
+            pack_dir = root / "indexes" / "context_packs"
+            pack_dir.mkdir(parents=True, exist_ok=True)
+            (pack_dir / "old-pack.md").write_text(
+                "---\nupdated: 2026-04-01\n---\n# Old Pack\n\nLinked notes: [[20 Projects]]\n",
+                encoding="utf-8",
+            )
+            with patch("vault_health.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_health.refresh_brain_health_note(stale_context_days=7)
+            self.assertTrue(result["ok"])
+            health_note = root / result["path"]
+            self.assertTrue(health_note.exists())
+            body = health_note.read_text(encoding="utf-8")
+            self.assertIn("write_policy: generated", body)
+            self.assertIn("# Brain Health", body)
+            self.assertIn("## Weakly Linked Brain Nodes", body)
+            self.assertIn("## Stale Context Packs", body)
+            self.assertIn("[[Old Pack]]", body)
+
 
 # ===========================================================================
 # conversation_context.py

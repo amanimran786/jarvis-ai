@@ -815,6 +815,42 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertIn("Refreshed vault maintenance dashboard at wiki/brain/93 Vault Maintenance.md.", result["output"])
         dashboard_mock.assert_called_once_with(stale_after_days=3)
 
+    def test_vault_curator_native_reports_brain_health_status(self):
+        with patch(
+            "specialized_agent_native.vault_health.brain_health_status",
+            return_value={
+                "ok": True,
+                "doc_count": 62,
+                "brain_note_count": 40,
+                "context_pack_count": 2,
+                "weak_node_count": 3,
+                "duplicate_basename_count": 0,
+                "stale_context_pack_count": 1,
+            },
+        ) as status_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Show brain health status.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Brain health status:", result["output"])
+        self.assertIn("docs=62", result["output"])
+        self.assertIn("weak_nodes=3", result["output"])
+        status_mock.assert_called_once_with(stale_context_days=7)
+
+    def test_vault_curator_native_refreshes_brain_health_note(self):
+        with patch(
+            "specialized_agent_native.vault_health.refresh_brain_health_note",
+            return_value={"ok": True, "path": "wiki/brain/94 Brain Health.md", "action": "refreshed"},
+        ) as health_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Refresh brain health note.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Refreshed brain health note at wiki/brain/94 Brain Health.md.", result["output"])
+        health_mock.assert_called_once_with(stale_context_days=7)
+
     def test_vault_curator_native_archives_candidate_note(self):
         with patch(
             "specialized_agent_native.vault_edit.archive_candidate_note",

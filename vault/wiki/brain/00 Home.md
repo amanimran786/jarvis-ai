@@ -46,6 +46,7 @@ Core note set:
 - [[90 Task Hub]] for open distillation and product-memory tasks
 - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents
 - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands
+- [[94 Brain Health]] for the live graph-health snapshot of weak links, stale packs, and vault cleanup pressure
 - [[91 Vault Changelog]] for major brain upgrades and provenance
 
 Supporting surfaces:

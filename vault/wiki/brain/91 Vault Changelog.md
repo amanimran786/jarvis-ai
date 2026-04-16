@@ -121,3 +121,4 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added a native `coder` verification helper for repo-safe checks like targeted `pytest` and `py_compile`, plus native repo-map lookup
 - added generated `context packs` under `vault/indexes/context_packs/` so Jarvis can build explicit working sets from seed notes and linked notes instead of relying only on broad vault retrieval
 - added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift
+- added generated [[94 Brain Health]] so Jarvis can inspect graph quality, stale context packs, duplicate basenames, and weakly linked brain notes without relying on plugin-only graph heuristics

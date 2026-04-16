@@ -19,6 +19,7 @@ import tools
 import vault_capture
 import vault_context
 import vault_edit
+import vault_health
 
 
 _ADMIN_SHELL_PATTERNS = (
@@ -85,10 +86,20 @@ def _run_vault_curator_hook(task: str) -> dict | None:
         if status_result is not None:
             return {"model": "native/vault_curator", "output": status_result}
 
+    if "brain health status" in lower or "vault health status" in lower:
+        brain_status_result = _brain_health_status(task)
+        if brain_status_result is not None:
+            return {"model": "native/vault_curator", "output": brain_status_result}
+
     if "maintenance dashboard" in lower and any(verb in lower for verb in ("refresh", "update", "build", "create")):
         dashboard_result = _refresh_maintenance_dashboard(task)
         if dashboard_result is not None:
             return {"model": "native/vault_curator", "output": dashboard_result}
+
+    if "brain health" in lower and any(verb in lower for verb in ("refresh", "update", "build", "create", "generate")):
+        brain_health_result = _refresh_brain_health(task)
+        if brain_health_result is not None:
+            return {"model": "native/vault_curator", "output": brain_health_result}
 
     if "promote" in lower and "candidate" in lower:
         promotion_result = _promote_candidate_note(task)
@@ -718,6 +729,33 @@ def _refresh_maintenance_dashboard(task: str) -> str | None:
     if not result.get("ok"):
         return _vault_error_text(result, "Could not refresh the maintenance dashboard.")
     return f"Refreshed vault maintenance dashboard at {result['path']}."
+
+
+def _brain_health_status(task: str) -> str | None:
+    lower = (task or "").lower()
+    day_match = re.search(r"\b(\d+)\s+days?\b", lower)
+    threshold = int(day_match.group(1)) if day_match else 7
+    result = vault_health.brain_health_status(stale_context_days=threshold)
+    if not result.get("ok"):
+        return _vault_error_text(result, "Could not build brain health status.")
+    return (
+        f"Brain health status: docs={result.get('doc_count', 0)}, "
+        f"brain_notes={result.get('brain_note_count', 0)}, "
+        f"context_packs={result.get('context_pack_count', 0)}, "
+        f"weak_nodes={result.get('weak_node_count', 0)}, "
+        f"duplicate_basenames={result.get('duplicate_basename_count', 0)}, "
+        f"stale_context_packs={result.get('stale_context_pack_count', 0)}."
+    )
+
+
+def _refresh_brain_health(task: str) -> str | None:
+    lower = (task or "").lower()
+    day_match = re.search(r"\b(\d+)\s+days?\b", lower)
+    threshold = int(day_match.group(1)) if day_match else 7
+    result = vault_health.refresh_brain_health_note(stale_context_days=threshold)
+    if not result.get("ok"):
+        return _vault_error_text(result, "Could not refresh the brain health note.")
+    return f"Refreshed brain health note at {result['path']}."
 
 
 def _archive_candidate_note(task: str) -> str | None:
