@@ -874,6 +874,43 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertIn("Canonical target for [[Roadmap]]: [[80 Jarvis Roadmap]].", append_mock.call_args.args[2])
         self.assertIn("Requested source reference: [[Roadmap]].", append_mock.call_args.args[2])
 
+    def test_coder_native_repo_map_read_bypasses_model_call(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            return_value={
+                "ok": True,
+                "title": "Jarvis Repo Map",
+                "path": "wiki/brain/09 Jarvis Repo Map.md",
+                "content": "# Jarvis Repo Map\nrouter.py handles routing.",
+                "truncated": False,
+            },
+        ) as read_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("coder", "Use the coder to show me the repo map.")
+        self.assertEqual(result["model"], "native/coder")
+        self.assertIn("Read Jarvis Repo Map from wiki/brain/09 Jarvis Repo Map.md.", result["output"])
+        read_mock.assert_called_once_with("09 Jarvis Repo Map")
+
+    def test_coder_native_verification_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.terminal.run_command", return_value="6 passed") as run_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "coder",
+                "Use the coder to verify with: python3 -m pytest tests/test_jarvis_regression_suite.py -k 'code_reviewer' -q",
+            )
+        self.assertEqual(result["model"], "native/coder")
+        self.assertEqual(result["output"], "6 passed")
+        run_mock.assert_called_once_with(
+            "python3 -m pytest tests/test_jarvis_regression_suite.py -k 'code_reviewer' -q",
+            cwd="/Users/truthseeker/jarvis-ai",
+        )
+
+    def test_coder_native_verification_hook_rejects_non_verification_shell(self):
+        with patch("specialized_agent_native.terminal.run_command", side_effect=AssertionError("should not run shell")), \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("coder", "Use the coder to verify with: rm -rf /")
+        self.assertEqual(result["model"], "native/coder")
+        self.assertIn("repo-safe checks", result["output"])
+
     def test_operator_native_open_app_hook_bypasses_model_call(self):
         with patch("specialized_agent_native.tools.open_app", return_value="Opening Safari.") as open_mock, \
              patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
@@ -2629,11 +2666,13 @@ class ModelRouterFallbackTests(unittest.TestCase):
         self.assertEqual(model_router._engineering_playbook_category("Walk me through the threat model for prompt injection."), "threat_modeling")
 
         coding_queries = model_router._engineering_grounding_queries("Implement this patch in the Python module and add tests.")
+        self.assertIn("jarvis repo map", coding_queries)
         self.assertIn("coding implementation playbook", coding_queries)
         self.assertIn("verification matrix", coding_queries)
         self.assertEqual(model_router._engineering_playbook_category("Implement this patch in the Python module and add tests."), "coding_implementation")
 
         review_queries = model_router._engineering_grounding_queries("Review this diff and tell me the regression risk.")
+        self.assertIn("jarvis repo map", review_queries)
         self.assertIn("code review regression heuristics", review_queries)
         self.assertIn("verification matrix", review_queries)
         self.assertEqual(model_router._engineering_playbook_category("Review this diff and tell me the regression risk."), "code_review")

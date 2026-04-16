@@ -117,3 +117,5 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant
 - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves
 - added a dedicated `code_reviewer` specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path
+- added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands
+- added a native `coder` verification helper for repo-safe checks like targeted `pytest` and `py_compile`, plus native repo-map lookup

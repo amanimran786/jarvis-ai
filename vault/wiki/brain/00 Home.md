@@ -11,6 +11,7 @@ Core note set:
 - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges
 - [[07 Import Source Hub]] for raw import families and provenance flow
 - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer
+- [[09 Jarvis Repo Map]] for the fastest repo-grounded map of behavior seams and proof commands
 - [[10 Identity]] for stable user identity, role, strengths, and goals
 - [[20 Projects]] for active and important ongoing work
 - [[30 Preferences]] for communication, product, and operating preferences

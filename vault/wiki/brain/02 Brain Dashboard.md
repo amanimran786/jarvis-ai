@@ -10,6 +10,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges.
 - [[07 Import Source Hub]] groups the staged import families and provenance flow.
 - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface.
+- [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and verification commands.
 - [[10 Identity]] holds stable user identity and strengths.
 - [[20 Projects]] keeps active work visible.
 - [[30 Preferences]] preserves how Aman likes to work and collaborate.

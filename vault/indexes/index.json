@@ -1,5 +1,5 @@
 {
-  "doc_count": 61,
+  "doc_count": 62,
   "docs": [
     {
       "path": "indexes/keyword_index.md",
@@ -1021,6 +1021,7 @@
         "interview",
         "vault",
         "product",
+        "map",
         "coding",
         "variant",
         "framing",
@@ -1028,22 +1029,21 @@
         "hub",
         "role",
         "style",
-        "map",
         "source",
         "support",
         "systems",
         "runtime",
         "import",
-        "safety"
+        "behavior"
       ],
-      "chars": 4864,
+      "chars": 4960,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Coding Implementation Playbook]] for how Jarvis should execute coding tasks with the smallest correct diff and the right verification step - [[79A Code Review Regression Heuristics]] for how Jarvis should review patches and prioritize regressions over style - [[79B Jarvis Architecture Runtime Seams]] for the real coding map of where Jarvis behavior lives - [[79C Verification Matrix]] for what \u201cdone\u201d means across runtime, vault, and packaged-app changes - [[79D External Coding Agent Signals]] for the public repo patterns worth borrowing into Jarvis\u2019s coding brain - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[Product Surface Bridge]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer - [[09 Jarvis Repo Map]] for the fastest repo-grounded map of behavior seams and proof commands - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Coding Implementation Playbook]] for how Jarvis should execute coding tasks with the smallest correct diff and the right verification step - [[79A Code Review Regression Heuristics]] for how Jarvis should review patches and prioritize regressions over style - [[79B Jarvis Architecture Runtime Seams]] for the real coding map of where Jarvis behavior lives - [[79C Verification Matrix]] for what \u201cdone\u201d means across runtime, vault, and packaged-app changes - [[79D External Coding Agent Signals]] for the public repo patterns worth borrowing into Jarvis\u2019s coding brain - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[Product Surface Bridge]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
             "brain",
@@ -1051,12 +1051,12 @@
             "interview",
             "vault",
             "product",
+            "map",
             "coding",
             "variant",
             "framing",
             "notes",
-            "hub",
-            "role"
+            "hub"
           ]
         }
       ]
@@ -1068,10 +1068,10 @@
       "keywords": [
         "jarvis",
         "brain",
-        "vault",
-        "variant",
-        "gives",
         "map",
+        "vault",
+        "gives",
+        "variant",
         "notes",
         "reusable",
         "product",
@@ -1087,7 +1087,7 @@
         "systems",
         "runtime"
       ],
-      "chars": 5335,
+      "chars": 5442,
       "sections": [
         {
           "heading": "Brain Dashboard",
@@ -1110,11 +1110,11 @@
           "level": 2,
           "page": null,
           "line_start": 5,
-          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Coding Implementation Playbook]] gives Jarvis a reusable coding loop for bounded patches and repo-grounded changes. - [[79A Code Review Regression Heuristics]] gives Jarvis a reusable review order for bugs, regressions, and missing proof. - [[79B Jarvis Architecture Runtime Seams]] preserves where behavior actually lives across routing, voice, vault, specialists, and packaging. - [[79C Verification Matrix]] defines the proof expected for different Jarvis change types. - [[79D External Coding Agent Signals]] keeps the external repo patterns that are worth borrowing into the coding brain. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
+          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface. - [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and verification commands. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Coding Implementation Playbook]] gives Jarvis a reusable coding loop for bounded patches and repo-grounded changes. - [[79A Code Review Regression Heuristics]] gives Jarvis a reusable review order for bugs, regressions, and missing proof. - [[79B Jarvis Architecture Runtime Seams]] preserves where behavior actually lives across routing, voice, vault, specialists, and packaging. - [[79C Verification Matrix]] defines the proof expected for different Jarvis change types. - [[79D External Coding Agent Signals]] keeps the external repo patterns that are worth borrowing into the coding brain. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
           "keywords": [
             "jarvis",
-            "variant",
             "gives",
+            "variant",
             "reusable",
             "coding",
             "covers",
@@ -1130,7 +1130,7 @@
           "heading": "Use This Dashboard For",
           "level": 2,
           "page": null,
-          "line_start": 48,
+          "line_start": 49,
           "text": "- orienting inside the brain quickly - checking the capture and metadata rules before adding new durable notes - checking whether a fact belongs in identity, project, synthesis, or stories - deciding which durable note should absorb new source material - jumping into the next curation tasks without searching raw imports",
           "keywords": [
             "checking",
@@ -1151,7 +1151,7 @@
           "heading": "Source Paths",
           "level": 2,
           "page": null,
-          "line_start": 56,
+          "line_start": 57,
           "text": "- Raw imports live under vault/raw/imports/ - Curated long-term notes live under vault/wiki/brain/ - The visual Obsidian map lives in [[81 Jarvis Brain Map]]",
           "keywords": [
             "raw",
@@ -1172,7 +1172,7 @@
           "heading": "Support Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 62,
+          "line_start": 63,
           "text": "- [[06 Vault Support Hub]] is the main support-layer anchor. - [[07 Import Source Hub]] is the main import-layer anchor. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[Product Surface Bridge]] is the compiled product-surface bridge back to repo truth.",
           "keywords": [
             "bridge",
@@ -1193,7 +1193,7 @@
           "heading": "Obsidian Usage",
           "level": 2,
           "page": null,
-          "line_start": 70,
+          "line_start": 71,
           "text": "- Open Graph View to see how the curated notes cluster. - Open [[81 Jarvis Brain Map]] for a cleaner designed map of the same structure. - Use vault/templates/ when creating new durable note types. - Use backlinks from any brain note to see where Jarvis should deepen the knowledge next.",
           "keywords": [
             "open",
@@ -2163,12 +2163,13 @@
     {
       "path": "wiki/brain/08 Coding Systems Hub.md",
       "title": "---",
-      "preview": "--- type: hub area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - coding - review - engineering - runtime related: - \"[[73 Senior Cybersecurity AI Engineering Companion]]\" - \"[[74 Universal Engineer Thinker Problem Solver]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[76 Systems Design Tradeoff Heuristics]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[79 ",
+      "preview": "--- type: hub area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - coding - review - engineering - runtime related: - \"[[09 Jarvis Repo Map]]\" - \"[[73 Senior Cybersecurity AI Engineering Companion]]\" - \"[[74 Universal Engineer Thinker Problem Solver]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[76 Systems Design Tradeoff Heuristics]]\" - \"[[78 AI Runtime Agent Enginee",
       "keywords": [
+        "jarvis",
         "engineering",
         "coding",
-        "jarvis",
         "review",
+        "repo",
         "runtime",
         "playbook",
         "agent",
@@ -2176,44 +2177,43 @@
         "architecture",
         "keeps",
         "hub",
-        "repo",
+        "map",
         "systems",
         "principles",
         "code",
+        "seams",
         "verification",
-        "defines",
-        "should",
-        "required",
-        "2026"
+        "behavior",
+        "defines"
       ],
-      "chars": 2112,
+      "chars": 2239,
       "sections": [
         {
           "heading": "---",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "--- type: hub area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - coding - review - engineering - runtime related: - \"[[73 Senior Cybersecurity AI Engineering Companion]]\" - \"[[74 Universal Engineer Thinker Problem Solver]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[76 Systems Design Tradeoff Heuristics]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[79 Coding Implementation Playbook]]\" - \"[[79A Code Review Regression Heuristics]]\" - \"[[79B Jarvis Architecture Runtime Seams]]\" - \"[[79C Verification Matrix]]\" - \"[[79D External Coding Agent Signals]]\" ---",
+          "text": "--- type: hub area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - coding - review - engineering - runtime related: - \"[[09 Jarvis Repo Map]]\" - \"[[73 Senior Cybersecurity AI Engineering Companion]]\" - \"[[74 Universal Engineer Thinker Problem Solver]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[76 Systems Design Tradeoff Heuristics]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[79 Coding Implementation Playbook]]\" - \"[[79A Code Review Regression Heuristics]]\" - \"[[79B Jarvis Architecture Runtime Seams]]\" - \"[[79C Verification Matrix]]\" - \"[[79D External Coding Agent Signals]]\" ---",
           "keywords": [
             "engineering",
+            "jarvis",
             "review",
             "coding",
             "runtime",
-            "jarvis",
+            "repo",
             "2026",
             "playbook",
             "heuristics",
             "agent",
             "type",
-            "hub",
-            "area"
+            "hub"
           ]
         },
         {
           "heading": "Coding Systems Hub",
           "level": 1,
           "page": null,
-          "line_start": 31,
+          "line_start": 32,
           "text": "Purpose: keep Jarvis's coding, review, architecture, and verification notes connected as one durable engineering layer instead of separate leaves.",
           "keywords": [
             "purpose",
@@ -2234,28 +2234,28 @@
           "heading": "Primary Coding Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 35,
-          "text": "- [[79 Coding Implementation Playbook]] defines how Jarvis should implement bounded patches. - [[79A Code Review Regression Heuristics]] defines how Jarvis should review diffs and rank risk. - [[79B Jarvis Architecture Runtime Seams]] maps where behavior actually lives in the repo. - [[79C Verification Matrix]] defines what proof is required for each change surface. - [[79D External Coding Agent Signals]] keeps the public repo patterns worth borrowing.",
+          "line_start": 36,
+          "text": "- [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and proof commands. - [[79 Coding Implementation Playbook]] defines how Jarvis should implement bounded patches. - [[79A Code Review Regression Heuristics]] defines how Jarvis should review diffs and rank risk. - [[79B Jarvis Architecture Runtime Seams]] maps where behavior actually lives in the repo. - [[79C Verification Matrix]] defines what proof is required for each change surface. - [[79D External Coding Agent Signals]] keeps the public repo patterns worth borrowing.",
           "keywords": [
-            "defines",
             "jarvis",
+            "repo",
+            "defines",
+            "map",
+            "behavior",
+            "seams",
+            "proof",
             "coding",
             "should",
             "review",
-            "repo",
-            "implementation",
-            "playbook",
-            "implement",
-            "bounded",
-            "patches",
-            "79a"
+            "gives",
+            "quickest"
           ]
         },
         {
           "heading": "Supporting Technical Posture",
           "level": 2,
           "page": null,
-          "line_start": 43,
+          "line_start": 45,
           "text": "- [[73 Senior Cybersecurity AI Engineering Companion]] sets the expected engineering-partner bar. - [[74 Universal Engineer Thinker Problem Solver]] keeps the reasoning broad and first-principles driven. - [[75 Debugging Root Cause Playbook]] is the fallback when the failing layer is not yet isolated. - [[76 Systems Design Tradeoff Heuristics]] keeps architecture answers grounded in tradeoffs, not theater. - [[78 AI Runtime Agent Engineering Principles]] keeps Jarvis's agent and routing behavior aligned with the same engineering rules.",
           "keywords": [
             "engineering",
@@ -2276,7 +2276,7 @@
           "heading": "Runtime Implication",
           "level": 2,
           "page": null,
-          "line_start": 51,
+          "line_start": 53,
           "text": "When Jarvis is coding or reviewing code, it should retrieve this hub and then pull the more specific playbook rather than answering from generic technical identity alone.",
           "keywords": [
             "jarvis",
@@ -2291,6 +2291,225 @@
             "more",
             "specific",
             "playbook"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/09 Jarvis Repo Map.md",
+      "title": "---",
+      "preview": "--- type: map area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - repo - coding - runtime - verification related: - \"[[08 Coding Systems Hub]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[79 Coding Implementation Playbook]]\" - \"[[79A Code Review Regression Heuristics]]\" - \"[[79B Jarvis Architecture Runtime Seams]]\" -",
+      "keywords": [
+        "jarvis",
+        "runtime",
+        "local",
+        "tests",
+        "test",
+        "coding",
+        "handles",
+        "app",
+        "memory",
+        "vault",
+        "python3",
+        "verification",
+        "surface",
+        "behavior",
+        "main",
+        "owns",
+        "tts",
+        "packaged",
+        "targeted",
+        "engineering"
+      ],
+      "chars": 2986,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: map area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - repo - coding - runtime - verification related: - \"[[08 Coding Systems Hub]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[78 AI Runtime Agent Engineering Principles]]\" - \"[[79 Coding Implementation Playbook]]\" - \"[[79A Code Review Regression Heuristics]]\" - \"[[79B Jarvis Architecture Runtime Seams]]\" - \"[[79C Verification Matrix]]\" ---",
+          "keywords": [
+            "coding",
+            "runtime",
+            "engineering",
+            "jarvis",
+            "review",
+            "repo",
+            "2026",
+            "verification",
+            "playbook",
+            "type",
+            "map",
+            "area"
+          ]
+        },
+        {
+          "heading": "Jarvis Repo Map",
+          "level": 1,
+          "page": null,
+          "line_start": 28,
+          "text": "Purpose: give Jarvis one fast retrieval surface for where behavior actually lives and which verification command proves a change.",
+          "keywords": [
+            "purpose",
+            "give",
+            "jarvis",
+            "one",
+            "fast",
+            "retrieval",
+            "surface",
+            "behavior",
+            "actually",
+            "lives",
+            "verification",
+            "command"
+          ]
+        },
+        {
+          "heading": "Main Runtime Spine",
+          "level": 2,
+          "page": null,
+          "line_start": 32,
+          "text": "- router.py handles fast paths, user intent routing, and tool dispatch before deeper model work. - orchestrator.py classifies requests into tools and specialist-agent paths. - model_router.py decides local/cloud behavior, engineering grounding, and prompt shaping. - specialized_agents.py coordinates scoped specialist roles. - specialized_agent_native.py handles narrow native specialist shortcuts that should bypass model calls.",
+          "keywords": [
+            "model",
+            "specialist",
+            "router",
+            "handles",
+            "paths",
+            "agent",
+            "specialized",
+            "native",
+            "fast",
+            "user",
+            "intent",
+            "routing"
+          ]
+        },
+        {
+          "heading": "Product Surfaces",
+          "level": 2,
+          "page": null,
+          "line_start": 40,
+          "text": "- main.py starts the GUI or headless runtime. - ui.py owns the main PyQt desktop surface. - desktop/overlay.py owns the overlay surface. - voice.py owns the voice loop and TTS/STT handoff behavior. - meeting_listener.py owns meeting capture and live assist behavior. - Jarvis.spec plus scripts/install_jarvis_app.sh define the packaged macOS app path.",
+          "keywords": [
+            "owns",
+            "main",
+            "desktop",
+            "surface",
+            "overlay",
+            "voice",
+            "behavior",
+            "meeting",
+            "jarvis",
+            "app",
+            "starts",
+            "gui"
+          ]
+        },
+        {
+          "heading": "Local Runtime Layer",
+          "level": 2,
+          "page": null,
+          "line_start": 49,
+          "text": "- local_runtime/local_stt.py is the main local STT seam. - local_runtime/local_tts.py is the macOS fallback TTS seam. - local_runtime/local_kokoro_tts.py and related subprocess/runtime files are the higher-quality local voice path. - local_runtime/ is where packaging drift often shows up first.",
+          "keywords": [
+            "local",
+            "runtime",
+            "tts",
+            "stt",
+            "seam",
+            "main",
+            "macos",
+            "fallback",
+            "kokoro",
+            "related",
+            "subprocess",
+            "files"
+          ]
+        },
+        {
+          "heading": "Brain And Memory Layer",
+          "level": 2,
+          "page": null,
+          "line_start": 56,
+          "text": "- vault.py handles vault indexing, search, and context building. - vault_edit.py handles bounded note mutation. - vault_capture.py handles structured natural-language brain writes. - memory.py, memory_layer.py, semantic_memory.py, and graph_context.py shape durable memory and retrieval.",
+          "keywords": [
+            "vault",
+            "memory",
+            "handles",
+            "context",
+            "indexing",
+            "search",
+            "building",
+            "edit",
+            "bounded",
+            "note",
+            "mutation",
+            "capture"
+          ]
+        },
+        {
+          "heading": "Where To Verify",
+          "level": 2,
+          "page": null,
+          "line_start": 63,
+          "text": "- routing change: targeted tests/test_jarvis_regression_suite.py - bounded vault mutation: targeted tests/test_unit_coverage.py - packaged surface change: rebuild with scripts/install_jarvis_app.sh --applications-only - installed app smoke: tests/test_jarvis_live_integrations.py - syntax-only Python patch: python3 -m py_compile ...",
+          "keywords": [
+            "tests",
+            "test",
+            "jarvis",
+            "change",
+            "targeted",
+            "app",
+            "only",
+            "routing",
+            "regression",
+            "suite",
+            "bounded",
+            "vault"
+          ]
+        },
+        {
+          "heading": "Narrow Verification Commands",
+          "level": 2,
+          "page": null,
+          "line_start": 71,
+          "text": "- python3 -m pytest tests/test_jarvis_regression_suite.py -k '<targeted_case>' -q - python3 -m pytest tests/test_unit_coverage.py -k '<targeted_case>' -q - python3 -m py_compile <files> - JARVIS_RUN_PACKAGED_SMOKE=1 python3 -m pytest tests/test_jarvis_live_integrations.py -k 'packaged_app_starts_and_serves_status' -q",
+          "keywords": [
+            "python3",
+            "pytest",
+            "tests",
+            "test",
+            "jarvis",
+            "targeted",
+            "case",
+            "packaged",
+            "regression",
+            "suite",
+            "unit",
+            "coverage"
+          ]
+        },
+        {
+          "heading": "Default Coding Rule",
+          "level": 2,
+          "page": null,
+          "line_start": 78,
+          "text": "Start from [[08 Coding Systems Hub]], then pull the smallest specific playbook and the narrowest proof command for the seam you are touching.",
+          "keywords": [
+            "start",
+            "coding",
+            "systems",
+            "hub",
+            "then",
+            "pull",
+            "smallest",
+            "specific",
+            "playbook",
+            "narrowest",
+            "proof",
+            "command"
           ]
         }
       ]
@@ -9547,8 +9766,8 @@
       "preview": "--- type: task_hub area: vault status: active source: repo confidence: high created: 2026-04-15 updated: 2026-04-16 version: 4 tags: - vault - changelog - provenance - obsidian related: - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[70 Jarvis Decision Log]]\" - \"[[80 Jarvis Roadmap]]\" --- Vault Changelog Purpose: preserve note-level provenance for major brain upgrades so Jarvis can compound knowledge without losing change history. Linked notes: [[03 Brain Schema]], [[04 Capture Workflow",
       "keywords": [
         "vault",
-        "brain",
         "added",
+        "brain",
         "jarvis",
         "notes",
         "capture",
@@ -9558,16 +9777,16 @@
         "candidate",
         "review",
         "stale",
+        "note",
         "can",
         "under",
         "only",
         "curator",
-        "note",
+        "runtime",
         "explicit",
-        "task",
-        "hub"
+        "task"
       ],
-      "chars": 8156,
+      "chars": 8387,
       "sections": [
         {
           "heading": "---",
@@ -9800,7 +10019,7 @@
           "level": 3,
           "page": null,
           "line_start": 99,
-          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path",
+          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands - added a native coder verification helper for repo-safe checks like targeted pytest and py_compile, plus native repo-map lookup",
           "keywords": [
             "added",
             "instead",

@@ -574,6 +574,7 @@ def _engineering_grounding_queries(user_input: str) -> list[str]:
     elif category == "coding_implementation":
         queries.extend(
             [
+                "jarvis repo map",
                 "coding implementation playbook",
                 "jarvis architecture runtime seams",
                 "verification matrix",
@@ -582,6 +583,7 @@ def _engineering_grounding_queries(user_input: str) -> list[str]:
     elif category == "code_review":
         queries.extend(
             [
+                "jarvis repo map",
                 "code review regression heuristics",
                 "verification matrix",
             ]

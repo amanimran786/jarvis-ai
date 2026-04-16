@@ -30,12 +30,24 @@ _ADMIN_SHELL_PATTERNS = (
     "root ",
 )
 
+_SAFE_CODER_VERIFY_PREFIXES = (
+    "python3 -m pytest ",
+    "python -m pytest ",
+    "pytest ",
+    "python3 -m py_compile ",
+    "python -m py_compile ",
+)
+
+_REPO_ROOT = Path(__file__).resolve().parent
+
 
 def run_native_role_hook(role: str, task: str) -> dict | None:
     if role == "vault_curator":
         return _run_vault_curator_hook(task)
     if role == "operator":
         return _run_operator_hook(task)
+    if role == "coder":
+        return _run_coder_hook(task)
     return None
 
 
@@ -246,9 +258,59 @@ def _run_operator_hook(task: str) -> dict | None:
     return None
 
 
+def _run_coder_hook(task: str) -> dict | None:
+    lower = task.lower().strip()
+
+    if any(phrase in lower for phrase in ("repo map", "repository map", "codebase map")):
+        result = vault_edit.read_note("09 Jarvis Repo Map")
+        if not result.get("ok"):
+            return {"model": "native/coder", "output": _vault_error_text(result, "Could not read the repo map.")}
+        preview = result.get("content", "").strip().replace("\n", " ")
+        if result.get("truncated"):
+            preview += " ..."
+        return {
+            "model": "native/coder",
+            "output": f"Read {result['title']} from {result['path']}. {preview}".strip(),
+        }
+
+    verify_match = re.search(
+        r"\b(?:verify|run verification|run checks|run check|run tests)\b(?:\s+with)?\s*:?\s+(.+)$",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if verify_match:
+        command = verify_match.group(1).strip()
+        if not _looks_like_safe_coder_verification(command):
+            return {
+                "model": "native/coder",
+                "output": (
+                    "Coder verification only runs narrow repo-safe checks like "
+                    "`python3 -m pytest ...` or `python3 -m py_compile ...`."
+                ),
+            }
+        return {
+            "model": "native/coder",
+            "output": terminal.run_command(command, cwd=str(_REPO_ROOT)),
+        }
+
+    return None
+
+
 def _looks_like_admin_shell(command: str) -> bool:
     lower = (command or "").lower()
     return any(pattern in lower for pattern in _ADMIN_SHELL_PATTERNS)
+
+
+def _looks_like_safe_coder_verification(command: str) -> bool:
+    raw = (command or "").strip()
+    lower = raw.lower()
+    if not raw:
+        return False
+    if any(token in raw for token in ("&&", "||", ";", "|", ">", "<", "`")):
+        return False
+    if any(pattern in lower for pattern in _ADMIN_SHELL_PATTERNS):
+        return False
+    return any(lower.startswith(prefix) for prefix in _SAFE_CODER_VERIFY_PREFIXES)
 
 
 def _vault_error_text(result: dict, default: str) -> str:

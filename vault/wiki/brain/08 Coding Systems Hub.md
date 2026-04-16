@@ -16,6 +16,7 @@ tags:
   - engineering
   - runtime
 related:
+  - "[[09 Jarvis Repo Map]]"
   - "[[73 Senior Cybersecurity AI Engineering Companion]]"
   - "[[74 Universal Engineer Thinker Problem Solver]]"
   - "[[75 Debugging Root Cause Playbook]]"
@@ -34,6 +35,7 @@ Purpose: keep Jarvis's coding, review, architecture, and verification notes conn
 
 ## Primary Coding Surfaces
 
+- [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and proof commands.
 - [[79 Coding Implementation Playbook]] defines how Jarvis should implement bounded patches.
 - [[79A Code Review Regression Heuristics]] defines how Jarvis should review diffs and rank risk.
 - [[79B Jarvis Architecture Runtime Seams]] maps where behavior actually lives in the repo.
