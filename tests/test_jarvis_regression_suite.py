@@ -23,6 +23,8 @@ import router
 import browser
 import call_privacy
 import camera
+import research
+import operative
 from brains import brain_ollama
 import config
 import graph_context
@@ -334,6 +336,596 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertEqual(result["roles"], ["planner", "executor", "reviewer"])
         self.assertEqual(result["final"], "Execute second.")
 
+    def test_specialized_agent_run_role_injects_engineering_playbook_grounding(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.skills.build_system_extra", return_value=("Skill context", [])), \
+                 patch("specialized_agents.model_router._is_engineering_companion_query", return_value=True), \
+                 patch("specialized_agents.model_router._engineering_companion_grounding", return_value="Engineering companion guidance:\n- Debugging Root Cause Playbook: find the failing layer first."), \
+                 patch("specialized_agents.ask_claude", return_value="Grounded specialist answer.") as ask_mock:
+                result = specialized_agents._run_role("executor", "Help me debug this flaky worker pool.")
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(result["output"], "Grounded specialist answer.")
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Skill context", injected)
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Debugging Root Cause Playbook", injected)
+
+    def test_specialized_agent_run_role_skips_engineering_playbook_for_nontechnical_queries(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            with patch("specialized_agents.skills.build_system_extra", return_value=("Skill context", [])), \
+                 patch("specialized_agents.model_router._is_engineering_companion_query", return_value=False), \
+                 patch("specialized_agents.ask_claude", return_value="Grounded specialist answer.") as ask_mock:
+                result = specialized_agents._run_role("planner", "Use specialized agents to summarize my local markdown vault.")
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(result["output"], "Grounded specialist answer.")
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertEqual(injected, "Skill context")
+
+    def test_vault_curator_native_append_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.vault_edit.append_under_heading", return_value={"ok": True, "path": "wiki/brain/91 Vault Changelog.md", "heading": "2026-04-15"}) as append_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Add to [[91 Vault Changelog]] under 2026-04-15: Added native vault hooks.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Updated wiki/brain/91 Vault Changelog.md under 2026-04-15.", result["output"])
+        append_mock.assert_called_once_with("91 Vault Changelog", "2026-04-15", "Added native vault hooks.")
+
+    def test_vault_curator_native_read_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.vault_edit.read_note", return_value={"ok": True, "title": "Jarvis Roadmap", "path": "wiki/brain/80 Jarvis Roadmap.md", "content": "# Jarvis Roadmap\nNorth star.", "truncated": False}) as read_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("vault_curator", "Read [[80 Jarvis Roadmap]].")
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Read Jarvis Roadmap from wiki/brain/80 Jarvis Roadmap.md.", result["output"])
+        read_mock.assert_called_once_with("80 Jarvis Roadmap")
+
+    def test_vault_curator_native_read_hook_surfaces_candidates_on_ambiguity(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            return_value={
+                "ok": False,
+                "error": "Ambiguous note reference for [[Roadmap]]. Matches: wiki/brain/80 Jarvis Roadmap.md, wiki/brain/80 Product Roadmap.md.",
+                "ambiguous": True,
+                "candidates": ["wiki/brain/80 Jarvis Roadmap.md", "wiki/brain/80 Product Roadmap.md"],
+            },
+        ) as read_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("vault_curator", "Read [[Roadmap]].")
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Try one of: [[80 Jarvis Roadmap]], [[80 Product Roadmap]].", result["output"])
+        read_mock.assert_called_once_with("Roadmap")
+
+    def test_vault_curator_native_read_hook_prefers_brain_candidate_when_requested(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            side_effect=[
+                {
+                    "ok": False,
+                    "error": "Ambiguous note reference for [[Roadmap]]. Matches: wiki/brain/80 Jarvis Roadmap.md, raw/imports/chatgpt/Roadmap.md.",
+                    "ambiguous": True,
+                    "candidates": ["wiki/brain/80 Jarvis Roadmap.md", "raw/imports/chatgpt/Roadmap.md"],
+                },
+                {
+                    "ok": True,
+                    "title": "Jarvis Roadmap",
+                    "path": "wiki/brain/80 Jarvis Roadmap.md",
+                    "content": "# Jarvis Roadmap\nNorth star.",
+                    "truncated": False,
+                },
+            ],
+        ) as read_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("vault_curator", "Read [[Roadmap]] and pick the brain note.")
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Read Jarvis Roadmap from wiki/brain/80 Jarvis Roadmap.md.", result["output"])
+        self.assertEqual(read_mock.call_args_list[0].args[0], "Roadmap")
+        self.assertEqual(read_mock.call_args_list[1].args[0], "wiki/brain/80 Jarvis Roadmap.md")
+
+    def test_vault_curator_native_links_ambiguous_candidates_into_target_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            return_value={
+                "ok": False,
+                "error": "Ambiguous note reference for [[Roadmap]]. Matches: wiki/brain/80 Jarvis Roadmap.md, raw/imports/chatgpt/Roadmap.md.",
+                "ambiguous": True,
+                "candidates": ["wiki/brain/80 Jarvis Roadmap.md", "raw/imports/chatgpt/Roadmap.md"],
+            },
+        ) as read_mock, patch(
+            "specialized_agent_native.vault_edit.append_under_heading",
+            return_value={"ok": True, "path": "wiki/brain/90 Task Hub.md", "heading": "Disambiguation"},
+        ) as append_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Read [[Roadmap]] and link these candidates in [[90 Task Hub]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Linked candidate notes for [[Roadmap]] into wiki/brain/90 Task Hub.md under Disambiguation.", result["output"])
+        read_mock.assert_called_once_with("Roadmap")
+        append_mock.assert_called_once()
+        self.assertEqual(append_mock.call_args.args[0], "90 Task Hub")
+        self.assertEqual(append_mock.call_args.args[1], "Disambiguation")
+        self.assertIn("Disambiguation for [[Roadmap]]:", append_mock.call_args.args[2])
+        self.assertIn("- [[80 Jarvis Roadmap]]", append_mock.call_args.args[2])
+        self.assertIn("- [[Roadmap]]", append_mock.call_args.args[2])
+
+    def test_vault_curator_native_creates_disambiguation_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            return_value={
+                "ok": False,
+                "error": "Ambiguous note reference for [[Roadmap]]. Matches: wiki/brain/80 Jarvis Roadmap.md, raw/imports/chatgpt/Roadmap.md.",
+                "ambiguous": True,
+                "candidates": ["wiki/brain/80 Jarvis Roadmap.md", "raw/imports/chatgpt/Roadmap.md"],
+            },
+        ) as read_mock, patch(
+            "specialized_agent_native.vault_edit.create_note_from_template",
+            return_value={"ok": True, "path": "wiki/brain/Roadmap Disambiguation.md", "title": "Roadmap Disambiguation", "template": "brain-note-template"},
+        ) as create_mock, patch(
+            "specialized_agent_native.vault_edit.append_under_heading",
+            return_value={"ok": True, "path": "wiki/brain/Roadmap Disambiguation.md", "heading": "What This Note Holds"},
+        ) as append_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Create disambiguation note for [[Roadmap]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Created disambiguation note [[Roadmap Disambiguation]] at wiki/brain/Roadmap Disambiguation.md.", result["output"])
+        read_mock.assert_called_once_with("Roadmap")
+        create_mock.assert_called_once_with("Roadmap Disambiguation", template_name="brain-note-template")
+        self.assertEqual(append_mock.call_count, 3)
+
+    def test_vault_curator_native_adds_agent_inbox_item(self):
+        with patch(
+            "specialized_agent_native.vault_capture.add_agent_inbox_item",
+            return_value={"ok": True, "path": "wiki/brain/92 Agent Inbox.md", "heading": "Queued"},
+        ) as inbox_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Add to agent inbox: distill recent routing lessons into the roadmap.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Queued agent inbox item in wiki/brain/92 Agent Inbox.md under Queued.", result["output"])
+        inbox_mock.assert_called_once_with("distill recent routing lessons into the roadmap.")
+
+    def test_vault_curator_native_stages_candidate_update_for_propose_only_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.append_under_heading",
+            return_value={
+                "ok": False,
+                "error": "This note is propose-only. Route changes into [[92 Agent Inbox]] or a candidate note before updating the canonical note.",
+                "write_policy": "propose_only",
+            },
+        ) as append_mock, patch(
+            "specialized_agent_native.vault_edit.stage_candidate_update",
+            return_value={
+                "ok": True,
+                "path": "wiki/candidates/Curated Identity Candidate.md",
+                "heading": "Proposed Updates",
+                "action": "staged",
+            },
+        ) as stage_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Add to [[Curated Identity]] under Notes: Stage this safer update.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn(
+            "Staged a candidate update for [[Curated Identity]] in wiki/candidates/Curated Identity Candidate.md under Proposed Updates.",
+            result["output"],
+        )
+        append_mock.assert_called_once_with("Curated Identity", "Notes", "Stage this safer update.")
+        stage_mock.assert_called_once_with("Curated Identity", "Notes", "Stage this safer update.", reason="propose_only")
+
+    def test_vault_curator_native_stages_candidate_update_for_review_required_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.read_note",
+            return_value={
+                "ok": True,
+                "metadata": {"review_required": "true", "write_policy": "curated"},
+            },
+        ) as read_mock, patch(
+            "specialized_agent_native.vault_edit.stage_candidate_update",
+            return_value={
+                "ok": True,
+                "path": "wiki/candidates/Curated Identity Candidate.md",
+                "heading": "Proposed Updates",
+                "action": "staged",
+            },
+        ) as stage_mock, patch(
+            "specialized_agent_native.vault_edit.append_under_heading",
+            side_effect=AssertionError("should not append directly"),
+        ), patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Add to [[Curated Identity]] under Notes: Stage this reviewed update.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("because that note requires review", result["output"])
+        read_mock.assert_called_once_with("Curated Identity", max_chars=200)
+        stage_mock.assert_called_once_with("Curated Identity", "Notes", "Stage this reviewed update.", reason="review_required")
+
+    def test_vault_curator_native_promotes_candidate_note_into_canon(self):
+        with patch(
+            "specialized_agent_native.vault_edit.promote_candidate_update",
+            return_value={
+                "ok": True,
+                "candidate_path": "wiki/candidates/Curated Identity Candidate.md",
+                "canonical_path": "wiki/brain/Curated Identity.md",
+                "heading": "Notes",
+                "action": "promoted",
+            },
+        ) as promote_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Promote [[Curated Identity Candidate]] into [[Curated Identity]] under Notes.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn(
+            "Promoted [[Curated Identity Candidate]] into wiki/brain/Curated Identity.md under Notes.",
+            result["output"],
+        )
+        promote_mock.assert_called_once_with(
+            "Curated Identity Candidate",
+            canonical_ref="Curated Identity",
+            heading="Notes",
+        )
+
+    def test_vault_curator_native_promotes_and_archives_candidate_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.promote_candidate_update",
+            return_value={
+                "ok": True,
+                "candidate_path": "wiki/candidates/Curated Identity Candidate.md",
+                "canonical_path": "wiki/brain/Curated Identity.md",
+                "heading": "Notes",
+                "action": "promoted",
+            },
+        ) as promote_mock, patch(
+            "specialized_agent_native.vault_edit.archive_candidate_note",
+            return_value={"ok": True, "path": "wiki/candidates/Curated Identity Candidate.md", "action": "archived"},
+        ) as archive_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Promote [[Curated Identity Candidate]] into [[Curated Identity]] under Notes and archive it.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("then archived it", result["output"])
+        promote_mock.assert_called_once_with(
+            "Curated Identity Candidate",
+            canonical_ref="Curated Identity",
+            heading="Notes",
+        )
+        archive_mock.assert_called_once_with("Curated Identity Candidate")
+
+    def test_vault_curator_native_reviews_stale_candidate_notes(self):
+        with patch(
+            "specialized_agent_native.vault_edit.review_stale_candidate_notes",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "path": "wiki/candidates/Curated Identity Candidate.md",
+                        "canonical_target": "wiki/brain/Curated Identity.md",
+                        "age_days": 5,
+                        "recommendation": "promote_or_refresh",
+                    }
+                ],
+            },
+        ) as review_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Review stale candidate notes older than 3 days.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Stale candidate notes older than 3 days:", result["output"])
+        self.assertIn("[[Curated Identity Candidate]]", result["output"])
+        self.assertIn("next: promote_or_refresh", result["output"])
+        self.assertIn("do: Promote [[Curated Identity Candidate]] into [[Curated Identity]].", result["output"])
+        review_mock.assert_called_once_with(max_age_days=3)
+
+    def test_vault_curator_native_reviews_stale_agent_inbox_items(self):
+        with patch(
+            "specialized_agent_native.vault_edit.review_stale_agent_inbox",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "heading": "Queued",
+                        "text": "Review old candidate",
+                        "due": "2026-04-10",
+                        "age_days": 6,
+                        "recommendation": "archive_or_close",
+                    }
+                ],
+            },
+        ) as review_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Review stale inbox items older than 3 days.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Stale agent inbox items older than 3 days:", result["output"])
+        self.assertIn("Review old candidate", result["output"])
+        self.assertIn("next: archive_or_close", result["output"])
+        self.assertIn("do: Close inbox item: Review old candidate", result["output"])
+        review_mock.assert_called_once_with(max_age_days=3)
+
+    def test_vault_curator_native_reviews_combined_stale_vault_work(self):
+        with patch(
+            "specialized_agent_native.vault_edit.review_stale_candidate_notes",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "path": "wiki/candidates/Curated Identity Candidate.md",
+                        "canonical_target": "wiki/brain/Curated Identity.md",
+                        "age_days": 5,
+                        "recommendation": "promote_or_refresh",
+                    }
+                ],
+            },
+        ) as candidate_mock, patch(
+            "specialized_agent_native.vault_edit.review_stale_agent_inbox",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "heading": "Queued",
+                        "text": "Review old candidate",
+                        "due": "2026-04-10",
+                        "age_days": 6,
+                        "recommendation": "archive_or_close",
+                    }
+                ],
+            },
+        ) as inbox_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Review stale vault work older than 3 days.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Stale vault work older than 3 days:", result["output"])
+        self.assertIn("Candidates:", result["output"])
+        self.assertIn("Inbox:", result["output"])
+        self.assertIn("do: Promote [[Curated Identity Candidate]] into [[Curated Identity]].", result["output"])
+        self.assertIn("do: Close inbox item: Review old candidate", result["output"])
+        candidate_mock.assert_called_once_with(max_age_days=3)
+        inbox_mock.assert_called_once_with(max_age_days=3)
+
+    def test_vault_curator_native_applies_recommended_action_for_candidate(self):
+        with patch(
+            "specialized_agent_native.vault_edit.review_stale_candidate_notes",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "path": "wiki/candidates/Curated Identity Candidate.md",
+                        "canonical_target": "wiki/brain/Curated Identity.md",
+                        "age_days": 5,
+                        "recommendation": "promote_or_refresh",
+                    }
+                ],
+            },
+        ) as review_mock, patch(
+            "specialized_agent_native.vault_edit.promote_candidate_update",
+            return_value={
+                "ok": True,
+                "candidate_path": "wiki/candidates/Curated Identity Candidate.md",
+                "canonical_path": "wiki/brain/Curated Identity.md",
+                "heading": "Notes",
+            },
+        ) as promote_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Apply recommended action for [[Curated Identity Candidate]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Applied recommended action for [[Curated Identity Candidate]]: promoted into wiki/brain/Curated Identity.md.", result["output"])
+        review_mock.assert_called_once_with(max_age_days=3)
+        promote_mock.assert_called_once_with("Curated Identity Candidate")
+
+    def test_vault_curator_native_applies_recommended_action_for_inbox_item(self):
+        with patch(
+            "specialized_agent_native.vault_edit.review_stale_agent_inbox",
+            return_value={
+                "ok": True,
+                "items": [
+                    {
+                        "heading": "Queued",
+                        "text": "Review old candidate",
+                        "due": "2026-04-10",
+                        "age_days": 6,
+                        "recommendation": "archive_or_close",
+                    }
+                ],
+            },
+        ) as review_mock, patch(
+            "specialized_agent_native.vault_edit.close_agent_inbox_item",
+            return_value={"ok": True, "path": "wiki/brain/92 Agent Inbox.md", "action": "closed"},
+        ) as close_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Apply recommended action: Review old candidate",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Applied recommended action for inbox item 'Review old candidate': closed.", result["output"])
+        review_mock.assert_called_once_with(max_age_days=3)
+        close_mock.assert_called_once_with("Review old candidate")
+
+    def test_vault_curator_native_applies_recommended_actions_batch_for_stale_vault_work(self):
+        with patch(
+            "specialized_agent_native.vault_edit.apply_recommended_actions_for_stale_vault_work",
+            return_value={
+                "ok": True,
+                "max_items": 5,
+                "applied": [
+                    {"kind": "candidate", "title": "Curated Identity Candidate", "action": "archived"},
+                    {"kind": "inbox", "title": "Review old candidate", "action": "closed"},
+                ],
+                "skipped": [{"kind": "candidate", "title": "Needs Review", "reason": "requires_manual_review"}],
+            },
+        ) as batch_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Apply recommended actions for stale vault work older than 7 days.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Applied 2 low-risk maintenance action(s) for stale vault work older than 7 days (cap 5).", result["output"])
+        self.assertIn("- candidate: Curated Identity Candidate -> archived", result["output"])
+        self.assertIn("- inbox: Review old candidate -> closed", result["output"])
+        self.assertIn("Skipped 1 item(s) that still need manual review or exceeded the cap.", result["output"])
+        batch_mock.assert_called_once_with(max_age_days=7, max_items=5)
+
+    def test_vault_curator_native_reports_maintenance_status(self):
+        with patch(
+            "specialized_agent_native.vault_edit.maintenance_status",
+            return_value={
+                "ok": True,
+                "candidates": {"active": 2, "archived": 1, "stale": 1},
+                "agent_inbox": {"queued": 3, "in_review": 1, "done": 4, "stale": 2},
+            },
+        ) as status_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Show vault maintenance status.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Vault maintenance status:", result["output"])
+        self.assertIn("candidates active=2, archived=1, stale=1", result["output"])
+        self.assertIn("Agent inbox queued=3, in_review=1, done=4, stale=2", result["output"])
+        status_mock.assert_called_once_with(stale_after_days=3)
+
+    def test_vault_curator_native_refreshes_maintenance_dashboard(self):
+        with patch(
+            "specialized_agent_native.vault_edit.refresh_maintenance_dashboard",
+            return_value={"ok": True, "path": "wiki/brain/93 Vault Maintenance.md", "action": "refreshed"},
+        ) as dashboard_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Refresh vault maintenance dashboard.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Refreshed vault maintenance dashboard at wiki/brain/93 Vault Maintenance.md.", result["output"])
+        dashboard_mock.assert_called_once_with(stale_after_days=3)
+
+    def test_vault_curator_native_archives_candidate_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.archive_candidate_note",
+            return_value={"ok": True, "path": "wiki/candidates/Curated Identity Candidate.md", "action": "archived"},
+        ) as archive_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Archive [[Curated Identity Candidate]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Archived [[Curated Identity Candidate]].", result["output"])
+        archive_mock.assert_called_once_with("Curated Identity Candidate")
+
+    def test_vault_curator_native_closes_inbox_item(self):
+        with patch(
+            "specialized_agent_native.vault_edit.close_agent_inbox_item",
+            return_value={"ok": True, "path": "wiki/brain/92 Agent Inbox.md", "action": "closed"},
+        ) as close_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Close inbox item: Review old candidate",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Closed inbox item 'Review old candidate'.", result["output"])
+        close_mock.assert_called_once_with("Review old candidate")
+
+    def test_vault_curator_native_requeues_inbox_item(self):
+        with patch(
+            "specialized_agent_native.vault_edit.requeue_agent_inbox_item",
+            return_value={"ok": True, "path": "wiki/brain/92 Agent Inbox.md", "action": "requeued"},
+        ) as requeue_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Requeue inbox item: Review old candidate for 2026-04-20",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Requeued inbox item 'Review old candidate' for 2026-04-20.", result["output"])
+        requeue_mock.assert_called_once_with("Review old candidate", due_date="2026-04-20")
+
+    def test_vault_curator_native_marks_canonical_target_in_disambiguation_note(self):
+        with patch(
+            "specialized_agent_native.vault_edit.append_under_heading",
+            return_value={"ok": True, "path": "wiki/brain/Roadmap Disambiguation.md", "heading": "Resolution"},
+        ) as append_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Mark [[80 Jarvis Roadmap]] as canonical for [[Roadmap]] in [[Roadmap Disambiguation]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn(
+            "Marked [[80 Jarvis Roadmap]] as the canonical target in wiki/brain/Roadmap Disambiguation.md under Resolution.",
+            result["output"],
+        )
+        append_mock.assert_called_once()
+        self.assertEqual(append_mock.call_args.args[0], "Roadmap Disambiguation")
+        self.assertEqual(append_mock.call_args.args[1], "Resolution")
+        self.assertIn("Canonical target for [[Roadmap]]: [[80 Jarvis Roadmap]].", append_mock.call_args.args[2])
+        self.assertIn("Requested source reference: [[Roadmap]].", append_mock.call_args.args[2])
+
+    def test_operator_native_open_app_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.tools.open_app", return_value="Opening Safari.") as open_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("operator", "Use the operator to open Safari")
+        self.assertEqual(result["model"], "native/operator")
+        self.assertEqual(result["output"], "Opening Safari.")
+        open_mock.assert_called_once_with("Safari")
+
+    def test_operator_native_terminal_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.terminal.run_command", return_value="/Users/truthseeker/jarvis-ai") as run_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("operator", "Run command: pwd")
+        self.assertEqual(result["model"], "native/operator")
+        self.assertEqual(result["output"], "/Users/truthseeker/jarvis-ai")
+        run_mock.assert_called_once_with("pwd")
+
+    def test_operator_native_terminal_hook_rejects_admin_command_text(self):
+        with patch("specialized_agent_native.terminal.run_command", side_effect=AssertionError("should not run shell")), \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("operator", "Run command: sudo ls /System")
+        self.assertEqual(result["model"], "native/operator")
+        self.assertIn("cannot run administrator commands", result["output"].lower())
+
+    def test_operator_native_terminal_hook_rejects_explicit_admin_shell_request(self):
+        with patch("specialized_agent_native.terminal.run_command", side_effect=AssertionError("should not run shell")), \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("operator", "Execute admin command: ls /System")
+        self.assertEqual(result["model"], "native/operator")
+        self.assertIn("dedicated admin command path", result["output"].lower())
+
+    def test_specialized_agent_choose_roles_for_explicit_debugger_request(self):
+        roles = specialized_agents.choose_roles("Use the debugger on this flaky worker issue.")
+        self.assertEqual(roles, ["debugger", "reviewer"])
+
+    def test_specialized_agent_choose_roles_for_research_request(self):
+        roles = specialized_agents.choose_roles(
+            "Research the top public GitHub repos for Obsidian workflows and compare the strongest patterns."
+        )
+        self.assertEqual(roles, ["researcher", "reviewer"])
+
+    def test_specialized_agent_choose_roles_for_vault_curator_request(self):
+        roles = specialized_agents.choose_roles(
+            "Curate the vault and distill this into the brain schema and decision log."
+        )
+        self.assertEqual(roles, ["vault_curator", "reviewer"])
+
+    def test_specialized_agent_choose_roles_for_security_analysis_request(self):
+        roles = specialized_agents.choose_roles(
+            "Threat model this auth flow and tell me the likely trust boundary failures."
+        )
+        self.assertEqual(roles, ["security_analyst", "reviewer"])
+
     def test_specialized_agent_science_fallback_when_claude_unavailable(self):
         previous = model_router.get_mode()
         try:
@@ -478,6 +1070,16 @@ class OrchestratorTests(unittest.TestCase):
             model_router.set_mode(previous)
         self.assertEqual(decision.tool, "chat")
 
+    def test_open_source_mode_keeps_short_calendar_queries_tool_aware(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("orchestrator.ask_claude", side_effect=AssertionError("should not call claude")):
+                decision = orchestrator.classify("What do I have today?")
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "calendar")
+
     def test_science_prompt_auto_invokes_specialized_agent(self):
         previous = model_router.get_mode()
         try:
@@ -495,7 +1097,31 @@ class OrchestratorTests(unittest.TestCase):
             "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence."
         )
         self.assertEqual(decision.tool, "specialized_agent")
-        self.assertEqual(decision.params.get("roles"), ["planner", "executor", "reviewer"])
+        self.assertEqual(decision.params.get("roles"), ["debugger", "reviewer"])
+
+    def test_research_prompt_auto_invokes_specialized_agent(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            decision = orchestrator.classify(
+                "Research the top public GitHub repos for Obsidian workflows and compare the strongest patterns."
+            )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "specialized_agent")
+        self.assertEqual(decision.params.get("roles"), ["researcher", "reviewer"])
+
+    def test_security_analysis_prompt_auto_invokes_specialized_agent(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            decision = orchestrator.classify(
+                "Threat model this authentication flow and tell me the likely trust boundary failures."
+            )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "specialized_agent")
+        self.assertEqual(decision.params.get("roles"), ["security_analyst", "reviewer"])
 
     def test_casual_chat_stays_chat(self):
         decision = orchestrator.classify("How are you doing today?")
@@ -716,6 +1342,32 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say to chunky", text.lower())
 
+    def test_message_request_extracts_phone_number_from_number_phrase(self):
+        stream, label = router.route_stream("now message this number 5107071879")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to 5107071879", text.lower())
+        self.assertNotIn("this number", text.lower())
+
+    def test_message_tool_normalizes_number_phrase_recipient_param(self):
+        import orchestrator
+        decision = orchestrator.ToolDecision(
+            tool="message",
+            confidence=0.99,
+            action="send",
+            params={"recipient": "this number 5107071879"},
+            raw='{"tool":"message"}',
+        )
+        with patch("orchestrator.classify", return_value=decision):
+            stream, label = router._orchestrate(
+                "now message this number 5107071879",
+                "now message this number 5107071879",
+            )
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to 5107071879", text.lower())
+        self.assertNotIn("this number", text.lower())
+
     def test_awaiting_recipient_accepts_contact_name_label(self):
         router._set_awaiting_recipient()
         stream, label = router.route_stream("Contact Name : Chunky")
@@ -776,15 +1428,17 @@ class RouterTests(unittest.TestCase):
         )
         text = "".join(stream)
         self.assertEqual(label, "Sonnet")
-        self.assertIn("Optimistic locking", text)
-        self.assertIn("Pessimistic locking", text)
-        self.assertTrue(any(term in text for term in ("throughput", "conflicts", "deadlocks")))
+        self.assertIn("optimistic locking", text.lower())
+        self.assertIn("pessimistic locking", text.lower())
+        self.assertIn("safer default", text.lower())
+        self.assertTrue(any(term in text.lower() for term in ("throughput", "conflicts", "contention")))
 
     def test_database_index_tradeoff_fast_path(self):
         stream, label = router.route_stream("When should I add a database index, and when can it hurt performance?")
         text = "".join(stream)
         self.assertEqual(label, "Sonnet")
-        self.assertTrue(any(term in text for term in ("read performance", "write amplification", "storage", "insert")))
+        self.assertIn("read-heavy", text.lower())
+        self.assertTrue(any(term in text.lower() for term in ("write amplification", "query plan", "application logic")))
 
     def test_python_race_condition_routes_to_specialized_agents(self):
         stream, label = router.route_stream(
@@ -983,6 +1637,16 @@ class RouterTests(unittest.TestCase):
             text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertEqual(text, "Stub answer.")
+
+    def test_explicit_smart_agent_role_request_bypasses_knowledge_fast_path(self):
+        with patch("specialized_agents.run", return_value={"ok": True, "roles": ["researcher", "reviewer"], "final": "Research stub."}), \
+             patch("specialized_agents.result_text", return_value="Research stub."):
+            stream, label = router.route_stream(
+                "Use smart agents with researcher and vault curator to compare Obsidian repos and distill the findings into the brain."
+            )
+            text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertEqual(text, "Research stub.")
 
     def test_automatic_specialized_agent_route_for_science_question(self):
         previous = model_router.get_mode()
@@ -1282,6 +1946,48 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("workspace", event_types)
         self.assertIn("chunk", event_types)
 
+    def test_tasks_endpoint_wraps_vault_kind_with_curator_prompt(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream", return_value=(iter(["Queued vault work."]), "UnitTestModel")), \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "distill recent runtime lessons into the roadmap",
+                    "kind": "vault",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            task_id = payload["task"]["id"]
+            task = task_runtime.wait_for_task(task_id, timeout=2.0)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task["assigned_agent_id"], "knowledge-vault")
+        self.assertIn("Use the vault curator to handle this vault task.", task["effective_prompt"])
+        self.assertIn("distill recent runtime lessons into the roadmap", task["effective_prompt"])
+
+    def test_router_queues_background_vault_task_and_logs_agent_inbox(self):
+        with patch(
+            "task_runtime.submit_task",
+            return_value={"id": "task_vault123", "assigned_agent_id": "knowledge-vault"},
+        ) as submit_mock, patch(
+            "router.vault_capture.add_agent_inbox_item",
+            return_value={"ok": True, "path": "wiki/brain/92 Agent Inbox.md", "heading": "Queued"},
+        ) as inbox_mock:
+            stream, label = router.route_stream(
+                "Queue background vault task: distill the newest debugging learnings into the brain."
+            )
+            text = "".join(stream)
+
+        self.assertEqual(label, "Tasks")
+        self.assertIn("Queued background vault task task_vault123", text)
+        self.assertIn("[[92 Agent Inbox]]", text)
+        submit_mock.assert_called_once()
+        self.assertEqual(submit_mock.call_args.kwargs["kind"], "vault")
+        inbox_mock.assert_called_once_with("distill the newest debugging learnings into the brain.")
+
     def test_public_status_path_remains_visible_when_auth_is_enabled(self):
         api._API_TOKEN = "test-token"
         response = self.client.get("/status")
@@ -1563,7 +2269,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         ui.OrbShellWindow._apply_live_suggestion_update(fake, "Use that confident answer.")
 
         self.assertEqual(fake.suggest_label.text(), "Use that confident answer.")
-        self.assertEqual(fake.transcript_label.text(), "Live suggestion ready.")
+        self.assertEqual(fake.transcript_label.text(), "Next: Use that confident answer")
         self.assertEqual(fake._peek_label.text(), "SUGGESTION: Use that confident answer.")
         self.assertEqual(fake._top_chip.text(), "SMART LISTEN ACTIVE")
         fake._set_tray_visible.assert_called_once_with(True)
@@ -1698,6 +2404,35 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertTrue(snapshot["local_stt_available"])
         self.assertEqual(snapshot["local_stt_status"]["model"], "small.en")
 
+    def test_status_snapshot_uses_real_local_stt_status_path(self):
+        previous_backend = meeting_listener._last_stt_backend
+        previous_detail = meeting_listener._last_stt_backend_detail
+        previous_device_index = meeting_listener._device_index
+        try:
+            meeting_listener._last_stt_backend = "faster-whisper"
+            meeting_listener._last_stt_backend_detail = "faster-whisper"
+            meeting_listener._device_index = None
+            with patch(
+                "meeting_listener.preferred_source_snapshot",
+                return_value={"device_index": 3, "device_name": "MacBook Pro Microphone"},
+            ), patch("meeting_listener._device_name", return_value="MacBook Pro Microphone"), \
+                 patch("local_runtime.local_stt.configured_engine", return_value="faster-whisper"), \
+                 patch("local_runtime.local_stt.local_available", return_value=True), \
+                 patch("local_runtime.local_stt.openai_fallback_allowed", return_value=False), \
+                 patch("local_runtime.local_stt.LOCAL_STT_MODEL", "base.en"), \
+                 patch("local_runtime.local_stt.FASTER_WHISPER_DEVICE", "cpu"), \
+                 patch("local_runtime.local_stt.FASTER_WHISPER_COMPUTE_TYPE", "int8"):
+                snapshot = meeting_listener.status_snapshot()
+        finally:
+            meeting_listener._last_stt_backend = previous_backend
+            meeting_listener._last_stt_backend_detail = previous_detail
+            meeting_listener._device_index = previous_device_index
+        self.assertEqual(snapshot["active_device_index"], 3)
+        self.assertEqual(snapshot["active_device_name"], "MacBook Pro Microphone")
+        self.assertEqual(snapshot["local_stt_status"]["active_engine"], "faster-whisper")
+        self.assertEqual(snapshot["local_stt_status"]["device"], "cpu")
+        self.assertEqual(snapshot["local_stt_status"]["compute_type"], "int8")
+
     def test_generate_suggestion_uses_strong_tier_for_interview_style_prompt(self):
         previous_history = list(meeting_listener._transcript_history)
         try:
@@ -1741,6 +2476,38 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertIn("answer it directly instead of asking for vague clarification", prompt)
         self.assertIn("ask one short clarification question instead of inventing missing details", prompt)
 
+    def test_generate_suggestion_adds_engineering_grounding_for_technical_prompt(self):
+        previous_history = list(meeting_listener._transcript_history)
+        try:
+            meeting_listener._transcript_history[:] = ["Interviewer: How would you design a resilient job queue?"]
+            with patch("meeting_listener._smem.context_for_query", return_value=""), \
+                 patch("meeting_listener._ip.answer_for_query", return_value=""), \
+                 patch("meeting_listener._model_router._engineering_companion_grounding", return_value="Engineering companion guidance:\n- Systems Design Tradeoff Heuristics: choose the smallest reliable architecture.") as grounding_mock, \
+                 patch("meeting_listener.ask_with_priority", return_value="Start with a queue, workers, retries, and idempotency.") as ask_mock:
+                meeting_listener._generate_suggestion("How would you design a resilient job queue?")
+        finally:
+            meeting_listener._transcript_history[:] = previous_history
+
+        grounding_mock.assert_called_once()
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Systems Design Tradeoff Heuristics", injected)
+
+    def test_fallback_suggestion_text_uses_technical_playbook_style(self):
+        text = meeting_listener._fallback_suggestion_text(
+            "How would you debug this flaky worker pool?",
+            question_like=True,
+            technical=True,
+        )
+        self.assertIn("recommendation first", text.lower())
+        self.assertTrue(any(term in text.lower() for term in ("tradeoff", "failure point", "verification step")))
+
+    def test_actionable_hint_prefers_verification_clause(self):
+        hint = meeting_listener.actionable_hint(
+            "Use retries and idempotency for the worker queue. Verify duplicate jobs stay harmless under load."
+        )
+        self.assertEqual(hint, "Verify: Verify duplicate jobs stay harmless under load")
+
     def test_try_caption_fallback_suppresses_duplicate_caption_line(self):
         snapshot = {
             "ok": True,
@@ -1771,6 +2538,31 @@ class MeetingListenerTests(unittest.TestCase):
 
 
 class ModelRouterFallbackTests(unittest.TestCase):
+    def test_runtime_voice_query_detection_stays_narrow(self):
+        self.assertTrue(model_router._is_runtime_voice_query("Jarvis, what voice are you using right now?"))
+        self.assertTrue(model_router._is_runtime_voice_query("Which STT backend are you using currently?"))
+        self.assertFalse(model_router._is_runtime_voice_query("What is a good local TTS library for Python?"))
+
+    def test_engineering_companion_query_detection_stays_narrow(self):
+        self.assertTrue(model_router._is_engineering_companion_query("How would you design a resilient job queue?", "chat"))
+        self.assertTrue(model_router._is_engineering_companion_query("Help me debug this flaky worker pool.", "chat"))
+        self.assertFalse(model_router._is_engineering_companion_query("What is the weather today?", "chat"))
+        self.assertFalse(model_router._is_engineering_companion_query("Message Aman that I am running late.", "chat"))
+
+    def test_engineering_grounding_queries_add_specific_playbooks(self):
+        debug_queries = model_router._engineering_grounding_queries("Help me debug this flaky worker pool.")
+        self.assertIn("debugging root cause playbook", debug_queries)
+        self.assertEqual(model_router._engineering_playbook_category("Help me debug this flaky worker pool."), "debugging")
+
+        design_queries = model_router._engineering_grounding_queries("How would you design a resilient job queue?")
+        self.assertIn("systems design tradeoff heuristics", design_queries)
+        self.assertEqual(model_router._engineering_playbook_category("How would you design a resilient job queue?"), "systems_design")
+
+        security_queries = model_router._engineering_grounding_queries("Walk me through the threat model for prompt injection.")
+        self.assertIn("threat modeling security thinking", security_queries)
+        self.assertNotIn("ai runtime agent engineering principles", security_queries)
+        self.assertEqual(model_router._engineering_playbook_category("Walk me through the threat model for prompt injection."), "threat_modeling")
+
     def test_smart_stream_injects_general_grounding_rules(self):
         previous = model_router.get_mode()
         try:
@@ -1808,6 +2600,307 @@ class ModelRouterFallbackTests(unittest.TestCase):
         injected = ask_mock.call_args.kwargs["system_extra"]
         self.assertIn("Relevant Graphify repo context", injected)
         self.assertIn("JarvisWindow [ui.py:L1]", injected)
+
+    def test_smart_stream_runtime_voice_query_prefers_live_runtime_facts_over_stale_context(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router.skills.build_system_extra", return_value=("Stale skill context", [SimpleNamespace(id="jarvis-local-vault-overview")])), \
+                 patch("model_router.vault.build_context", return_value="Stale vault context"), \
+                 patch("model_router._smem.retrieve", return_value=[{"content": "Stale semantic memory", "score": 0.91}]), \
+                 patch("model_router._smem.format_for_prompt", return_value="Stale semantic memory"), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.tts_runtime_config", return_value={
+                     "backends": ["kokoro", "say", "elevenlabs", "openai"],
+                     "primary_backend": "kokoro",
+                     "local": {"voice": "Reed (English (US))", "rate_wpm": 175},
+                     "kokoro": {"enabled": True, "voice": "af_sarah"},
+                 }), \
+                 patch("model_router.stt_runtime_config", return_value={
+                     "backends": ["faster-whisper", "openai"],
+                     "language": "en",
+                     "faster_whisper": {"model": "base.en", "device": "cpu", "compute_type": "int8"},
+                 }), \
+                 patch("model_router.local_tts.status", return_value={"ready": True}), \
+                 patch("model_router.local_stt.status", return_value={"active_engine": "faster-whisper", "language": "en"}), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded runtime answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("Jarvis, what voice are you using right now?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded runtime answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Jarvis runtime voice facts", injected)
+        self.assertIn("Configured TTS backends in priority order: kokoro, say, elevenlabs, openai", injected)
+        self.assertIn("Active STT engine: faster-whisper", injected)
+        self.assertNotIn("Stale skill context", injected)
+        self.assertNotIn("Stale vault context", injected)
+        self.assertNotIn("Stale semantic memory", injected)
+
+    def test_smart_stream_prioritizes_user_snapshot_and_semantic_guidance(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.memory_status", return_value={
+                     "working_memory": {
+                         "active_projects": ["Jarvis AI: local-first desktop assistant"],
+                         "assist_preferences": ["communication_style: direct"],
+                         "recurring_topics": ["python", "ai safety"],
+                     },
+                     "long_term_profile": {
+                         "summary": "Aman is building Jarvis as a local-first assistant."
+                     },
+                 }), \
+                 patch("model_router._smem.retrieve", return_value=[
+                     {"content": "Aman prefers answers tied to his Jarvis project.", "score": 0.98}
+                 ]), \
+                 patch("model_router._smem.format_for_prompt", return_value="[Relevant context from Jarvis knowledge base]\n• [0.98] Aman prefers answers tied to his Jarvis project."), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.vault.build_context", return_value=""), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("How should we improve Jarvis next?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Compact user snapshot", injected)
+        self.assertIn("Aman is building Jarvis as a local-first assistant.", injected)
+        self.assertIn("Semantic memory guidance", injected)
+        self.assertIn("Most relevant retrieved memory: Aman prefers answers tied to his Jarvis project.", injected)
+
+    def test_smart_stream_injects_engineering_companion_grounding_for_technical_queries(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.memory_status", return_value={}), \
+                 patch("model_router.vault.build_context", return_value=""), \
+                 patch("model_router.vault.search", side_effect=[
+                     [{"title": "Senior Cybersecurity AI Engineering Companion", "path": "wiki/brain/73 Senior Cybersecurity AI Engineering Companion.md", "excerpt": "Jarvis should behave like a local-first senior technical companion who can move across cybersecurity, AI safety, backend and systems engineering."}],
+                     [{"title": "Universal Engineer Thinker Problem Solver", "path": "wiki/brain/74 Universal Engineer Thinker Problem Solver.md", "excerpt": "Jarvis should diagnose problems clearly, identify the real failing layer, and choose the smallest correct next step."}],
+                     [{"title": "Systems Design Tradeoff Heuristics", "path": "wiki/brain/76 Systems Design Tradeoff Heuristics.md", "excerpt": "Good systems design is about matching the design to the actual problem, expected scale, and operational burden."}],
+                 ]), \
+                 patch("model_router._smem.retrieve", return_value=[]), \
+                 patch("model_router._smem.format_for_prompt", return_value=""), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("How would you design a resilient job queue?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Act like a senior technical partner, not a generic assistant.", injected)
+        self.assertIn("Senior Cybersecurity AI Engineering Companion", injected)
+        self.assertIn("Universal Engineer Thinker Problem Solver", injected)
+        self.assertIn("Systems Design Tradeoff Heuristics", injected)
+
+    def test_smart_stream_injects_debugging_playbook_for_debug_queries(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.memory_status", return_value={}), \
+                 patch("model_router.vault.build_context", return_value=""), \
+                 patch("model_router.vault.search", side_effect=[
+                     [{"title": "Senior Cybersecurity AI Engineering Companion", "path": "wiki/brain/73 Senior Cybersecurity AI Engineering Companion.md", "excerpt": "Jarvis should behave like a local-first senior technical companion who can move across cybersecurity, AI safety, backend and systems engineering."}],
+                     [{"title": "Universal Engineer Thinker Problem Solver", "path": "wiki/brain/74 Universal Engineer Thinker Problem Solver.md", "excerpt": "Jarvis should diagnose problems clearly, identify the real failing layer, and choose the smallest correct next step."}],
+                     [{"title": "Debugging Root Cause Playbook", "path": "wiki/brain/75 Debugging Root Cause Playbook.md", "excerpt": "Jarvis should debug by finding the real failing layer, making the smallest correct fix, and verifying it on the actual runtime surface."}],
+                 ]), \
+                 patch("model_router._smem.retrieve", return_value=[]), \
+                 patch("model_router._smem.format_for_prompt", return_value=""), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("Help me debug this flaky worker pool.", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Debugging Root Cause Playbook", injected)
+
+    def test_smart_stream_skips_engineering_companion_grounding_for_nontechnical_queries(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.memory_status", return_value={}), \
+                 patch("model_router.vault.build_context", return_value=""), \
+                 patch("model_router.vault.search", return_value=[]), \
+                 patch("model_router._smem.retrieve", return_value=[]), \
+                 patch("model_router._smem.format_for_prompt", return_value=""), \
+                 patch("model_router._gctx.context_for_query", return_value=""), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded answer."])) as ask_mock:
+                stream, label = model_router.smart_stream("What is the weather today?", tool="chat")
+                text = "".join(stream)
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertIn("Grounded answer.", text)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertNotIn("Engineering companion guidance", injected)
+
+    def test_format_with_mini_injects_engineering_grounding_for_ground_query(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.get_context", return_value=""), \
+                 patch("model_router.vault.search", side_effect=[
+                     [{"title": "Senior Cybersecurity AI Engineering Companion", "path": "wiki/brain/73 Senior Cybersecurity AI Engineering Companion.md", "excerpt": "Jarvis should behave like a local-first senior technical companion who can move across cybersecurity, AI safety, backend and systems engineering."}],
+                     [{"title": "Universal Engineer Thinker Problem Solver", "path": "wiki/brain/74 Universal Engineer Thinker Problem Solver.md", "excerpt": "Jarvis should diagnose problems clearly, identify the real failing layer, and choose the smallest correct next step."}],
+                     [{"title": "Systems Design Tradeoff Heuristics", "path": "wiki/brain/76 Systems Design Tradeoff Heuristics.md", "excerpt": "Good systems design is about matching the design to the actual problem, expected scale, and operational burden."}],
+                 ]), \
+                 patch("model_router.skills.build_system_extra", return_value=("", None)), \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded summary."])) as ask_mock:
+                text = "".join(
+                    model_router.format_with_mini(
+                        "Summarize this output.",
+                        tool="terminal",
+                        ground_query="How would you design a resilient job queue?",
+                    )
+                )
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertIn("Grounded summary.", text)
+        prompt = ask_mock.call_args.args[0]
+        self.assertIn("Lead with the conclusion, recommendation, or most important finding first", prompt)
+        self.assertIn("next verification step", prompt)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Systems Design Tradeoff Heuristics", injected)
+
+
+class OverlayTechnicalGuidanceTests(unittest.TestCase):
+    def test_screen_analysis_prompt_includes_engineering_playbook_guidance(self):
+        worker = overlay.ScreenAnalysisWorker()
+        with patch("desktop.overlay.camera.screenshot_and_describe", return_value="answer") as scan_mock:
+            worker.run()
+
+        prompt = scan_mock.call_args.args[0]
+        self.assertIn("Engineering playbook guidance", prompt)
+        self.assertIn("Diagnose the failing layer first", prompt)
+        self.assertIn("Use only what is visible in the image", prompt)
+
+
+class CameraTechnicalGuidanceTests(unittest.TestCase):
+    def test_engineering_vision_prompt_only_adds_playbook_for_technical_queries(self):
+        with patch("camera._cloud_vision_allowed", return_value=False):
+            technical = camera._engineering_vision_prompt("How would you debug this worker pool?")
+            casual = camera._engineering_vision_prompt("Describe what you see on the screen.")
+
+        self.assertIn("Engineering playbook guidance", technical)
+        self.assertIn("Diagnose the failing layer first", technical)
+        self.assertNotIn("Engineering playbook guidance", casual)
+
+
+class LongFormTechnicalGroundingTests(unittest.TestCase):
+    def test_research_voice_summary_injects_engineering_grounding_for_technical_query(self):
+        result = {
+            "query": "How would you design a resilient job queue?",
+            "report": "Detailed report text.",
+        }
+        with patch(
+            "research.ask_claude",
+            return_value="Use retries, idempotency, and dead-letter handling.",
+        ) as ask_mock:
+            text = research.format_for_voice(result)
+
+        self.assertIn("idempotency", text.lower())
+        prompt = ask_mock.call_args.args[0]
+        self.assertIn("Lead with the conclusion or recommendation first", prompt)
+        self.assertIn("next verification step", prompt)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Systems Design Tradeoff Heuristics", injected)
+
+    def test_operative_summary_injects_engineering_grounding_for_technical_task(self):
+        fake_steps = [
+            SimpleNamespace(number=1, description="Inspect logs", ok=True, result="Found queue contention."),
+            SimpleNamespace(number=2, description="Propose fix", ok=True, result="Add idempotent worker handling."),
+        ]
+        with patch("operative.plan_task", return_value=fake_steps), \
+             patch(
+                 "operative.execute_step",
+                 side_effect=[
+                     (True, "Found queue contention."),
+                     (True, "Add idempotent worker handling."),
+                 ],
+             ), \
+             patch(
+                 "operative.ask_claude",
+                 return_value="The queue issue was contention under load, and the next fix is idempotent processing with retries.",
+             ) as ask_mock:
+            result = operative.run_task("Debug the flaky worker queue and propose the smallest safe fix.")
+
+        self.assertTrue(result["ok"])
+        prompt = ask_mock.call_args.args[0]
+        self.assertIn("Lead with the conclusion or fix first", prompt)
+        self.assertIn("root cause", prompt)
+        injected = ask_mock.call_args.kwargs["system_extra"]
+        self.assertIn("Engineering companion guidance", injected)
+        self.assertIn("Debugging Root Cause Playbook", injected)
+
+
+class InterviewProfileBrainRegressionTests(unittest.TestCase):
+    def test_openai_variant_path_is_selected_for_openai_queries(self):
+        path = interview_profile._brain_variant_path("Why am I a fit for OpenAI trust and safety operations?")
+        self.assertEqual(path, interview_profile.OPENAI_VARIANT)
+
+    def test_security_variant_path_is_selected_for_incident_command_queries(self):
+        path = interview_profile._brain_variant_path("Why am I a fit for GSOC security incident command leadership?")
+        self.assertEqual(path, interview_profile.SECURITY_VARIANT)
+
+    def test_google_play_variant_path_is_selected_for_fraud_queries(self):
+        path = interview_profile._brain_variant_path("How should I position myself for Google Play fraud and abuse work?")
+        self.assertEqual(path, interview_profile.GOOGLE_PLAY_VARIANT)
+
+    def test_meta_variant_path_is_selected_for_meta_quality_queries(self):
+        path = interview_profile._brain_variant_path("Why am I a fit for Meta trust and safety calibration work?")
+        self.assertEqual(path, interview_profile.META_VARIANT)
+
+    def test_target_role_pack_uses_openai_brain_variant(self):
+        text = interview_profile.target_role_pack_text("How should I position myself for OpenAI trust and safety operations?")
+        self.assertIn("OpenAI-style roles", text)
+        self.assertIn("high-sensitivity abuse and integrity cases", text)
+
+    def test_candidate_profile_hint_includes_career_rules_and_variant_guidance(self):
+        text = interview_profile._candidate_profile_hint("Tell me about yourself for OpenAI trust and safety operations.")
+        self.assertIn("career-answering rules", text)
+        self.assertIn("core career narrative", text)
+        self.assertIn("OpenAI-style", text)
+
+    def test_tell_me_about_yourself_uses_updated_resume_tenure(self):
+        text = interview_profile.tell_me_about_yourself_text("Tell me about yourself for a trust and safety role.")
+        self.assertIn("7+ years", text)
+
+    def test_candidate_profile_hint_includes_llnl_technical_guidance_for_engineering_queries(self):
+        text = interview_profile._candidate_profile_hint("Tell me about yourself for a backend software engineering role.")
+        self.assertIn("Technical credibility note guidance", text)
+
+    def test_backend_tell_me_about_yourself_uses_llnl_proof_points(self):
+        text = interview_profile.tell_me_about_yourself_text("Tell me about yourself for a backend software engineering role.")
+        self.assertIn("optimized SQL latency at LLNL by 40 percent", text)
 
 
 class GraphContextTests(unittest.TestCase):
@@ -2259,6 +3352,75 @@ class _StubButton:
         self.style = style
 
 
+class VoiceStatusUiRegressionTests(unittest.TestCase):
+    class _Sink:
+        def __init__(self):
+            self.calls = []
+
+        def set_color(self, value):
+            self.calls.append(("color", value))
+
+        def set_state(self, value):
+            self.calls.append(("state", value))
+
+        def set_intensity(self, value):
+            self.calls.append(("intensity", value))
+
+    def _fake_window(self, *, voice_status="AWAITING WAKE WORD", label_text="ONLINE"):
+        return SimpleNamespace(
+            _voice_status_raw=voice_status,
+            _status_label=_StubTextWidget(label_text),
+            _status_dot=self._Sink(),
+            _orb=self._Sink(),
+            _signal_bars=self._Sink(),
+            _hud_bg=SimpleNamespace(set_busy=unittest.mock.Mock()),
+            _apply_voice_hint_for_status=unittest.mock.Mock(),
+        )
+
+    def test_non_voice_status_keeps_existing_mic_state(self):
+        window = self._fake_window()
+
+        ui.JarvisWindow._set_status(window, "PROCESSING")
+
+        self.assertEqual(window._voice_status_raw, "AWAITING WAKE WORD")
+        window._apply_voice_hint_for_status.assert_called_once_with("AWAITING WAKE WORD")
+        self.assertEqual(window._status_label.text(), "PROCESSING")
+
+    def test_voice_prefixed_status_updates_mic_state(self):
+        window = self._fake_window()
+
+        ui.JarvisWindow._set_status(window, f"{ui.VOICE_STATUS_PREFIX}LISTENING")
+
+        self.assertEqual(window._voice_status_raw, "LISTENING")
+        window._apply_voice_hint_for_status.assert_called_once_with("LISTENING")
+        self.assertEqual(window._status_label.text(), "LISTENING")
+
+    def test_mic_chip_click_uses_voice_state_not_status_label_text(self):
+        window = SimpleNamespace(
+            _voice_status_raw="LISTENING",
+            _status_label=_StubTextWidget("ONLINE"),
+            _restart_voice_worker_to_standby=unittest.mock.Mock(),
+        )
+
+        with patch("ui._voice_trigger_wake_word") as trigger_mock:
+            ui.JarvisWindow._on_mic_chip_clicked(window)
+
+        window._restart_voice_worker_to_standby.assert_called_once_with()
+        trigger_mock.assert_not_called()
+
+    def test_mic_chip_click_wakes_if_worker_needs_recovery(self):
+        window = SimpleNamespace(
+            _voice_status_raw="AWAITING WAKE WORD",
+            _ensure_voice_worker_running=unittest.mock.Mock(return_value=True),
+        )
+
+        with patch("ui._voice_trigger_wake_word") as trigger_mock:
+            ui.JarvisWindow._on_mic_chip_clicked(window)
+
+        window._ensure_voice_worker_running.assert_called_once_with()
+        trigger_mock.assert_called_once_with()
+
+
 class LiveAssistRenderingTests(unittest.TestCase):
     def test_meeting_watchdog_respects_manual_full_window_restore(self):
         window = SimpleNamespace(
@@ -2404,6 +3566,53 @@ class LiveAssistRenderingTests(unittest.TestCase):
         )
         self.assertEqual(window._top_chip.text(), "SMART LISTEN ACTIVE")
         window._set_tray_visible.assert_called_once_with(True)
+
+    def test_orb_live_call_status_appends_actionable_hint(self):
+        suggestion = "Use retries and idempotency. Verify duplicate jobs stay harmless under load."
+        live_snapshot = {
+            "running": True,
+            "started_at": 1.0,
+            "last_transcript": "",
+            "last_transcript_at": 0.0,
+            "last_suggestion": suggestion,
+            "last_suggestion_at": 2.0,
+            "active_device_name": "MacBook Pro Microphone",
+            "preferred": {"device_name": "MacBook Pro Microphone"},
+        }
+        window = SimpleNamespace(
+            _last_live_listener_started_at=0.0,
+            _last_live_transcript_at=0.0,
+            _last_live_suggestion_at=0.0,
+            suggest_panel=_StubPanel(),
+            suggest_label=_StubTextWidget(),
+            transcript_label=_StubTextWidget(),
+            _peek_label=_StubTextWidget(),
+            _top_chip=_StubTextWidget(),
+            listen_btn=_StubButton(),
+            privacy_btn=_StubButton(),
+            _call_status_label=_StubTextWidget(),
+            _update_meeting_toolbar_layout=lambda: None,
+            _add_message=lambda *args, **kwargs: None,
+            _action_btn_css=lambda color: f"button:{color}",
+            _call_status_css=lambda tone: f"tone:{tone}",
+        )
+        window.tray_visible = False
+        window._set_tray_visible = lambda visible: setattr(window, "tray_visible", visible)
+        window._apply_live_transcript_update = lambda text: window.transcript_label.setText(f"Transcript: {text[:240]}")
+        window._apply_live_suggestion_update = lambda suggestion: (
+            window.suggest_label.setPlainText(suggestion),
+            window.transcript_label.setText(meeting_listener.actionable_hint(suggestion) or "Live suggestion ready."),
+            window._set_tray_visible(True),
+        )
+
+        with patch("ui._overlay_mod.detect_meeting_app", return_value="TEAMS"), \
+             patch("ui._meeting_status_snapshot", return_value=live_snapshot), \
+             patch("ui._live_listener_snapshot", return_value=live_snapshot), \
+             patch("ui.call_privacy.snapshot", return_value={"suppressing_audio": False, "enabled": False}), \
+             patch("ui.shutil.which", return_value="/usr/bin/screencapture"):
+            ui.OrbShellWindow._refresh_live_call_status(window)
+
+        self.assertIn("Verify: Verify duplicate jobs stay harmless under load", window._call_status_label.text())
 
 
 class UnderstandingQualitySmokeTests(unittest.TestCase):

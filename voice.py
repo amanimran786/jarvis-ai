@@ -2,6 +2,9 @@ import os
 import tempfile
 import subprocess
 import threading
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
 import speech_recognition as sr
 from openai import OpenAI
 from config import (
@@ -16,17 +19,41 @@ from config import (
 import call_privacy
 from local_runtime import local_stt
 from local_runtime import local_tts
-from local_runtime import local_kokoro_tts
+# Prefer the subprocess bridge when it imports cleanly, but keep runtime stable
+# while that path is still being debugged.
+try:
+    from local_runtime import local_kokoro_subprocess_tts as local_kokoro_tts
+except Exception:
+    from local_runtime import local_kokoro_tts
 
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
 
-WAKE_WORDS = {"hey jarvis", "ok jarvis"}
+WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis", "okay jarvis"}
 _last_tts_engine = ""
+MANUAL_PROMPT_WINDOW_SECONDS = 8.0
+WAKE_WORD_WINDOW_SECONDS = 3.0
+_kokoro_disabled_reason = ""
 
 # Preferred real microphones — avoid BlackHole (loopback bus, no physical mic)
 _PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
 _BLACKHOLE_SKIP = ["blackhole", "loopback", "virtual"]
+_VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
+
+
+def _debug_log(*args, **kwargs) -> None:
+    """Best-effort logging that stays safe inside windowed macOS app bundles."""
+    try:
+        print(*args, **kwargs)
+    except (BrokenPipeError, OSError, ValueError):
+        pass
+    try:
+        _VOICE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = " ".join(str(arg) for arg in args)
+        with _VOICE_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(f"[{datetime.now().isoformat(timespec='seconds')}] {line}\n")
+    except Exception:
+        pass
 
 
 def _get_microphone() -> sr.Microphone:
@@ -44,6 +71,105 @@ def _get_microphone() -> sr.Microphone:
         pass
     return sr.Microphone()
 
+
+def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
+    """Return microphone candidates ordered by preference.
+
+    Priority:
+      1. Exact or substring match against _PREFERRED_MICS (highest priority first).
+      2. Fuzzy word match: any single significant word from a preferred name appears
+         in the device name (handles e.g. "AirPods" matching "AirPods Pro Mic").
+      3. Any real non-virtual device not in _BLACKHOLE_SKIP.
+      4. macOS default input device as last resort.
+
+    This ensures the Default input device is only used when nothing better exists,
+    rather than always winning by being inserted first.
+    """
+    candidates: list[tuple[str, sr.Microphone]] = []
+    seen: set[int | None] = set()
+
+    try:
+        names = sr.Microphone.list_microphone_names() or []
+    except Exception:
+        names = []
+
+    def _append(index: int | None, label: str) -> None:
+        if index in seen:
+            return
+        seen.add(index)
+        candidates.append((label, sr.Microphone(device_index=index)))
+
+    # Tier 1: substring match — "MacBook Pro Microphone" in device name
+    for preferred in _PREFERRED_MICS:
+        for i, name in enumerate(names):
+            if preferred.lower() in name.lower():
+                _append(i, name)
+
+    # Tier 2: fuzzy word match — any word from the preferred name appears in
+    # the device name (handles slight naming differences like "AirPods" vs "AirPods Pro Mic")
+    _FUZZY_SKIP_WORDS = {"microphone", "mic", "the", "a", "an", "input", "output"}
+    for preferred in _PREFERRED_MICS:
+        words = [w for w in preferred.lower().split() if w not in _FUZZY_SKIP_WORDS and len(w) > 2]
+        for i, name in enumerate(names):
+            name_lower = name.lower()
+            if any(word in name_lower for word in words):
+                _append(i, name)
+
+    # Tier 3: any real non-virtual device
+    for i, name in enumerate(names):
+        if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
+            _append(i, name)
+
+    # Tier 4: macOS default input (last resort — may be a loopback or virtual device)
+    _append(None, "Default input device")
+
+    return candidates
+
+
+@contextmanager
+def _open_microphone_source():
+    """Open a live microphone stream, skipping candidates that fail to provide one."""
+    last_error: Exception | None = None
+
+    for label, microphone in _microphone_candidates():
+        source = None
+        try:
+            source = microphone.__enter__()
+            if getattr(source, "stream", None) is None:
+                raise RuntimeError(f"{label} opened without a live input stream")
+            _debug_log(f"[Mic] Using input device: {label}")
+            try:
+                yield source
+            finally:
+                microphone.__exit__(None, None, None)
+            return
+        except Exception as exc:
+            last_error = exc
+            _debug_log(f"[Mic] Failed to open {label}: {exc}")
+            try:
+                if source is not None:
+                    stream = getattr(source, "stream", None)
+                    audio = getattr(source, "audio", None)
+                    if stream is not None:
+                        stream.close()
+                    if audio is not None:
+                        audio.terminate()
+                    source.stream = None
+            except Exception:
+                pass
+
+    detail = str(last_error) if last_error is not None else "No microphone devices are available."
+    raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
+
+
+def _capture_audio_window(source, *, duration: float, reason: str):
+    """
+    Record a fixed window of audio instead of waiting for speech_recognition's
+    phrase gate to decide that the user started talking.
+    """
+    _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
+    return _recognizer.record(source, duration=duration)
+
 # Prevents mic from picking up Jarvis's own TTS output.
 # Cleared while Jarvis is speaking; listen() blocks until set again.
 _done_speaking = threading.Event()
@@ -56,7 +182,7 @@ _manual_wake_trigger = threading.Event()  # set by UI to skip wake-word wait
 # adjust_for_ambient_noise() costs 300ms per call — we call it once and reuse.
 import time as _time
 _CALIBRATION_LOCK = threading.Lock()
-_CALIBRATION_TTL = 120.0          # re-calibrate every 2 minutes
+_CALIBRATION_TTL = 12.0           # re-calibrate every 12 s — fresh after each TTS turn
 _calibrated_at: float = 0.0
 _calibrated_threshold: float | None = None
 
@@ -137,7 +263,7 @@ def _speak_elevenlabs(text: str) -> bool:
         os.unlink(tmp_path)
         return True
     except Exception as e:
-        print(f"[ElevenLabs] Failed: {e} — falling back to OpenAI TTS")
+        _debug_log(f"[ElevenLabs] Failed: {e} — falling back to OpenAI TTS")
         return False
 
 
@@ -165,17 +291,33 @@ def _speak_local(text: str) -> bool:
     if not result.get("ok"):
         error = result.get("error")
         if error:
-            print(f"[Local TTS] {error}")
+            _debug_log(f"[Local TTS] {error}")
         return False
     return True
 
 
 def _speak_kokoro(text: str) -> bool:
+    global _kokoro_disabled_reason
+    if _kokoro_disabled_reason:
+        return False
     result = local_kokoro_tts.speak(text)
     if not result.get("ok"):
         error = result.get("error")
         if error:
-            print(f"[Kokoro TTS] {error}")
+            normalized = error.lower()
+            if any(
+                phrase in normalized
+                for phrase in (
+                    "kokoro-onnx not installed",
+                    "kokoro model unavailable",
+                    "no module named",
+                    "failed to load model",
+                )
+            ):
+                _kokoro_disabled_reason = error
+                _debug_log(f"[Kokoro TTS] disabling Kokoro for this session: {error}")
+            else:
+                _debug_log(f"[Kokoro TTS] {error}")
         return False
     return True
 
@@ -197,7 +339,7 @@ def _speak_with_fallbacks(text: str) -> str:
                 _last_tts_engine = "OpenAI TTS"
                 return _last_tts_engine
         except Exception as exc:
-            print(f"[TTS] Backend {backend} failed: {exc}")
+            _debug_log(f"[TTS] Backend {backend} failed: {exc}")
     raise RuntimeError("No TTS backend succeeded.")
 
 
@@ -207,14 +349,18 @@ def speak(text: str) -> None:
     """Speak text — local macOS TTS first, then paid fallbacks if needed."""
     if not text or not text.strip():
         return
-    print(f"Jarvis: {text}")
+    _debug_log(f"Jarvis: {text}")
     if call_privacy.should_suppress_audio():
-        print("[Voice] Suppressed audio because meeting-safe mode is active.")
+        _debug_log("[Voice] Suppressed audio because meeting-safe mode is active.")
         return
     _done_speaking.clear()
     try:
         _speak_with_fallbacks(text)
     finally:
+        # Invalidate the noise calibration so the next listen() recalibrates
+        # in post-speech silence rather than reusing a threshold measured while
+        # the room was loud (which would suppress the user's voice).
+        invalidate_noise_calibration()
         _done_speaking.set()
 
 
@@ -224,20 +370,20 @@ def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
     if local_result.get("ok"):
         text = (local_result.get("text") or "").strip()
         if text:
-            print(f"[STT] Transcribed locally via {local_result.get('engine')}.")
+            _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
-        print(f"[Local STT] {local_error}")
+        _debug_log(f"[Local STT] {local_error}")
         return None
     if _openai_client is None:
-        print(f"[Local STT] {local_error}")
-        print("[Whisper Error] OpenAI STT fallback is not configured.")
+        _debug_log(f"[Local STT] {local_error}")
+        _debug_log("[Whisper Error] OpenAI STT fallback is not configured.")
         return None
 
     if local_result.get("engine") == "faster-whisper":
-        print(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
+        _debug_log(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
 
     try:
         import io
@@ -249,7 +395,7 @@ def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
         )
         return transcript.text.strip() or None
     except Exception as e:
-        print(f"[Whisper Error] {e}")
+        _debug_log(f"[Whisper Error] {e}")
         return None
 
 
@@ -259,20 +405,20 @@ def _transcribe_audio_file(path: str) -> str | None:
     if local_result.get("ok"):
         text = (local_result.get("text") or "").strip()
         if text:
-            print(f"[STT] Transcribed locally via {local_result.get('engine')}.")
+            _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
-        print(f"[Local STT] {local_error}")
+        _debug_log(f"[Local STT] {local_error}")
         return None
     if _openai_client is None:
-        print(f"[Local STT] {local_error}")
-        print("[Whisper Error] OpenAI STT fallback is not configured.")
+        _debug_log(f"[Local STT] {local_error}")
+        _debug_log("[Whisper Error] OpenAI STT fallback is not configured.")
         return None
 
     if local_result.get("engine") == "faster-whisper":
-        print(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
+        _debug_log(f"[Local STT] {local_error} — falling back to OpenAI Whisper")
 
     try:
         with open(path, "rb") as audio_file:
@@ -282,15 +428,18 @@ def _transcribe_audio_file(path: str) -> str | None:
             )
         return transcript.text.strip() or None
     except Exception as e:
-        print(f"[Whisper Error] {e}")
+        _debug_log(f"[Whisper Error] {e}")
         return None
 
 
-def speak_stream(text_chunks) -> str:
+def speak_stream(text_chunks, *, on_text=None) -> str:
     """
     Speak a streaming response sentence by sentence.
     Plays each sentence as soon as it's complete while the next is generating.
     Returns the full response text.
+
+    on_text: optional callable(accumulated_text: str) called after each sentence
+             is spoken — lets callers update a live UI bubble in real time.
     """
     buffer = ""
     full_text = ""
@@ -300,8 +449,10 @@ def speak_stream(text_chunks) -> str:
         for chunk in text_chunks:
             full_text += chunk
         if full_text.strip():
-            print(f"Jarvis: {full_text}")
-            print("[Voice] Suppressed streaming audio because meeting-safe mode is active.")
+            _debug_log(f"Jarvis: {full_text}")
+            _debug_log("[Voice] Suppressed streaming audio because meeting-safe mode is active.")
+            if on_text:
+                on_text(full_text)
         return full_text
 
     for chunk in text_chunks:
@@ -326,9 +477,13 @@ def speak_stream(text_chunks) -> str:
             buffer = buffer[end_idx + 1:]
             if sentence:
                 speak(sentence)
+                if on_text:
+                    on_text(full_text)
 
     if buffer.strip():
         speak(buffer.strip())
+        if on_text:
+            on_text(full_text)
 
     return full_text
 
@@ -339,26 +494,35 @@ def listen() -> str | None:
     """Record audio and transcribe with local faster-whisper when available."""
     if _stop_requested.is_set():
         return None
-    # Wait until Jarvis finishes speaking — prevents TTS feedback loop.
-    # A short dynamic pause after TTS is handled by the _done_speaking event;
-    # no hard-coded sleep needed.
     _done_speaking.wait(timeout=30)
     if _stop_requested.is_set():
         return None
 
-    with _get_microphone() as source:
-        print("Listening...")
-        _ensure_calibrated(source)   # 300ms → ~0ms on cached calls
-        try:
-            audio = _recognizer.listen(source, timeout=6, phrase_time_limit=60)
-        except sr.WaitTimeoutError:
-            return None
+    # Unconditional pause — lets the mic stream initialise and any TTS room
+    # echo die away before calibration samples ambient noise.  Without this,
+    # calibration runs against reverb and sets the threshold too high,
+    # silencing the user's voice every time.  The original code always had a
+    # 0.3 s sleep here; restoring that behaviour.
+    _time.sleep(0.3)
+
+    try:
+        with _open_microphone_source() as source:
+            _debug_log("Listening...")
+            _ensure_calibrated(source)
+            audio = _capture_audio_window(
+                source,
+                duration=MANUAL_PROMPT_WINDOW_SECONDS,
+                reason="manual prompt",
+            )
+    except RuntimeError as exc:
+        _debug_log(f"[Mic] {exc}")
+        return None
 
     # Transcribe in memory — no temp file write/read
     wav_bytes = audio.get_wav_data()
     text = _transcribe_wav_bytes(wav_bytes)
     if text:
-        print(f"You: {text}")
+        _debug_log(f"You: {text}")
     return text or None
 
 
@@ -384,6 +548,9 @@ def _transcribe_wake_audio(audio) -> str | None:
         text = (local_result.get("text") or "").strip().lower()
         if text:
             return text
+        local_error = (local_result.get("error") or "").strip()
+        if local_error:
+            _debug_log(f"[Wake STT] {local_error}")
     finally:
         os.unlink(tmp_path)
 
@@ -410,14 +577,19 @@ def trigger_wake_word() -> None:
 
 def wait_for_wake_word() -> None:
     """Listen for wake word using local STT first, with optional remote fallback."""
-    _manual_wake_trigger.clear()
-    print("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
+    # Honor a trigger that was set just before this call (e.g., mic button clicked
+    # right as a new worker started). The trigger is always cleared after it fires.
+    if _manual_wake_trigger.is_set():
+        _manual_wake_trigger.clear()
+        _debug_log("\n[Wake word manually triggered on entry]")
+        return
+    _debug_log("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
     while True:
         if _stop_requested.is_set():
             return
         if _manual_wake_trigger.is_set():
             _manual_wake_trigger.clear()
-            print("\n[Wake word manually triggered]")
+            _debug_log("\n[Wake word manually triggered]")
             return
         # Also wait here if Jarvis is speaking
         _done_speaking.wait(timeout=10)
@@ -425,20 +597,26 @@ def wait_for_wake_word() -> None:
             return
         if _manual_wake_trigger.is_set():
             _manual_wake_trigger.clear()
-            print("\n[Wake word manually triggered]")
+            _debug_log("\n[Wake word manually triggered]")
             return
-        with _get_microphone() as source:
-            _ensure_calibrated(source)
-            try:
-                audio = _recognizer.listen(source, timeout=3, phrase_time_limit=4)
-            except sr.WaitTimeoutError:
-                print(".", end="", flush=True)
-                continue
+        try:
+            with _open_microphone_source() as source:
+                _ensure_calibrated(source)
+                audio = _capture_audio_window(
+                    source,
+                    duration=WAKE_WORD_WINDOW_SECONDS,
+                    reason="wake word",
+                )
+        except RuntimeError as exc:
+            _debug_log(f"[Mic] {exc}")
+            _time.sleep(0.5)
+            continue
 
         text = _transcribe_wake_audio(audio)
         if _wake_word_match(text or ""):
-            print(f"\n[Wake word detected: '{text}']")
+            _debug_log(f"\n[Wake word detected: '{text}']")
             return
+        _debug_log(".", end="", flush=True)
 
 
 def tts_engine() -> str:
