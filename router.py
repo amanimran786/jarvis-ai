@@ -29,6 +29,7 @@ import memory_layer
 import evals
 import skills
 import vault
+import vault_capture
 import source_ingest
 import skill_factory
 from local_runtime import local_training
@@ -149,11 +150,9 @@ def _is_capability_boundary_query(lower: str) -> bool:
 
 def _capability_boundary_reply() -> str:
     return (
-        "My limits are about scope, permissions, and available inputs. "
-        "I can execute tasks on this Mac through approved runtime paths, but destructive or privileged actions still require explicit authorization gates. "
-        "I only know what is in current context, tool output, or stored memory and vault data unless I am directed to fetch more. "
-        "I do not sense the world directly beyond connected tools, and I do not set strategy on my own. "
-        "You define the objective and I execute it transparently."
+        "My scope is defined by the permissions, tools, and live context available to me. "
+        "I can act on this Mac, retrieve what I can verify from runtime output, memory, and the vault, and carry out your objective directly. "
+        "I do not assume authority I have not been given, and I do not present guesses as facts."
     )
 
 
@@ -210,7 +209,7 @@ def _requested_mode(lower: str) -> str | None:
 def _is_specialized_agent_query(lower: str) -> bool:
     return bool(
         re.search(
-            r"\b(use specialized agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|self-improve critic)\b",
+            r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|vault curator|self-improve critic)\b",
             lower,
         )
     )
@@ -331,10 +330,10 @@ def _is_locking_tradeoff_query(lower: str) -> bool:
 
 def _locking_tradeoff_reply() -> str:
     return (
-        "Optimistic locking is the better default when conflicts are relatively rare and you care about throughput, because readers and writers do not block each other up front. "
-        "You usually implement it with a version column or timestamp and only reject the write if someone else changed the row first. "
-        "Pessimistic locking is the better choice when conflicts are common, the cost of a retry is high, or the critical section must not be raced at all, because it takes the lock early and forces serialization. "
-        "The tradeoff is throughput versus certainty: optimistic locking gives you better concurrency but more retries under contention, while pessimistic locking reduces conflict at the cost of waiting, lock contention, and possible deadlocks."
+        "Default to optimistic locking when conflicts are rare and retries are cheap, because it preserves throughput and avoids blocking readers and writers up front. "
+        "Use pessimistic locking only when contention is common, the cost of a retry is high, or the critical section cannot tolerate a race, because it trades concurrency for certainty. "
+        "The real tradeoff is retry cost versus lock contention, so check how often conflicts actually happen before choosing. "
+        "If you have not measured contention yet, optimistic locking is usually the safer default."
     )
 
 
@@ -432,9 +431,9 @@ def _meeting_diagnostics_reply() -> str:
 
 def _database_index_tradeoff_reply() -> str:
     return (
-        "Add a database index when it materially improves read performance on high-value queries such as selective filters, joins, or ordered lookups that happen often enough to matter. "
-        "Indexes can hurt performance when write volume is high, because every insert, update, and delete has extra maintenance work and more storage overhead. "
-        "The real tradeoff is read speed versus write amplification, so the right choice depends on query frequency, selectivity, table size, and whether the slow path is really on reads instead of elsewhere in the request."
+        "Add the index when the slow path is a read-heavy, selective query you run often enough that better lookup speed materially matters. "
+        "Do not add it just because a query was slow once, because indexes buy read performance by adding write amplification, storage overhead, and maintenance cost on every insert, update, and delete. "
+        "The real tradeoff is read speed versus write cost, so first verify that the bottleneck is actually the query plan rather than joins, fetch volume, or application logic."
     )
 
 
@@ -1165,7 +1164,7 @@ def route_stream(user_input: str) -> tuple:
             _output = terminal.run_admin_command(_raw_cmd) if _admin else terminal.run_command(_raw_cmd)
             return format_with_mini(
                 f"User ran: '{_raw_cmd}'. Output:\n{_output}\nReport the output in one spoken sentence.",
-                skill_id=None, tool="terminal", extra_system=modifier_system,
+                skill_id=None, tool="terminal", extra_system=modifier_system, ground_query=user_input,
             ), "Terminal"
 
     # Self-improve fast paths
@@ -1238,6 +1237,15 @@ def route_stream(user_input: str) -> tuple:
             return _s(skill_factory.result_text(skill_factory.create_skill_from_vault(topic))), "Skill"
         return _s("Tell me what topic you want the skill to cover."), "Skill"
 
+    # ── Vault capture fast-path (write-back to Obsidian brain notes) ──────────
+    # Handles: "add task X", "save to vault: ...", "update changelog: ...",
+    #          "project update: ...", "append to [[Note]] under Heading: ...",
+    #          "read [[Note]]"
+    # Decisions and stories fall through to vault_curator for structured extraction.
+    _capture_result = vault_capture.handle_capture(user_input)
+    if _capture_result is not None:
+        return _s(_capture_result), "Vault"
+
     if any(p in lower for p in ("search the vault", "refresh the vault", "index the vault", "build the vault wiki", "compile the wiki", "ingest source", "ingest file", "ingest repo", "ingest repository", "ingest url", "ingest notes", "add to the vault", "knowledge base", "local knowledge", "from the vault", "in the vault")):
         if any(p in lower for p in ("ingest", "add to the vault")):
             target = _parse_source_target(user_input) or "notes"
@@ -1260,6 +1268,7 @@ def route_stream(user_input: str) -> tuple:
                 skill_id="local_knowledge",
                 tool="knowledge",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Knowledge"
         return _s(raw), "Knowledge"
 
@@ -1298,6 +1307,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             skill_id=skill_id,
             tool=tool,
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Search"
 
     # ── Local knowledge vault ────────────────────────────────────────────────
@@ -1326,6 +1336,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             skill_id=skill_id or "local_knowledge",
             tool="knowledge",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Knowledge"
 
     # ── Skill factory ────────────────────────────────────────────────────────
@@ -1534,6 +1545,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Terminal"
         path = params.get("path", "")
         if path:
@@ -1543,6 +1555,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "File"
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
@@ -1558,6 +1571,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Admin"
         return _s("Tell me the exact command you want me to run with administrator privileges."), "Admin"
 
@@ -1749,6 +1763,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         return format_with_mini(
             f"Report this nearby device snapshot in Jarvis voice, naturally and concisely: {summary}",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Hardware"
 
     if any(p in lower for p in ["hardware status", "device status", "check devices", "show hardware"]):
@@ -1758,6 +1773,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         return format_with_mini(
             f"Report this hardware status in Jarvis voice: {s}",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Hardware"
 
     if any(p in lower for p in ["scan ports", "find devices", "detect hardware"]):
@@ -1789,6 +1805,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
             return format_with_mini(
                 f"Report this in Jarvis voice (1 sentence): {msg}",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Hardware"
 
     for triggers, device_name, cmd, extra_params in _HW_ROUTES:
@@ -1799,6 +1816,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
             return format_with_mini(
                 f"Report in Jarvis voice (1 sentence): {result}",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Hardware"
 
     return None
