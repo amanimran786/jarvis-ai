@@ -1,5 +1,5 @@
 {
-  "doc_count": 65,
+  "doc_count": 66,
   "docs": [
     {
       "path": "indexes/context_packs/jarvis-working-context-pack.md",
@@ -230,6 +230,127 @@
             "broad",
             "vault",
             "retrieval"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "indexes/handoffs/20 Projects Debugger Handoff.md",
+      "title": "---",
+      "preview": "--- type: generated_handoff area: vault owner: generated write_policy: generated review_required: false status: active source: repo confidence: medium created: 2026-04-16 updated: 2026-04-16 version: 1 role: debugger tags: - handoff - generated - debugger related: - \"[[20 Projects]]\" --- 20 Projects Debugger Handoff Purpose: compact durable handoff for note-scoped specialist work. Linked notes: [[20 Projects]] Task Use the debugger on [[20 Projects]] to diagnose the stale read path. Output Likel",
+      "keywords": [
+        "handoff",
+        "projects",
+        "generated",
+        "debugger",
+        "review",
+        "2026",
+        "stale",
+        "path",
+        "type",
+        "area",
+        "vault",
+        "owner",
+        "write",
+        "policy",
+        "required",
+        "false",
+        "status",
+        "active",
+        "source",
+        "repo"
+      ],
+      "chars": 642,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: generated_handoff area: vault owner: generated write_policy: generated review_required: false status: active source: repo confidence: medium created: 2026-04-16 updated: 2026-04-16 version: 1 role: debugger tags: - handoff - generated - debugger related: - \"[[20 Projects]]\" ---",
+          "keywords": [
+            "generated",
+            "handoff",
+            "2026",
+            "debugger",
+            "type",
+            "area",
+            "vault",
+            "owner",
+            "write",
+            "policy",
+            "review",
+            "required"
+          ]
+        },
+        {
+          "heading": "20 Projects Debugger Handoff",
+          "level": 1,
+          "page": null,
+          "line_start": 22,
+          "text": "Purpose: compact durable handoff for note-scoped specialist work. Linked notes: [[20 Projects]]",
+          "keywords": [
+            "purpose",
+            "compact",
+            "durable",
+            "handoff",
+            "note",
+            "scoped",
+            "specialist",
+            "work",
+            "linked",
+            "notes",
+            "projects"
+          ]
+        },
+        {
+          "heading": "Task",
+          "level": 2,
+          "page": null,
+          "line_start": 28,
+          "text": "Use the debugger on [[20 Projects]] to diagnose the stale read path.",
+          "keywords": [
+            "use",
+            "debugger",
+            "projects",
+            "diagnose",
+            "stale",
+            "read",
+            "path"
+          ]
+        },
+        {
+          "heading": "Output",
+          "level": 2,
+          "page": null,
+          "line_start": 32,
+          "text": "Likely cache invalidation issue with one stale path.",
+          "keywords": [
+            "likely",
+            "cache",
+            "invalidation",
+            "issue",
+            "one",
+            "stale",
+            "path"
+          ]
+        },
+        {
+          "heading": "Next Step",
+          "level": 2,
+          "page": null,
+          "line_start": 36,
+          "text": "- Review this handoff against [[20 Projects]] before promoting any canonical change.",
+          "keywords": [
+            "review",
+            "handoff",
+            "against",
+            "projects",
+            "before",
+            "promoting",
+            "any",
+            "canonical",
+            "change"
           ]
         }
       ]
@@ -10146,23 +10267,23 @@
         "brain",
         "jarvis",
         "notes",
-        "capture",
         "instead",
+        "capture",
         "into",
+        "can",
         "inbox",
         "candidate",
-        "can",
+        "under",
         "only",
         "stale",
         "review",
-        "under",
         "note",
-        "without",
         "curator",
+        "without",
         "explicit",
         "runtime"
       ],
-      "chars": 8928,
+      "chars": 9150,
       "sections": [
         {
           "heading": "---",
@@ -10395,7 +10516,7 @@
           "level": 3,
           "page": null,
           "line_start": 99,
-          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands - added a native coder verification helper for repo-safe checks like targeted pytest and py_compile, plus native repo-map lookup - added generated context packs under vault/indexes/context_packs/ so Jarvis can build explicit working sets from seed notes and linked notes instead of relying only on broad vault retrieval - added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift - added generated [[94 Brain Health]] so Jarvis can inspect graph quality, stale context packs, duplicate basenames, and weakly linked brain notes without relying on plugin-only graph heuristics",
+          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands - added a native coder verification helper for repo-safe checks like targeted pytest and py_compile, plus native repo-map lookup - added generated context packs under vault/indexes/context_packs/ so Jarvis can build explicit working sets from seed notes and linked notes instead of relying only on broad vault retrieval - added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift - added generated [[94 Brain Health]] so Jarvis can inspect graph quality, stale context packs, duplicate basenames, and weakly linked brain notes without relying on plugin-only graph heuristics - added generated specialist handoff notes under vault/indexes/handoffs/ so note-scoped coder, debugger, researcher, operator, security, and vault-curator work can leave durable markdown artifacts instead of dying in chat",
           "keywords": [
             "added",
             "notes",
@@ -10405,8 +10526,8 @@
             "candidate",
             "stale",
             "review",
-            "inbox",
             "can",
+            "inbox",
             "only",
             "jarvis"
           ]

@@ -1071,6 +1071,45 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertIn("cache", result["final"])
         self.assertTrue(any(term in result["final"] for term in ("objgraph", "tracemalloc", "connection", "client")))
 
+    def test_specialized_agent_run_records_note_scoped_handoff_for_supported_role(self):
+        with patch(
+            "specialized_agents._run_role",
+            return_value={"role": "debugger", "model": "local/test", "output": "Likely cache invalidation issue."},
+        ) as run_mock, patch(
+            "specialized_agents.vault_handoff.record_role_handoff",
+            return_value={"ok": True, "path": "indexes/handoffs/Projects Debugger Handoff.md", "title": "Projects Debugger Handoff"},
+        ) as handoff_mock:
+            result = specialized_agents.run(
+                "Use the debugger on [[20 Projects]] to diagnose the stale read path.",
+                roles=["debugger"],
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["handoffs"][0]["path"], "indexes/handoffs/Projects Debugger Handoff.md")
+        self.assertEqual(result["stages"][0]["handoff_path"], "indexes/handoffs/Projects Debugger Handoff.md")
+        run_mock.assert_called_once()
+        handoff_mock.assert_called_once_with(
+            "debugger",
+            "Use the debugger on [[20 Projects]] to diagnose the stale read path.",
+            "Likely cache invalidation issue.",
+        )
+
+    def test_specialized_agent_run_skips_handoff_without_note_scope(self):
+        with patch(
+            "specialized_agents._run_role",
+            return_value={"role": "debugger", "model": "local/test", "output": "Likely cache invalidation issue."},
+        ) as run_mock, patch(
+            "specialized_agents.vault_handoff.record_role_handoff",
+            side_effect=AssertionError("should not record handoff"),
+        ):
+            result = specialized_agents.run(
+                "Use the debugger to diagnose the stale read path.",
+                roles=["debugger"],
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["handoffs"], [])
+        self.assertNotIn("handoff_path", result["stages"][0])
+        run_mock.assert_called_once()
+
     def test_specialized_agent_fastapi_502_fallback_when_claude_unavailable(self):
         previous = model_router.get_mode()
         try:

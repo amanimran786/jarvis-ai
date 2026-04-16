@@ -2694,5 +2694,52 @@ class SourceIngestSafetyTests(unittest.TestCase):
             source_ingest._assert_safe_remote_url("http://127.0.0.1:8000/private")
 
 
+class VaultHandoffTests(unittest.TestCase):
+    def _patch_vault_dirs(self, vault_module, root: Path):
+        return [
+            patch.object(vault_module, "VAULT_ROOT", root),
+            patch.object(vault_module, "RAW_DIR", root / "raw"),
+            patch.object(vault_module, "WIKI_DIR", root / "wiki"),
+            patch.object(vault_module, "INDEXES_DIR", root / "indexes"),
+            patch.object(vault_module, "OUTPUTS_DIR", root / "outputs"),
+            patch.object(vault_module, "TEMPLATES_DIR", root / "templates"),
+            patch.object(vault_module, "INDEX_FILE", root / "indexes" / "index.json"),
+        ]
+
+    def test_record_role_handoff_writes_generated_note(self):
+        import vault
+        import vault_handoff
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            (root / "wiki" / "brain").mkdir(parents=True, exist_ok=True)
+            (root / "wiki" / "brain" / "20 Projects.md").write_text("# Projects\n", encoding="utf-8")
+
+            result = vault_handoff.record_role_handoff(
+                "debugger",
+                "Use the debugger on [[20 Projects]] to diagnose the stale read path.",
+                "Likely cache invalidation issue with one stale path.",
+            )
+
+            self.assertTrue(result["ok"])
+            note = root / result["path"]
+            self.assertTrue(note.exists())
+            body = note.read_text(encoding="utf-8")
+            self.assertIn("write_policy: generated", body)
+            self.assertIn("# 20 Projects Debugger Handoff", body)
+            self.assertIn("Likely cache invalidation issue", body)
+
+    def test_should_record_handoff_requires_supported_role_and_note_scope(self):
+        import vault_handoff
+
+        self.assertTrue(vault_handoff.should_record_handoff("debugger", "Debug [[20 Projects]]."))
+        self.assertFalse(vault_handoff.should_record_handoff("planner", "Debug [[20 Projects]]."))
+        self.assertFalse(vault_handoff.should_record_handoff("debugger", "Debug the stale read path."))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -21,6 +21,7 @@ from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT,
 import model_router
 import skills
 import specialized_agent_native
+import vault_handoff
 
 
 AGENTS_DIR = Path(__file__).resolve().parent / "agents"
@@ -568,9 +569,15 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
     selected = roles or choose_roles(user_input)
     stages = []
     shared_context = ""
+    handoffs = []
 
     for role in selected:
         result = _run_role(role, user_input, context=shared_context)
+        if vault_handoff.should_record_handoff(role, user_input):
+            handoff = vault_handoff.record_role_handoff(role, user_input, result.get("output", ""))
+            if handoff.get("ok"):
+                result["handoff_path"] = handoff["path"]
+                handoffs.append(handoff)
         stages.append(result)
         if role in {
             "planner", "coder", "code_reviewer", "operator", "researcher", "debugger", "vault_curator",
@@ -594,6 +601,7 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
         "ok": True,
         "roles": selected,
         "stages": stages,
+        "handoffs": handoffs,
         "final": final_output,
     }
 
