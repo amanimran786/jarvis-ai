@@ -60,6 +60,119 @@ _RUNTIME_VOICE_TERMS = (
     "wake-word",
 )
 
+_ENGINEERING_COMPANION_TERMS = (
+    "debug",
+    "debugging",
+    "design",
+    "architecture",
+    "architect",
+    "tradeoff",
+    "trade-off",
+    "root cause",
+    "system",
+    "systems",
+    "backend",
+    "infra",
+    "infrastructure",
+    "api",
+    "queue",
+    "worker",
+    "job queue",
+    "reliability",
+    "observability",
+    "performance",
+    "distributed",
+    "flaky",
+    "incident",
+    "throughput",
+    "latency",
+    "bottleneck",
+    "sql",
+    "python service",
+    "service",
+    "production",
+    "problem solving",
+    "problem-solving",
+)
+
+_DEBUGGING_TERMS = (
+    "debug",
+    "debugging",
+    "flaky",
+    "root cause",
+    "regression",
+    "reproduce",
+    "reproducible",
+    "crash",
+    "error",
+    "failing",
+    "failure",
+    "timeout",
+    "not working",
+    "incident",
+    "bug",
+)
+
+_SYSTEM_DESIGN_TERMS = (
+    "design",
+    "architecture",
+    "architect",
+    "tradeoff",
+    "trade-off",
+    "queue",
+    "throughput",
+    "latency",
+    "scalability",
+    "distributed",
+    "microservice",
+    "cache",
+    "consistency",
+    "api",
+    "schema",
+    "worker",
+)
+
+_THREAT_MODELING_TERMS = (
+    "security",
+    "threat",
+    "attack",
+    "abuse",
+    "misuse",
+    "adversarial",
+    "exploit",
+    "vulnerability",
+    "xss",
+    "csrf",
+    "sql injection",
+    "prompt injection",
+    "jailbreak",
+    "auth",
+    "authentication",
+    "authorization",
+    "permission",
+    "trust boundary",
+    "secret",
+    "token",
+    "credential",
+)
+
+_AI_RUNTIME_TERMS = (
+    "agent",
+    "routing",
+    "grounding",
+    "retrieval",
+    "tool calling",
+    "tool routing",
+    "runtime",
+    "context window",
+    "fallback",
+    "model selection",
+    "orchestration",
+    "memory injection",
+    "semantic memory",
+    "local-first ai",
+)
+
 
 def get_mode() -> str:
     return _current_mode
@@ -379,6 +492,79 @@ def _user_snapshot_grounding() -> str:
     return "Compact user snapshot:\n" + "\n".join(lines)
 
 
+def _is_engineering_companion_query(user_input: str, tool: str | None) -> bool:
+    if tool != "chat":
+        return False
+    lower = (user_input or "").lower()
+    if not lower or _is_runtime_voice_query(lower):
+        return False
+    return any(term in lower for term in _ENGINEERING_COMPANION_TERMS)
+
+
+def _engineering_playbook_category(user_input: str) -> str | None:
+    lower = (user_input or "").lower()
+    if any(term in lower for term in _DEBUGGING_TERMS):
+        return "debugging"
+    if any(term in lower for term in _SYSTEM_DESIGN_TERMS):
+        return "systems_design"
+    if any(term in lower for term in _THREAT_MODELING_TERMS):
+        return "threat_modeling"
+    if any(term in lower for term in _AI_RUNTIME_TERMS):
+        return "ai_runtime_agent"
+    return None
+
+
+def _engineering_grounding_queries(user_input: str) -> list[str]:
+    queries = [
+        "senior cybersecurity ai engineering companion",
+        "universal engineer thinker problem solver",
+    ]
+    category = _engineering_playbook_category(user_input)
+    if category == "debugging":
+        queries.append("debugging root cause playbook")
+    elif category == "systems_design":
+        queries.append("systems design tradeoff heuristics")
+    elif category == "threat_modeling":
+        queries.append("threat modeling security thinking")
+    elif category == "ai_runtime_agent":
+        queries.append("ai runtime agent engineering principles")
+    return queries
+
+
+def _engineering_companion_grounding(user_input: str) -> str:
+    hits: list[dict] = []
+    seen_paths: set[str] = set()
+    try:
+        for query in _engineering_grounding_queries(user_input):
+            for hit in vault.search(query, topn=1):
+                path = hit.get("path") or ""
+                if path and path in seen_paths:
+                    continue
+                if path:
+                    seen_paths.add(path)
+                hits.append(hit)
+                if len(hits) >= 4:
+                    break
+            if len(hits) >= 4:
+                break
+    except Exception:
+        hits = []
+
+    lines = [
+        "Engineering companion guidance:",
+        "- Act like a senior technical partner, not a generic assistant.",
+        "- Diagnose the failing layer first and prefer the smallest correct next step.",
+        "- Use cross-layer reasoning across systems, product, AI, security, and operations when the problem spans them.",
+        "- Prefer verification and concrete evidence over speculation.",
+    ]
+    for hit in hits[:4]:
+        excerpt = _trim_context_line(hit.get("excerpt", ""), 220)
+        title = hit.get("title") or hit.get("matched_heading") or "Brain note"
+        if excerpt:
+            lines.append(f"- {title}: {excerpt}")
+    return "\n".join(lines)
+
+
 def _semantic_memory_hint(hits: list[dict] | None) -> str:
     if not hits:
         return ""
@@ -488,6 +674,10 @@ def smart_stream(
         user_snapshot = _user_snapshot_grounding()
         if user_snapshot:
             system_extra = user_snapshot + ("\n\n" + system_extra if system_extra else "")
+        if _is_engineering_companion_query(user_input, tool):
+            engineering_grounding = _engineering_companion_grounding(user_input)
+            if engineering_grounding:
+                system_extra = engineering_grounding + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     # ── Parallel context assembly ──────────────────────────────────────────────
@@ -647,13 +837,26 @@ def format_with_mini(
     skill_id: str | None = None,
     tool: str | None = None,
     extra_system: str = "",
+    ground_query: str = "",
 ):
     """Format tool output with free-first routing for lightweight generation."""
     import memory as _mem
     context = _mem.get_context()
     system_extra, _ = skills.build_system_extra(prompt, skill_id=skill_id, tool=tool)
+    technical_summary = bool(ground_query and _is_engineering_companion_query(ground_query, "chat"))
+    if technical_summary:
+        engineering_extra = _engineering_companion_grounding(ground_query)
+        if engineering_extra:
+            system_extra = engineering_extra + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
+    if technical_summary:
+        prompt = (
+            "Format this for Aman like a senior engineering companion. "
+            "Lead with the conclusion, recommendation, or most important finding first. "
+            "Then name the key tradeoff, root cause, or next verification step in one short follow-up sentence when relevant.\n\n"
+            f"{prompt}"
+        )
     if context:
         prompt = prompt + f"\n\nUser context for personalization:{context}"
     local_available = _has_local()

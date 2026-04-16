@@ -145,6 +145,29 @@ def _should_prefer_ocr_for_screenshot(prompt: str, ocr_text: str) -> bool:
     return _prompt_prefers_text(prompt) and signal["chars"] >= 48
 
 
+def _engineering_vision_prompt(prompt: str, force: bool = False) -> str:
+    base = (prompt or "").strip() or "Describe what you see in detail."
+    if "Engineering playbook guidance:" in base:
+        return base
+    try:
+        import model_router
+        needs_engineering = force or model_router._is_engineering_companion_query(base, "chat")
+    except Exception:
+        needs_engineering = force
+    if not needs_engineering:
+        return base
+    guidance = (
+        "Engineering playbook guidance:\n"
+        "- Diagnose the failing layer first before proposing a fix.\n"
+        "- For system design, choose the smallest reliable architecture and name the main tradeoff.\n"
+        "- For debugging, identify the broken contract or bug and give the shortest verification path.\n"
+        "- For security or abuse risk, identify the trust boundary and the control gap.\n"
+        "- For AI/runtime behavior, explain the routing, grounding, state, or tool seam causing the outcome.\n"
+        "- Use only what is visible in the image. Do not invent unseen details.\n"
+    )
+    return f"{base}\n\n{guidance}"
+
+
 def _preprocess_for_ocr(path: str) -> str:
     tmp_path = None
     try:
@@ -204,8 +227,9 @@ def _local_vision_summary(prompt: str, ocr_text: str) -> str:
         return ""
     from brains.brain_ollama import ask_local_stream
 
+    effective_prompt = _engineering_vision_prompt(prompt)
     summary_prompt = (
-        f"{prompt}\n\n"
+        f"{effective_prompt}\n\n"
         "Use only the OCR evidence below. If OCR is partial, say so briefly and summarize only what is supported.\n\n"
         f"OCR:\n{ocr_text[:8000]}"
     )
@@ -275,14 +299,15 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
     path = None
     try:
         path = _capture_frame()
+        effective_prompt = _engineering_vision_prompt(prompt)
         from brains.brain_ollama import ask_local_vision
         local_vision = ask_local_vision(
-            path, prompt,
+            path, effective_prompt,
             system_extra="Be concise. This response will be spoken aloud. No markdown."
         )
         if local_vision:
             return local_vision
-        local_answer = _local_vision_summary(prompt, _extract_ocr_text(path))
+        local_answer = _local_vision_summary(effective_prompt, _extract_ocr_text(path))
         if local_answer:
             return local_answer
         if not _cloud_vision_allowed():
@@ -296,7 +321,7 @@ def see(prompt: str = "Describe what you see in detail.") -> str:
             model="gpt-4o",
             messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-                {"type": "text", "text": f"You are Jarvis. {prompt} Be concise — spoken aloud."}
+                {"type": "text", "text": f"You are Jarvis. {effective_prompt} Be concise — spoken aloud."}
             ]}],
             max_tokens=300,
         )
@@ -316,25 +341,26 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
     """
     path = capture_screenshot_temp(preferred_format="png", fallback_formats=("jpg",))
     try:
-        probe = _quick_ocr_probe(path, prompt)
+        effective_prompt = _engineering_vision_prompt(prompt)
+        probe = _quick_ocr_probe(path, effective_prompt)
         ocr_text = ""
         prefer_ocr = bool(probe.get("prefer_ocr"))
         if prefer_ocr:
             ocr_text = _extract_ocr_text(path)
-            prefer_ocr = _should_prefer_ocr_for_screenshot(prompt, ocr_text or str(probe.get("sample_text") or ""))
-            local_answer = _local_vision_summary(prompt, ocr_text)
+            prefer_ocr = _should_prefer_ocr_for_screenshot(effective_prompt, ocr_text or str(probe.get("sample_text") or ""))
+            local_answer = _local_vision_summary(effective_prompt, ocr_text)
             if local_answer:
                 return local_answer
         from brains.brain_ollama import ask_local_vision
         local_vision = ask_local_vision(
-            path, prompt,
+            path, effective_prompt,
             system_extra="Be concise. This response will be spoken aloud. No markdown."
         )
         if local_vision:
             return local_vision
         if not prefer_ocr:
             ocr_text = ocr_text or _extract_ocr_text(path)
-            local_answer = _local_vision_summary(prompt, ocr_text)
+            local_answer = _local_vision_summary(effective_prompt, ocr_text)
             if local_answer:
                 return local_answer
         if not _cloud_vision_allowed():
@@ -348,7 +374,7 @@ def screenshot_and_describe(prompt: str = "Describe what's on this screen.") -> 
             model="gpt-4o",
             messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}},
-                {"type": "text", "text": f"You are Jarvis. {prompt}"},
+                {"type": "text", "text": f"You are Jarvis. {effective_prompt}"},
             ]}],
             max_tokens=1024,
         )

@@ -35,6 +35,7 @@ PROJECTS        = "20 Projects"
 IDENTITY        = "10 Identity"
 PREFERENCES     = "30 Preferences"
 SYNTHESIS       = "50 Synthesis"
+AGENT_INBOX     = "92 Agent Inbox"
 
 # Default headings inside notes
 _TASK_HEADING       = "Incoming"
@@ -42,6 +43,7 @@ _DECISION_HEADING   = "Decisions"
 _CHANGELOG_HEADING  = None          # built dynamically per date
 _STORY_HEADING      = "Stories"
 _PROJECT_HEADING    = "Recent Updates"
+_AGENT_INBOX_HEADING = "Queued"
 
 
 def _today() -> str:
@@ -97,6 +99,25 @@ def add_task(task_text: str, date: str | None = None, tag: str = "#brain") -> di
     result = vault_edit.append_under_heading(TASK_HUB, _TASK_HEADING, block)
     if result.get("ok"):
         _resolve_and_patch(TASK_HUB)
+    return result
+
+
+def add_agent_inbox_item(item_text: str, *, lane: str = "Queued", tag: str = "#brain") -> dict:
+    """
+    Append a durable agent-work item to the Agent Inbox note.
+
+    This is the bounded handoff surface for self-sustaining vault work:
+    agents can queue work here continuously, while canonical note mutation stays
+    explicit and reviewable.
+    """
+    item_text = (item_text or "").strip().lstrip("-[] ")
+    if not item_text:
+        return {"ok": False, "error": "No inbox item text provided."}
+    lane_heading = (lane or _AGENT_INBOX_HEADING).strip() or _AGENT_INBOX_HEADING
+    block = f"- [ ] {item_text} 📅 {_today()} {tag} #agent-inbox"
+    result = vault_edit.append_under_heading(AGENT_INBOX, lane_heading, block)
+    if result.get("ok"):
+        _resolve_and_patch(AGENT_INBOX)
     return result
 
 

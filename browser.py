@@ -852,7 +852,14 @@ def summarize_meeting_captions(request: str = "", browser: str | None = None) ->
         "You are Jarvis helping during a live call. Give the most useful concise response, answer, or talking point based on these captions. "
         "If the user seems to need a direct answer, provide it. If the conversation is ambiguous, summarize the topic and give the best next thing to say."
     )
-    return "".join(format_with_mini(prompt, skill_id="browser_execution", tool="browser"))
+    return "".join(
+        format_with_mini(
+            prompt,
+            skill_id="browser_execution",
+            tool="browser",
+            ground_query=request,
+        )
+    )
 
 
 def _fetch_url_text(url: str) -> str:
@@ -961,7 +968,14 @@ def summarize_current_page(request: str = "", browser: str | None = None) -> str
         f"Page text:\n{page_text}\n\n"
         "Summarize this for Aman in Jarvis voice. Keep it concise and spoken naturally."
     )
-    return "".join(format_with_mini(prompt, skill_id="browser_execution", tool="browser"))
+    return "".join(
+        format_with_mini(
+            prompt,
+            skill_id="browser_execution",
+            tool="browser",
+            ground_query=request,
+        )
+    )
 
 
 def _browser_command(action: str, browser: str | None = None) -> str:

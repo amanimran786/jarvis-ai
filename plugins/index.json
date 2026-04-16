@@ -20,7 +20,7 @@
       "local_only": true,
       "skills": ["browser_execution", "source_grounding"],
       "connectors": ["browser_operator"],
-      "agents": ["executor"],
+      "agents": ["operator", "reviewer"],
       "entrypoints": ["chat", "desktop"]
     },
     {
@@ -53,7 +53,7 @@
       "local_only": true,
       "skills": ["code_implementation", "code_review", "debugging_diagnostics", "planning_execution"],
       "connectors": ["managed_runtime", "terminal_operator"],
-      "agents": ["planner", "executor", "reviewer", "security_reviewer"],
+      "agents": ["planner", "executor", "operator", "debugger", "reviewer", "vault_curator", "security_reviewer", "security_analyst"],
       "entrypoints": ["api", "cli", "desktop"]
     },
     {
@@ -64,7 +64,7 @@
       "local_only": true,
       "skills": ["research_synthesis", "source_grounding"],
       "connectors": ["osint_local", "knowledge_vault"],
-      "agents": ["planner", "reviewer"],
+      "agents": ["researcher", "reviewer"],
       "entrypoints": ["api", "desktop"]
     }
   ]

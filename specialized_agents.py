@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import os
 import queue
+import re
 import threading
 
 from brains.brain_claude import ask_claude
@@ -19,6 +20,7 @@ from brains.brain_ollama import ask_local, get_best_available
 from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT
 import model_router
 import skills
+import specialized_agent_native
 
 
 AGENTS_DIR = Path(__file__).resolve().parent / "agents"
@@ -35,8 +37,13 @@ AGENTS = {
     "planner": AgentSpec("planner", AGENTS_DIR / "planner.md", HAIKU),
     "executor": AgentSpec("executor", AGENTS_DIR / "executor.md", SONNET),
     "reviewer": AgentSpec("reviewer", AGENTS_DIR / "reviewer.md", HAIKU),
+    "operator": AgentSpec("operator", AGENTS_DIR / "operator.md", SONNET),
+    "researcher": AgentSpec("researcher", AGENTS_DIR / "researcher.md", SONNET),
+    "debugger": AgentSpec("debugger", AGENTS_DIR / "debugger.md", SONNET),
+    "vault_curator": AgentSpec("vault_curator", AGENTS_DIR / "vault_curator.md", HAIKU),
     "science_expert": AgentSpec("science_expert", AGENTS_DIR / "science_expert.md", SONNET),
     "security_reviewer": AgentSpec("security_reviewer", AGENTS_DIR / "security_reviewer.md", SONNET),
+    "security_analyst": AgentSpec("security_analyst", AGENTS_DIR / "security_analyst.md", SONNET),
     "self_improve_critic": AgentSpec("self_improve_critic", AGENTS_DIR / "self_improve_critic.md", HAIKU),
 }
 
@@ -46,8 +53,13 @@ _LOCAL_ROLE_MODELS = {
     "planner":            LOCAL_DEFAULT,    # fast outline pass
     "executor":           LOCAL_REASONING,  # deep answer pass — worth the wait
     "reviewer":           LOCAL_DEFAULT,    # fast verification pass
+    "operator":           LOCAL_REASONING,  # concrete environment steps
+    "researcher":         LOCAL_REASONING,  # source synthesis and comparison
+    "debugger":           LOCAL_REASONING,  # root-cause and verification path
+    "vault_curator":      LOCAL_DEFAULT,    # structured note work is lightweight
     "science_expert":     LOCAL_REASONING,  # needs depth
     "security_reviewer":  LOCAL_REASONING,  # needs depth
+    "security_analyst":   LOCAL_REASONING,  # abuse-path and trust-boundary analysis
     "self_improve_critic": LOCAL_DEFAULT,   # lightweight check
 }
 
@@ -237,6 +249,41 @@ def _self_improve_fallback() -> str:
     )
 
 
+def _operator_fallback() -> str:
+    return (
+        "Start with the exact environment action that changes the state, execute only the requested scope, "
+        "then report the result, blocker, or shortest next verification step."
+    )
+
+
+def _researcher_fallback() -> str:
+    return (
+        "Lead with the strongest sourced finding, then summarize the evidence that agrees, "
+        "call out what is uncertain, and end with the next thing worth verifying."
+    )
+
+
+def _debugger_fallback() -> str:
+    return (
+        "Identify the failing layer first, name the two or three likeliest causes, "
+        "then give the shortest proof step that separates them."
+    )
+
+
+def _vault_curator_fallback() -> str:
+    return (
+        "Update the smallest durable note surface that matches the request, preserve provenance, add links, "
+        "and avoid whole-file rewrites when a heading or frontmatter patch is enough."
+    )
+
+
+def _security_analyst_fallback() -> str:
+    return (
+        "Start with the highest-impact abuse path or trust-boundary failure, then name what would have to be true "
+        "for exploitation and which control would close it."
+    )
+
+
 def _fallback_role_output(role: str, task: str, context: str = "") -> str:
     lower = task.lower()
     memory_leak_like = ("memory leak" in lower) or ("leaking memory" in lower)
@@ -293,10 +340,30 @@ def _fallback_role_output(role: str, task: str, context: str = "") -> str:
         if stale_read_like:
             return _stale_read_reviewer_fallback()
         return "Tighten the answer around the main tradeoff, likely failure modes, and the clearest validation path."
+    if role == "operator":
+        return _operator_fallback()
+    if role == "researcher":
+        return _researcher_fallback()
+    if role == "debugger":
+        if memory_leak_like and "python" in lower:
+            return _memory_leak_executor_fallback()
+        if fastapi_502_like:
+            return _fastapi_502_executor_fallback()
+        if migration_like:
+            return _migration_executor_fallback()
+        if race_condition_like:
+            return _race_condition_executor_fallback()
+        if stale_read_like:
+            return _stale_read_executor_fallback()
+        return _debugger_fallback()
+    if role == "vault_curator":
+        return _vault_curator_fallback()
     if role == "security_reviewer":
         if auth_security_like:
             return _auth_security_fallback()
         return _security_fallback()
+    if role == "security_analyst":
+        return _security_analyst_fallback()
     if role == "self_improve_critic":
         return _self_improve_fallback()
     return "The specialist cloud path is unavailable, so the local fallback is returning the most defensible concise answer."
@@ -308,8 +375,13 @@ def _explicit_roles(user_input: str) -> list[str]:
         "planner": ("planner", "plan this"),
         "executor": ("executor", "execute this"),
         "reviewer": ("reviewer", "review this"),
+        "operator": ("operator", "use the operator", "have the operator"),
+        "researcher": ("researcher", "research this", "use the researcher"),
+        "debugger": ("debugger", "debug this", "use the debugger"),
+        "vault_curator": ("vault curator", "vault_curator", "curate the vault", "use the vault curator"),
         "science_expert": ("science expert", "science_expert", "technology expert"),
         "security_reviewer": ("security reviewer", "security audit", "security review"),
+        "security_analyst": ("security analyst", "security_analyst", "threat model this", "analyze the attack surface"),
         "self_improve_critic": ("self improve critic", "self-improve critic", "self review critic"),
     }
     selected = []
@@ -321,34 +393,84 @@ def _explicit_roles(user_input: str) -> list[str]:
 
 def choose_roles(user_input: str) -> list[str]:
     lower = user_input.lower()
+    word_count = len(lower.split())
     science_markers = (
         "transformer", "kv cache", "entropy", "thermodynamics", "information theory",
         "crispr", "biology", "physics", "chemistry", "lithography", "semiconductor",
         "materials science", "science", "technology",
     )
     security_markers = ("security", "auth", "authentication", "authorization", "exploit", "vulnerability")
+    security_analysis_markers = (
+        "threat model", "attack surface", "prompt injection", "jailbreak",
+        "abuse path", "trust boundary", "privilege escalation", "data exposure",
+    )
+    debug_markers = (
+        "debug", "debugging", "diagnose", "root cause", "why won't", "why doesnt", "why doesn't",
+        "traceback", "stack trace", "launch failure", "crash", "regression", "flaky",
+        "502", "memory leak", "race condition", "stale data", "replica lag",
+    )
+    research_markers = (
+        "research", "investigate", "look through", "scan github", "browse repos",
+        "compare repos", "source-backed", "findings", "what changed", "public repos",
+    )
+    vault_markers = (
+        "distill into the brain", "story bank", "decision log", "roadmap note",
+        "changelog", "patch this note", "update this note", "update the vault",
+        "curate the vault", "brain schema",
+    )
+    asks_for_reasoning = bool(re.search(r"\b(why|how|explain|walk me through|tradeoff|trade-offs|compare|root cause|debug|debugging|diagnose|design|architecture|review|investigate|research|threat model)\b", lower))
 
     explicit = _explicit_roles(user_input)
     if explicit:
+        if "security_analyst" in explicit:
+            return ["security_analyst", "reviewer"]
+        if any(t in lower for t in security_analysis_markers) and "security_analyst" not in explicit:
+            return ["security_analyst", "reviewer"]
         if any(t in lower for t in security_markers) and "security_reviewer" not in explicit:
             return ["security_reviewer", "reviewer"]
         if any(t in lower for t in science_markers) and "science_expert" not in explicit:
             return ["science_expert", "reviewer"]
+        if explicit == ["debugger"]:
+            return ["debugger", "reviewer"]
+        if explicit == ["researcher"]:
+            return ["researcher", "reviewer"]
+        if explicit == ["vault_curator"]:
+            return ["vault_curator", "reviewer"]
+        if explicit == ["security_analyst"]:
+            return ["security_analyst", "reviewer"]
+        if explicit == ["operator"]:
+            return ["operator", "reviewer"]
         return explicit
 
     roles = ["planner", "executor", "reviewer"]
     if any(t in lower for t in science_markers):
         return ["science_expert", "reviewer"]
+    if any(t in lower for t in security_analysis_markers) and (asks_for_reasoning or word_count >= 8):
+        return ["security_analyst", "reviewer"]
     if any(t in lower for t in security_markers):
         return ["security_reviewer", "reviewer"]
+    if any(t in lower for t in research_markers) and word_count >= 8:
+        return ["researcher", "reviewer"]
+    if any(t in lower for t in vault_markers) and word_count >= 6:
+        return ["vault_curator", "reviewer"]
+    if any(t in lower for t in debug_markers) and (asks_for_reasoning or word_count >= 8):
+        return ["debugger", "reviewer"]
     if any(t in lower for t in ("improve yourself", "self improve", "self-improve", "should you change your code")):
         return ["self_improve_critic", "reviewer"]
     return roles
 
 
 def _run_role(role: str, task: str, context: str = "") -> dict:
+    native = specialized_agent_native.run_native_role_hook(role, task)
+    if native:
+        return {"role": role, "model": native["model"], "output": native["output"], "native": True}
+
     spec = AGENTS[role]
     system_extra, _ = skills.build_system_extra(task, tool="chat")
+    if model_router._is_engineering_companion_query(task, "chat"):
+        engineering_extra = model_router._engineering_companion_grounding(task)
+        if engineering_extra:
+            system_extra = system_extra + ("\n\n" if system_extra else "") + engineering_extra
     system = (
         f"{SYSTEM_PROMPT}\n\n"
         f"Specialized agent role for this request:\n{_load_agent_instructions(role)}\n\n"
@@ -401,7 +523,10 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
     for role in selected:
         result = _run_role(role, user_input, context=shared_context)
         stages.append(result)
-        if role in {"planner", "science_expert", "security_reviewer", "self_improve_critic"}:
+        if role in {
+            "planner", "operator", "researcher", "debugger", "vault_curator",
+            "science_expert", "security_reviewer", "security_analyst", "self_improve_critic"
+        }:
             shared_context += f"{role}: {result['output']}\n\n"
 
     if selected == ["planner", "executor", "reviewer"]:
