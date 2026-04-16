@@ -165,6 +165,22 @@ Jarvis is aiming for:
 
 Changes should support that direction rather than drifting back toward a generic cloud chat app.
 
+### Codex Coding Posture
+
+When acting as Jarvis's coding or code-review core:
+
+- default to security-first and local-first choices
+- respect the repo seam boundaries between `local_runtime/`, `brains/`, `skills/`, routing layers, and vault layers
+- preserve compatibility with `memory_layer.py`, `graph_context.py`, and the packaged app path when relevant
+- do not suggest new external API dependencies for core behavior unless the user explicitly wants them or the repo already has that connector pattern
+- prefer explicit permission gates, privacy boundaries, and data-redaction thinking for features touching browser, camera, microphone, meetings, screenshots, or stored memory
+
+Be careful with framework-specific advice:
+
+- use `Pydantic` where the repo is already using schema validation or API models
+- do not force `Pydantic`, FastAPI dependency injection changes, or new abstraction layers into places that do not need them
+- repository fit matters more than generic best-practice theater
+
 ### Use Context7 For External Library Docs, Not Repo Truth
 
 When implementing or debugging third-party libraries, frameworks, SDKs, or APIs, prefer up-to-date source documentation through Context7 before relying on model memory.
