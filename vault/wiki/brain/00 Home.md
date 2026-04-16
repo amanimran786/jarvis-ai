@@ -10,6 +10,7 @@ Core note set:
 - [[05 Source Inventory]] for imported data sources and staging status
 - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges
 - [[07 Import Source Hub]] for raw import families and provenance flow
+- [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer
 - [[10 Identity]] for stable user identity, role, strengths, and goals
 - [[20 Projects]] for active and important ongoing work
 - [[30 Preferences]] for communication, product, and operating preferences

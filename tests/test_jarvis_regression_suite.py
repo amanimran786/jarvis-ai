@@ -912,11 +912,21 @@ class SkillAndAgentTests(unittest.TestCase):
         roles = specialized_agents.choose_roles("Use the coder to patch this Python service and add tests.")
         self.assertEqual(roles, ["coder", "reviewer"])
 
+    def test_specialized_agent_choose_roles_for_explicit_code_reviewer_request(self):
+        roles = specialized_agents.choose_roles("Use the code reviewer to review this patch and tell me the regression risk.")
+        self.assertEqual(roles, ["code_reviewer"])
+
     def test_specialized_agent_choose_roles_for_coding_request(self):
         roles = specialized_agents.choose_roles(
             "Implement this feature in the FastAPI module, patch the handler, and add tests."
         )
         self.assertEqual(roles, ["coder", "reviewer"])
+
+    def test_specialized_agent_choose_roles_for_code_review_request(self):
+        roles = specialized_agents.choose_roles(
+            "Review this diff in the FastAPI module and tell me the regression risk before we merge."
+        )
+        self.assertEqual(roles, ["code_reviewer"])
 
     def test_specialized_agent_choose_roles_for_research_request(self):
         roles = specialized_agents.choose_roles(
@@ -1120,6 +1130,30 @@ class OrchestratorTests(unittest.TestCase):
             model_router.set_mode(previous)
         self.assertEqual(decision.tool, "specialized_agent")
         self.assertEqual(decision.params.get("roles"), ["researcher", "reviewer"])
+
+    def test_coding_prompt_auto_invokes_specialized_agent(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            decision = orchestrator.classify(
+                "Implement this feature in the FastAPI module, patch the handler, and add tests in the repo."
+            )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "specialized_agent")
+        self.assertEqual(decision.params.get("roles"), ["coder", "reviewer"])
+
+    def test_code_review_prompt_auto_invokes_specialized_agent(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("cloud")
+            decision = orchestrator.classify(
+                "Review this patch in the FastAPI repo and tell me the regression risk before we merge."
+            )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "specialized_agent")
+        self.assertEqual(decision.params.get("roles"), ["code_reviewer"])
 
     def test_security_analysis_prompt_auto_invokes_specialized_agent(self):
         previous = model_router.get_mode()
@@ -1667,6 +1701,16 @@ class RouterTests(unittest.TestCase):
             text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertEqual(text, "Coder stub.")
+
+    def test_explicit_code_reviewer_request_bypasses_fast_paths(self):
+        with patch("specialized_agents.run", return_value={"ok": True, "roles": ["code_reviewer"], "final": "Review stub."}), \
+             patch("specialized_agents.result_text", return_value="Review stub."):
+            stream, label = router.route_stream(
+                "Use the code reviewer to review this diff and tell me the regression risk."
+            )
+            text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertEqual(text, "Review stub.")
 
     def test_automatic_specialized_agent_route_for_science_question(self):
         previous = model_router.get_mode()

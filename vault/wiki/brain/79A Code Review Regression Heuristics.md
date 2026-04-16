@@ -15,6 +15,7 @@ tags:
   - regression
   - engineering
 related:
+  - "[[08 Coding Systems Hub]]"
   - "[[75 Debugging Root Cause Playbook]]"
   - "[[79 Coding Implementation Playbook]]"
   - "[[79C Verification Matrix]]"
@@ -24,7 +25,7 @@ related:
 
 Purpose: make Jarvis good at review, not just generation.
 
-Linked notes: [[75 Debugging Root Cause Playbook]], [[79 Coding Implementation Playbook]], [[79C Verification Matrix]]
+Linked notes: [[08 Coding Systems Hub]], [[75 Debugging Root Cause Playbook]], [[79 Coding Implementation Playbook]], [[79C Verification Matrix]]
 
 ## Review Order
 

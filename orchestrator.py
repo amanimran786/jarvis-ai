@@ -215,7 +215,7 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Self-improve — require self-referential context to avoid false positives
     if re.search(r"\b(review your own code|review your code|self review|what are your shortcomings|what are your weaknesses|review yourself)\b", lower):
         return ToolDecision("self_improve", 0.99, "review")
-    if re.search(r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|coder|coding agent|vault curator|self-improve critic)\b", lower):
+    if re.search(r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|coder|coding agent|code reviewer|vault curator|self-improve critic)\b", lower):
         return ToolDecision("specialized_agent", 0.97, "run")
     if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
@@ -304,6 +304,10 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
         "modify this file", "change this module", "implement this feature",
         "patch this", "code this", "ship this change",
     )
+    code_review_markers = (
+        "code review", "review this diff", "review this patch", "review this pr",
+        "review this code", "regression risk", "what could break", "find bugs in this diff",
+    )
     code_artifact_markers = (
         "code", "function", "class", "module", "file", "repo", "repository",
         "codebase", "test", "tests", "python", "javascript", "typescript",
@@ -325,6 +329,9 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
 
     if any(marker in lower for marker in research_markers) and word_count >= 8:
         return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["researcher", "reviewer"]})
+
+    if any(marker in lower for marker in code_review_markers) and any(marker in lower for marker in code_artifact_markers) and word_count >= 6:
+        return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["code_reviewer"]})
 
     if any(marker in lower for marker in coding_markers) and any(marker in lower for marker in code_artifact_markers) and word_count >= 6:
         return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["coder", "reviewer"]})

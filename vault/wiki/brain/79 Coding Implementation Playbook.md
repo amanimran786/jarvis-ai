@@ -16,6 +16,7 @@ tags:
   - engineering
   - local-first
 related:
+  - "[[08 Coding Systems Hub]]"
   - "[[72 LLNL Technical Systems Credibility]]"
   - "[[73 Senior Cybersecurity AI Engineering Companion]]"
   - "[[75 Debugging Root Cause Playbook]]"
@@ -29,7 +30,7 @@ related:
 
 Purpose: make Jarvis useful on real coding work, not just technical explanation.
 
-Linked notes: [[73 Senior Cybersecurity AI Engineering Companion]], [[75 Debugging Root Cause Playbook]], [[76 Systems Design Tradeoff Heuristics]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]]
+Linked notes: [[08 Coding Systems Hub]], [[73 Senior Cybersecurity AI Engineering Companion]], [[75 Debugging Root Cause Playbook]], [[76 Systems Design Tradeoff Heuristics]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]]
 
 ## Default Coding Loop
 

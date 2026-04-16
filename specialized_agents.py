@@ -38,6 +38,7 @@ AGENTS = {
     "executor": AgentSpec("executor", AGENTS_DIR / "executor.md", SONNET),
     "reviewer": AgentSpec("reviewer", AGENTS_DIR / "reviewer.md", HAIKU),
     "coder": AgentSpec("coder", AGENTS_DIR / "coder.md", SONNET),
+    "code_reviewer": AgentSpec("code_reviewer", AGENTS_DIR / "code_reviewer.md", HAIKU),
     "operator": AgentSpec("operator", AGENTS_DIR / "operator.md", SONNET),
     "researcher": AgentSpec("researcher", AGENTS_DIR / "researcher.md", SONNET),
     "debugger": AgentSpec("debugger", AGENTS_DIR / "debugger.md", SONNET),
@@ -55,6 +56,7 @@ _LOCAL_ROLE_MODELS = {
     "executor":           LOCAL_REASONING,  # deep answer pass — worth the wait
     "reviewer":           LOCAL_DEFAULT,    # fast verification pass
     "coder":              LOCAL_CODER,      # implementation-focused coding model
+    "code_reviewer":      LOCAL_CODER,      # code-focused review and regression detection
     "operator":           LOCAL_REASONING,  # concrete environment steps
     "researcher":         LOCAL_REASONING,  # source synthesis and comparison
     "debugger":           LOCAL_REASONING,  # root-cause and verification path
@@ -265,6 +267,13 @@ def _coder_fallback() -> str:
     )
 
 
+def _code_reviewer_fallback() -> str:
+    return (
+        "Start with the highest-risk regression or unsafe assumption, say what could break, "
+        "and name the shortest proof step before discussing maintainability."
+    )
+
+
 def _researcher_fallback() -> str:
     return (
         "Lead with the strongest sourced finding, then summarize the evidence that agrees, "
@@ -353,6 +362,8 @@ def _fallback_role_output(role: str, task: str, context: str = "") -> str:
         return _operator_fallback()
     if role == "coder":
         return _coder_fallback()
+    if role == "code_reviewer":
+        return _code_reviewer_fallback()
     if role == "researcher":
         return _researcher_fallback()
     if role == "debugger":
@@ -387,6 +398,7 @@ def _explicit_roles(user_input: str) -> list[str]:
         "executor": ("executor", "execute this"),
         "reviewer": ("reviewer", "review this"),
         "coder": ("coder", "coding agent", "use the coder", "use the coding agent"),
+        "code_reviewer": ("code reviewer", "review this diff", "review this patch", "review this pr", "use the code reviewer"),
         "operator": ("operator", "use the operator", "have the operator"),
         "researcher": ("researcher", "research this", "use the researcher"),
         "debugger": ("debugger", "debug this", "use the debugger"),
@@ -431,6 +443,10 @@ def choose_roles(user_input: str) -> list[str]:
         "modify this file", "change this module", "implement this feature",
         "patch this", "code this", "ship this change",
     )
+    code_review_markers = (
+        "code review", "review this diff", "review this patch", "review this pr",
+        "review this code", "regression risk", "what could break", "find bugs in this diff",
+    )
     code_artifact_markers = (
         "code", "function", "class", "module", "file", "repo", "repository",
         "codebase", "test", "tests", "python", "javascript", "typescript",
@@ -445,6 +461,8 @@ def choose_roles(user_input: str) -> list[str]:
 
     explicit = _explicit_roles(user_input)
     if explicit:
+        if "code_reviewer" in explicit:
+            return ["code_reviewer"]
         if "security_analyst" in explicit:
             return ["security_analyst", "reviewer"]
         if any(t in lower for t in security_analysis_markers) and "security_analyst" not in explicit:
@@ -453,6 +471,8 @@ def choose_roles(user_input: str) -> list[str]:
             return ["security_reviewer", "reviewer"]
         if any(t in lower for t in science_markers) and "science_expert" not in explicit:
             return ["science_expert", "reviewer"]
+        if explicit == ["code_reviewer"]:
+            return ["code_reviewer"]
         if explicit == ["debugger"]:
             return ["debugger", "reviewer"]
         if explicit == ["coder"]:
@@ -476,6 +496,8 @@ def choose_roles(user_input: str) -> list[str]:
         return ["security_reviewer", "reviewer"]
     if any(t in lower for t in research_markers) and word_count >= 8:
         return ["researcher", "reviewer"]
+    if any(t in lower for t in code_review_markers) and any(t in lower for t in code_artifact_markers) and word_count >= 6:
+        return ["code_reviewer"]
     if any(t in lower for t in coding_markers) and any(t in lower for t in code_artifact_markers) and word_count >= 6:
         return ["coder", "reviewer"]
     if any(t in lower for t in vault_markers) and word_count >= 6:
@@ -551,7 +573,7 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
         result = _run_role(role, user_input, context=shared_context)
         stages.append(result)
         if role in {
-            "planner", "coder", "operator", "researcher", "debugger", "vault_curator",
+            "planner", "coder", "code_reviewer", "operator", "researcher", "debugger", "vault_curator",
             "science_expert", "security_reviewer", "security_analyst", "self_improve_critic"
         }:
             shared_context += f"{role}: {result['output']}\n\n"

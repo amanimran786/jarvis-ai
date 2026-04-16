@@ -227,7 +227,7 @@ def _requested_mode(lower: str) -> str | None:
 def _is_specialized_agent_query(lower: str) -> bool:
     return bool(
         re.search(
-            r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|coder|coding agent|vault curator|self-improve critic)\b",
+            r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|coder|coding agent|code reviewer|vault curator|self-improve critic)\b",
             lower,
         )
     )
