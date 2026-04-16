@@ -17,6 +17,7 @@ import notes
 import terminal
 import tools
 import vault_capture
+import vault_context
 import vault_edit
 
 
@@ -68,6 +69,11 @@ def _run_vault_curator_hook(task: str) -> dict | None:
         batch_result = _apply_recommended_actions_batch(task)
         if batch_result is not None:
             return {"model": "native/vault_curator", "output": batch_result}
+
+    if "context pack" in lower and any(verb in lower for verb in ("build", "create", "refresh", "generate")):
+        context_pack_result = _build_context_pack(task)
+        if context_pack_result is not None:
+            return {"model": "native/vault_curator", "output": context_pack_result}
 
     if "apply recommended action" in lower:
         recommended_result = _apply_recommended_action(task)
@@ -464,6 +470,25 @@ def _add_agent_inbox_item(task: str) -> str | None:
     if not result.get("ok"):
         return _vault_error_text(result, "Could not add that item to the agent inbox.")
     return f"Queued agent inbox item in {result['path']} under {result['heading']}."
+
+
+def _build_context_pack(task: str) -> str | None:
+    links = _extract_wikilinks(task)
+    if not links:
+        return (
+            "To build a context pack, tell me the seed notes, for example: "
+            "Build context pack for [[20 Projects]] and [[80 Jarvis Roadmap]]."
+        )
+
+    title_match = re.search(r"\bcalled\s+(.+?)\s+for\s+\[\[", task, flags=re.IGNORECASE)
+    title = title_match.group(1).strip() if title_match else None
+    result = vault_context.build_context_pack(links, title=title)
+    if not result.get("ok"):
+        return result.get("error", "Could not build that context pack.")
+    return (
+        f"Built context pack [[{result['title']}]] at {result['path']} "
+        f"from {result['note_count']} notes."
+    )
 
 
 def _promote_candidate_note(task: str) -> str | None:

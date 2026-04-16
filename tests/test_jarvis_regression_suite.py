@@ -874,6 +874,27 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertIn("Canonical target for [[Roadmap]]: [[80 Jarvis Roadmap]].", append_mock.call_args.args[2])
         self.assertIn("Requested source reference: [[Roadmap]].", append_mock.call_args.args[2])
 
+    def test_vault_curator_native_builds_context_pack(self):
+        with patch(
+            "specialized_agent_native.vault_context.build_context_pack",
+            return_value={
+                "ok": True,
+                "title": "Jarvis Working Context Pack",
+                "path": "indexes/context_packs/jarvis-working-context-pack.md",
+                "note_count": 4,
+            },
+        ) as build_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Build context pack called Jarvis Working Context Pack for [[20 Projects]] and [[80 Jarvis Roadmap]].",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Built context pack [[Jarvis Working Context Pack]]", result["output"])
+        build_mock.assert_called_once_with(
+            ["20 Projects", "80 Jarvis Roadmap"],
+            title="Jarvis Working Context Pack",
+        )
+
     def test_coder_native_repo_map_read_bypasses_model_call(self):
         with patch(
             "specialized_agent_native.vault_edit.read_note",

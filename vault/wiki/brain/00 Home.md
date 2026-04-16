@@ -13,6 +13,7 @@ Core note set:
 - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer
 - [[09 Jarvis Repo Map]] for the fastest repo-grounded map of behavior seams and proof commands
 - [[10 Identity]] for stable user identity, role, strengths, and goals
+- [[12 External Brain Patterns]] for the strongest public Obsidian and agent patterns worth borrowing without platform drift
 - [[20 Projects]] for active and important ongoing work
 - [[30 Preferences]] for communication, product, and operating preferences
 - [[40 Timeline]] for major events, milestones, and decisions

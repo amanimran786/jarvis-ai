@@ -1,6 +1,239 @@
 {
-  "doc_count": 62,
+  "doc_count": 64,
   "docs": [
+    {
+      "path": "indexes/context_packs/jarvis-working-context-pack.md",
+      "title": "---",
+      "preview": "--- type: generated_context_pack area: vault owner: generated write_policy: generated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - context-pack - generated - vault related: - \"[[Projects]]\" - \"[[Jarvis Roadmap]]\" - \"[[---]]\" - \"[[---]]\" - \"[[Identity]]\" - \"[[Synthesis]]\" --- Jarvis Working Context Pack Purpose: generated working set built from explicit seed notes and their nearest linked notes. Seed Notes - [[20 Pr",
+      "keywords": [
+        "jarvis",
+        "projects",
+        "identity",
+        "synthesis",
+        "notes",
+        "repo",
+        "roadmap",
+        "brain",
+        "summary",
+        "2026",
+        "hub",
+        "path",
+        "wiki",
+        "generated",
+        "active",
+        "purpose",
+        "linked",
+        "coding",
+        "map",
+        "pack"
+      ],
+      "chars": 2981,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: generated_context_pack area: vault owner: generated write_policy: generated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - context-pack - generated - vault related: - \"[[Projects]]\" - \"[[Jarvis Roadmap]]\" - \"[[---]]\" - \"[[---]]\" - \"[[Identity]]\" - \"[[Synthesis]]\" ---",
+          "keywords": [
+            "generated",
+            "context",
+            "pack",
+            "vault",
+            "2026",
+            "type",
+            "area",
+            "owner",
+            "write",
+            "policy",
+            "review",
+            "required"
+          ]
+        },
+        {
+          "heading": "Jarvis Working Context Pack",
+          "level": 1,
+          "page": null,
+          "line_start": 26,
+          "text": "Purpose: generated working set built from explicit seed notes and their nearest linked notes.",
+          "keywords": [
+            "notes",
+            "purpose",
+            "generated",
+            "working",
+            "set",
+            "built",
+            "explicit",
+            "seed",
+            "their",
+            "nearest",
+            "linked"
+          ]
+        },
+        {
+          "heading": "Seed Notes",
+          "level": 2,
+          "page": null,
+          "line_start": 30,
+          "text": "- [[20 Projects]], [[80 Jarvis Roadmap]], [[08 Coding Systems Hub]], [[09 Jarvis Repo Map]]",
+          "keywords": [
+            "jarvis",
+            "projects",
+            "roadmap",
+            "coding",
+            "systems",
+            "hub",
+            "repo",
+            "map"
+          ]
+        },
+        {
+          "heading": "[[Projects]]",
+          "level": 3,
+          "page": null,
+          "line_start": 36,
+          "text": "- path: wiki/brain/20 Projects.md - summary: Projects Purpose: hold the active project landscape Jarvis should keep in mind. Linked notes: [[10 Identity]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[90 Task Hub]] Jarvis - Jarvis is an active flagship build, aiming to feel more like an operating companion than a generic chatbot. - The t",
+          "keywords": [
+            "jarvis",
+            "projects",
+            "active",
+            "path",
+            "wiki",
+            "brain",
+            "summary",
+            "purpose",
+            "hold",
+            "project",
+            "landscape",
+            "should"
+          ]
+        },
+        {
+          "heading": "[[Jarvis Roadmap]]",
+          "level": 3,
+          "page": null,
+          "line_start": 41,
+          "text": "- path: wiki/brain/80 Jarvis Roadmap.md - summary: Jarvis Roadmap Purpose: keep Jarvis development pointed at the long-term product, not just the bug of the week. Linked notes: [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[90 Task Hub]], [[81 Jarvis Brain Map]] This note should answer: - what Jarvis is becoming - what must be true for it to feel genu",
+          "keywords": [
+            "jarvis",
+            "brain",
+            "roadmap",
+            "path",
+            "wiki",
+            "summary",
+            "purpose",
+            "keep",
+            "development",
+            "pointed",
+            "long",
+            "term"
+          ]
+        },
+        {
+          "heading": "[[---]]",
+          "level": 3,
+          "page": null,
+          "line_start": 46,
+          "text": "- path: wiki/brain/08 Coding Systems Hub.md - summary: --- type: hub area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - coding - review - engineering - runtime related: - \"[[09 Jarvis Repo Map]]\" - \"[[73 Senior Cybersecurity AI Engineering Compa",
+          "keywords": [
+            "engineering",
+            "coding",
+            "hub",
+            "jarvis",
+            "review",
+            "repo",
+            "2026",
+            "path",
+            "wiki",
+            "brain",
+            "systems",
+            "summary"
+          ]
+        },
+        {
+          "heading": "[[---]]",
+          "level": 3,
+          "page": null,
+          "line_start": 51,
+          "text": "- path: wiki/brain/09 Jarvis Repo Map.md - summary: --- type: map area: engineering owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - repo - coding - runtime - verification related: - \"[[08 Coding Systems Hub]]\" - \"[[75 Debugging Root Cause Playbook]]\" - \"[[7",
+          "keywords": [
+            "repo",
+            "jarvis",
+            "map",
+            "2026",
+            "coding",
+            "path",
+            "wiki",
+            "brain",
+            "summary",
+            "type",
+            "area",
+            "engineering"
+          ]
+        },
+        {
+          "heading": "[[Identity]]",
+          "level": 3,
+          "page": null,
+          "line_start": 56,
+          "text": "- path: wiki/brain/10 Identity.md - summary: Identity Purpose: capture durable facts about the user that should shape Jarvis's tone, priorities, and responses. Linked notes: [[20 Projects]], [[30 Preferences]], [[40 Timeline]], [[50 Synthesis]], [[60 Interview Story Bank]] Core Identity - Name: Aman Imran. - Base: San Francisco Bay Area. - Professional identity:",
+          "keywords": [
+            "identity",
+            "path",
+            "wiki",
+            "brain",
+            "summary",
+            "purpose",
+            "capture",
+            "durable",
+            "facts",
+            "about",
+            "user",
+            "should"
+          ]
+        },
+        {
+          "heading": "[[Synthesis]]",
+          "level": 3,
+          "page": null,
+          "line_start": 61,
+          "text": "- path: wiki/brain/50 Synthesis.md - summary: Synthesis Purpose: distill large exports and long conversations into concise reusable understanding. Linked notes: [[05 Source Inventory]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[80 Jarvis Roadmap]] Claude Export Synthesis - Claude carries the cleanest explicit long-form memory summary and sho",
+          "keywords": [
+            "synthesis",
+            "summary",
+            "long",
+            "claude",
+            "path",
+            "wiki",
+            "brain",
+            "purpose",
+            "distill",
+            "large",
+            "exports",
+            "conversations"
+          ]
+        },
+        {
+          "heading": "Usage",
+          "level": 2,
+          "page": null,
+          "line_start": 66,
+          "text": "Use this pack when you want a compact working set instead of broad vault retrieval.",
+          "keywords": [
+            "use",
+            "pack",
+            "want",
+            "compact",
+            "working",
+            "set",
+            "instead",
+            "broad",
+            "vault",
+            "retrieval"
+          ]
+        }
+      ]
+    },
     {
       "path": "indexes/keyword_index.md",
       "title": "Vault Keyword Index",
@@ -1033,17 +1266,17 @@
         "support",
         "systems",
         "runtime",
-        "import",
-        "behavior"
+        "agent",
+        "import"
       ],
-      "chars": 4960,
+      "chars": 5085,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer - [[09 Jarvis Repo Map]] for the fastest repo-grounded map of behavior seams and proof commands - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Coding Implementation Playbook]] for how Jarvis should execute coding tasks with the smallest correct diff and the right verification step - [[79A Code Review Regression Heuristics]] for how Jarvis should review patches and prioritize regressions over style - [[79B Jarvis Architecture Runtime Seams]] for the real coding map of where Jarvis behavior lives - [[79C Verification Matrix]] for what \u201cdone\u201d means across runtime, vault, and packaged-app changes - [[79D External Coding Agent Signals]] for the public repo patterns worth borrowing into Jarvis\u2019s coding brain - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[Product Surface Bridge]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[08 Coding Systems Hub]] for the coding, review, runtime-seam, and verification layer - [[09 Jarvis Repo Map]] for the fastest repo-grounded map of behavior seams and proof commands - [[10 Identity]] for stable user identity, role, strengths, and goals - [[12 External Brain Patterns]] for the strongest public Obsidian and agent patterns worth borrowing without platform drift - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Coding Implementation Playbook]] for how Jarvis should execute coding tasks with the smallest correct diff and the right verification step - [[79A Code Review Regression Heuristics]] for how Jarvis should review patches and prioritize regressions over style - [[79B Jarvis Architecture Runtime Seams]] for the real coding map of where Jarvis behavior lives - [[79C Verification Matrix]] for what \u201cdone\u201d means across runtime, vault, and packaged-app changes - [[79D External Coding Agent Signals]] for the public repo patterns worth borrowing into Jarvis\u2019s coding brain - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[Product Surface Bridge]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
             "brain",
@@ -1087,7 +1320,7 @@
         "systems",
         "runtime"
       ],
-      "chars": 5442,
+      "chars": 5562,
       "sections": [
         {
           "heading": "Brain Dashboard",
@@ -1110,7 +1343,7 @@
           "level": 2,
           "page": null,
           "line_start": 5,
-          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface. - [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and verification commands. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Coding Implementation Playbook]] gives Jarvis a reusable coding loop for bounded patches and repo-grounded changes. - [[79A Code Review Regression Heuristics]] gives Jarvis a reusable review order for bugs, regressions, and missing proof. - [[79B Jarvis Architecture Runtime Seams]] preserves where behavior actually lives across routing, voice, vault, specialists, and packaging. - [[79C Verification Matrix]] defines the proof expected for different Jarvis change types. - [[79D External Coding Agent Signals]] keeps the external repo patterns that are worth borrowing into the coding brain. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
+          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface. - [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and verification commands. - [[10 Identity]] holds stable user identity and strengths. - [[12 External Brain Patterns]] distills the strongest public Obsidian and agent patterns worth borrowing into Jarvis. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Coding Implementation Playbook]] gives Jarvis a reusable coding loop for bounded patches and repo-grounded changes. - [[79A Code Review Regression Heuristics]] gives Jarvis a reusable review order for bugs, regressions, and missing proof. - [[79B Jarvis Architecture Runtime Seams]] preserves where behavior actually lives across routing, voice, vault, specialists, and packaging. - [[79C Verification Matrix]] defines the proof expected for different Jarvis change types. - [[79D External Coding Agent Signals]] keeps the external repo patterns that are worth borrowing into the coding brain. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
           "keywords": [
             "jarvis",
             "gives",
@@ -1119,18 +1352,18 @@
             "coding",
             "covers",
             "framing",
+            "brain",
             "systems",
             "runtime",
             "work",
-            "preserves",
-            "product"
+            "preserves"
           ]
         },
         {
           "heading": "Use This Dashboard For",
           "level": 2,
           "page": null,
-          "line_start": 49,
+          "line_start": 50,
           "text": "- orienting inside the brain quickly - checking the capture and metadata rules before adding new durable notes - checking whether a fact belongs in identity, project, synthesis, or stories - deciding which durable note should absorb new source material - jumping into the next curation tasks without searching raw imports",
           "keywords": [
             "checking",
@@ -1151,7 +1384,7 @@
           "heading": "Source Paths",
           "level": 2,
           "page": null,
-          "line_start": 57,
+          "line_start": 58,
           "text": "- Raw imports live under vault/raw/imports/ - Curated long-term notes live under vault/wiki/brain/ - The visual Obsidian map lives in [[81 Jarvis Brain Map]]",
           "keywords": [
             "raw",
@@ -1172,7 +1405,7 @@
           "heading": "Support Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 63,
+          "line_start": 64,
           "text": "- [[06 Vault Support Hub]] is the main support-layer anchor. - [[07 Import Source Hub]] is the main import-layer anchor. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[Product Surface Bridge]] is the compiled product-surface bridge back to repo truth.",
           "keywords": [
             "bridge",
@@ -1193,7 +1426,7 @@
           "heading": "Obsidian Usage",
           "level": 2,
           "page": null,
-          "line_start": 71,
+          "line_start": 72,
           "text": "- Open Graph View to see how the curated notes cluster. - Open [[81 Jarvis Brain Map]] for a cleaner designed map of the same structure. - Use vault/templates/ when creating new durable note types. - Use backlinks from any brain note to see where Jarvis should deepen the knowledge next.",
           "keywords": [
             "open",
@@ -2646,6 +2879,149 @@
             "force",
             "multiplier"
           ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/12 External Brain Patterns.md",
+      "title": "---",
+      "preview": "--- type: synthesis area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - obsidian - agents - context - memory related: - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[08 Coding Systems Hub]]\" - \"[[80 Jarvis Roadmap]]\" - \"[[91 Vault Changelog]]\" --- External Brain Patterns Purpose: preserve the strongest ideas worth borrowing from public Obsidian, memory, and agent re",
+      "keywords": [
+        "jarvis",
+        "memory",
+        "brain",
+        "vault",
+        "obsidian",
+        "context",
+        "borrowed",
+        "note",
+        "repos",
+        "packs",
+        "should",
+        "markdown",
+        "agent",
+        "instead",
+        "second",
+        "git",
+        "deterministic",
+        "write",
+        "policy",
+        "source"
+      ],
+      "chars": 2233,
+      "sections": [
+        {
+          "heading": "---",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "text": "--- type: synthesis area: vault owner: jarvis write_policy: curated review_required: false status: active source: repo confidence: high created: 2026-04-16 updated: 2026-04-16 version: 1 tags: - obsidian - agents - context - memory related: - \"[[03 Brain Schema]]\" - \"[[04 Capture Workflow]]\" - \"[[08 Coding Systems Hub]]\" - \"[[80 Jarvis Roadmap]]\" - \"[[91 Vault Changelog]]\" ---",
+          "keywords": [
+            "vault",
+            "jarvis",
+            "2026",
+            "type",
+            "synthesis",
+            "area",
+            "owner",
+            "write",
+            "policy",
+            "curated",
+            "review",
+            "required"
+          ]
+        },
+        {
+          "heading": "External Brain Patterns",
+          "level": 1,
+          "page": null,
+          "line_start": 26,
+          "text": "Purpose: preserve the strongest ideas worth borrowing from public Obsidian, memory, and agent repos without importing their platform assumptions blindly.",
+          "keywords": [
+            "purpose",
+            "preserve",
+            "strongest",
+            "ideas",
+            "worth",
+            "borrowing",
+            "public",
+            "obsidian",
+            "memory",
+            "agent",
+            "repos",
+            "without"
+          ]
+        },
+        {
+          "heading": "Highest-Value Patterns",
+          "level": 2,
+          "page": null,
+          "line_start": 30,
+          "text": "- context packs Borrowed from tools like Obsidian Copilot, basic-memory style working sets, and modular-context workflows. Jarvis should use explicit, generated markdown packs built from seed notes and nearby linked notes instead of giant retrieval blobs. - targeted note mutation Borrowed from MCP Obsidian style patch semantics. Jarvis should keep writing relative to headings, frontmatter, or bounded note surfaces instead of broad whole-note rewrites. - markdown-native memory structure Borrowed from basic-memory and second-brain repos. Jarvis should prefer human-readable markdown with stable structure over hidden database-only memory. - git-backed safety and history Borrowed from Obsidian Git and second-brain workflows. Git is a safety layer for the vault, but not a substitute for inbox, candidate, and promotion rules. - deterministic health and visualization Borrowed from visual-skills and second-brain repos. Jarvis should generate deterministic .canvas maps and maintenance reports rather than relying on opaque plugin state.",
+          "keywords": [
+            "borrowed",
+            "memory",
+            "jarvis",
+            "should",
+            "obsidian",
+            "markdown",
+            "note",
+            "second",
+            "brain",
+            "git",
+            "context",
+            "packs"
+          ]
+        },
+        {
+          "heading": "Things To Avoid",
+          "level": 2,
+          "page": null,
+          "line_start": 52,
+          "text": "- plugin-first core logic - autonomous multi-note rewriting as a default ingest behavior - cloud-native assumptions in the core brain path - UI-heavy agent shells before the markdown contract is strong - broad skill sprawl without a clear write policy and proof model",
+          "keywords": [
+            "core",
+            "plugin",
+            "first",
+            "logic",
+            "autonomous",
+            "multi",
+            "note",
+            "rewriting",
+            "default",
+            "ingest",
+            "behavior",
+            "cloud"
+          ]
+        },
+        {
+          "heading": "Current Jarvis Cut",
+          "level": 2,
+          "page": null,
+          "line_start": 60,
+          "text": "The cleanest immediate adoption is: - generated context packs under vault/indexes/context_packs/ - bounded note mutation through vault_edit.py - candidate and inbox staging for anything non-trivial - deterministic health and graph support instead of more agent freedom",
+          "keywords": [
+            "context",
+            "packs",
+            "vault",
+            "cleanest",
+            "immediate",
+            "adoption",
+            "generated",
+            "under",
+            "indexes",
+            "bounded",
+            "note",
+            "mutation"
+          ]
+        },
+        {
+          "heading": "Source Repos",
+          "level": 2,
+          "page": null,
+          "line_start": 69,
+          "text": "- - - - - - - - - - - - -",
+          "keywords": []
         }
       ]
     },
@@ -9776,17 +10152,17 @@
         "inbox",
         "candidate",
         "review",
-        "stale",
-        "note",
         "can",
         "under",
         "only",
+        "stale",
+        "note",
         "curator",
-        "runtime",
         "explicit",
-        "task"
+        "without",
+        "runtime"
       ],
-      "chars": 8387,
+      "chars": 8733,
       "sections": [
         {
           "heading": "---",
@@ -10019,20 +10395,20 @@
           "level": 3,
           "page": null,
           "line_start": 99,
-          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands - added a native coder verification helper for repo-safe checks like targeted pytest and py_compile, plus native repo-map lookup",
+          "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[Product Surface Bridge]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact - added a coding-brain layer with [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], [[79C Verification Matrix]], and [[79D External Coding Agent Signals]] so Jarvis can improve as a local coding companion instead of only a general technical assistant - added [[08 Coding Systems Hub]] so the coding playbooks, runtime seam map, and verification layer cluster around one retrieval surface instead of scattering as separate graph leaves - added a dedicated code_reviewer specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands - added a native coder verification helper for repo-safe checks like targeted pytest and py_compile, plus native repo-map lookup - added generated context packs under vault/indexes/context_packs/ so Jarvis can build explicit working sets from seed notes and linked notes instead of relying only on broad vault retrieval - added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift",
           "keywords": [
             "added",
-            "instead",
             "notes",
+            "instead",
+            "vault",
             "into",
             "candidate",
             "review",
             "stale",
-            "vault",
             "inbox",
             "can",
-            "coding",
-            "only"
+            "only",
+            "jarvis"
           ]
         }
       ]

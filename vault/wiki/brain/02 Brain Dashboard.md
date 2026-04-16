@@ -12,6 +12,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[08 Coding Systems Hub]] groups the coding, review, runtime-seam, and verification notes into one retrieval surface.
 - [[09 Jarvis Repo Map]] gives the quickest repo-grounded map of behavior seams and verification commands.
 - [[10 Identity]] holds stable user identity and strengths.
+- [[12 External Brain Patterns]] distills the strongest public Obsidian and agent patterns worth borrowing into Jarvis.
 - [[20 Projects]] keeps active work visible.
 - [[30 Preferences]] preserves how Aman likes to work and collaborate.
 - [[40 Timeline]] captures major milestones and shifts.

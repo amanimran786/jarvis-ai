@@ -895,6 +895,18 @@ class VaultMutationTests(unittest.TestCase):
             patch.object(vault_module, "INDEX_FILE", root / "indexes" / "index.json"),
         ]
 
+    def _patch_context_dirs(self, context_module, root: Path):
+        return [
+            patch.object(context_module.vault, "VAULT_ROOT", root),
+            patch.object(context_module.vault, "RAW_DIR", root / "raw"),
+            patch.object(context_module.vault, "WIKI_DIR", root / "wiki"),
+            patch.object(context_module.vault, "INDEXES_DIR", root / "indexes"),
+            patch.object(context_module.vault, "OUTPUTS_DIR", root / "outputs"),
+            patch.object(context_module.vault, "TEMPLATES_DIR", root / "templates"),
+            patch.object(context_module.vault, "INDEX_FILE", root / "indexes" / "index.json"),
+            patch.object(context_module, "CONTEXT_PACKS_DIR", root / "indexes" / "context_packs"),
+        ]
+
     def test_resolve_note_path_finds_brain_note_by_wikilink_title(self):
         import vault
         import vault_edit
@@ -1058,6 +1070,35 @@ class VaultMutationTests(unittest.TestCase):
             self.assertIn("canonical_target: wiki/brain/Curated Identity.md", updated)
             self.assertIn("## Proposed Updates", updated)
             self.assertIn("Proposed staged change", updated)
+
+    def test_build_context_pack_generates_markdown_bundle(self):
+        import vault
+        import vault_context
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            for ctx in self._patch_context_dirs(vault_context, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+
+            projects = root / "wiki" / "brain" / "20 Projects.md"
+            roadmap = root / "wiki" / "brain" / "80 Jarvis Roadmap.md"
+            projects.parent.mkdir(parents=True, exist_ok=True)
+            projects.write_text("# Projects\n\nSee [[80 Jarvis Roadmap]].\n", encoding="utf-8")
+            roadmap.write_text("# Jarvis Roadmap\n\nNorth star.\n", encoding="utf-8")
+
+            result = vault_context.build_context_pack(["20 Projects"], title="Jarvis Working Context Pack")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["note_count"], 2)
+            pack = root / result["path"]
+            self.assertTrue(pack.exists())
+            body = pack.read_text(encoding="utf-8")
+            self.assertIn("# Jarvis Working Context Pack", body)
+            self.assertIn("[[20 Projects]]", body)
+            self.assertIn("[[Jarvis Roadmap]]", body)
 
     def test_promote_candidate_update_merges_latest_candidate_block_into_canon(self):
         import vault

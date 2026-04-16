@@ -119,3 +119,5 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added a dedicated `code_reviewer` specialist role so code-review prompts route into regression-first review behavior instead of the more general reviewer path
 - added [[09 Jarvis Repo Map]] as the fastest repo-grounded note for runtime seams and proof commands
 - added a native `coder` verification helper for repo-safe checks like targeted `pytest` and `py_compile`, plus native repo-map lookup
+- added generated `context packs` under `vault/indexes/context_packs/` so Jarvis can build explicit working sets from seed notes and linked notes instead of relying only on broad vault retrieval
+- added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift
