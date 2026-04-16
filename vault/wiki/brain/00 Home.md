@@ -33,6 +33,11 @@ Core note set:
 - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering
 - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps
 - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior
+- [[79 Coding Implementation Playbook]] for how Jarvis should execute coding tasks with the smallest correct diff and the right verification step
+- [[79A Code Review Regression Heuristics]] for how Jarvis should review patches and prioritize regressions over style
+- [[79B Jarvis Architecture Runtime Seams]] for the real coding map of where Jarvis behavior lives
+- [[79C Verification Matrix]] for what “done” means across runtime, vault, and packaged-app changes
+- [[79D External Coding Agent Signals]] for the public repo patterns worth borrowing into Jarvis’s coding brain
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks

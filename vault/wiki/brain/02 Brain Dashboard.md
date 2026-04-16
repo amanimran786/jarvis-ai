@@ -32,6 +32,11 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater.
 - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls.
 - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior.
+- [[79 Coding Implementation Playbook]] gives Jarvis a reusable coding loop for bounded patches and repo-grounded changes.
+- [[79A Code Review Regression Heuristics]] gives Jarvis a reusable review order for bugs, regressions, and missing proof.
+- [[79B Jarvis Architecture Runtime Seams]] preserves where behavior actually lives across routing, voice, vault, specialists, and packaging.
+- [[79C Verification Matrix]] defines the proof expected for different Jarvis change types.
+- [[79D External Coding Agent Signals]] keeps the external repo patterns that are worth borrowing into the coding brain.
 - [[70 Jarvis Decision Log]] preserves architectural and product decisions.
 - [[80 Jarvis Roadmap]] keeps product direction anchored.
 - [[90 Task Hub]] tracks the next curation and product-memory work.

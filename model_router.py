@@ -63,6 +63,22 @@ _RUNTIME_VOICE_TERMS = (
 _ENGINEERING_COMPANION_TERMS = (
     "debug",
     "debugging",
+    "implement",
+    "implementation",
+    "code review",
+    "review this diff",
+    "review this patch",
+    "diff",
+    "patch",
+    "refactor",
+    "write code",
+    "write tests",
+    "add tests",
+    "python function",
+    "python module",
+    "repo",
+    "repository",
+    "codebase",
     "design",
     "architecture",
     "architect",
@@ -171,6 +187,35 @@ _AI_RUNTIME_TERMS = (
     "memory injection",
     "semantic memory",
     "local-first ai",
+)
+
+_CODING_IMPLEMENTATION_TERMS = (
+    "implement",
+    "implementation",
+    "write the patch",
+    "make the patch",
+    "patch",
+    "refactor",
+    "write code",
+    "write tests",
+    "add tests",
+    "change this function",
+    "update this function",
+    "modify this file",
+    "change this module",
+    "implement this feature",
+    "fix this code",
+)
+
+_CODE_REVIEW_TERMS = (
+    "code review",
+    "review this diff",
+    "review this patch",
+    "review this pr",
+    "review this code",
+    "regression risk",
+    "what could break",
+    "find bugs in this diff",
 )
 
 
@@ -503,6 +548,10 @@ def _is_engineering_companion_query(user_input: str, tool: str | None) -> bool:
 
 def _engineering_playbook_category(user_input: str) -> str | None:
     lower = (user_input or "").lower()
+    if any(term in lower for term in _CODE_REVIEW_TERMS):
+        return "code_review"
+    if any(term in lower for term in _CODING_IMPLEMENTATION_TERMS):
+        return "coding_implementation"
     if any(term in lower for term in _DEBUGGING_TERMS):
         return "debugging"
     if any(term in lower for term in _SYSTEM_DESIGN_TERMS):
@@ -522,6 +571,21 @@ def _engineering_grounding_queries(user_input: str) -> list[str]:
     category = _engineering_playbook_category(user_input)
     if category == "debugging":
         queries.append("debugging root cause playbook")
+    elif category == "coding_implementation":
+        queries.extend(
+            [
+                "coding implementation playbook",
+                "jarvis architecture runtime seams",
+                "verification matrix",
+            ]
+        )
+    elif category == "code_review":
+        queries.extend(
+            [
+                "code review regression heuristics",
+                "verification matrix",
+            ]
+        )
     elif category == "systems_design":
         queries.append("systems design tradeoff heuristics")
     elif category == "threat_modeling":
@@ -554,6 +618,8 @@ def _engineering_companion_grounding(user_input: str) -> str:
         "Engineering companion guidance:",
         "- Act like a senior technical partner, not a generic assistant.",
         "- Diagnose the failing layer first and prefer the smallest correct next step.",
+        "- For coding work, inspect existing repo patterns before proposing a new abstraction.",
+        "- Prefer the smallest correct diff and the narrowest verification that proves it.",
         "- Use cross-layer reasoning across systems, product, AI, security, and operations when the problem spans them.",
         "- Prefer verification and concrete evidence over speculation.",
     ]

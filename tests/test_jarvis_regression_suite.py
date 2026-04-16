@@ -908,6 +908,16 @@ class SkillAndAgentTests(unittest.TestCase):
         roles = specialized_agents.choose_roles("Use the debugger on this flaky worker issue.")
         self.assertEqual(roles, ["debugger", "reviewer"])
 
+    def test_specialized_agent_choose_roles_for_explicit_coder_request(self):
+        roles = specialized_agents.choose_roles("Use the coder to patch this Python service and add tests.")
+        self.assertEqual(roles, ["coder", "reviewer"])
+
+    def test_specialized_agent_choose_roles_for_coding_request(self):
+        roles = specialized_agents.choose_roles(
+            "Implement this feature in the FastAPI module, patch the handler, and add tests."
+        )
+        self.assertEqual(roles, ["coder", "reviewer"])
+
     def test_specialized_agent_choose_roles_for_research_request(self):
         roles = specialized_agents.choose_roles(
             "Research the top public GitHub repos for Obsidian workflows and compare the strongest patterns."
@@ -1647,6 +1657,16 @@ class RouterTests(unittest.TestCase):
             text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertEqual(text, "Research stub.")
+
+    def test_explicit_coder_request_bypasses_fast_paths(self):
+        with patch("specialized_agents.run", return_value={"ok": True, "roles": ["coder", "reviewer"], "final": "Coder stub."}), \
+             patch("specialized_agents.result_text", return_value="Coder stub."):
+            stream, label = router.route_stream(
+                "Use the coder to implement this patch in the repository and add tests."
+            )
+            text = "".join(stream)
+        self.assertEqual(label, "Specialized Agents")
+        self.assertEqual(text, "Coder stub.")
 
     def test_automatic_specialized_agent_route_for_science_question(self):
         previous = model_router.get_mode()
@@ -2546,6 +2566,7 @@ class ModelRouterFallbackTests(unittest.TestCase):
     def test_engineering_companion_query_detection_stays_narrow(self):
         self.assertTrue(model_router._is_engineering_companion_query("How would you design a resilient job queue?", "chat"))
         self.assertTrue(model_router._is_engineering_companion_query("Help me debug this flaky worker pool.", "chat"))
+        self.assertTrue(model_router._is_engineering_companion_query("Refactor this Python module and add tests.", "chat"))
         self.assertFalse(model_router._is_engineering_companion_query("What is the weather today?", "chat"))
         self.assertFalse(model_router._is_engineering_companion_query("Message Aman that I am running late.", "chat"))
 
@@ -2562,6 +2583,16 @@ class ModelRouterFallbackTests(unittest.TestCase):
         self.assertIn("threat modeling security thinking", security_queries)
         self.assertNotIn("ai runtime agent engineering principles", security_queries)
         self.assertEqual(model_router._engineering_playbook_category("Walk me through the threat model for prompt injection."), "threat_modeling")
+
+        coding_queries = model_router._engineering_grounding_queries("Implement this patch in the Python module and add tests.")
+        self.assertIn("coding implementation playbook", coding_queries)
+        self.assertIn("verification matrix", coding_queries)
+        self.assertEqual(model_router._engineering_playbook_category("Implement this patch in the Python module and add tests."), "coding_implementation")
+
+        review_queries = model_router._engineering_grounding_queries("Review this diff and tell me the regression risk.")
+        self.assertIn("code review regression heuristics", review_queries)
+        self.assertIn("verification matrix", review_queries)
+        self.assertEqual(model_router._engineering_playbook_category("Review this diff and tell me the regression risk."), "code_review")
 
     def test_smart_stream_injects_general_grounding_rules(self):
         previous = model_router.get_mode()

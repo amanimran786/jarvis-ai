@@ -215,6 +215,51 @@
       "y": 780,
       "width": 300,
       "height": 180
+    },
+    {
+      "id": "codingplaybook",
+      "type": "file",
+      "file": "79 Coding Implementation Playbook.md",
+      "x": 1960,
+      "y": -260,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "codereview",
+      "type": "file",
+      "file": "79A Code Review Regression Heuristics.md",
+      "x": 2360,
+      "y": -260,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "architectureseams",
+      "type": "file",
+      "file": "79B Jarvis Architecture Runtime Seams.md",
+      "x": 2360,
+      "y": 40,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "verificationmatrix",
+      "type": "file",
+      "file": "79C Verification Matrix.md",
+      "x": 2360,
+      "y": 320,
+      "width": 340,
+      "height": 220
+    },
+    {
+      "id": "externalsignals",
+      "type": "file",
+      "file": "79D External Coding Agent Signals.md",
+      "x": 2760,
+      "y": 40,
+      "width": 360,
+      "height": 220
     }
   ],
   "edges": [
@@ -460,6 +505,46 @@
       "fromSide": "bottom",
       "toSide": "top",
       "label": "lookup"
+    },
+    {
+      "id": "e28",
+      "fromNode": "roadmap",
+      "toNode": "codingplaybook",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "label": "coding loop"
+    },
+    {
+      "id": "e29",
+      "fromNode": "codingplaybook",
+      "toNode": "codereview",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "review"
+    },
+    {
+      "id": "e30",
+      "fromNode": "codingplaybook",
+      "toNode": "architectureseams",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "seams"
+    },
+    {
+      "id": "e31",
+      "fromNode": "codingplaybook",
+      "toNode": "verificationmatrix",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "prove"
+    },
+    {
+      "id": "e32",
+      "fromNode": "architectureseams",
+      "toNode": "externalsignals",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "borrow patterns"
     }
   ]
 }

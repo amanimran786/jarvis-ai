@@ -86,6 +86,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - it should reason like a strong senior technical partner, not a generic assistant with engineering vocabulary
 - retrieval and memory should reinforce technical fluency, not just product or career context
 - reusable playbooks for debugging, systems design, threat modeling, and AI runtime should compound into better answers over time
+- Jarvis should become a credible coding companion with a dedicated implementation loop, review loop, repo-seam map, and verification discipline
 
 ### 5. Universal Problem-Solving Depth
 
@@ -124,6 +125,8 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately
 - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries
 - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure
+- give coding work its own local specialist path so implementation requests do not fall back to generic planner/executor behavior
+- keep learning selectively from strong public coding-agent and Obsidian repos without importing their cloud or platform assumptions directly
 
 ## Medium-Term Priorities
 

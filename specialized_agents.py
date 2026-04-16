@@ -17,7 +17,7 @@ import threading
 
 from brains.brain_claude import ask_claude
 from brains.brain_ollama import ask_local, get_best_available
-from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT
+from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT, LOCAL_CODER
 import model_router
 import skills
 import specialized_agent_native
@@ -37,6 +37,7 @@ AGENTS = {
     "planner": AgentSpec("planner", AGENTS_DIR / "planner.md", HAIKU),
     "executor": AgentSpec("executor", AGENTS_DIR / "executor.md", SONNET),
     "reviewer": AgentSpec("reviewer", AGENTS_DIR / "reviewer.md", HAIKU),
+    "coder": AgentSpec("coder", AGENTS_DIR / "coder.md", SONNET),
     "operator": AgentSpec("operator", AGENTS_DIR / "operator.md", SONNET),
     "researcher": AgentSpec("researcher", AGENTS_DIR / "researcher.md", SONNET),
     "debugger": AgentSpec("debugger", AGENTS_DIR / "debugger.md", SONNET),
@@ -53,6 +54,7 @@ _LOCAL_ROLE_MODELS = {
     "planner":            LOCAL_DEFAULT,    # fast outline pass
     "executor":           LOCAL_REASONING,  # deep answer pass — worth the wait
     "reviewer":           LOCAL_DEFAULT,    # fast verification pass
+    "coder":              LOCAL_CODER,      # implementation-focused coding model
     "operator":           LOCAL_REASONING,  # concrete environment steps
     "researcher":         LOCAL_REASONING,  # source synthesis and comparison
     "debugger":           LOCAL_REASONING,  # root-cause and verification path
@@ -256,6 +258,13 @@ def _operator_fallback() -> str:
     )
 
 
+def _coder_fallback() -> str:
+    return (
+        "Inspect the existing repo pattern first, make the smallest correct code change, "
+        "then run the narrowest verification that proves the patch works."
+    )
+
+
 def _researcher_fallback() -> str:
     return (
         "Lead with the strongest sourced finding, then summarize the evidence that agrees, "
@@ -342,6 +351,8 @@ def _fallback_role_output(role: str, task: str, context: str = "") -> str:
         return "Tighten the answer around the main tradeoff, likely failure modes, and the clearest validation path."
     if role == "operator":
         return _operator_fallback()
+    if role == "coder":
+        return _coder_fallback()
     if role == "researcher":
         return _researcher_fallback()
     if role == "debugger":
@@ -375,6 +386,7 @@ def _explicit_roles(user_input: str) -> list[str]:
         "planner": ("planner", "plan this"),
         "executor": ("executor", "execute this"),
         "reviewer": ("reviewer", "review this"),
+        "coder": ("coder", "coding agent", "use the coder", "use the coding agent"),
         "operator": ("operator", "use the operator", "have the operator"),
         "researcher": ("researcher", "research this", "use the researcher"),
         "debugger": ("debugger", "debug this", "use the debugger"),
@@ -413,6 +425,17 @@ def choose_roles(user_input: str) -> list[str]:
         "research", "investigate", "look through", "scan github", "browse repos",
         "compare repos", "source-backed", "findings", "what changed", "public repos",
     )
+    coding_markers = (
+        "implement", "write the patch", "make the patch", "fix this code",
+        "refactor this", "add tests", "write tests", "update this function",
+        "modify this file", "change this module", "implement this feature",
+        "patch this", "code this", "ship this change",
+    )
+    code_artifact_markers = (
+        "code", "function", "class", "module", "file", "repo", "repository",
+        "codebase", "test", "tests", "python", "javascript", "typescript",
+        "fastapi", "react", "sql", "query",
+    )
     vault_markers = (
         "distill into the brain", "story bank", "decision log", "roadmap note",
         "changelog", "patch this note", "update this note", "update the vault",
@@ -432,6 +455,8 @@ def choose_roles(user_input: str) -> list[str]:
             return ["science_expert", "reviewer"]
         if explicit == ["debugger"]:
             return ["debugger", "reviewer"]
+        if explicit == ["coder"]:
+            return ["coder", "reviewer"]
         if explicit == ["researcher"]:
             return ["researcher", "reviewer"]
         if explicit == ["vault_curator"]:
@@ -451,6 +476,8 @@ def choose_roles(user_input: str) -> list[str]:
         return ["security_reviewer", "reviewer"]
     if any(t in lower for t in research_markers) and word_count >= 8:
         return ["researcher", "reviewer"]
+    if any(t in lower for t in coding_markers) and any(t in lower for t in code_artifact_markers) and word_count >= 6:
+        return ["coder", "reviewer"]
     if any(t in lower for t in vault_markers) and word_count >= 6:
         return ["vault_curator", "reviewer"]
     if any(t in lower for t in debug_markers) and (asks_for_reasoning or word_count >= 8):
@@ -524,7 +551,7 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
         result = _run_role(role, user_input, context=shared_context)
         stages.append(result)
         if role in {
-            "planner", "operator", "researcher", "debugger", "vault_curator",
+            "planner", "coder", "operator", "researcher", "debugger", "vault_curator",
             "science_expert", "security_reviewer", "security_analyst", "self_improve_critic"
         }:
             shared_context += f"{role}: {result['output']}\n\n"

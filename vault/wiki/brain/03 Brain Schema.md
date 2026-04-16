@@ -69,6 +69,8 @@ Preferred fields:
 - `decision`
 - `story`
 - `playbook`
+- `architecture_map`
+- `verification`
 - `roadmap`
 - `task_hub`
 - `capture_template`

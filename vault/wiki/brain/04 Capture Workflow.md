@@ -70,6 +70,9 @@ Promote material into the curated brain only when it improves one of these:
 - project continuity
 - reusable stories
 - technical playbooks
+- coding playbooks
+- verification rules
+- architecture seam maps
 - product decisions
 - roadmap clarity
 
@@ -87,6 +90,7 @@ When Jarvis gains more direct vault tools later, prefer:
 - `append_only` notes for continuous agent maintenance work
 - `propose_only` notes when Jarvis should gather candidate changes under `vault/wiki/candidates/` without directly rewriting the canon
 - explicit promotion when a candidate update is accepted into the canonical note
+- solved coding lesson -> [[79 Coding Implementation Playbook]], [[79A Code Review Regression Heuristics]], [[79B Jarvis Architecture Runtime Seams]], or [[79C Verification Matrix]] depending on what became reusable
 
 ## Major-Change Rule
 
