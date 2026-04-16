@@ -266,18 +266,21 @@ class ScreenAnalysisWorker(QThread):
     def run(self):
         self.status.emit("SCANNING SCREEN...")
         try:
-            prompt = (
-                "You are Jarvis, an AI assistant helping Aman during a live interview or technical call. "
-                "Analyze everything visible on the screen RIGHT NOW and provide the most useful response:\n\n"
-                "PRIORITY ORDER:\n"
-                "1. Coding problem / LeetCode / algorithm question → give the full working solution with time/space complexity\n"
-                "2. System design question → outline the architecture clearly\n"
-                "3. Technical interview question → give a strong, precise answer with an example\n"
-                "4. Code with a bug → identify the bug and provide the fix\n"
-                "5. Presentation / document → key talking points Aman should mention\n"
-                "6. Anything else → describe what's visible and provide relevant context\n\n"
-                "Be direct. No markdown formatting. Write as if speaking out loud. "
-                "For code, include the actual code block. Max 6 sentences for explanations."
+            prompt = camera._engineering_vision_prompt(
+                (
+                    "You are Jarvis, an AI assistant helping Aman during a live interview or technical call. "
+                    "Analyze everything visible on the screen RIGHT NOW and provide the most useful response:\n\n"
+                    "PRIORITY ORDER:\n"
+                    "1. Coding problem / LeetCode / algorithm question → give the full working solution with time/space complexity\n"
+                    "2. System design question → outline the architecture clearly\n"
+                    "3. Technical interview question → give a strong, precise answer with an example\n"
+                    "4. Code with a bug → identify the bug and provide the fix\n"
+                    "5. Presentation / document → key talking points Aman should mention\n"
+                    "6. Anything else → describe what's visible and provide relevant context\n\n"
+                    "Be direct. No markdown formatting. Write as if speaking out loud. "
+                    "For code, include the actual code block. Max 6 sentences for explanations."
+                ),
+                force=True,
             )
             answer = camera.screenshot_and_describe(prompt)
             self.result.emit(answer)
@@ -685,7 +688,9 @@ class MeetingOverlay(QMainWindow):
 
     def _on_suggestion(self, text: str):
         self._current_suggestion = text
-        self._suggestion_lbl.setText(text)
+        hint = meeting_listener.actionable_hint(text)
+        display_text = f"{text}\n\n{hint}" if hint else text
+        self._suggestion_lbl.setText(display_text)
         self._set_status("LIVE")
         # Flash border
         self._suggestion_lbl.setStyleSheet(f"""

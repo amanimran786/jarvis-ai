@@ -33,6 +33,61 @@ if _REPO_ROOT not in sys.path:
 
 
 # ===========================================================================
+# briefing.py
+# ===========================================================================
+
+class BriefingModuleTests(unittest.TestCase):
+
+    def test_build_briefing_uses_name_fact(self):
+        import briefing
+        with patch("briefing._greeting", return_value="Good morning"), \
+             patch("briefing._focus_line", return_value=""):
+            result = briefing.build_briefing(["My name is Aman"])
+        self.assertEqual(result, "Good morning, Aman.")
+
+    def test_build_briefing_appends_focus_line(self):
+        import briefing
+        with patch("briefing._greeting", return_value="Good evening"), \
+             patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."):
+            result = briefing.build_briefing(["My name is Aman"])
+        self.assertEqual(result, "Good evening, Aman. Current focus: Jarvis local-first roadmap.")
+
+    def test_focus_line_prefers_curated_brain_hits(self):
+        import briefing
+        fake_results = [
+            {
+                "path": "raw/imports/chatgpt/2026-04-15-export/conversations-000.json",
+                "excerpt": "Raw transcript snippet that should be ignored.",
+            },
+            {
+                "path": "wiki/brain/80 Jarvis Roadmap.md",
+                "excerpt": "Jarvis is focused on local-first reliability and stronger runtime grounding.",
+            },
+        ]
+        with patch("briefing.vault.search", return_value=fake_results):
+            result = briefing._focus_line()
+        self.assertIn("Current focus:", result)
+        self.assertIn("local-first reliability", result)
+
+    def test_focus_line_skips_purpose_stub_when_better_hit_exists(self):
+        import briefing
+        fake_results = [
+            {
+                "path": "wiki/brain/80 Jarvis Roadmap.md",
+                "excerpt": "Purpose: keep Jarvis development pointed at the long-term product.",
+            },
+            {
+                "path": "wiki/brain/20 Projects.md",
+                "excerpt": "- Jarvis is an active flagship build focused on local-first voice and proactive behavior.",
+            },
+        ]
+        with patch("briefing.vault.search", return_value=fake_results):
+            result = briefing._focus_line()
+        self.assertIn("Current focus:", result)
+        self.assertIn("Jarvis is an active flagship build", result)
+
+
+# ===========================================================================
 # memory.py
 # ===========================================================================
 
@@ -649,6 +704,29 @@ class VaultSearchRoutingTests(unittest.TestCase):
         long_query = "What is the best way to design a distributed database system?"
         self.assertTrue(vault.should_query(long_query))
 
+    def test_should_query_for_short_brain_query(self):
+        import vault
+        self.assertTrue(vault.should_query("what are we building"))
+        self.assertTrue(vault.should_query("my priorities"))
+        self.assertTrue(vault.should_query("openai fit"))
+
+    def test_should_query_for_memory_context_prompts(self):
+        import vault
+        self.assertTrue(vault.should_query("what do you know about me", tool="memory"))
+        self.assertTrue(vault.should_query("catch me up", tool="memory"))
+        self.assertFalse(vault.should_query("remember milk", tool="memory"))
+
+    def test_rewrite_context_query_normalizes_memory_prompts(self):
+        import vault
+        self.assertEqual(
+            vault._rewrite_context_query("what do you know about me", tool="memory"),
+            "identity my background my projects my preferences",
+        )
+        self.assertEqual(
+            vault._rewrite_context_query("catch me up", tool="memory"),
+            "my priorities jarvis roadmap current focus",
+        )
+
     def test_should_query_false_for_short_query(self):
         import vault
         self.assertFalse(vault.should_query("hi"))
@@ -678,6 +756,46 @@ class VaultSearchRoutingTests(unittest.TestCase):
         self.assertIn("raw/notes.md > Section", result)
         self.assertIn("relevant snippet", result)
 
+    def test_build_context_prefers_curated_brain_hits_for_brain_query(self):
+        import vault
+        fake_results = [
+            {
+                "path": "raw/imports/chatgpt/2026-04-15-export/conversations-000.json",
+                "score": 15,
+                "citation": {"label": "raw/imports/chatgpt/2026-04-15-export/conversations-000.json > Raw"},
+                "excerpt": "Raw transcript snippet.",
+            },
+            {
+                "path": "wiki/brain/80 Jarvis Roadmap.md",
+                "score": 18,
+                "citation": {"label": "wiki/brain/80 Jarvis Roadmap.md > Roadmap"},
+                "excerpt": "Curated roadmap snippet.",
+            },
+        ]
+        with patch("vault.search", return_value=fake_results):
+            result = vault.build_context("what are we building", tool=None)
+        self.assertIn("wiki/brain/80 Jarvis Roadmap.md > Roadmap", result)
+        self.assertNotIn("conversations-000.json", result)
+
+    def test_build_context_caps_search_width_for_brain_query(self):
+        import vault
+        with patch("vault.search", return_value=[]) as mock_search:
+            vault.build_context("my priorities", tool=None, topn=5)
+        mock_search.assert_called_once_with("my priorities current focus", topn=2)
+
+    def test_build_context_allows_memory_context_queries(self):
+        import vault
+        fake_results = [
+            {
+                "citation": {"label": "wiki/brain/10 Identity.md > Identity"},
+                "excerpt": "Identity snippet.",
+            }
+        ]
+        with patch("vault.search", return_value=fake_results) as mock_search:
+            result = vault.build_context("what do you know about me", tool="memory")
+        mock_search.assert_called_once_with("identity my background my projects my preferences", topn=3)
+        self.assertIn("wiki/brain/10 Identity.md > Identity", result)
+
     def test_score_text_rewards_title_match(self):
         import vault
         score_match = vault._score_text("jarvis vault strategy", "Jarvis Vault Strategy", [], "")
@@ -688,6 +806,35 @@ class VaultSearchRoutingTests(unittest.TestCase):
         import vault
         score = vault._score_text("python debugging", "Title", ["python", "debug"], "")
         self.assertGreater(score, 0)
+
+    def test_path_bias_prefers_brain_notes_over_raw_imports(self):
+        import vault
+        self.assertGreater(vault._path_bias("wiki/brain/10 Identity.md"), vault._path_bias("raw/imports/chatgpt/2026-04-15-export/conversations-000.json"))
+
+    def test_search_prefers_brain_note_when_scores_are_otherwise_equal(self):
+        import vault
+        fake_index = {
+            "docs": [
+                {
+                    "path": "raw/imports/chatgpt/2026-04-15-export/chat.html",
+                    "title": "Jarvis Identity",
+                    "preview": "Jarvis identity and local-first preferences.",
+                    "keywords": ["jarvis", "identity", "local", "preferences"],
+                    "sections": [],
+                },
+                {
+                    "path": "wiki/brain/10 Identity.md",
+                    "title": "Jarvis Identity",
+                    "preview": "Jarvis identity and local-first preferences.",
+                    "keywords": ["jarvis", "identity", "local", "preferences"],
+                    "sections": [],
+                },
+            ]
+        }
+        with patch("vault.load_index", return_value=fake_index):
+            results = vault.search("jarvis identity preferences", topn=2)
+        self.assertEqual(results[0]["path"], "wiki/brain/10 Identity.md")
+        self.assertEqual(results[1]["path"], "raw/imports/chatgpt/2026-04-15-export/chat.html")
 
 
 class VaultStatusTests(unittest.TestCase):
@@ -733,6 +880,535 @@ class VaultStatusTests(unittest.TestCase):
             result = vault.search_text("my topic")
         self.assertIn("raw/notes.md > My Section", result)
         self.assertIn("Relevant content", result)
+
+
+class VaultMutationTests(unittest.TestCase):
+
+    def _patch_vault_dirs(self, vault_module, root: Path):
+        return [
+            patch.object(vault_module, "VAULT_ROOT", root),
+            patch.object(vault_module, "RAW_DIR", root / "raw"),
+            patch.object(vault_module, "WIKI_DIR", root / "wiki"),
+            patch.object(vault_module, "INDEXES_DIR", root / "indexes"),
+            patch.object(vault_module, "OUTPUTS_DIR", root / "outputs"),
+            patch.object(vault_module, "TEMPLATES_DIR", root / "templates"),
+            patch.object(vault_module, "INDEX_FILE", root / "indexes" / "index.json"),
+        ]
+
+    def test_resolve_note_path_finds_brain_note_by_wikilink_title(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "10 Identity.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text("# Identity\n\nHello.\n", encoding="utf-8")
+            resolved = vault_edit.resolve_note_path("[[10 Identity]]")
+            self.assertEqual(resolved, note)
+
+    def test_resolve_note_path_fails_closed_on_ambiguous_title(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            a = root / "wiki" / "brain" / "Target Alpha.md"
+            b = root / "wiki" / "brain" / "Target Beta.md"
+            a.parent.mkdir(parents=True, exist_ok=True)
+            b.parent.mkdir(parents=True, exist_ok=True)
+            a.write_text("# Same Title\n\nAlpha.\n", encoding="utf-8")
+            b.write_text("# Same Title\n\nBeta.\n", encoding="utf-8")
+            result = vault_edit.read_note("[[Same Title]]")
+            self.assertFalse(result["ok"])
+            self.assertTrue(result.get("ambiguous"))
+            self.assertIn("Ambiguous note reference", result["error"])
+            self.assertEqual(
+                result["candidates"],
+                ["wiki/brain/Target Alpha.md", "wiki/brain/Target Beta.md"],
+            )
+
+    def test_append_under_heading_updates_only_target_section(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "90 Task Hub.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(
+                "# Task Hub\n\n## Operational Backlog\n\n- [ ] Existing task\n\n## Later\n\nKeep this.\n",
+                encoding="utf-8",
+            )
+            result = vault_edit.append_under_heading("[[90 Task Hub]]", "Operational Backlog", "- [ ] New task")
+            self.assertTrue(result["ok"])
+            updated = note.read_text(encoding="utf-8")
+            self.assertIn("- [ ] Existing task", updated)
+            self.assertIn("- [ ] New task", updated)
+            self.assertIn("## Later\n\nKeep this.", updated)
+
+    def test_create_note_from_template_renders_title_and_writes_note(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            template = root / "templates" / "brain-note-template.md"
+            template.parent.mkdir(parents=True, exist_ok=True)
+            template.write_text("# <Title>\n\nCreated: <YYYY-MM-DD>\nArea: <area>\n", encoding="utf-8")
+            result = vault_edit.create_note_from_template("Smart Agent Spec")
+            self.assertTrue(result["ok"])
+            note = root / result["path"]
+            self.assertTrue(note.exists())
+            body = note.read_text(encoding="utf-8")
+            self.assertIn("# Smart Agent Spec", body)
+            self.assertIn("Area: vault", body)
+
+    def test_add_agent_inbox_item_appends_to_agent_inbox(self):
+        import vault
+        import vault_capture
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text("# Agent Inbox\n\n## Queued\n\n", encoding="utf-8")
+            result = vault_capture.add_agent_inbox_item("distill runtime learnings into the roadmap")
+            self.assertTrue(result["ok"])
+            updated = note.read_text(encoding="utf-8")
+            self.assertIn("distill runtime learnings into the roadmap", updated)
+            self.assertIn("#agent-inbox", updated)
+
+    def test_append_under_heading_blocks_generated_note(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "compiled" / "Generated Summary.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(
+                "---\nwrite_policy: generated\n---\n# Generated Summary\n\n## Notes\n\nAuto-built.\n",
+                encoding="utf-8",
+            )
+            result = vault_edit.append_under_heading("wiki/compiled/Generated Summary.md", "Notes", "Should fail")
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["write_policy"], "generated")
+            self.assertIn("generated-only", result["error"])
+
+    def test_append_under_heading_blocks_propose_only_note(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "Curated Identity.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(
+                "---\nwrite_policy: propose_only\n---\n# Curated Identity\n\n## Notes\n\nKeep user-owned.\n",
+                encoding="utf-8",
+            )
+            result = vault_edit.append_under_heading("Curated Identity", "Notes", "Should route through inbox")
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["write_policy"], "propose_only")
+            self.assertIn("[[92 Agent Inbox]]", result["error"])
+
+    def test_stage_candidate_update_creates_candidate_note_for_protected_canon(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "Curated Identity.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(
+                "---\nwrite_policy: propose_only\n---\n# Curated Identity\n\n## Notes\n\nKeep user-owned.\n",
+                encoding="utf-8",
+            )
+            result = vault_edit.stage_candidate_update("Curated Identity", "Notes", "Proposed staged change")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["action"], "staged")
+            candidate_note = root / result["path"]
+            self.assertTrue(candidate_note.exists())
+            updated = candidate_note.read_text(encoding="utf-8")
+            self.assertIn("canonical_target: wiki/brain/Curated Identity.md", updated)
+            self.assertIn("## Proposed Updates", updated)
+            self.assertIn("Proposed staged change", updated)
+
+    def test_promote_candidate_update_merges_latest_candidate_block_into_canon(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            canonical = root / "wiki" / "brain" / "Curated Identity.md"
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            canonical.write_text(
+                "---\nwrite_policy: propose_only\nupdated: 2026-04-15\nversion: 1\n---\n# Curated Identity\n\n## Notes\n\nKeep user-owned.\n",
+                encoding="utf-8",
+            )
+            candidate = root / "wiki" / "candidates" / "Curated Identity Candidate.md"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(
+                "---\ncanonical_target: wiki/brain/Curated Identity.md\nwrite_policy: append_only\nupdated: 2026-04-15\nversion: 2\n---\n"
+                "# Curated Identity Candidate\n\n"
+                "## Proposed Updates\n\n"
+                "### 2026-04-16 10:00\n\n"
+                "- Target note: [[Curated Identity]]\n"
+                "- Target heading: Notes\n"
+                "- Reason: propose_only\n\n"
+                "First proposal.\n\n"
+                "### 2026-04-16 10:30\n\n"
+                "- Target note: [[Curated Identity]]\n"
+                "- Target heading: Notes\n"
+                "- Reason: propose_only\n\n"
+                "Second proposal.\n",
+                encoding="utf-8",
+            )
+            result = vault_edit.promote_candidate_update("Curated Identity Candidate", canonical_ref="Curated Identity", heading="Notes")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["action"], "promoted")
+            canonical_updated = canonical.read_text(encoding="utf-8")
+            self.assertIn("Second proposal.", canonical_updated)
+            self.assertNotIn("First proposal.", canonical_updated)
+            self.assertIn("_Source: promoted from [[Curated Identity Candidate]] on 2026-04-16 10:30._", canonical_updated)
+            self.assertIn("version: 2", canonical_updated)
+            candidate_updated = candidate.read_text(encoding="utf-8")
+            self.assertIn("## Promotion Log", candidate_updated)
+            self.assertIn("Promoted to [[Curated Identity]] under Notes.", candidate_updated)
+            self.assertIn("version: 3", candidate_updated)
+
+    def test_review_stale_candidate_notes_lists_old_candidates(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            candidate = root / "wiki" / "candidates" / "Old Candidate.md"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(
+                "---\ncanonical_target: wiki/brain/80 Jarvis Roadmap.md\nupdated: 2026-04-10\nstatus: draft\n---\n# Old Candidate\n",
+                encoding="utf-8",
+            )
+            fresh = root / "wiki" / "candidates" / "Fresh Candidate.md"
+            fresh.write_text(
+                "---\ncanonical_target: wiki/brain/90 Task Hub.md\nupdated: 2026-04-16\nstatus: draft\n---\n# Fresh Candidate\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.review_stale_candidate_notes(max_age_days=3)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(result["items"][0]["path"], "wiki/candidates/Old Candidate.md")
+            self.assertEqual(result["items"][0]["age_days"], 6)
+            self.assertEqual(result["items"][0]["recommendation"], "review_or_archive")
+
+    def test_review_stale_candidate_notes_skips_archived_candidates(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            archived = root / "wiki" / "candidates" / "Archived Candidate.md"
+            archived.parent.mkdir(parents=True, exist_ok=True)
+            archived.write_text(
+                "---\ncanonical_target: wiki/brain/80 Jarvis Roadmap.md\nupdated: 2026-04-10\nstatus: archived\n---\n# Archived Candidate\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.review_stale_candidate_notes(max_age_days=3)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["count"], 0)
+
+    def test_review_stale_agent_inbox_lists_old_open_items(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "# Agent Inbox\n\n## Queued\n\n"
+                "- [ ] Review old candidate 📅 2026-04-10 #brain #agent-inbox\n"
+                "- [ ] Fresh task 📅 2026-04-16 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.review_stale_agent_inbox(max_age_days=3)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(result["items"][0]["heading"], "Queued")
+            self.assertEqual(result["items"][0]["text"], "Review old candidate")
+            self.assertEqual(result["items"][0]["age_days"], 6)
+            self.assertEqual(result["items"][0]["recommendation"], "archive_or_close")
+
+    def test_archive_candidate_note_sets_status_archived_and_logs_it(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            candidate = root / "wiki" / "candidates" / "Curated Identity Candidate.md"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(
+                "---\nstatus: draft\ncanonical_target: wiki/brain/Curated Identity.md\nupdated: 2026-04-16\nversion: 2\n---\n# Curated Identity Candidate\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 14, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.archive_candidate_note("Curated Identity Candidate")
+            self.assertTrue(result["ok"])
+            updated = candidate.read_text(encoding="utf-8")
+            self.assertIn("status: archived", updated)
+            self.assertIn("version: 3", updated)
+            self.assertIn("## Archive Log", updated)
+            self.assertIn("Archived on 2026-04-16 14:00.", updated)
+
+    def test_close_agent_inbox_item_marks_matching_task_done(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "---\nupdated: 2026-04-15\nversion: 4\n---\n# Agent Inbox\n\n## Queued\n\n- [ ] Review old candidate 📅 2026-04-10 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 14, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.close_agent_inbox_item("Review old candidate")
+            self.assertTrue(result["ok"])
+            updated = inbox.read_text(encoding="utf-8")
+            self.assertIn("## Done", updated)
+            self.assertIn("version: 5", updated)
+            self.assertIn("- [x] Review old candidate 📅 2026-04-10 #brain #agent-inbox", updated)
+            self.assertNotIn("## Queued\n\n- [ ] Review old candidate", updated)
+
+    def test_requeue_agent_inbox_item_marks_old_done_and_appends_new_task(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "---\nupdated: 2026-04-15\nversion: 4\n---\n# Agent Inbox\n\n## Queued\n\n- [ ] Review old candidate 📅 2026-04-10 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 14, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.requeue_agent_inbox_item("Review old candidate", due_date="2026-04-20")
+            self.assertTrue(result["ok"])
+            updated = inbox.read_text(encoding="utf-8")
+            self.assertIn("- [x] Review old candidate 📅 2026-04-10 #brain #agent-inbox", updated)
+            self.assertIn("- [ ] Review old candidate 📅 2026-04-20 #brain #agent-inbox", updated)
+            self.assertIn("## Done", updated)
+            self.assertIn("version: 5", updated)
+
+    def test_maintenance_status_reports_candidate_and_inbox_counts(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            c1 = root / "wiki" / "candidates" / "Active Candidate.md"
+            c1.parent.mkdir(parents=True, exist_ok=True)
+            c1.write_text(
+                "---\ncanonical_target: wiki/brain/10 Identity.md\nstatus: draft\nupdated: 2026-04-10\n---\n# Active Candidate\n",
+                encoding="utf-8",
+            )
+            c2 = root / "wiki" / "candidates" / "Archived Candidate.md"
+            c2.write_text(
+                "---\ncanonical_target: wiki/brain/20 Projects.md\nstatus: archived\nupdated: 2026-04-10\n---\n# Archived Candidate\n",
+                encoding="utf-8",
+            )
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "# Agent Inbox\n\n## Queued\n\n- [ ] Review old candidate 📅 2026-04-10 #brain #agent-inbox\n"
+                "## In Review\n\n- [ ] Validate roadmap 📅 2026-04-16 #brain #agent-inbox\n"
+                "## Done\n\n- [x] Closed item 📅 2026-04-09 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.maintenance_status(stale_after_days=3)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["candidates"]["total"], 2)
+            self.assertEqual(result["candidates"]["archived"], 1)
+            self.assertEqual(result["candidates"]["active"], 1)
+            self.assertEqual(result["candidates"]["stale"], 1)
+            self.assertEqual(result["agent_inbox"]["queued"], 1)
+            self.assertEqual(result["agent_inbox"]["in_review"], 1)
+            self.assertEqual(result["agent_inbox"]["done"], 1)
+            self.assertEqual(result["agent_inbox"]["stale"], 1)
+
+    def test_apply_recommended_actions_for_stale_vault_work_uses_low_risk_actions_and_cap(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+
+            candidate_root = root / "wiki" / "candidates"
+            candidate_root.mkdir(parents=True, exist_ok=True)
+            (candidate_root / "Archive Candidate.md").write_text(
+                "---\ncanonical_target: wiki/brain/10 Identity.md\nstatus: draft\nupdated: 2026-04-01\n---\n# Archive Candidate\n## Promotion Log\n\n- already reviewed\n",
+                encoding="utf-8",
+            )
+            (candidate_root / "Manual Candidate.md").write_text(
+                "---\ncanonical_target: wiki/brain/20 Projects.md\nstatus: draft\nupdated: 2026-04-01\n---\n# Manual Candidate\n",
+                encoding="utf-8",
+            )
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "# Agent Inbox\n\n## Queued\n\n- [ ] Close me 📅 2026-04-01 #brain #agent-inbox\n## In Review\n\n- [ ] Manual follow-up 📅 2026-04-01 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.apply_recommended_actions_for_stale_vault_work(max_age_days=7, max_items=2)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["applied_count"], 2)
+            self.assertEqual(
+                result["applied"],
+                [
+                    {"kind": "candidate", "title": "Archive Candidate", "action": "archived"},
+                    {"kind": "candidate", "title": "Manual Candidate", "action": "archived"},
+                ],
+            )
+            skipped_titles = {item["title"]: item["reason"] for item in result["skipped"]}
+            self.assertEqual(skipped_titles["Close me"], "cap_reached")
+            self.assertEqual(skipped_titles["Manual follow-up"], "cap_reached")
+
+    def test_refresh_maintenance_dashboard_writes_generated_note(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            candidate = root / "wiki" / "candidates" / "Active Candidate.md"
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_text(
+                "---\ncanonical_target: wiki/brain/10 Identity.md\nstatus: draft\nupdated: 2026-04-10\n---\n# Active Candidate\n",
+                encoding="utf-8",
+            )
+            inbox = root / "wiki" / "brain" / "92 Agent Inbox.md"
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(
+                "# Agent Inbox\n\n## Queued\n\n- [ ] Review old candidate 📅 2026-04-10 #brain #agent-inbox\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.refresh_maintenance_dashboard(stale_after_days=3)
+            self.assertTrue(result["ok"])
+            dashboard = root / result["path"]
+            self.assertTrue(dashboard.exists())
+            body = dashboard.read_text(encoding="utf-8")
+            self.assertIn("write_policy: generated", body)
+            self.assertIn("# Vault Maintenance", body)
+            self.assertIn("## Overview", body)
+            self.assertIn("## Stale Candidates", body)
+            self.assertIn("## Stale Inbox", body)
+
+    def test_refresh_maintenance_dashboard_preserves_created_and_bumps_version(self):
+        import vault
+        import vault_edit
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            dashboard = root / "wiki" / "brain" / "93 Vault Maintenance.md"
+            dashboard.parent.mkdir(parents=True, exist_ok=True)
+            dashboard.write_text(
+                "---\ncreated: 2026-04-15\nupdated: 2026-04-15\nversion: 4\n---\n# Vault Maintenance\n",
+                encoding="utf-8",
+            )
+            with patch("vault_edit.datetime") as dt_mock:
+                dt_mock.now.return_value = datetime(2026, 4, 16, 12, 0)
+                dt_mock.strptime = datetime.strptime
+                result = vault_edit.refresh_maintenance_dashboard(stale_after_days=3)
+            self.assertTrue(result["ok"])
+            updated = dashboard.read_text(encoding="utf-8")
+            self.assertIn("created: 2026-04-15", updated)
+            self.assertIn("updated: 2026-04-16", updated)
+            self.assertIn("version: 5", updated)
 
 
 # ===========================================================================
@@ -1206,6 +1882,51 @@ class BehaviorHooksShellGatingTests(unittest.TestCase):
             result = behavior_hooks.pre_shell_command("chmod 777 /etc/passwd")
         self.assertFalse(result["ok"])
         self.assertIn("protected", result["reason"].lower())
+
+    def test_pre_shell_command_blocks_interpreter_write_to_protected_path(self):
+        import behavior_hooks
+        with self._patch_log():
+            result = behavior_hooks.pre_shell_command(
+                'python3 -c \'open("/etc/passwd","w").write("x")\''
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["rule"], "protected_path_shell")
+
+    def test_pre_shell_command_blocks_os_remove_on_protected_path(self):
+        import behavior_hooks
+        with self._patch_log():
+            result = behavior_hooks.pre_shell_command(
+                'python3 -c \'import os; os.remove("/etc/passwd")\''
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["rule"], "protected_path_shell")
+
+    def test_pre_shell_command_blocks_node_fs_write_to_protected_path(self):
+        import behavior_hooks
+        with self._patch_log():
+            result = behavior_hooks.pre_shell_command(
+                'node -e \'require("fs").writeFileSync("/etc/passwd","x")\''
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["rule"], "protected_path_shell")
+
+    def test_pre_shell_command_blocks_perl_unlink_on_protected_path(self):
+        import behavior_hooks
+        with self._patch_log():
+            result = behavior_hooks.pre_shell_command(
+                "perl -e 'unlink(\"/etc/passwd\")'"
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["rule"], "protected_path_shell")
+
+    def test_pre_shell_command_blocks_ruby_file_write_on_protected_path(self):
+        import behavior_hooks
+        with self._patch_log():
+            result = behavior_hooks.pre_shell_command(
+                "ruby -e 'File.write(\"/etc/passwd\", \"x\")'"
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["rule"], "protected_path_shell")
 
     def test_pre_shell_command_allows_modify_on_user_path(self):
         import behavior_hooks
