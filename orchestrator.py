@@ -107,6 +107,9 @@ def classify(user_input: str) -> ToolDecision:
     word_count = len(user_input.split())
     _no_cloud = model_router.is_open_source_mode() or model_router.get_mode() == "local"
     if _no_cloud and word_count < 20:
+        local_short = _local_short_query_classify(user_input.lower().strip())
+        if local_short:
+            return _attach_skill(user_input, local_short)
         return _attach_skill(user_input, _FALLBACK)
 
     # Use the fast heuristic specialist classifier in every mode.
@@ -212,7 +215,7 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Self-improve — require self-referential context to avoid false positives
     if re.search(r"\b(review your own code|review your code|self review|what are your shortcomings|what are your weaknesses|review yourself)\b", lower):
         return ToolDecision("self_improve", 0.99, "review")
-    if re.search(r"\b(use specialized agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|self-improve critic)\b", lower):
+    if re.search(r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|vault curator|self-improve critic)\b", lower):
         return ToolDecision("specialized_agent", 0.97, "run")
     if re.search(r"\b(improve yourself|modify your (code|source|interface|routing|memory|voice)|upgrade your (code|source|interface|routing|memory|voice)|change your interface|redesign your (interface|ui|layout))\b", lower):
         return ToolDecision("self_improve", 0.99, "improve")
@@ -230,6 +233,24 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     return None
 
 
+def _local_short_query_classify(lower: str) -> ToolDecision | None:
+    """Keep common short voice queries tool-aware even without cloud classification."""
+    if re.search(r"\b(next event|next meeting|what(?:'s| is) next|what do i have (today|tomorrow)|what(?:'s| is) on (my )?(calendar|schedule)|calendar (today|tomorrow)|schedule (today|tomorrow)|meetings? (today|tomorrow)|events? (today|tomorrow)|any meetings?)\b", lower):
+        return ToolDecision("calendar", 0.91, "read")
+    if re.search(r"\b(check (my )?inbox|check email|new emails?|unread emails?|any emails?|gmail)\b", lower):
+        return ToolDecision("email", 0.9, "read")
+    if re.search(r"\b(open notes|show notes|my notes|search notes|take a note|write a note|save a note|note this)\b", lower):
+        action = "write" if any(term in lower for term in ("take a note", "write a note", "save a note", "note this")) else "read"
+        return ToolDecision("notes", 0.9, action)
+    if re.search(r"\b(meeting mode|smart listen|meeting status|start listening|stop listening)\b", lower):
+        return ToolDecision("meeting", 0.9, "manage")
+    if re.search(r"\b(search for|look up|google|find on the web|browse to|open this page|open that page)\b", lower):
+        return ToolDecision("browser", 0.88, "browse")
+    if re.search(r"\b(what do you remember|what do you know about me|briefing|catch me up|what did i miss)\b", lower):
+        return ToolDecision("memory", 0.86, "recall")
+    return None
+
+
 def _auto_specialized_classify(lower: str) -> ToolDecision | None:
     """
     Promote clearly high-risk or high-complexity requests into a scoped
@@ -237,7 +258,7 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
     Keep this conservative so normal requests stay cheap and direct.
     """
     word_count = len(re.findall(r"\b\w+\b", lower))
-    asks_for_reasoning = bool(re.search(r"\b(why|how|explain|walk me through|tradeoff|trade-offs|compare|root cause|debug|diagnose|design|architecture|review)\b", lower))
+    asks_for_reasoning = bool(re.search(r"\b(why|how|explain|walk me through|tradeoff|trade-offs|compare|root cause|debug|debugging|diagnose|design|architecture|review|investigate|research|threat model)\b", lower))
     has_question = "?" in lower or asks_for_reasoning
 
     science_markers = (
@@ -264,11 +285,41 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
     if any(marker in lower for marker in ("review your own code", "review your code", "self review", "what are your shortcomings", "what are your weaknesses")):
         return ToolDecision("specialized_agent", 0.95, "run", {"roles": ["self_improve_critic", "reviewer"]})
 
+    security_analysis_markers = (
+        "threat model", "attack surface", "prompt injection", "jailbreak",
+        "abuse path", "trust boundary", "privilege escalation", "data exposure",
+    )
+    debug_markers = (
+        "debug", "debugging", "diagnose", "root cause", "why won't", "why doesnt", "why doesn't",
+        "traceback", "stack trace", "launch failure", "crash", "regression", "flaky",
+        "502", "memory leak", "race condition", "stale data", "replica lag",
+    )
+    research_markers = (
+        "research", "investigate", "look through", "scan github", "browse repos",
+        "compare repos", "source-backed", "findings", "public repos",
+    )
+    vault_markers = (
+        "distill into the brain", "story bank", "decision log", "roadmap note",
+        "changelog", "patch this note", "update this note", "curate the vault", "brain schema",
+    )
+
+    if any(marker in lower for marker in security_analysis_markers) and (has_question or word_count >= 8):
+        return ToolDecision("specialized_agent", 0.9, "run", {"roles": ["security_analyst", "reviewer"]})
+
     if any(marker in lower for marker in security_markers) and (has_question or word_count >= 8):
         return ToolDecision("specialized_agent", 0.9, "run", {"roles": ["security_reviewer", "reviewer"]})
 
     if any(marker in lower for marker in science_markers) and (has_question or word_count >= 10):
         return ToolDecision("specialized_agent", 0.9, "run", {"roles": ["science_expert", "reviewer"]})
+
+    if any(marker in lower for marker in research_markers) and word_count >= 8:
+        return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["researcher", "reviewer"]})
+
+    if any(marker in lower for marker in vault_markers) and word_count >= 6:
+        return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["vault_curator", "reviewer"]})
+
+    if any(marker in lower for marker in debug_markers) and has_question and word_count >= 8:
+        return ToolDecision("specialized_agent", 0.88, "run", {"roles": ["debugger", "reviewer"]})
 
     if any(marker in lower for marker in technical_markers) and has_question and word_count >= 10:
         return ToolDecision("specialized_agent", 0.86, "run", {"roles": ["planner", "executor", "reviewer"]})

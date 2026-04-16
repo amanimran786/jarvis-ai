@@ -29,6 +29,7 @@ import memory_layer
 import evals
 import skills
 import vault
+import vault_capture
 import source_ingest
 import skill_factory
 from local_runtime import local_training
@@ -127,6 +128,24 @@ def _parse_source_target(text: str) -> str | None:
     return target or None
 
 
+def _parse_background_vault_task(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:queue|run|start|submit)\b\s+(?:a\s+)?(?:background\s+)?(?:vault|brain|obsidian)\s+task\b\s*:?\s+(.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        return match.group(1).strip()
+    match = re.search(
+        r"\b(?:have|let)\b\s+(?:the\s+)?vault\s+curator\b(?:\s+work\s+on)?(?:\s+in\s+the\s+background)?\s*:?\s+(.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def _parse_skill_topic(text: str) -> str | None:
     match = re.search(r"\b(?:create|generate|make|build)\b\s+(?:a\s+)?skill(?:\s+from\s+the\s+vault)?(?:\s+(?:about|for))\s+(.+)", text, re.IGNORECASE)
     if not match:
@@ -149,11 +168,9 @@ def _is_capability_boundary_query(lower: str) -> bool:
 
 def _capability_boundary_reply() -> str:
     return (
-        "My limits are about scope, permissions, and available inputs. "
-        "I can execute tasks on this Mac through approved runtime paths, but destructive or privileged actions still require explicit authorization gates. "
-        "I only know what is in current context, tool output, or stored memory and vault data unless I am directed to fetch more. "
-        "I do not sense the world directly beyond connected tools, and I do not set strategy on my own. "
-        "You define the objective and I execute it transparently."
+        "My scope is defined by the permissions, tools, and live context available to me. "
+        "I can act on this Mac, retrieve what I can verify from runtime output, memory, and the vault, and carry out your objective directly. "
+        "I do not assume authority I have not been given, and I do not present guesses as facts."
     )
 
 
@@ -210,7 +227,7 @@ def _requested_mode(lower: str) -> str | None:
 def _is_specialized_agent_query(lower: str) -> bool:
     return bool(
         re.search(
-            r"\b(use specialized agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|self-improve critic)\b",
+            r"\b(use specialized agents|use smart agents|use agents|multi-pass|planner executor reviewer|science expert|security reviewer|security analyst|debugger|researcher|operator|vault curator|self-improve critic)\b",
             lower,
         )
     )
@@ -331,10 +348,10 @@ def _is_locking_tradeoff_query(lower: str) -> bool:
 
 def _locking_tradeoff_reply() -> str:
     return (
-        "Optimistic locking is the better default when conflicts are relatively rare and you care about throughput, because readers and writers do not block each other up front. "
-        "You usually implement it with a version column or timestamp and only reject the write if someone else changed the row first. "
-        "Pessimistic locking is the better choice when conflicts are common, the cost of a retry is high, or the critical section must not be raced at all, because it takes the lock early and forces serialization. "
-        "The tradeoff is throughput versus certainty: optimistic locking gives you better concurrency but more retries under contention, while pessimistic locking reduces conflict at the cost of waiting, lock contention, and possible deadlocks."
+        "Default to optimistic locking when conflicts are rare and retries are cheap, because it preserves throughput and avoids blocking readers and writers up front. "
+        "Use pessimistic locking only when contention is common, the cost of a retry is high, or the critical section cannot tolerate a race, because it trades concurrency for certainty. "
+        "The real tradeoff is retry cost versus lock contention, so check how often conflicts actually happen before choosing. "
+        "If you have not measured contention yet, optimistic locking is usually the safer default."
     )
 
 
@@ -432,9 +449,9 @@ def _meeting_diagnostics_reply() -> str:
 
 def _database_index_tradeoff_reply() -> str:
     return (
-        "Add a database index when it materially improves read performance on high-value queries such as selective filters, joins, or ordered lookups that happen often enough to matter. "
-        "Indexes can hurt performance when write volume is high, because every insert, update, and delete has extra maintenance work and more storage overhead. "
-        "The real tradeoff is read speed versus write amplification, so the right choice depends on query frequency, selectivity, table size, and whether the slow path is really on reads instead of elsewhere in the request."
+        "Add the index when the slow path is a read-heavy, selective query you run often enough that better lookup speed materially matters. "
+        "Do not add it just because a query was slow once, because indexes buy read performance by adding write amplification, storage overhead, and maintenance cost on every insert, update, and delete. "
+        "The real tradeoff is read speed versus write cost, so first verify that the bottleneck is actually the query plan rather than joins, fetch volume, or application logic."
     )
 
 
@@ -713,6 +730,8 @@ def _extract_contact_name(text: str) -> str:
     cleaned = re.sub(r"^(?:contact\s*name|name|recipient|contact)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:contact|recipient)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:to\s+)?(?:contact\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:now\s+)?(?:this|that|the)\s+(?:phone\s+)?number\s+", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^(?:phone\s+)?number\s+", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"^(?:send|message|text|say)\s+(?:to\s+)?", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned
@@ -768,8 +787,12 @@ def _looks_like_contact_name(name: str) -> bool:
         return False
     if len(cleaned) > 64:
         return False
-    if re.search(r"[0-9@]", cleaned):
+    if "@" in cleaned:
         return True
+    if re.search(r"[0-9]", cleaned):
+        letters = [tok.lower() for tok in re.findall(r"[A-Za-z]+", cleaned)]
+        filler = {"this", "that", "the", "number", "phone", "mobile", "cell", "at"}
+        return all(tok in filler for tok in letters)
     tokens = [tok for tok in re.split(r"\s+", cleaned) if tok]
     if not tokens or len(tokens) > 4:
         return False
@@ -777,6 +800,20 @@ def _looks_like_contact_name(name: str) -> bool:
     if any(tok.lower() in blocked for tok in tokens):
         return False
     return True
+
+
+def _normalize_message_recipient(text: str) -> str:
+    candidate = _extract_contact_name(text)
+    phone_match = re.search(r"(\+?\d[\d\-\(\)\s]{6,}\d)", candidate)
+    if phone_match:
+        phone = re.sub(r"[\s\-\(\)]", "", phone_match.group(1))
+        prefix = candidate[:phone_match.start()].strip()
+        suffix = candidate[phone_match.end():].strip()
+        filler = {"this", "that", "the", "number", "phone", "mobile", "cell", "at"}
+        around = " ".join(part for part in (prefix, suffix) if part).strip()
+        if not around or all(tok.lower() in filler for tok in re.findall(r"[A-Za-z]+", around)):
+            return phone
+    return candidate
 
 
 def _parse_message_recipient_only(text: str) -> str:
@@ -800,7 +837,16 @@ def _parse_message_recipient_only(text: str) -> str:
         candidate = re.split(r"\s+(?:saying|says|that)\s+", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip()
         return candidate if _looks_like_contact_name(candidate) else ""
 
-    candidate = _extract_contact_name(raw)
+    number_phrase = re.search(
+        r"\b(?:send|message|text)\b.*?\b(?:this|that|the)?\s*(?:phone\s+)?number\b[:\s-]*(\+?\d[\d\-\(\)\s]{6,}\d)\b",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if number_phrase:
+        candidate = _normalize_message_recipient(number_phrase.group(1))
+        return candidate if _looks_like_contact_name(candidate) else ""
+
+    candidate = _normalize_message_recipient(raw)
     return candidate if _looks_like_contact_name(candidate) else ""
 
 
@@ -1136,7 +1182,7 @@ def route_stream(user_input: str) -> tuple:
             _output = terminal.run_admin_command(_raw_cmd) if _admin else terminal.run_command(_raw_cmd)
             return format_with_mini(
                 f"User ran: '{_raw_cmd}'. Output:\n{_output}\nReport the output in one spoken sentence.",
-                skill_id=None, tool="terminal", extra_system=modifier_system,
+                skill_id=None, tool="terminal", extra_system=modifier_system, ground_query=user_input,
             ), "Terminal"
 
     # Self-improve fast paths
@@ -1209,6 +1255,30 @@ def route_stream(user_input: str) -> tuple:
             return _s(skill_factory.result_text(skill_factory.create_skill_from_vault(topic))), "Skill"
         return _s("Tell me what topic you want the skill to cover."), "Skill"
 
+    background_vault_task = _parse_background_vault_task(user_input)
+    if background_vault_task:
+        import task_runtime
+
+        task = task_runtime.submit_task(
+            background_vault_task,
+            kind="vault",
+            source="chat_background_vault",
+            meta={"requested_via": "router", "task_lane": "vault"},
+        )
+        vault_capture.add_agent_inbox_item(background_vault_task)
+        return _s(
+            f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
+        ), "Tasks"
+
+    # ── Vault capture fast-path (write-back to Obsidian brain notes) ──────────
+    # Handles: "add task X", "save to vault: ...", "update changelog: ...",
+    #          "project update: ...", "append to [[Note]] under Heading: ...",
+    #          "read [[Note]]"
+    # Decisions and stories fall through to vault_curator for structured extraction.
+    _capture_result = vault_capture.handle_capture(user_input)
+    if _capture_result is not None:
+        return _s(_capture_result), "Vault"
+
     if any(p in lower for p in ("search the vault", "refresh the vault", "index the vault", "build the vault wiki", "compile the wiki", "ingest source", "ingest file", "ingest repo", "ingest repository", "ingest url", "ingest notes", "add to the vault", "knowledge base", "local knowledge", "from the vault", "in the vault")):
         if any(p in lower for p in ("ingest", "add to the vault")):
             target = _parse_source_target(user_input) or "notes"
@@ -1231,6 +1301,7 @@ def route_stream(user_input: str) -> tuple:
                 skill_id="local_knowledge",
                 tool="knowledge",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Knowledge"
         return _s(raw), "Knowledge"
 
@@ -1269,6 +1340,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             skill_id=skill_id,
             tool=tool,
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Search"
 
     # ── Local knowledge vault ────────────────────────────────────────────────
@@ -1297,6 +1369,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             skill_id=skill_id or "local_knowledge",
             tool="knowledge",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Knowledge"
 
     # ── Skill factory ────────────────────────────────────────────────────────
@@ -1450,6 +1523,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             m = re.search(r"(?:text|message|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})", user_input, flags=re.IGNORECASE)
             if m:
                 recipient = m.group(1)
+        recipient = _normalize_message_recipient(recipient)
         if recipient and body:
             _clear_pending_recipient()
             _set_pending_message_draft(recipient, body)
@@ -1504,6 +1578,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Terminal"
         path = params.get("path", "")
         if path:
@@ -1513,6 +1588,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "File"
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
@@ -1528,6 +1604,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 skill_id=skill_id,
                 tool=tool,
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Admin"
         return _s("Tell me the exact command you want me to run with administrator privileges."), "Admin"
 
@@ -1719,6 +1796,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         return format_with_mini(
             f"Report this nearby device snapshot in Jarvis voice, naturally and concisely: {summary}",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Hardware"
 
     if any(p in lower for p in ["hardware status", "device status", "check devices", "show hardware"]):
@@ -1728,6 +1806,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         return format_with_mini(
             f"Report this hardware status in Jarvis voice: {s}",
             extra_system=modifier_system,
+            ground_query=user_input,
         ), "Hardware"
 
     if any(p in lower for p in ["scan ports", "find devices", "detect hardware"]):
@@ -1759,6 +1838,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
             return format_with_mini(
                 f"Report this in Jarvis voice (1 sentence): {msg}",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Hardware"
 
     for triggers, device_name, cmd, extra_params in _HW_ROUTES:
@@ -1769,6 +1849,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
             return format_with_mini(
                 f"Report in Jarvis voice (1 sentence): {result}",
                 extra_system=modifier_system,
+                ground_query=user_input,
             ), "Hardware"
 
     return None

@@ -90,9 +90,10 @@ C_WARNING   = "#FFAA00"       # processing state
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
-WAKE_PROMPT = "Say 'Hey Jarvis' to talk."
+WAKE_PROMPT = "Say 'Jarvis' to talk."
 WAKE_ACK = "I'm here. Go ahead."
 MIC_IDLE_TOOLTIP = "Jarvis is standing by for the wake word."
+VOICE_STATUS_PREFIX = "VOICE:"
 _DEBUG_UI_SNAPSHOT_PATH = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_PATH", "").strip()
 _DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED = os.getenv("JARVIS_DEBUG_UI_SNAPSHOT_ALLOW_BUNDLED", "").lower() in {"1", "true", "yes", "on"}
 
@@ -1301,6 +1302,8 @@ class VoiceWorker(QThread):
     message = pyqtSignal(str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
+    stream_start = pyqtSignal(str)   # model name — creates live bubble
+    stream_chunk = pyqtSignal(str)   # accumulated text so far
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1313,11 +1316,11 @@ class VoiceWorker(QThread):
     def run(self):
         _voice_clear_stop_request()
         while self._active:
-            self.status.emit("AWAITING WAKE WORD")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}AWAITING WAKE WORD")
             wait_for_wake_word()
             if not self._active:
                 break
-            self.status.emit("VOICE ACTIVE")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}VOICE ACTIVE")
             self._conversation()
 
     def _conversation(self):
@@ -1327,25 +1330,24 @@ class VoiceWorker(QThread):
         exchanges = []
 
         while self._active:
-            self.status.emit("LISTENING")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}LISTENING")
             user_input = listen()
 
             if not user_input:
                 misses += 1
-                if misses >= 2:
+                if misses >= 3:
                     if exchanges:
                         _summarize(exchanges)
-                    self.status.emit("AWAITING WAKE WORD")
+                    self.status.emit(f"{VOICE_STATUS_PREFIX}AWAITING WAKE WORD")
                     return
-                # Silent wait on first miss — avoids "Still here" spam from ambient noise
+                # Silent wait — avoids "Still here" spam; gives 3 chances to speak
                 continue
 
             misses = 0
             lower = user_input.lower().strip()
 
             # Drop single-word noise captures and re-triggered wake words silently
-            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er",
-                                                       "jarvis"}:
+            if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
                 continue
 
             self.message.emit(user_input, "user", "")
@@ -1366,10 +1368,11 @@ class VoiceWorker(QThread):
                 self.message.emit("Alright, I'll be here.", "jarvis", "")
                 return
 
-            self.status.emit("PROCESSING")
+            self.status.emit(f"{VOICE_STATUS_PREFIX}PROCESSING")
             try:
                 stream, model = route_stream(user_input)
-                response = speak_stream(stream)
+                self.stream_start.emit(model)
+                response = speak_stream(stream, on_text=lambda t: self.stream_chunk.emit(t))
                 context_stats = ctx.record_request_stats(model, source="voice_ui")
                 entry = evals.log_interaction(user_input, response, model, source="voice_ui", context=context_stats)
                 evals.maybe_log_automatic_failure(entry)
@@ -1406,6 +1409,8 @@ class TextWorker(QThread):
     message = pyqtSignal(str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
+    stream_start = pyqtSignal(str)   # model name — creates live bubble
+    stream_chunk = pyqtSignal(str)   # accumulated text so far
 
     def __init__(self, user_input: str, parent=None):
         super().__init__(parent)
@@ -1415,9 +1420,11 @@ class TextWorker(QThread):
         self.status.emit("PROCESSING")
         try:
             stream, model = route_stream(self.user_input)
+            self.stream_start.emit(model)
             chunks = []
             for chunk in stream:
                 chunks.append(chunk)
+                self.stream_chunk.emit("".join(chunks))
             response = "".join(chunks)
             context_stats = ctx.record_request_stats(model, source="text_ui")
             entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
@@ -1517,6 +1524,11 @@ class MessageBubble(QFrame):
             _glow(msg, C_CYAN, 8)
 
         layout.addWidget(msg)
+        self._msg_label = msg
+
+    def set_text(self, text: str) -> None:
+        """Update bubble text in place — used for live streaming display."""
+        self._msg_label.setText(text)
 
 
 # ── Main Window ────────────────────────────────────────────────────────────────
@@ -1537,6 +1549,7 @@ class JarvisWindow(QMainWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._streaming_bubble = None
         self._auto_listen_suppressed_meeting = None
         self._auto_listen_engaged_meeting = None
         self._meeting_toolbar_mode = False
@@ -1553,6 +1566,7 @@ class JarvisWindow(QMainWindow):
         self._voice_runtime_mode = "unknown"
         self._voice_runtime_detail = ""
         self._voice_runtime_tooltip = ""
+        self._voice_status_raw = "AWAITING WAKE WORD"
         self._build_ui()
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
@@ -2254,6 +2268,7 @@ class JarvisWindow(QMainWindow):
         self._voice_runtime_mode = str(voice_runtime["mode"])
         self._voice_runtime_detail = str(voice_runtime["detail"])
         self._voice_runtime_tooltip = str(voice_runtime["tooltip"])
+        self._voice_status_raw = "AWAITING WAKE WORD" if self._voice_runtime_ready else str(voice_runtime["label"])
         self._set_voice_hint(
             self._voice_runtime_detail,
             str(voice_runtime["color"]),
@@ -2262,11 +2277,7 @@ class JarvisWindow(QMainWindow):
         self._refresh_vision_runtime()
 
         if self._voice_runtime_ready:
-            self.voice_worker = VoiceWorker()
-            self.voice_worker.message.connect(self._add_message)
-            self.voice_worker.interaction.connect(self._register_interaction)
-            self.voice_worker.status.connect(self._set_status)
-            self.voice_worker.start()
+            self._ensure_voice_worker_running()
         else:
             self._set_status(str(voice_runtime["label"]))
             self._add_message(
@@ -2306,6 +2317,34 @@ class JarvisWindow(QMainWindow):
         self._meeting_watchdog_tick()
         self._meeting_watchdog_timer.start(1500)
 
+    def _attach_voice_worker(self, worker: VoiceWorker) -> None:
+        self.voice_worker = worker
+        self.voice_worker.message.connect(self._add_message)
+        self.voice_worker.interaction.connect(self._register_interaction)
+        self.voice_worker.status.connect(self._set_status)
+        self.voice_worker.stream_start.connect(self._start_stream_bubble)
+        self.voice_worker.stream_chunk.connect(self._update_stream_bubble)
+
+    def _ensure_voice_worker_running(self) -> bool:
+        if not getattr(self, "_voice_runtime_ready", False):
+            return False
+        worker = getattr(self, "voice_worker", None)
+        if worker is not None and worker.isRunning():
+            return True
+        _voice_clear_stop_request()
+        worker = VoiceWorker()
+        self._attach_voice_worker(worker)
+        worker.start()
+        return True
+
+    def _restart_voice_worker_to_standby(self) -> bool:
+        worker = getattr(self, "voice_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            worker.wait(4000)
+        self._voice_status_raw = "AWAITING WAKE WORD"
+        return self._ensure_voice_worker_running()
+
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
     def _hotkey_screen(self):
@@ -2329,8 +2368,11 @@ class JarvisWindow(QMainWindow):
         try:
             import camera
             result = camera.screenshot_and_describe(
-                "Analyze this screenshot in detail. The user is sharing this with you privately "
-                "during a call. Describe what you see, highlight anything important or actionable."
+                camera._engineering_vision_prompt(
+                    "Analyze this screenshot in detail. The user is sharing this with you privately "
+                    "during a call. Describe what you see, highlight anything important or actionable.",
+                    force=True,
+                )
             )
             speak(result)
             self._add_message(result, "jarvis", "")
@@ -2441,6 +2483,10 @@ class JarvisWindow(QMainWindow):
         _trace_ui_event(self, "classic-toolbar", "live_suggestion", suggestion)
         _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_panel.show()
+        hint = meeting_listener.actionable_hint(suggestion)
+        _force_text_widget_update(self.transcript_label, hint or "Live suggestion ready.")
+        if hasattr(self, "_subtitle"):
+            self._subtitle.setText(hint or "Smart Listen active")
         if suggestion:
             self._add_message(suggestion, "jarvis", "Meeting")
         self._update_meeting_toolbar_layout()
@@ -2449,9 +2495,6 @@ class JarvisWindow(QMainWindow):
         self._apply_live_suggestion_update(suggestion)
 
     def _refresh_live_call_status(self):
-        # The classic window does not expose the richer orbital call-status panel.
-        # Keep this as a shared no-op so event-driven transcript/suggestion updates
-        # can safely call into it without special-casing the window type.
         return
 
     # ── Briefing ───────────────────────────────────────────────────────────────
@@ -2765,15 +2808,14 @@ class JarvisWindow(QMainWindow):
 
     def _on_mic_chip_clicked(self):
         """Handle click on the MIC STANDBY chip — bypass wake word or stop listening."""
-        status_label = getattr(self, "_status_label", None)
-        upper = (status_label.text() if status_label else "").upper()
+        upper = str(getattr(self, "_voice_status_raw", "")).upper()
         if "LISTEN" in upper or "VOICE ACTIVE" in upper or "MIC LIVE" in upper or "MIC HOT" in upper:
-            # Currently active — stop listening
-            if hasattr(self, "voice_worker"):
-                self.voice_worker.stop()
+            # Currently active — return to standby without permanently killing voice control.
+            self._restart_voice_worker_to_standby()
         else:
             # Standby — trigger immediate listen (skip wake word)
-            _voice_trigger_wake_word()
+            if self._ensure_voice_worker_running():
+                _voice_trigger_wake_word()
 
     def _set_mic_chip(self, label: str, border: str, fill: str, text: str, tooltip: str):
         if not hasattr(self, "_mic_chip"):
@@ -2965,7 +3007,47 @@ class JarvisWindow(QMainWindow):
         if self._meeting_toolbar_mode:
             self._update_meeting_toolbar_layout()
 
+    def _start_stream_bubble(self, model: str):
+        """Create a live bubble that will be updated as text streams in."""
+        bubble = MessageBubble("▌", "jarvis", model)
+        count = self.chat_layout.count()
+        self.chat_layout.insertWidget(count - 1, bubble)
+        self._streaming_bubble = bubble
+        _safe_single_shot(
+            50,
+            "JarvisWindow._scroll_stream_start",
+            lambda: self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()
+            ),
+        )
+
+    def _update_stream_bubble(self, text: str):
+        """Update the live bubble with the latest accumulated text."""
+        if self._streaming_bubble is not None:
+            self._streaming_bubble.set_text(text)
+            _safe_single_shot(
+                30,
+                "JarvisWindow._scroll_stream_chunk",
+                lambda: self.scroll.verticalScrollBar().setValue(
+                    self.scroll.verticalScrollBar().maximum()
+                ),
+            )
+
     def _add_message(self, text: str, sender: str, model: str):
+        # If a streaming bubble already has this text, finalize it instead of
+        # creating a duplicate bubble.
+        if sender == "jarvis" and self._streaming_bubble is not None:
+            self._streaming_bubble.set_text(text)
+            self._streaming_bubble = None
+            self._show_toolbar_message(text, sender, model)
+            _safe_single_shot(
+                50,
+                "JarvisWindow._scroll_to_latest_message",
+                lambda: self.scroll.verticalScrollBar().setValue(
+                    self.scroll.verticalScrollBar().maximum()
+                ),
+            )
+            return
         bubble = MessageBubble(text, sender, model)
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
@@ -3016,13 +3098,27 @@ class JarvisWindow(QMainWindow):
 
     def _set_status(self, text: str):
         raw_text = text or ""
+        is_voice_status = raw_text.startswith(VOICE_STATUS_PREFIX)
+        if is_voice_status:
+            raw_text = raw_text[len(VOICE_STATUS_PREFIX):]
+            self._voice_status_raw = raw_text
         upper = raw_text.upper()
+
+        # Guard: while VoiceWorker is actively capturing audio, unrelated task
+        # statuses (TextWorker PROCESSING/ONLINE, scans, clipboard reads) must
+        # not stomp the voice-active orb, status label, and signal bars.
+        # The mic chip is still refreshed via _apply_voice_hint_for_status.
+        if not is_voice_status:
+            voice_raw = getattr(self, "_voice_status_raw", "")
+            if any(t in voice_raw.upper() for t in ("LISTENING", "VOICE ACTIVE")):
+                self._apply_voice_hint_for_status(voice_raw)
+                return
         display_text = {
             "AWAITING WAKE WORD": "MIC READY",
             "VOICE ACTIVE": "MIC LIVE",
         }.get(raw_text, raw_text)
         if self._status_label.text() == display_text:
-            self._apply_voice_hint_for_status(raw_text)
+            self._apply_voice_hint_for_status(getattr(self, "_voice_status_raw", raw_text))
             return
         self._status_label.setText(display_text)
         busy = False
@@ -3050,7 +3146,9 @@ class JarvisWindow(QMainWindow):
             self._signal_bars.set_intensity(0.28)
         if hasattr(self, "_hud_bg"):
             self._hud_bg.set_busy(busy)
-        self._apply_voice_hint_for_status(raw_text)
+        # Keep microphone state tied to explicit voice lifecycle events instead of
+        # unrelated task activity such as text prompts, scans, or clipboard reads.
+        self._apply_voice_hint_for_status(getattr(self, "_voice_status_raw", raw_text))
 
     def _send_text(self):
         text = self.input_field.text().strip()
@@ -3066,6 +3164,8 @@ class JarvisWindow(QMainWindow):
         worker.message.connect(self._add_message)
         worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
+        worker.stream_start.connect(self._start_stream_bubble)
+        worker.stream_chunk.connect(self._update_stream_bubble)
         worker.start()
         self._workers.append(worker)
 
@@ -3089,6 +3189,24 @@ class JarvisWindow(QMainWindow):
 
     def _handle_memory(self, text: str) -> bool:
         lower = text.lower().strip()
+
+        # Wake-word typed in text box → activate mic instead of routing to LLM.
+        if lower in {
+            "jarvis", "hey jarvis", "ok jarvis", "okay jarvis",
+            "hello jarvis", "hi jarvis", "yo jarvis",
+        }:
+            voice_raw = getattr(self, "_voice_status_raw", "")
+            voice_listening = any(t in voice_raw.upper() for t in ("LISTENING", "VOICE ACTIVE"))
+            if voice_listening:
+                # Mic is already hot — silently swallow the typed wake-word
+                return True
+            if getattr(self, "_voice_runtime_ready", False):
+                # Waiting for wake word — skip straight into voice
+                _voice_trigger_wake_word()
+                self._add_message("Mic activated. Go ahead.", "jarvis", "")
+                return True
+            # No voice hardware — fall through to router's text response
+
         if lower.startswith("remember "):
             fact = text[9:].strip()
             mem.add_fact(fact)
@@ -3177,6 +3295,7 @@ class OrbShellWindow(JarvisWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._streaming_bubble = None
         self._session_started = datetime.now()
         self._drag_pos = None
         self._tray_locked = False
@@ -3780,9 +3899,16 @@ end tell
         else:
             privacy_line = "Privacy: quiet mode off"
             self.privacy_btn.setStyleSheet(self._action_btn_css(C_TEXT_DIM))
-        self._call_status_label.setText(
-            f"{meeting_line}\n{audio_line}\n{privacy_line}\nScreen scan: {scan_ready}"
-        )
+        hint_line = meeting_listener.actionable_hint(last_suggestion)
+        status_lines = [
+            meeting_line,
+            audio_line,
+            privacy_line,
+            f"Screen scan: {scan_ready}",
+        ]
+        if hint_line:
+            status_lines.append(hint_line)
+        self._call_status_label.setText("\n".join(status_lines))
         self._call_status_label.setStyleSheet(self._call_status_css(tone))
 
     def _toggle_meeting_safe_mode(self):
@@ -3842,6 +3968,7 @@ end tell
         preview = suggestion.strip().replace("\n", " ")
         if len(preview) > 180:
             preview = preview[:177].rstrip() + "..."
+        hint = meeting_listener.actionable_hint(suggestion)
         _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
         if suggestion:
@@ -3849,7 +3976,7 @@ end tell
         self._current_summary = f"SUGGESTION: {preview}"
         self._peek_label.setText(self._current_summary)
         self._top_chip.setText("SMART LISTEN ACTIVE")
-        self.transcript_label.setText("Live suggestion ready.")
+        self.transcript_label.setText(hint or "Live suggestion ready.")
         self._set_tray_visible(True)
 
     def _on_suggestion(self, suggestion: str):
@@ -3889,10 +4016,10 @@ class EnterLineEdit(QTextEdit):
         self.setAcceptRichText(False)
         self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setTabChangesFocus(True)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMinimumHeight(42)
-        self.setMaximumHeight(110)
+        self.setMaximumHeight(200)
         self.textChanged.connect(self._sync_height)
         self._sync_height()
 
@@ -3915,7 +4042,7 @@ class EnterLineEdit(QTextEdit):
     def _sync_height(self):
         doc_height = self.document().size().height()
         target = int(doc_height + 18)
-        target = max(42, min(110, target))
+        target = max(42, min(200, target))
         if self.height() != target:
             self.setFixedHeight(target)
 

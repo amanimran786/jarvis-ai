@@ -289,7 +289,10 @@ def _run_deferred_startup_tasks() -> None:
 
     # Pre-render common TTS phrases so acknowledgements play instantly
     try:
-        from local_runtime.local_kokoro_tts import prewarm_phrase_cache
+        try:
+            from local_runtime.local_kokoro_subprocess_tts import prewarm_phrase_cache
+        except Exception:
+            from local_runtime.local_kokoro_tts import prewarm_phrase_cache
         prewarm_phrase_cache()
     except Exception:
         pass

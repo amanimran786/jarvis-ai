@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import shutil
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 
 ROOT = Path.cwd().resolve()
@@ -46,9 +47,52 @@ def iter_datas():
     return datas
 
 
+def ensure_collect_destination_dirs():
+    """Work around PyInstaller COLLECT missing some nested Qt plugin directories."""
+    base = ROOT / "dist" / "Jarvis" / "_internal"
+    for _, dest in collect_dynamic_libs("PyQt6"):
+        if dest:
+            (base / dest).mkdir(parents=True, exist_ok=True)
+
+
+_ORIGINAL_COPYFILE = shutil.copyfile
+
+
+def _copyfile_with_parent_dirs(src, dst, *args, **kwargs):
+    Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    return _ORIGINAL_COPYFILE(src, dst, *args, **kwargs)
+
+
+shutil.copyfile = _copyfile_with_parent_dirs
+
+
 datas = iter_datas()
+datas += collect_data_files("faster_whisper")
+datas += collect_data_files("kokoro_onnx")
+datas += collect_data_files("espeakng_loader")
+datas = [(src, dest) for src, dest in datas if Path(src).is_file()]
 hiddenimports = sorted(set(
     collect_submodules("PyQt6")
+    + collect_submodules("faster_whisper")
+    + collect_submodules("ctranslate2")
+    + collect_submodules("kokoro_onnx")
+    + collect_submodules("phonemizer")
+    + collect_submodules("espeakng_loader")
+    + [
+        "numpy.typing",
+        "numpy._typing",
+        "numpy._typing._add_docstring",
+        "numpy._typing._array_like",
+        "numpy._typing._char_codes",
+        "numpy._typing._dtype_like",
+        "numpy._typing._extended_precision",
+        "numpy._typing._nbit",
+        "numpy._typing._nbit_base",
+        "numpy._typing._nested_sequence",
+        "numpy._typing._scalars",
+        "numpy._typing._shape",
+        "numpy._typing._ufunc",
+    ]
     + [
         "api",
         "agents",
@@ -77,6 +121,7 @@ hiddenimports = sorted(set(
         "local_runtime.local_model_automation",
         "local_runtime.local_model_eval",
         "local_runtime.local_training",
+        "local_runtime.local_kokoro_tts",
         "local_runtime.local_stt",
         "local_runtime.local_tts",
         "local_runtime.local_model_benchmark",
@@ -115,7 +160,7 @@ hiddenimports = sorted(set(
 a = Analysis(
     ["main.py"],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=collect_dynamic_libs("espeakng_loader"),
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -147,6 +192,8 @@ exe = EXE(
     entitlements_file=None,
 )
 
+ensure_collect_destination_dirs()
+
 coll = COLLECT(
     exe,
     a.binaries,
@@ -168,5 +215,9 @@ app = BUNDLE(
         "CFBundleShortVersionString": "1.0",
         "CFBundleVersion": "1",
         "NSHighResolutionCapable": True,
+        "NSMicrophoneUsageDescription": "Jarvis needs microphone access so it can hear your voice commands and conversations you explicitly ask it to process.",
+        "NSCameraUsageDescription": "Jarvis needs camera access for webcam vision features you explicitly trigger.",
+        "NSContactsUsageDescription": "Jarvis needs Contacts access to look up people when you ask it to message or call them.",
+        "NSAppleEventsUsageDescription": "Jarvis needs automation access to control apps like Safari, Messages, and Terminal when you ask it to take action.",
     },
 )

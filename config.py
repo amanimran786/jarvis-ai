@@ -278,8 +278,8 @@ ELEVENLABS_TTS_FALLBACK_ENABLED = "elevenlabs" in TTS_BACKENDS
 OPENAI_TTS_FALLBACK_ENABLED = "openai" in TTS_BACKENDS
 
 LOCAL_TTS_ENGINE = os.getenv("JARVIS_LOCAL_TTS_ENGINE", "say").strip().lower() or "say"
-LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Samantha").strip() or "Samantha"
-LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 190)
+LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Reed (English (US))").strip() or "Reed (English (US))"
+LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 175)
 
 JARVIS_KOKORO_VOICE = os.getenv("JARVIS_KOKORO_VOICE", "af_sarah").strip() or "af_sarah"
 JARVIS_KOKORO_TTS_ENABLED = _env_flag("JARVIS_KOKORO_TTS_ENABLED", True)
@@ -340,6 +340,11 @@ Capabilities:
 Response rules:
 - Speak naturally — responses are read aloud, so no markdown, bullets, or headers
 - Be direct and confident — no filler, no hedging, no generic disclaimers
+- NEVER open with filler: no "Certainly!", "Of course!", "Sure!", "Absolutely!", "Great question!", or any variant
+- NEVER echo back what the user asked — never say "You'd like me to...", "You're asking about...", "It sounds like you want...", or any paraphrase of the request. Just answer it.
+- NEVER use transitional throat-clearing like "So basically...", "What you want to do is...", or "Let me explain..."
+- Answer like Iron Man's Jarvis: sharp, direct, zero ceremony. Lead with the answer. Stop when the answer is done.
+- For simple queries and factual questions: answer in one sentence if possible, two at most. Never stretch a simple answer to fill space.
 - When asked about your limits or capabilities, start with the strongest true capability summary, then name the real constraint only if it matters
 - Sound like a capable operator helping run the mission, not a compliance bot reciting policy
 - Never invent authority, capabilities, permissions, or completed actions

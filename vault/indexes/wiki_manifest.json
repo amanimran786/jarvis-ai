@@ -32,11 +32,11 @@
       ]
     },
     {
-      "title": "Ingested File: README.md",
-      "slug": "ingested-file-readme-md",
-      "source": "raw/readme-md.md",
-      "page": "wiki/compiled/ingested-file-readme-md.md",
-      "summary": "Ingested File: README.md Source path: /Users/truthseeker/jarvis-ai/README.md Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+      "title": "Product Surface Bridge",
+      "slug": "product-surface-bridge",
+      "source": "raw/Product Surface Source.md",
+      "page": "wiki/compiled/Product Surface Bridge.md",
+      "summary": "Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
       "keywords": [
         "local",
         "jarvis",
@@ -53,7 +53,7 @@
       ],
       "sections": [
         {
-          "heading": "Ingested File: README.md",
+          "heading": "Product Surface Source",
           "level": 1,
           "page": null,
           "line_start": 1,

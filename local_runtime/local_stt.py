@@ -7,11 +7,11 @@ from typing import Any
 from config import (
     OPENAI_API_KEY,
     OPENAI_STT_FALLBACK_ENABLED,
-    LOCAL_STT_COMPUTE_TYPE,
-    LOCAL_STT_DEVICE,
     LOCAL_STT_ENGINE,
     LOCAL_STT_LANGUAGE,
-    LOCAL_STT_MODEL,
+    FASTER_WHISPER_MODEL as LOCAL_STT_MODEL,
+    FASTER_WHISPER_DEVICE,
+    FASTER_WHISPER_COMPUTE_TYPE,
     FASTER_WHISPER_CPU_THREADS,
     FASTER_WHISPER_NUM_WORKERS,
     FASTER_WHISPER_BEAM_SIZE,
@@ -22,6 +22,11 @@ from config import (
 _MODEL_LOCK = threading.Lock()
 _MODEL = None
 _IMPORT_ERROR: str = ""
+
+
+def _missing_vad_asset_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "silero_vad_v6.onnx" in text or ("no_suchfile" in text and "vad" in text)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -72,8 +77,8 @@ def status() -> dict[str, Any]:
         "local_available": available,
         "openai_fallback_allowed": openai_allowed,
         "model": LOCAL_STT_MODEL,
-        "device": LOCAL_STT_DEVICE,
-        "compute_type": LOCAL_STT_COMPUTE_TYPE,
+        "device": FASTER_WHISPER_DEVICE,
+        "compute_type": FASTER_WHISPER_COMPUTE_TYPE,
         "language": LOCAL_STT_LANGUAGE,
         "import_error": _IMPORT_ERROR,
     }
@@ -102,8 +107,8 @@ def _get_model():
 
         _MODEL = WhisperModel(
             LOCAL_STT_MODEL,
-            device=LOCAL_STT_DEVICE,
-            compute_type=LOCAL_STT_COMPUTE_TYPE,
+            device=FASTER_WHISPER_DEVICE,
+            compute_type=FASTER_WHISPER_COMPUTE_TYPE,
             cpu_threads=FASTER_WHISPER_CPU_THREADS,
             num_workers=FASTER_WHISPER_NUM_WORKERS,
         )
@@ -130,12 +135,20 @@ def _wav_bytes_to_numpy(wav_bytes: bytes):
     if n_channels > 1:
         samples = samples.reshape(-1, n_channels).mean(axis=1)
 
-    # Resample to 16kHz if needed (faster-whisper expects 16kHz)
+    # Resample to 16kHz if needed (faster-whisper expects 16kHz).
+    # Use scipy for proper anti-aliased resampling (avoids aliasing from
+    # 44.1kHz/48kHz mic capture that degrades Whisper accuracy).
+    # Falls back to nearest-neighbor if scipy is unavailable.
     if frame_rate != 16000:
-        ratio = 16000 / frame_rate
-        new_len = int(len(samples) * ratio)
-        indices = np.round(np.linspace(0, len(samples) - 1, new_len)).astype(np.int32)
-        samples = samples[indices]
+        try:
+            from scipy.signal import resample as scipy_resample
+            new_len = int(len(samples) * 16000 / frame_rate)
+            samples = scipy_resample(samples, new_len).astype(np.float32)
+        except ImportError:
+            ratio = 16000 / frame_rate
+            new_len = int(len(samples) * ratio)
+            indices = np.round(np.linspace(0, len(samples) - 1, new_len)).astype(np.int32)
+            samples = samples[indices]
 
     # Normalize to [-1, 1]
     max_val = 32768.0 if sample_width == 2 else 128.0
@@ -145,14 +158,42 @@ def _wav_bytes_to_numpy(wav_bytes: bytes):
 def _run_transcription(audio_input, *, language: str | None = None) -> dict[str, Any]:
     """Core transcription — accepts file path or numpy float32 array."""
     model = _get_model()
-    segments, info = model.transcribe(
-        audio_input,
-        language=language or LOCAL_STT_LANGUAGE or None,
-        beam_size=FASTER_WHISPER_BEAM_SIZE,
-        vad_filter=FASTER_WHISPER_VAD_FILTER,
-        condition_on_previous_text=False,
-    )
+    primary_kwargs = {
+        "language": language or LOCAL_STT_LANGUAGE or None,
+        "beam_size": FASTER_WHISPER_BEAM_SIZE,
+        "vad_filter": FASTER_WHISPER_VAD_FILTER,
+        "condition_on_previous_text": False,
+        # Suppress hallucinations and low-confidence outputs
+        "no_speech_threshold": 0.4,
+        "compression_ratio_threshold": 2.4,
+        "log_prob_threshold": -1.0,
+        "hallucination_silence_threshold": 0.3,
+    }
+
+    def _transcribe_with_kwargs(kwargs: dict[str, Any]):
+        try:
+            return model.transcribe(audio_input, **kwargs)
+        except Exception as exc:
+            if not kwargs["vad_filter"] or not _missing_vad_asset_error(exc):
+                raise
+            fallback_kwargs = dict(kwargs)
+            fallback_kwargs["vad_filter"] = False
+            return model.transcribe(audio_input, **fallback_kwargs)
+
+    segments, info = _transcribe_with_kwargs(primary_kwargs)
     text = " ".join(segment.text.strip() for segment in segments if segment.text).strip()
+    if not text and primary_kwargs["vad_filter"]:
+        retry_kwargs = dict(primary_kwargs)
+        retry_kwargs.update(
+            {
+                "vad_filter": False,
+                "no_speech_threshold": 0.2,
+                "hallucination_silence_threshold": 0.1,
+            }
+        )
+        segments, info = _transcribe_with_kwargs(retry_kwargs)
+        text = " ".join(segment.text.strip() for segment in segments if segment.text).strip()
+
     return {
         "ok": bool(text),
         "engine": "faster-whisper",

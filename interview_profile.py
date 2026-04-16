@@ -14,6 +14,7 @@ from config import INTERVIEW_ACTIVE_COMPANY, INTERVIEW_ACTIVE_ROLE, KB_ROOT
 
 
 CAREER_KB_ROOT = KB_ROOT / "career"
+BRAIN_ROOT = Path(__file__).resolve().parent / "vault" / "wiki" / "brain"
 UNIVERSAL_BASE_POINTER = CAREER_KB_ROOT / "universal_base.md"
 UNIVERSAL_BASE_SOURCE = CAREER_KB_ROOT / "Jarvis_Universal_Interview_Context.md"
 PACKS_DIR = CAREER_KB_ROOT / "packs"
@@ -21,6 +22,17 @@ CAREER_OPS_PLAYBOOK = CAREER_KB_ROOT / "career_ops_interview_playbook.md"
 STORY_BANK_TEMPLATE = CAREER_KB_ROOT / "story_bank_template.md"
 APPLICATION_STATES = CAREER_KB_ROOT / "application_states.md"
 CANDIDATE_PROFILE_TEMPLATE = CAREER_KB_ROOT / "candidate_profile_template.md"
+ROLE_TARGETING_MAP = BRAIN_ROOT / "61 Role Targeting Map.md"
+ANTHROPIC_VARIANT = BRAIN_ROOT / "62 Anthropic AI Safety Variant.md"
+APPLE_VARIANT = BRAIN_ROOT / "63 Apple Ops Leadership Variant.md"
+YOUTUBE_VARIANT = BRAIN_ROOT / "64 YouTube Policy Variant.md"
+CAREER_ANSWERING_RULES = BRAIN_ROOT / "65 Career Answering Rules.md"
+OPENAI_VARIANT = BRAIN_ROOT / "66 OpenAI Trust Safety Variant.md"
+SECURITY_VARIANT = BRAIN_ROOT / "67 Security Incident Command Variant.md"
+GOOGLE_PLAY_VARIANT = BRAIN_ROOT / "68 Google Play Fraud Abuse Variant.md"
+CORE_CAREER_NARRATIVE = BRAIN_ROOT / "69 Core Career Narrative.md"
+META_VARIANT = BRAIN_ROOT / "71 Meta Calibration Quality Variant.md"
+LLNL_TECHNICAL_CREDIBILITY = BRAIN_ROOT / "72 LLNL Technical Systems Credibility.md"
 
 
 def _read_text(path: Path) -> str:
@@ -74,7 +86,10 @@ def _extract_markdown_subheading(markdown: str, heading: str) -> str:
 def _clean_markdown_excerpt(text: str, max_chars: int = 520) -> str:
     text = re.sub(r"`{3}.*?`{3}", " ", text, flags=re.S)
     text = re.sub(r"^\s*[-*]\s*", "", text, flags=re.M)
+    text = re.sub(r"^\s*#{1,6}\s*", "", text, flags=re.M)
     text = re.sub(r"\|\s*[-:]+\s*\|", " ", text)
+    text = re.sub(r"\[\[([^|\]]+)\|([^]]+)\]\]", r"\2", text)
+    text = re.sub(r"\[\[([^]]+)\]\]", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > max_chars:
         text = text[:max_chars].rstrip() + "..."
@@ -97,8 +112,138 @@ def _career_ops_asset_text(path: Path) -> str:
     return _clean_markdown_excerpt(_read_text(path), max_chars=900)
 
 
+def _brain_variant_path(user_input: str) -> Path | None:
+    lower = (user_input or "").lower()
+    if "openai" in lower:
+        return OPENAI_VARIANT
+    if "meta" in lower or "facebook" in lower:
+        return META_VARIANT
+    if "google play" in lower or ("fraud" in lower and any(term in lower for term in ("abuse", "platform", "risk", "marketplace"))):
+        return GOOGLE_PLAY_VARIANT
+    if "anthropic" in lower or "safeguards" in lower:
+        return ANTHROPIC_VARIANT
+    if "apple" in lower:
+        return APPLE_VARIANT
+    if "youtube" in lower or "policy enforcement manager" in lower or "age appropriateness" in lower:
+        return YOUTUBE_VARIANT
+    if any(term in lower for term in ("incident command", "security operations", "security incident", "gsoc", "soc")):
+        return SECURITY_VARIANT
+    return None
+
+
+def _brain_note_guidance(path: Path, *, summary_heading: str = "## Positioning Summary", detail_heading: str = "## Best Story Stack") -> str:
+    markdown = _read_text(path)
+    if not markdown:
+        return ""
+    summary = _extract_markdown_block(markdown, summary_heading)
+    detail = _extract_markdown_block(markdown, detail_heading)
+    parts = []
+    if summary:
+        parts.append(_clean_markdown_excerpt(summary, max_chars=280))
+    if detail:
+        parts.append(_clean_markdown_excerpt(detail, max_chars=280))
+    return " ".join(part for part in parts if part).strip()
+
+
+def _career_answering_rules_hint() -> str:
+    markdown = _read_text(CAREER_ANSWERING_RULES)
+    if not markdown:
+        return ""
+    rules = _extract_markdown_block(markdown, "## Core Rules")
+    if not rules:
+        return ""
+    cleaned = _clean_markdown_excerpt(rules, max_chars=320)
+    if not cleaned:
+        return ""
+    return f"Use the career-answering rules from the curated brain: {cleaned}"
+
+
+def _core_career_narrative_hint() -> str:
+    guidance = _brain_note_guidance(
+        CORE_CAREER_NARRATIVE,
+        summary_heading="## Core Narrative Spine",
+        detail_heading="## Strongest Proof Points",
+    )
+    if not guidance:
+        return ""
+    return f"Use the core career narrative from the curated brain: {guidance}"
+
+
+def _core_why_you_hint() -> str:
+    guidance = _brain_note_guidance(
+        CORE_CAREER_NARRATIVE,
+        summary_heading="## Default Positioning",
+        detail_heading="## Why-You Framing",
+    )
+    if not guidance:
+        return ""
+    return guidance
+
+
+def _technical_credibility_hint(user_input: str) -> str:
+    lower = (user_input or "").lower()
+    if not any(term in lower for term in ("software engineer", "software engineering", "backend", "platform", "infra", "infrastructure", "distributed", "sql", "llnl", "observability", "ci/cd", "reliability")):
+        return ""
+    guidance = _brain_note_guidance(
+        LLNL_TECHNICAL_CREDIBILITY,
+        summary_heading="## Positioning Summary",
+        detail_heading="## Core Technical Proof Points",
+    )
+    if not guidance:
+        return ""
+    return f"Technical credibility note guidance: {guidance}"
+
+
+def _role_targeting_hint(user_input: str) -> str:
+    markdown = _read_text(ROLE_TARGETING_MAP)
+    if not markdown:
+        return ""
+    lower = (user_input or "").lower()
+    heading = ""
+    if "openai" in lower or "anthropic" in lower or "ai safety" in lower or "safeguards" in lower:
+        heading = "### AI safety and safeguards operations"
+    elif "apple" in lower or "operations lead" in lower or "screening" in lower:
+        heading = "### Trust and safety operations leadership"
+    elif "youtube" in lower or "policy" in lower:
+        heading = "### Policy enforcement and judgment-heavy moderation"
+    if not heading:
+        return ""
+    excerpt = _extract_markdown_subheading(markdown, heading)
+    cleaned = _clean_markdown_excerpt(excerpt, max_chars=320)
+    if not cleaned:
+        return ""
+    return f"Role-targeting guidance: {cleaned}"
+
+
+def _company_variant_hint(user_input: str) -> str:
+    path = _brain_variant_path(user_input)
+    if not path:
+        return ""
+    guidance = _brain_note_guidance(path)
+    if not guidance:
+        return ""
+    return f"Company-targeted brain note guidance: {guidance}"
+
+
 def _proof_points_line(limit: int = 3) -> str:
     items = PROFILE["evidence"][:limit]
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + f", and {items[-1]}"
+
+
+def _proof_points_for_query(user_input: str, limit: int = 3) -> str:
+    lower = (user_input or "").lower()
+    if any(term in lower for term in ("software engineer", "software engineering", "backend", "platform", "infra", "infrastructure", "distributed", "sql", "llnl", "observability", "ci/cd", "reliability")):
+        items = [
+            "optimized SQL latency at LLNL by 40 percent",
+            "built backend Python services for distributed real-time systems",
+            "improved observability, logging, monitoring, and CI/CD reliability in engineering environments",
+        ][:limit]
+    else:
+        items = PROFILE["evidence"][:limit]
     if not items:
         return ""
     if len(items) == 1:
@@ -119,11 +264,27 @@ def _story_bank_fit_text(user_input: str) -> str:
     return "The strongest story-bank angle here is a measurable STAR plus reflection story, not a generic summary."
 
 
-def _candidate_profile_hint() -> str:
+def _candidate_profile_hint(user_input: str = "") -> str:
     text = _career_ops_asset_text(CANDIDATE_PROFILE_TEMPLATE)
-    if not text:
-        return ""
-    return "The answer should stay anchored on target roles, clear narrative, and measurable proof points."
+    hints = []
+    if text:
+        hints.append("The answer should stay anchored on target roles, clear narrative, and measurable proof points.")
+    rules_hint = _career_answering_rules_hint()
+    if rules_hint:
+        hints.append(rules_hint)
+    core_hint = _core_career_narrative_hint()
+    if core_hint:
+        hints.append(core_hint)
+    tech_hint = _technical_credibility_hint(user_input)
+    if tech_hint:
+        hints.append(tech_hint)
+    variant_hint = _company_variant_hint(user_input)
+    if variant_hint:
+        hints.append(variant_hint)
+    role_hint = _role_targeting_hint(user_input)
+    if role_hint:
+        hints.append(role_hint)
+    return " ".join(hints).strip()
 
 
 def _application_states_summary() -> str:
@@ -136,40 +297,47 @@ def _application_states_summary() -> str:
     )
 
 
-def _interview_playbook_hint() -> str:
+def _interview_playbook_hint(user_input: str = "") -> str:
     text = _career_ops_asset_text(CAREER_OPS_PLAYBOOK)
-    if not text:
-        return ""
-    return (
-        "Prep should stay company-specific: separate sourced findings from inferred ones, map likely questions to real proof points, "
-        "and identify missing stories before the interview instead of improvising live."
-    )
+    hints = []
+    if text:
+        hints.append(
+            "Prep should stay company-specific: separate sourced findings from inferred ones, map likely questions to real proof points, "
+            "and identify missing stories before the interview instead of improvising live."
+        )
+    role_hint = _role_targeting_hint(user_input)
+    if role_hint:
+        hints.append(role_hint)
+    variant_hint = _company_variant_hint(user_input)
+    if variant_hint:
+        hints.append(variant_hint)
+    return " ".join(hints).strip()
 
 
 PROFILE = {
     "candidate_name": "Aman Imran",
     "target_direction": (
-        "technical roles at the intersection of AI trust and safety, AI safety, "
-        "cybersecurity, and software engineering"
+        "roles at the intersection of trust and safety, AI safety, security operations, "
+        "incident response, and software-driven operations leadership"
     ),
     "headline": (
-        "Technical Trust and Safety and AI Safety operator with a software "
-        "engineering foundation and complementary cybersecurity experience"
+        "Trust and Safety, AI safety, and security operations leader with a software "
+        "engineering foundation and strong incident-response depth"
     ),
     "core_strengths": [
-        "over five years in Trust and Safety and AI Safety operations",
-        "hands-on experience across YouTube, Meta, Google Play, TikTok, and AI safety operations",
-        "software engineering background in backend systems, data pipelines, debugging, and automation",
-        "security operations and incident response experience with strong adversarial judgment",
+        "7+ years across Trust and Safety, AI safety, fraud and abuse prevention, and security operations",
+        "hands-on experience across YouTube, Meta, Google Play, TikTok, Lawrence Livermore National Laboratory, GSOC leadership, and Anthropic-aligned AI safety operations",
+        "software engineering background in backend systems, data pipelines, debugging, observability, and automation",
+        "security operations and incident response experience with strong escalation judgment",
         "strong Python and SQL fluency for investigations, measurement, and workflow tooling",
-        "systems thinking that connects policy, enforcement quality, engineering, and user impact",
+        "systems thinking that connects policy, enforcement quality, engineering, incident response, and user impact",
     ],
     "evidence": [
-        "improved false negative performance at Meta by 15 percent",
-        "improved TikTok enforcement accuracy by about 20 percent after diagnosing a misclassification spike",
-        "investigated model misuse, jailbreak attempts, and coordinated abuse in AI safety operations",
-        "built and used Python and SQL tooling to surface high-signal patterns faster",
-        "worked across reviewer quality, vendor calibration, policy operations, and product-facing decisions",
+        "reduced false negatives at Meta by 15 percent",
+        "improved TikTok enforcement accuracy by 20 percent and reduced recurrence by 25 percent",
+        "built SQL pipelines over 500K plus daily events to monitor enforcement trends and risk signals",
+        "optimized SQL latency at LLNL by 40 percent while improving observability and backend reliability",
+        "owned end-to-end AI safety incident response for jailbreaks, prompt injection, and coordinated abuse in an Anthropic-aligned environment",
     ],
     "answer_style": [
         "lead with the answer",
@@ -322,8 +490,8 @@ ROLE_PROFILES = {
     "trust_safety": {
         "label": "Trust and Safety",
         "tell_me_about_yourself": (
-            "I'm a technical Trust and Safety professional with over five years across YouTube, Meta, Google Play, TikTok, and AI safety operations. "
-            "I started in high-stakes enforcement work and then expanded into reviewer quality, vendor calibration, escalation judgment, and policy-to-product execution. "
+            "I'm a Trust and Safety and AI safety operator with 7+ years across YouTube, Meta, Google Play, TikTok, security operations, and Anthropic-aligned AI safety incident response. "
+            "I started in high-stakes enforcement work and then expanded into reviewer quality, fraud and abuse investigation, escalation judgment, and policy-to-product execution. "
             "What makes my background stronger than a standard operations profile is that I also use Python, SQL, and systems thinking to investigate patterns, validate signals, and improve enforcement workflows at scale. "
             "So the value I bring is not just sound judgment on hard cases. It is the ability to improve the quality system behind those decisions."
         ),
@@ -335,8 +503,8 @@ ROLE_PROFILES = {
     "ai_safety": {
         "label": "AI Safety",
         "tell_me_about_yourself": (
-            "I'm a technical AI Safety and Trust and Safety professional whose background sits right at the intersection of adversarial abuse, safety operations, and technical systems. "
-            "Across platform safety roles and more recent AI safety operations work, I have focused on model misuse, jailbreak attempts, coordinated abuse, and high-risk harm patterns. "
+            "I'm an AI Safety and Trust and Safety operator whose background sits right at the intersection of adversarial abuse, incident response, and technical systems. "
+            "Across platform safety roles and more recent Anthropic-aligned AI safety operations work, I have focused on model misuse, jailbreak attempts, coordinated abuse, and high-risk harm patterns. "
             "I also bring a real engineering and data foundation, so I can do more than identify problems. I can investigate them with Python and SQL, reason about signal quality, and help turn findings into stronger detection and safety workflows. "
             "That combination of adversarial judgment and technical execution is the core of the value I bring."
         ),
@@ -348,8 +516,8 @@ ROLE_PROFILES = {
     "security": {
         "label": "Cybersecurity",
         "tell_me_about_yourself": (
-            "I'm a technical security-oriented candidate with a background that combines security operations, adversarial investigation, and software-driven systems thinking. "
-            "I have worked in incident-oriented environments, threat detection, monitoring, access control, and audit-minded operations, and I also bring experience from Trust and Safety and AI safety roles where I investigated coordinated abuse, misuse patterns, and high-risk behavior. "
+            "I'm a security-operations and incident-response candidate with a background that combines GSOC leadership, adversarial investigation, and software-driven systems thinking. "
+            "I have worked in incident-oriented environments, threat detection, monitoring, access control, audit-minded operations, and high-severity escalation, and I also bring experience from Trust and Safety and AI safety roles where I investigated coordinated abuse, misuse patterns, and high-risk behavior. "
             "On top of that, I have a software engineering foundation in Python, SQL, backend systems, and automation, which means I can help improve detection and response workflows rather than only operate inside them. "
             "So the through-line in my work is risk triage, clear judgment, and building stronger systems around the threat landscape."
         ),
@@ -374,15 +542,14 @@ ROLE_PROFILES = {
     "hybrid": {
         "label": "Hybrid Technical Safety",
         "tell_me_about_yourself": (
-            "I'm a technical Trust and Safety and AI Safety professional with a software engineering foundation and complementary cybersecurity experience. "
-            "I started in high-stakes enforcement work at YouTube and then built across Meta, Google Play, TikTok, and AI safety operations, where I worked on enforcement quality, abuse detection, adversarial analysis, and policy-to-system execution. "
+            "I'm a Trust and Safety, AI safety, and security operations operator with a software engineering foundation and 7+ years in high-risk environments. "
+            "I started in high-stakes enforcement work at YouTube and then built across Meta, Google Play, TikTok, GSOC leadership, LLNL engineering work, and Anthropic-aligned AI safety operations, where I worked on enforcement quality, fraud and abuse investigation, adversarial analysis, and incident response. "
             "What makes my background a little different is that I do not just make judgment calls at the policy layer. I also use Python, SQL, and systems thinking to investigate patterns, improve signal quality, and build workflows that scale. "
-            "More recently, I have been focused on model misuse, jailbreak attempts, coordinated abuse, and the intersection between safety operations and technical systems. "
-            "So the thread across my work is pretty consistent: I operate well in ambiguous, high-risk environments, I know how to connect data to judgment, and I am now deliberately moving toward roles that converge AI trust and safety, AI safety, cybersecurity, and stronger technical ownership."
+            "So the thread across my work is pretty consistent: I operate well in ambiguous, high-risk environments, I know how to connect data to judgment, and I am strongest in roles where trust, safety, incident control, and technical systems all matter at once."
         ),
         "canonical": (
-            "Aman Imran is a Technical Trust and Safety and AI Safety operator with a software engineering foundation and complementary cybersecurity experience. "
-            "He is currently targeting technical roles at the intersection of AI trust and safety, AI safety, cybersecurity, and software engineering."
+            "Aman Imran is a Trust and Safety, AI safety, and security operations operator with a software engineering foundation and strong incident-response depth. "
+            "He is currently targeting roles at the intersection of trust and safety, AI safety, security operations, incident response, and software-driven operations leadership."
         ),
     },
 }
@@ -472,16 +639,17 @@ def canonical_profile_text(user_input: str = "") -> str:
 
 
 def tell_me_about_yourself_text(user_input: str = "") -> str:
-    profile_hint = _candidate_profile_hint()
+    profile_hint = _candidate_profile_hint(user_input)
+    proof_points = _proof_points_for_query(user_input)
     if _is_youtube_age_role(user_input):
         return (
             f"{YOUTUBE_AGE_ROLE['tell_me_about_yourself']} "
-            f"The proof points I would foreground are {_proof_points_line()}. "
+            f"The proof points I would foreground are {proof_points}. "
             f"{profile_hint}"
         )
     family = _role_family(user_input)
     base = ROLE_PROFILES.get(family, ROLE_PROFILES["hybrid"])["tell_me_about_yourself"]
-    return f"{base} The proof points I would foreground are {_proof_points_line()}. {profile_hint}"
+    return f"{base} The proof points I would foreground are {proof_points}. {profile_hint}"
 
 
 def _role_family(user_input: str) -> str:
@@ -515,7 +683,7 @@ def supported_role_families_text() -> str:
         "Jarvis can now tailor your interview story for four main role families: "
         "AI Trust and Safety, AI Safety, Cybersecurity, and Software Engineering, plus a hybrid technical safety default. "
         "Underneath that, it can also reuse your strongest behavioral stories and diagnostic frameworks across those domains instead of treating each interview like a fresh script."
-        " It now also carries a structured interview-prep playbook, a reusable story-bank pattern, and normalized application states by default."
+        " It now also carries a structured interview-prep playbook, a reusable story-bank pattern, role-specific variants for Anthropic, OpenAI, Apple, YouTube, Google Play, Meta quality roles, and security-incident roles, plus a dedicated LLNL technical-credibility note and normalized application states by default."
         f"{pack_text}"
     )
 
@@ -534,6 +702,13 @@ def _pack_key(user_input: str) -> str:
 
 
 def target_role_pack_text(user_input: str = "") -> str:
+    variant_hint = _company_variant_hint(user_input)
+    if variant_hint:
+        role_hint = _role_targeting_hint(user_input)
+        combined = " ".join(part for part in (variant_hint, role_hint) if part).strip()
+        if combined:
+            return combined
+
     requested_pack_id = _pack_id_for_query(user_input)
     if requested_pack_id:
         markdown = _load_pack_text(requested_pack_id)
@@ -568,7 +743,7 @@ def target_role_pack_text(user_input: str = "") -> str:
 
 
 def role_fit_text(user_input: str) -> str:
-    profile_hint = _candidate_profile_hint()
+    profile_hint = _candidate_profile_hint(user_input)
     family = _role_family(user_input)
 
     if family == "trust_safety":
@@ -605,7 +780,7 @@ def role_fit_text(user_input: str) -> str:
 
     return (
         "I am a strong fit because my background already sits at the intersection this kind of role needs. "
-        "I bring over five years across Trust and Safety and AI Safety, a real software engineering foundation, and complementary cybersecurity and adversarial investigation experience. "
+        "I bring 7+ years across Trust and Safety, AI safety, security operations, and a real software engineering foundation. "
         "In practice, that means I can make high-stakes judgment calls, use data and tooling to validate what is actually happening, and partner effectively with operations, policy, and engineering to improve the system rather than just handle individual cases. "
         "That convergence is exactly the direction I am intentionally building toward. "
         f"The proof points I would lean on most are {_proof_points_line()}. {profile_hint}"
@@ -628,10 +803,23 @@ def why_company_text(user_input: str) -> str:
             if excerpt:
                 return _clean_markdown_excerpt(excerpt, max_chars=650)
         return YOUTUBE_AGE_ROLE["why_youtube"]
-    return (
+    variant_hint = _company_variant_hint(user_input)
+    core_why_you = _core_why_you_hint()
+    if variant_hint:
+        parts = [
+            "The strongest reason is fit between the company's risk surface and the way Aman works.",
+            variant_hint,
+        ]
+        if core_why_you:
+            parts.append(f"Core why-you framing: {core_why_you}")
+        return " ".join(parts)
+    base = (
         "The strongest reason is fit between the problems the company is solving and the way I work. "
         "I do my best work in environments where safety, systems, and cross-functional judgment all matter, and I tend to be most useful when the scale is high enough that good decisions need to be translated into durable workflows."
     )
+    if core_why_you:
+        return f"{base} {core_why_you}"
+    return base
 
 
 def why_role_text(user_input: str) -> str:
@@ -919,7 +1107,7 @@ def is_situational_query(lower: str) -> bool:
 
 def interview_prep_text(user_input: str) -> str:
     role_pack = target_role_pack_text(user_input)
-    playbook_hint = _interview_playbook_hint()
+    playbook_hint = _interview_playbook_hint(user_input)
     story_hint = _story_bank_fit_text(user_input)
     return (
         "For this interview, I would prep it as company-specific intelligence, not a generic script. "

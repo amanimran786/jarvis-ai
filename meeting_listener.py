@@ -22,6 +22,7 @@ from local_runtime import local_stt
 from provider_priority import ask_with_priority
 import semantic_memory as _smem
 import interview_profile as _ip
+import model_router as _model_router
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -695,7 +696,7 @@ Instructions:
 - Return exactly what Aman should say next, not analysis about the conversation.
 - Keep it clear, concise, and spoken naturally.
 - Default to 1-2 sentences.
-- If the question is technical, give the precise answer first and the key rationale second.
+- If the question is technical, give the precise answer first, then include the key tradeoff, failure point, or shortest verification step.
 - If the transcript and question buffer already contain a usable question, answer it directly instead of asking for vague clarification.
 - If the transcript is truly too incomplete to answer, ask one short clarification question instead of inventing missing details.
 - If there is uncertainty, still give the best answer you can from the available words instead of pretending you heard more than you did.
@@ -713,6 +714,10 @@ Instructions:
         kb_parts.append(smem_ctx)
     if ip_ctx and len(ip_ctx) > 80:
         kb_parts.append(f"[Career profile context]\n{ip_ctx[:600]}")
+    if question_like or technical:
+        engineering_ctx = _model_router._engineering_companion_grounding(query_for_kb)
+        if engineering_ctx:
+            kb_parts.append(engineering_ctx)
     system_extra = "\n\n".join(kb_parts) if kb_parts else ""
 
     global _suggestion_model_failures, _suggestion_fallbacks
@@ -885,13 +890,42 @@ def _fallback_suggestion_text(new_line: str, question_like: bool, technical: boo
     if "api" in low:
         return "An API is an interface that lets one system talk to another in a defined way."
 
-    if question_like or technical:
-        return "Answer directly and briefly, then add one short supporting detail."
+    if technical:
+        return "Answer with the recommendation first, then name the key tradeoff, failure point, or verification step in one short sentence."
+
+    if question_like:
+        return "Answer with the conclusion first, then add one short supporting detail."
 
     if len(low.split()) >= 2:
         return "Acknowledge the point and add one concrete detail."
 
     return ""
+
+
+def actionable_hint(text: str) -> str:
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return ""
+    sentences = [
+        part.strip(" \"'")
+        for part in re.split(r"(?<=[.!?])\s+", cleaned)
+        if part.strip(" \"'")
+    ]
+    preferred = None
+    for sentence in sentences:
+        lower = sentence.lower()
+        if any(token in lower for token in ("verify", "check", "confirm", "test", "measure", "inspect", "trace", "reproduce")):
+            preferred = f"Verify: {sentence.rstrip('.!?')}"
+            break
+    if not preferred and len(sentences) >= 2:
+        preferred = f"Next: {sentences[1].rstrip('.!?')}"
+    if not preferred and sentences:
+        lower = sentences[0].lower()
+        if any(token in lower for token in ("use ", "add ", "start ", "check ", "verify ", "measure ", "inspect ", "test ")):
+            preferred = f"Next: {sentences[0].rstrip('.!?')}"
+    if not preferred:
+        return ""
+    return preferred[:160].rstrip()
 
 
 def _interpret_recent_question(new_line: str) -> str:
