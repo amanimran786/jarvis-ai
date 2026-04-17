@@ -2681,6 +2681,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         permissions_mock.assert_called_once_with()
 
+    def test_permissions_command_can_set_default_mode(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._set_permissions_mode", return_value=0) as mode_mock:
+            result = jarvis_cli._handle_console_command("/permissions default")
+
+        self.assertEqual(result, 0)
+        mode_mock.assert_called_once_with("default")
+
+    def test_permissions_command_can_toggle_protected_writes(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._set_protected_writes", return_value=0) as toggle_mock:
+            result = jarvis_cli._handle_console_command("/permissions protected-writes on")
+
+        self.assertEqual(result, 0)
+        toggle_mock.assert_called_once_with(True)
+
     def test_cancel_task_posts_cancel_endpoint(self):
         import jarvis_cli
 
@@ -2858,6 +2876,52 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertIn("Shell (normal)    : allowed [allowed]", printed)
         self.assertIn("Write (protected) : blocked [protected_path_write]", printed)
         self.assertIn("Self-improve stop : blocked [self_improve_scope]", printed)
+
+    def test_set_permissions_mode_default_resets_env_flags(self):
+        import jarvis_cli
+
+        with patch.dict(os.environ, {"JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE": "1", "JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES": "1"}, clear=False), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._set_permissions_mode("default")
+            self.assertEqual(os.environ["JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE"], "0")
+            self.assertEqual(os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"], "0")
+
+        self.assertEqual(result, 0)
+        print_mock.assert_called_once_with("Permissions set to default.")
+
+    def test_set_permissions_mode_max_permissive_keeps_protected_writes_off(self):
+        import jarvis_cli
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._set_permissions_mode("max-permissive")
+            self.assertEqual(os.environ["JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE"], "1")
+            self.assertEqual(os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"], "0")
+
+        self.assertEqual(result, 0)
+        print_mock.assert_called_once_with("Permissions set to max-permissive. Protected writes are still blocked.")
+
+    def test_set_protected_writes_requires_max_permissive(self):
+        import jarvis_cli
+
+        with patch("behavior_hooks.max_permissive_profile_enabled", return_value=False), \
+             patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = jarvis_cli._set_protected_writes(True)
+
+        self.assertEqual(result, 1)
+        self.assertIn("Enable max-permissive first", stderr.getvalue())
+
+    def test_set_protected_writes_updates_env_when_profile_enabled(self):
+        import jarvis_cli
+
+        with patch("behavior_hooks.max_permissive_profile_enabled", return_value=True), \
+             patch.dict(os.environ, {}, clear=True), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._set_protected_writes(True)
+            self.assertEqual(os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"], "1")
+
+        self.assertEqual(result, 0)
+        print_mock.assert_called_once_with("Protected writes enabled for this console process.")
 
 
 class ExtensionRegistryTests(unittest.TestCase):
