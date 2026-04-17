@@ -15,6 +15,8 @@ Usage:
   python jarvis_cli.py --agents
   python jarvis_cli.py --tasks
   python jarvis_cli.py --task-status <task_id>
+  python jarvis_cli.py --watch-task <task_id>
+  python jarvis_cli.py --cancel-task <task_id>
   python jarvis_cli.py --task fix the login bug   # streaming, Multica-compatible
   python jarvis_cli.py --task-code refactor the auth middleware
   python jarvis_cli.py --teach "user prompt" "ideal Jarvis answer"
@@ -261,6 +263,84 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
         return 1
 
 
+def watch_task(task_id: str) -> int:
+    task_id = (task_id or "").strip()
+    if not task_id:
+        print("Usage: /watch <task_id>", file=sys.stderr)
+        return 1
+
+    base = _base()
+    try:
+        task_payload = get(f"/tasks/{task_id}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(f"Error: task not found: {task_id}", file=sys.stderr)
+            return 1
+        raise
+
+    task = task_payload.get("task") or {}
+    workspace = task.get("workspace") or {}
+    if workspace.get("enabled") and workspace.get("worktree_path"):
+        print(f"[workspace:{workspace.get('worktree_path')}]", flush=True)
+
+    try:
+        req = urllib.request.Request(base + f"/tasks/{task_id}/stream", headers=_auth_headers())
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if obj.get("type") == "meta":
+                    print(f"\n[model:{obj.get('model', 'unknown')}]", flush=True)
+                elif obj.get("type") == "error":
+                    print(f"\n[error:{obj.get('error', 'task_failed')}]", flush=True)
+                elif obj.get("type") == "status":
+                    status = obj.get("status")
+                    if status:
+                        print(f"\n[status:{status}]", flush=True)
+                elif obj.get("type") == "done":
+                    if obj.get("status") not in {"succeeded", "cancelled"}:
+                        return 1
+                elif "chunk" in obj:
+                    print(obj["chunk"], end="", flush=True)
+        print()
+        task_state = get(f"/tasks/{task_id}")
+        status = ((task_state.get("task") or {}).get("status") or "").lower()
+        return 0 if status in {"", "succeeded", "cancelled"} else 1
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(f"Error: task not found: {task_id}", file=sys.stderr)
+            return 1
+        raise
+    except urllib.error.URLError:
+        print(f"Error: lost connection while streaming task {task_id}", file=sys.stderr)
+        return 1
+
+
+def cancel_task(task_id: str) -> int:
+    task_id = (task_id or "").strip()
+    if not task_id:
+        print("Usage: /cancel <task_id>", file=sys.stderr)
+        return 1
+    try:
+        payload = post(f"/tasks/{task_id}/cancel", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(f"Error: task not found: {task_id}", file=sys.stderr)
+            return 1
+        raise
+    task = payload.get("task") or {}
+    print(f"{task.get('id', task_id)}: {task.get('status', 'unknown')}")
+    return 0
+
+
 def get(path: str) -> dict:
     _ensure_daemon_running(reason="jarvis_cli_get")
     req = urllib.request.Request(_base() + path, headers=_auth_headers())
@@ -371,6 +451,8 @@ def _console_help() -> str:
             "  /task <prompt>        Run a managed task",
             "  /code <prompt>        Run an isolated coding task",
             "  /task-status <id>     Show one task payload",
+            "  /watch <task_id>      Stream an existing task until completion",
+            "  /cancel <task_id>     Request cancellation for a task",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
             "  /connectors           List connectors",
@@ -490,6 +572,10 @@ def _handle_console_command(line: str) -> int | None:
         payload = get(f"/tasks/{args}")
         print(json.dumps(payload.get("task", {}), indent=2))
         return 0
+    if command == "watch":
+        return watch_task(args)
+    if command == "cancel":
+        return cancel_task(args)
     if command == "memory":
         _print_memory()
         return 0
@@ -652,6 +738,18 @@ def main():
         task = payload.get("task", {})
         print(json.dumps(task, indent=2))
         return
+
+    if flag == "--watch-task":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --watch-task <task_id>", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(watch_task(sys.argv[2]))
+
+    if flag == "--cancel-task":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --cancel-task <task_id>", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(cancel_task(sys.argv[2]))
 
     if flag == "--memory":
         _print_memory()

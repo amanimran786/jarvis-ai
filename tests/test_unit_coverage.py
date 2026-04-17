@@ -18,6 +18,7 @@ dependencies (PyQt6, sounddevice, etc.).
 """
 
 import json
+import io
 import os
 import sys
 import tempfile
@@ -1907,6 +1908,85 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         shell_mock.assert_called_once_with("pwd")
+
+    def test_watch_command_routes_to_watch_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.watch_task", return_value=0) as watch_mock:
+            result = jarvis_cli._handle_console_command("/watch task-123")
+
+        self.assertEqual(result, 0)
+        watch_mock.assert_called_once_with("task-123")
+
+    def test_cancel_command_routes_to_cancel_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.cancel_task", return_value=0) as cancel_mock:
+            result = jarvis_cli._handle_console_command("/cancel task-123")
+
+        self.assertEqual(result, 0)
+        cancel_mock.assert_called_once_with("task-123")
+
+    def test_cancel_task_posts_cancel_endpoint(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"task": {"id": "task-123", "status": "cancel_requested"}}) as post_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.cancel_task("task-123")
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with("/tasks/task-123/cancel", {})
+        print_mock.assert_called_once_with("task-123: cancel_requested")
+
+    def test_watch_task_streams_existing_task(self):
+        import jarvis_cli
+
+        class _Resp:
+            def __enter__(self):
+                return iter([
+                    b'data: {"type":"status","status":"running"}\n\n',
+                    b'data: {"chunk":"working"}\n\n',
+                    b'data: {"type":"done","status":"succeeded"}\n\n',
+                    b"data: [DONE]\n\n",
+                ])
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        task_payload = {
+            "task": {
+                "id": "task-123",
+                "status": "running",
+                "workspace": {"enabled": True, "worktree_path": "/tmp/task-123"},
+            }
+        }
+        final_payload = {"task": {"id": "task-123", "status": "succeeded"}}
+
+        with patch("jarvis_cli.get", side_effect=[task_payload, final_payload]), \
+             patch("jarvis_cli._base", return_value="http://127.0.0.1:8765"), \
+             patch("jarvis_cli.urllib.request.urlopen", return_value=_Resp()), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.watch_task("task-123")
+
+        self.assertEqual(result, 0)
+        printed = [call.args[0] for call in print_mock.call_args_list if call.args]
+        self.assertIn("[workspace:/tmp/task-123]", printed)
+        self.assertIn("\n[status:running]", printed)
+
+    def test_watch_task_reports_missing_task(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.get", side_effect=jarvis_cli.urllib.error.HTTPError(
+            url="http://127.0.0.1:8765/tasks/task-404",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,
+        )), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = jarvis_cli.watch_task("task-404")
+
+        self.assertEqual(result, 1)
+        self.assertIn("task not found", stderr.getvalue())
 
 
 class ExtensionRegistryTests(unittest.TestCase):
