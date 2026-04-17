@@ -18,6 +18,7 @@ dependencies (PyQt6, sounddevice, etc.).
 """
 
 import json
+import io
 import os
 import sys
 import tempfile
@@ -2455,6 +2456,7 @@ class RuntimeEndpointDiscoveryTests(unittest.TestCase):
             return _Resp()
 
         with patch("runtime_state.read_api_endpoint", return_value={**metadata, "base_url": "http://127.0.0.1:8766"}), \
+             patch("runtime_state._pid_is_alive", return_value=True), \
              patch("runtime_state.port_file_path") as port_file_mock, \
              patch("runtime_state.urllib.request.urlopen", side_effect=_urlopen), \
              patch.dict(os.environ, {}, clear=True):
@@ -2488,8 +2490,59 @@ class RuntimeEndpointDiscoveryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["port"], 8772)
 
+    def test_discover_api_endpoint_clears_stale_runtime_metadata(self):
+        import runtime_state
+
+        metadata = {
+            "host": "127.0.0.1",
+            "port": 8766,
+            "pid": 99999,
+            "written_at": "2026-04-09T00:00:00+00:00",
+            "base_url": "http://127.0.0.1:8766",
+        }
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "online"}).encode("utf-8")
+
+        with patch("runtime_state.read_api_endpoint", return_value=metadata), \
+             patch("runtime_state._pid_is_alive", return_value=False), \
+             patch("runtime_state.clear_api_endpoint") as clear_mock, \
+             patch("runtime_state.port_file_path") as port_file_mock, \
+             patch("runtime_state.urllib.request.urlopen", return_value=_Resp()), \
+             patch.dict(os.environ, {}, clear=True):
+            port_file_mock.return_value.read_text.return_value = "8772"
+            result = runtime_state.discover_api_endpoint()
+
+        clear_mock.assert_called_once()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["port"], 8772)
+
 
 class JarvisCliEndpointTests(unittest.TestCase):
+    def test_cli_reexecs_into_project_venv_when_available(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.os.path.exists", return_value=True), \
+             patch("jarvis_cli.os.path.realpath", side_effect=lambda p: p), \
+             patch.object(jarvis_cli.sys, "executable", "/opt/anaconda3/bin/python3"), \
+             patch.object(jarvis_cli.sys, "argv", ["jarvis_cli.py", "--interactive"]), \
+             patch.dict("jarvis_cli.os.environ", {}, clear=True), \
+             patch("jarvis_cli.os.execve") as execve_mock:
+            jarvis_cli._ensure_supported_cli_runtime()
+
+        execve_mock.assert_called_once_with(
+            "/Users/truthseeker/jarvis-ai/venv/bin/python",
+            ["/Users/truthseeker/jarvis-ai/venv/bin/python", "jarvis_cli.py", "--interactive"],
+            {"_JARVIS_CLI_REEXEC_ATTEMPTED": "1"},
+        )
+
     def test_auth_headers_use_runtime_token_when_present(self):
         import jarvis_cli
 
@@ -2570,6 +2623,201 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(captured["body"]["answer"], "Ideal answer")
         self.assertEqual(captured["body"]["source"], "manual_teacher")
         self.assertIn("codex", captured["body"]["tags"])
+
+    def test_console_run_command_uses_terminal_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.os.getcwd", return_value="/tmp/jarvis"), \
+             patch("terminal.run_command", return_value="ok") as run_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._handle_console_command("/run pwd")
+
+        self.assertEqual(result, 0)
+        run_mock.assert_called_once_with("pwd", cwd="/tmp/jarvis")
+        print_mock.assert_called_once_with("ok")
+
+    def test_bang_command_routes_to_shell_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_shell_command", return_value=0) as shell_mock:
+            result = jarvis_cli._handle_console_command("!pwd")
+
+        self.assertEqual(result, 0)
+        shell_mock.assert_called_once_with("pwd")
+
+    def test_watch_command_routes_to_watch_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.watch_task", return_value=0) as watch_mock:
+            result = jarvis_cli._handle_console_command("/watch task-123")
+
+        self.assertEqual(result, 0)
+        watch_mock.assert_called_once_with("task-123")
+
+    def test_cancel_command_routes_to_cancel_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.cancel_task", return_value=0) as cancel_mock:
+            result = jarvis_cli._handle_console_command("/cancel task-123")
+
+        self.assertEqual(result, 0)
+        cancel_mock.assert_called_once_with("task-123")
+
+    def test_doctor_command_routes_to_doctor_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_doctor") as doctor_mock:
+            result = jarvis_cli._handle_console_command("/doctor")
+
+        self.assertEqual(result, 0)
+        doctor_mock.assert_called_once_with()
+
+    def test_permissions_command_routes_to_permissions_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_permissions") as permissions_mock:
+            result = jarvis_cli._handle_console_command("/permissions")
+
+        self.assertEqual(result, 0)
+        permissions_mock.assert_called_once_with()
+
+    def test_cancel_task_posts_cancel_endpoint(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"task": {"id": "task-123", "status": "cancel_requested"}}) as post_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.cancel_task("task-123")
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with("/tasks/task-123/cancel", {})
+        print_mock.assert_called_once_with("task-123: cancel_requested")
+
+    def test_watch_task_streams_existing_task(self):
+        import jarvis_cli
+
+        class _Resp:
+            def __enter__(self):
+                return iter([
+                    b'data: {"type":"status","status":"running"}\n\n',
+                    b'data: {"chunk":"working"}\n\n',
+                    b'data: {"type":"done","status":"succeeded"}\n\n',
+                    b"data: [DONE]\n\n",
+                ])
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        task_payload = {
+            "task": {
+                "id": "task-123",
+                "status": "running",
+                "workspace": {"enabled": True, "worktree_path": "/tmp/task-123"},
+            }
+        }
+        final_payload = {"task": {"id": "task-123", "status": "succeeded"}}
+
+        with patch("jarvis_cli.get", side_effect=[task_payload, final_payload]), \
+             patch("jarvis_cli._base", return_value="http://127.0.0.1:8765"), \
+             patch("jarvis_cli.urllib.request.urlopen", return_value=_Resp()), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.watch_task("task-123")
+
+        self.assertEqual(result, 0)
+        printed = [call.args[0] for call in print_mock.call_args_list if call.args]
+        self.assertIn("[workspace:/tmp/task-123]", printed)
+        self.assertIn("\n[status:running]", printed)
+
+    def test_watch_task_reports_missing_task(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.get", side_effect=jarvis_cli.urllib.error.HTTPError(
+            url="http://127.0.0.1:8765/tasks/task-404",
+            code=404,
+            msg="Not Found",
+            hdrs=None,
+            fp=None,
+        )), patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = jarvis_cli.watch_task("task-404")
+
+        self.assertEqual(result, 1)
+        self.assertIn("task not found", stderr.getvalue())
+
+    def test_print_doctor_reports_runtime_findings(self):
+        import jarvis_cli
+
+        payloads = {
+            "/status": {
+                "status": "online",
+                "mode": "open-source",
+                "api_host": "127.0.0.1",
+                "api_port": 8765,
+                "local_available": False,
+                "local_vision": {"state": "unavailable", "selected_model": None, "preferred_model": "llava:7b"},
+            },
+            "/runtime/state": {
+                "state": {
+                    "managed_runtime": {"task_counts": {"total": 3, "running": 1, "queued": 1, "failed": 1, "cancelled": 0}},
+                    "persistence": {"persisted_api_endpoint": {"base_url": "http://127.0.0.1:8765"}},
+                }
+            },
+            "/local/capabilities": {
+                "capabilities": {
+                    "stt": {"active_engine": "unavailable", "local_available": False},
+                    "tts": {"ready": False, "engine": "say", "voice": "Samantha"},
+                    "semantic_memory": {"retrieval_backend": "tfidf", "entries_indexed": 12, "index_ready": False},
+                }
+            },
+            "/memory/status": {"status": {"facts": 5, "projects": 2, "conversation_summaries": 4, "long_term_profile_ready": False}},
+            "/vault": {"doc_count": 61, "wiki_page_count": 12, "citation_ready": True},
+            "/hooks/status": {"hooks": {"event_count": 7, "blocked_count": 2}},
+            "/cost-policy": {"policy": {"budget_pressure": True, "hard_budget": False, "training_action": "distill"}},
+        }
+
+        with patch("jarvis_cli.get", side_effect=lambda path: payloads[path]), \
+             patch("builtins.print") as print_mock:
+            jarvis_cli._print_doctor()
+
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Doctor", printed)
+        self.assertIn("API               : ONLINE @ 127.0.0.1:8765", printed)
+        self.assertIn("Semantic memory   : tfidf | indexed=12 | ready=no", printed)
+        self.assertIn("Findings          :", printed)
+        self.assertIn("local model routing is unavailable", printed)
+
+    def test_print_permissions_reports_gate_examples(self):
+        import jarvis_cli
+
+        def _fake_shell(command, *, admin=False, cwd=None):
+            if command == "ls":
+                return {"ok": True, "rule": "allowed", "reason": ""}
+            if admin:
+                return {"ok": False, "rule": "protected_path_shell_requires_admin", "reason": "requires admin approval."}
+            return {"ok": False, "rule": "protected_path_shell", "reason": "blocked protected path"}
+
+        def _fake_write(path, *, source):
+            if path == "/etc/hosts":
+                return {"ok": False, "rule": "protected_path_write", "reason": "system path blocked"}
+            return {"ok": True, "rule": "allowed", "reason": ""}
+
+        def _fake_improve(target):
+            if target == "router.py":
+                return {"ok": True, "rule": "allowed", "reason": ""}
+            return {"ok": False, "rule": "self_improve_scope", "reason": "not in allowed scope"}
+
+        with patch("jarvis_cli.os.getcwd", return_value="/tmp/jarvis"), \
+             patch("behavior_hooks.max_permissive_profile_enabled", return_value=True), \
+             patch("safety_permissions.can_run_shell", side_effect=_fake_shell), \
+             patch("safety_permissions.can_write_file", side_effect=_fake_write), \
+             patch("safety_permissions.can_self_improve", side_effect=_fake_improve), \
+             patch("builtins.print") as print_mock:
+            jarvis_cli._print_permissions()
+
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Permissions", printed)
+        self.assertIn("Profile           : max-permissive", printed)
+        self.assertIn("Shell (normal)    : allowed [allowed]", printed)
+        self.assertIn("Write (protected) : blocked [protected_path_write]", printed)
+        self.assertIn("Self-improve stop : blocked [self_improve_scope]", printed)
 
 
 class ExtensionRegistryTests(unittest.TestCase):

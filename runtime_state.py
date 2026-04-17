@@ -170,6 +170,18 @@ def read_api_endpoint() -> dict[str, Any] | None:
     }
 
 
+def _pid_is_alive(pid: int | None) -> bool:
+    try:
+        if not pid:
+            return False
+        os.kill(int(pid), 0)
+        return True
+    except OSError:
+        return False
+    except (TypeError, ValueError):
+        return False
+
+
 def discover_api_endpoint() -> dict[str, Any] | None:
     candidates: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
@@ -190,7 +202,10 @@ def discover_api_endpoint() -> dict[str, Any] | None:
 
     metadata = read_api_endpoint()
     if metadata:
-        add_candidate(str(metadata["host"]), int(metadata["port"]))
+        if _pid_is_alive(metadata.get("pid")):
+            add_candidate(str(metadata["host"]), int(metadata["port"]))
+        else:
+            clear_api_endpoint()
 
     try:
         raw_port = port_file_path().read_text(encoding="utf-8").strip()
