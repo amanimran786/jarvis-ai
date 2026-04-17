@@ -5,6 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_APP="$ROOT/dist/Jarvis.app"
 APPLICATIONS_APP="$HOME/Applications/Jarvis.app"
 DESKTOP_APP="$HOME/Desktop/Jarvis.app"
+LOCAL_BIN_DIR="$HOME/.local/bin"
+CLI_LINK="$LOCAL_BIN_DIR/jarvis"
 STAMP_FILE="$ROOT/.jarvis_build_stamp"
 APPLICATIONS_ONLY=0
 if [[ "${1:-}" == "--applications-only" ]]; then
@@ -41,11 +43,19 @@ create_desktop_alias() {
   touch -h "$DESKTOP_APP" 2>/dev/null || true
 }
 
+install_cli_link() {
+  mkdir -p "$LOCAL_BIN_DIR"
+  rm -f "$CLI_LINK"
+  ln -s "$ROOT/jarvis" "$CLI_LINK"
+  chmod +x "$ROOT/jarvis" || true
+}
+
 printf '%s\n' "$(latest_source_stamp)" > "$STAMP_FILE"
 
 # Always keep Desktop pointed at the exact same app bundle in ~/Applications so
 # launch behavior and icon identity are consistent.
 create_desktop_alias
+install_cli_link
 
 /usr/bin/qlmanage -r cache >/dev/null 2>&1 || true
 
@@ -53,3 +63,5 @@ echo "Installed Jarvis.app to:"
 echo "  $APPLICATIONS_APP"
 echo "Desktop shortcut:"
 echo "  $DESKTOP_APP -> $APPLICATIONS_APP"
+echo "CLI launcher:"
+echo "  $CLI_LINK -> $ROOT/jarvis"

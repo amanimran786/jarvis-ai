@@ -2496,6 +2496,45 @@ class MainStartupGuardTests(unittest.TestCase):
         self.assertIn("NSContactsUsageDescription", spec_text)
         self.assertIn("NSAppleEventsUsageDescription", spec_text)
 
+    def test_interactive_console_command_includes_runtime_endpoint_and_console_flag(self):
+        import main
+
+        with patch("main.runtime_state.read_api_endpoint", return_value={"base_url": "http://127.0.0.1:8765", "token": "abc"}), \
+             patch.object(main.sys, "executable", "/usr/bin/python3"), \
+             patch.object(main.sys, "frozen", False, create=True):
+            command = main._interactive_console_command()
+
+        self.assertIn("JARVIS_API_BASE_URL", command)
+        self.assertIn("http://127.0.0.1:8765", command)
+        self.assertIn("JARVIS_API_TOKEN", command)
+        self.assertIn("abc", command)
+        self.assertIn("--console", command)
+
+    def test_ensure_terminal_console_connected_launches_terminal_when_missing(self):
+        import main
+
+        with patch.object(main.sys, "argv", ["main.py"]), \
+             patch.object(main.sys, "platform", "darwin"), \
+             patch("main._interactive_console_already_running", return_value=False), \
+             patch("main._interactive_console_command", return_value="python main.py --console"), \
+             patch.dict("main.os.environ", {}, clear=True), \
+             patch("terminal.run_command_in_terminal_app") as run_mock:
+            main._ensure_terminal_console_connected()
+
+        run_mock.assert_called_once()
+        self.assertIn("python main.py --console", run_mock.call_args.args[0])
+
+    def test_ensure_terminal_console_connected_skips_when_console_already_running(self):
+        import main
+
+        with patch.object(main.sys, "argv", ["main.py"]), \
+             patch.object(main.sys, "platform", "darwin"), \
+             patch("main._interactive_console_already_running", return_value=True), \
+             patch("terminal.run_command_in_terminal_app") as run_mock:
+            main._ensure_terminal_console_connected()
+
+        run_mock.assert_not_called()
+
     def test_packaged_app_bundles_local_stt_modules(self):
         spec_text = (Path(_REPO_ROOT) / "Jarvis.spec").read_text(encoding="utf-8")
 
@@ -2664,6 +2703,73 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(captured["body"]["answer"], "Ideal answer")
         self.assertEqual(captured["body"]["source"], "manual_teacher")
         self.assertIn("codex", captured["body"]["tags"])
+
+    def test_console_command_routes_plain_text_to_stream_chat(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._stream_chat", return_value=0) as stream_mock:
+            result = jarvis_cli._handle_console_command("explain optimistic locking")
+
+        self.assertEqual(result, 0)
+        stream_mock.assert_called_once_with("explain optimistic locking")
+
+    def test_console_command_routes_task_slash_command(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.stream_task", return_value=0) as task_mock:
+            result = jarvis_cli._handle_console_command("/task fix the auth middleware")
+
+        self.assertEqual(result, 0)
+        task_mock.assert_called_once_with("fix the auth middleware")
+
+    def test_console_command_routes_code_slash_command_to_isolated_workspace(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.stream_task", return_value=0) as task_mock:
+            result = jarvis_cli._handle_console_command("/code refactor the queue worker")
+
+        self.assertEqual(result, 0)
+        task_mock.assert_called_once_with(
+            "refactor the queue worker",
+            kind="code",
+            terse_mode="full",
+            isolated_workspace=True,
+        )
+
+    def test_console_command_sets_effort_level(self):
+        import jarvis_cli
+
+        jarvis_cli._CONSOLE_STATE["effort"] = "medium"
+        result = jarvis_cli._handle_console_command("/effort high")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(jarvis_cli._CONSOLE_STATE["effort"], "high")
+
+    def test_interactive_console_exits_on_exit_command(self):
+        import jarvis_cli
+
+        with patch("builtins.input", side_effect=["/exit"]):
+            result = jarvis_cli.run_interactive_console()
+
+        self.assertEqual(result, 0)
+
+    def test_ensure_daemon_running_boots_local_daemon_when_missing(self):
+        import jarvis_cli
+
+        with patch("runtime_state.discover_api_endpoint", side_effect=[None, {"base_url": "http://127.0.0.1:8765"}]), \
+             patch("jarvis_daemon.start_daemon") as start_mock:
+            ok = jarvis_cli._ensure_daemon_running(reason="unit_test")
+
+        self.assertTrue(ok)
+        start_mock.assert_called_once_with(reason="unit_test")
+
+    def test_interactive_console_returns_error_when_daemon_cannot_start(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._ensure_daemon_running", return_value=False):
+            result = jarvis_cli.run_interactive_console()
+
+        self.assertEqual(result, 1)
 
 
 class ExtensionRegistryTests(unittest.TestCase):

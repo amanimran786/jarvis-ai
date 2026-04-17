@@ -124,6 +124,10 @@ def runtime_meta_path() -> Path:
     return app_data_dir() / ".jarvis_runtime.json"
 
 
+def console_meta_path() -> Path:
+    return app_data_dir() / ".jarvis_console.json"
+
+
 def write_api_endpoint(host: str, port: int, *, pid: int | None = None) -> None:
     metadata = {
         "host": host,
@@ -168,6 +172,58 @@ def read_api_endpoint() -> dict[str, Any] | None:
         "written_at": payload.get("written_at"),
         "base_url": f"http://{host}:{port}",
     }
+
+
+def write_console_session(command: str = "") -> None:
+    metadata = {
+        "pid": int(os.getpid()),
+        "command": command.strip(),
+        "written_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path = console_meta_path()
+    path.write_text(json.dumps(metadata), encoding="utf-8")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def read_console_session() -> dict[str, Any] | None:
+    try:
+        payload = json.loads(console_meta_path().read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    try:
+        pid = int(payload.get("pid"))
+    except (TypeError, ValueError):
+        return None
+    alive = True
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        alive = False
+    return {
+        "pid": pid,
+        "command": str(payload.get("command") or "").strip(),
+        "written_at": payload.get("written_at"),
+        "alive": alive,
+    }
+
+
+def clear_console_session() -> None:
+    path = console_meta_path()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if int(payload.get("pid")) != os.getpid():
+            return
+    except (FileNotFoundError, OSError, json.JSONDecodeError, TypeError, ValueError):
+        pass
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        pass
 
 
 def discover_api_endpoint() -> dict[str, Any] | None:

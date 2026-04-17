@@ -6,6 +6,8 @@ import sys
 import traceback
 import threading
 import faulthandler
+import shlex
+import subprocess
 
 # ── Clean shutdown — reap all multiprocessing children before exit ────────────
 def _reap_children() -> None:
@@ -90,6 +92,8 @@ def _ensure_supported_gui_runtime() -> None:
     if getattr(sys, "frozen", False):
         return
     if "--no-ui" in sys.argv:
+        return
+    if "--console" in sys.argv:
         return
     if not _is_conda_python():
         return
@@ -322,6 +326,82 @@ def _start_deferred_startup_tasks() -> None:
         name="JarvisStartupSetup",
     ).start()
 
+
+def _interactive_console_command() -> str:
+    api_base = ""
+    api_token = ""
+    try:
+        discovered = runtime_state.read_api_endpoint() or runtime_state.discover_api_endpoint() or {}
+        api_base = str(discovered.get("base_url") or "").strip()
+        api_token = str(discovered.get("token") or os.getenv("JARVIS_API_TOKEN", "")).strip()
+    except Exception:
+        pass
+
+    exports = []
+    if api_base:
+        exports.append(f"export JARVIS_API_BASE_URL={shlex.quote(api_base)}")
+    if api_token:
+        exports.append(f"export JARVIS_API_TOKEN={shlex.quote(api_token)}")
+    exports.append("export JARVIS_CONSOLE_ATTACHED=1")
+
+    if getattr(sys, "frozen", False):
+        runner = f"{shlex.quote(sys.executable)} --console"
+    else:
+        runner = f"{shlex.quote(sys.executable)} {shlex.quote(os.path.abspath(__file__))} --console"
+
+    prefix = " && ".join(exports)
+    return f"{prefix} && {runner}" if prefix else runner
+
+
+def _interactive_console_already_running() -> bool:
+    try:
+        session = runtime_state.read_console_session() or {}
+        if session.get("alive"):
+            return True
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["pgrep", "-fal", "--", "--console"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["pgrep", "-fal", "jarvis_cli.py --interactive"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _ensure_terminal_console_connected() -> None:
+    if "--no-ui" in sys.argv or "--console" in sys.argv:
+        return
+    if sys.platform != "darwin":
+        return
+    if os.getenv("JARVIS_DISABLE_AUTO_CONSOLE", "").lower() in {"1", "true", "yes", "on"}:
+        return
+    if _interactive_console_already_running():
+        return
+    try:
+        import terminal
+
+        command = _interactive_console_command()
+        terminal.run_command_in_terminal_app(command, cwd=os.path.dirname(os.path.abspath(__file__)))
+    except Exception:
+        traceback.print_exc()
+
 def _run():
     _ensure_supported_gui_runtime()
     _install_crash_logging()
@@ -331,9 +411,16 @@ def _run():
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
     _start_deferred_startup_tasks()
 
+    if "--console" in sys.argv:
+        from jarvis_cli import run_interactive_console
+
+        sys.exit(run_interactive_console())
+
     if "--no-ui" in sys.argv:
         _run_headless()
         return
+
+    _ensure_terminal_console_connected()
 
     from ui import run
     run()
