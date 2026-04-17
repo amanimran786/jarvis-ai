@@ -68,3 +68,7 @@ graphify-out/graph.html
 graphify-out/graph.svg
 graphify-out/graph.graphml
 graphify-out/cypher.txt
+
+# Obsidian local UI state
+vault/.obsidian/workspace.json
+vault/.obsidian/graph.json
