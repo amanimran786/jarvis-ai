@@ -929,6 +929,18 @@ def _is_direct_time_query(lower: str) -> bool:
     )
 
 
+def _parse_visible_terminal_command(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:open\s+terminal(?:\.app)?|open\s+the\s+terminal|in\s+terminal)\b.*?\b(?:run|execute|type)\b\s+(.+)$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    command = match.group(1).strip().strip("\"'`")
+    return command or None
+
+
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
@@ -1195,6 +1207,14 @@ def route_stream(user_input: str) -> tuple:
     # Clipboard
     if any(p in lower for p in ("what's in my clipboard", "read my clipboard", "what did i copy")):
         return _s(terminal.get_clipboard()), "Clipboard"
+
+    visible_terminal_command = _parse_visible_terminal_command(user_input)
+    if visible_terminal_command and not re.search(r"\b(if|when|how|should|could|would|can you)\b", visible_terminal_command.lower()):
+        output = terminal.run_command_in_terminal_app(visible_terminal_command)
+        return format_with_mini(
+            f"User asked Jarvis to open Terminal and run: '{visible_terminal_command}'. Result:\n{output}\nReport the result in one spoken sentence.",
+            skill_id=None, tool="terminal", extra_system=modifier_system, ground_query=user_input,
+        ), "Terminal"
 
     # Shell command — fast path so local model doesn't hallucinate instead of executing
     _shell_match = re.match(

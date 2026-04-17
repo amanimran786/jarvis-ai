@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 import tempfile
 import behavior_hooks as hooks
@@ -80,6 +81,52 @@ def run_admin_command(command: str) -> str:
         return "Admin command timed out waiting for approval or completion."
     except Exception as e:
         return f"Error running admin command: {e}"
+
+
+def run_command_in_terminal_app(command: str, cwd: str = None) -> str:
+    """
+    Open Terminal.app and execute a visible command in the foreground window.
+    This is for users who explicitly want to see the command run in Terminal,
+    rather than the default headless subprocess path.
+    """
+    gate = perms.can_run_shell(command, cwd=cwd, admin=False)
+    if not gate["ok"]:
+        return gate["reason"]
+    pattern = _contains_blocked_pattern(command)
+    if pattern:
+        return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
+    working_dir = os.path.expanduser(cwd or os.path.expanduser("~"))
+    visible_command = command.strip()
+    if not visible_command:
+        return "I need an exact terminal command to run."
+
+    if working_dir:
+        visible_command = f"cd {shlex.quote(working_dir)} && {visible_command}"
+
+    safe_command = _escape_applescript(visible_command)
+    script = f'''
+    tell application "Terminal"
+        activate
+        do script "{safe_command}"
+    end tell
+    '''
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        output = result.stdout.strip() or result.stderr.strip()
+        if result.returncode != 0:
+            return output or "Could not run the command in Terminal."
+        final = f"Opened Terminal and ran: {command}"
+        hooks.post_shell_command(command, final, admin=False)
+        return final
+    except subprocess.TimeoutExpired:
+        return "Opening Terminal timed out."
+    except Exception as e:
+        return f"Error running command in Terminal: {e}"
 
 
 def read_file(path: str) -> str:

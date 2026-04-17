@@ -19,6 +19,7 @@ dependencies (PyQt6, sounddevice, etc.).
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -527,6 +528,20 @@ class TerminalCommandGatingTests(unittest.TestCase):
         with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}):
             result = terminal.run_admin_command("rm -rf /etc")
         self.assertIn("Blocked", result)
+
+    def test_run_command_in_terminal_app_executes_visible_command(self):
+        import terminal
+        completed = subprocess.CompletedProcess(args=["osascript"], returncode=0, stdout="", stderr="")
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}), \
+             patch("terminal.subprocess.run", return_value=completed) as run_mock, \
+             patch("terminal.hooks.post_shell_command") as hook_mock:
+            result = terminal.run_command_in_terminal_app("pwd", cwd="/Users/truthseeker/jarvis-ai")
+        self.assertIn("Opened Terminal and ran: pwd", result)
+        script = run_mock.call_args.args[0]
+        self.assertEqual(script[:2], ["osascript", "-e"])
+        self.assertIn("do script", script[2])
+        self.assertIn("cd /Users/truthseeker/jarvis-ai && pwd", script[2])
+        hook_mock.assert_called_once()
 
 
 class TerminalWriteTests(unittest.TestCase):

@@ -266,6 +266,20 @@ def _run_operator_hook(task: str) -> dict | None:
             }
         return {"model": "native/operator", "output": terminal.run_command(command)}
 
+    visible_terminal_match = re.search(
+        r"\b(?:open\s+terminal(?:\.app)?|open\s+the\s+terminal|in\s+terminal)\b.*?\b(?:run|execute|type)\b\s+(.+)$",
+        task,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if visible_terminal_match:
+        command = visible_terminal_match.group(1).strip()
+        if _looks_like_admin_shell(command):
+            return {
+                "model": "native/operator",
+                "output": "Operator cannot run administrator commands in Terminal. Use the dedicated admin command path with the exact command instead.",
+            }
+        return {"model": "native/operator", "output": terminal.run_command_in_terminal_app(command)}
+
     browser_match = re.search(r"\b(?:browse to|open website|open site|go to)\b\s+(.+)$", task, flags=re.IGNORECASE)
     if browser_match:
         return {"model": "native/operator", "output": browser.open_url(browser_match.group(1).strip())}

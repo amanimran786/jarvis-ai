@@ -1002,6 +1002,14 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertEqual(result["output"], "/Users/truthseeker/jarvis-ai")
         run_mock.assert_called_once_with("pwd")
 
+    def test_operator_native_visible_terminal_hook_bypasses_model_call(self):
+        with patch("specialized_agent_native.terminal.run_command_in_terminal_app", return_value="Opened Terminal and ran: pwd") as run_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role("operator", "Open Terminal and run pwd")
+        self.assertEqual(result["model"], "native/operator")
+        self.assertEqual(result["output"], "Opened Terminal and ran: pwd")
+        run_mock.assert_called_once_with("pwd")
+
     def test_operator_native_terminal_hook_rejects_admin_command_text(self):
         with patch("specialized_agent_native.terminal.run_command", side_effect=AssertionError("should not run shell")), \
              patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
@@ -1467,6 +1475,16 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Time")
         self.assertIn("It's", text)
         open_mock.assert_not_called()
+
+    def test_open_terminal_and_run_command_uses_visible_terminal_path(self):
+        with patch("router.terminal.run_command_in_terminal_app", return_value="Opened Terminal and ran: pwd") as run_mock, \
+             patch("router.format_with_mini", return_value=iter(["Opened Terminal and ran pwd."])) as format_mock:
+            stream, label = router.route_stream("open terminal and run pwd")
+            text = "".join(stream)
+        self.assertEqual(label, "Terminal")
+        self.assertIn("Opened Terminal and ran pwd.", text)
+        run_mock.assert_called_once_with("pwd")
+        self.assertTrue(format_mock.called)
 
     def test_capability_boundaries_fast_path(self):
         stream, label = router.route_stream("What are your limitations and scope boundaries?")
