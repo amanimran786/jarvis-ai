@@ -1719,6 +1719,7 @@ class RuntimeEndpointDiscoveryTests(unittest.TestCase):
             return _Resp()
 
         with patch("runtime_state.read_api_endpoint", return_value={**metadata, "base_url": "http://127.0.0.1:8766"}), \
+             patch("runtime_state._pid_is_alive", return_value=True), \
              patch("runtime_state.port_file_path") as port_file_mock, \
              patch("runtime_state.urllib.request.urlopen", side_effect=_urlopen), \
              patch.dict(os.environ, {}, clear=True):
@@ -1752,8 +1753,59 @@ class RuntimeEndpointDiscoveryTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["port"], 8772)
 
+    def test_discover_api_endpoint_clears_stale_runtime_metadata(self):
+        import runtime_state
+
+        metadata = {
+            "host": "127.0.0.1",
+            "port": 8766,
+            "pid": 99999,
+            "written_at": "2026-04-09T00:00:00+00:00",
+            "base_url": "http://127.0.0.1:8766",
+        }
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"status": "online"}).encode("utf-8")
+
+        with patch("runtime_state.read_api_endpoint", return_value=metadata), \
+             patch("runtime_state._pid_is_alive", return_value=False), \
+             patch("runtime_state.clear_api_endpoint") as clear_mock, \
+             patch("runtime_state.port_file_path") as port_file_mock, \
+             patch("runtime_state.urllib.request.urlopen", return_value=_Resp()), \
+             patch.dict(os.environ, {}, clear=True):
+            port_file_mock.return_value.read_text.return_value = "8772"
+            result = runtime_state.discover_api_endpoint()
+
+        clear_mock.assert_called_once()
+        self.assertIsNotNone(result)
+        self.assertEqual(result["port"], 8772)
+
 
 class JarvisCliEndpointTests(unittest.TestCase):
+    def test_cli_reexecs_into_project_venv_when_available(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.os.path.exists", return_value=True), \
+             patch("jarvis_cli.os.path.realpath", side_effect=lambda p: p), \
+             patch.object(jarvis_cli.sys, "executable", "/opt/anaconda3/bin/python3"), \
+             patch.object(jarvis_cli.sys, "argv", ["jarvis_cli.py", "--interactive"]), \
+             patch.dict("jarvis_cli.os.environ", {}, clear=True), \
+             patch("jarvis_cli.os.execve") as execve_mock:
+            jarvis_cli._ensure_supported_cli_runtime()
+
+        execve_mock.assert_called_once_with(
+            "/Users/truthseeker/jarvis-ai/venv/bin/python",
+            ["/Users/truthseeker/jarvis-ai/venv/bin/python", "jarvis_cli.py", "--interactive"],
+            {"_JARVIS_CLI_REEXEC_ATTEMPTED": "1"},
+        )
+
     def test_auth_headers_use_runtime_token_when_present(self):
         import jarvis_cli
 
@@ -1834,6 +1886,27 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(captured["body"]["answer"], "Ideal answer")
         self.assertEqual(captured["body"]["source"], "manual_teacher")
         self.assertIn("codex", captured["body"]["tags"])
+
+    def test_console_run_command_uses_terminal_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.os.getcwd", return_value="/tmp/jarvis"), \
+             patch("terminal.run_command", return_value="ok") as run_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._handle_console_command("/run pwd")
+
+        self.assertEqual(result, 0)
+        run_mock.assert_called_once_with("pwd", cwd="/tmp/jarvis")
+        print_mock.assert_called_once_with("ok")
+
+    def test_bang_command_routes_to_shell_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_shell_command", return_value=0) as shell_mock:
+            result = jarvis_cli._handle_console_command("!pwd")
+
+        self.assertEqual(result, 0)
+        shell_mock.assert_called_once_with("pwd")
 
 
 class ExtensionRegistryTests(unittest.TestCase):
