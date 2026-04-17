@@ -2783,6 +2783,46 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertIn("Semantic memory   : tfidf | indexed=12 | ready=no", printed)
         self.assertIn("Findings          :", printed)
         self.assertIn("local model routing is unavailable", printed)
+        self.assertIn("Advisories        : 2 behavior-hook action(s) were blocked recently", printed)
+
+    def test_print_doctor_keeps_guardrail_blocks_out_of_findings_when_runtime_is_healthy(self):
+        import jarvis_cli
+
+        payloads = {
+            "/status": {
+                "status": "online",
+                "mode": "open-source",
+                "api_host": "127.0.0.1",
+                "api_port": 8765,
+                "local_available": True,
+                "local_vision": {"state": "ready", "selected_model": "llava:7b", "preferred_model": "llava:7b"},
+            },
+            "/runtime/state": {
+                "state": {
+                    "managed_runtime": {"task_counts": {"total": 1, "running": 0, "queued": 0, "failed": 0, "cancelled": 0}},
+                    "persistence": {"persisted_api_endpoint": {"base_url": "http://127.0.0.1:8765"}},
+                }
+            },
+            "/local/capabilities": {
+                "capabilities": {
+                    "stt": {"active_engine": "faster-whisper", "local_available": True},
+                    "tts": {"ready": True, "engine": "say", "voice": "Samantha"},
+                    "semantic_memory": {"retrieval_backend": "ollama-embeddings", "entries_indexed": 42, "index_ready": True},
+                }
+            },
+            "/memory/status": {"status": {"facts": 5, "projects": 2, "conversation_summaries": 4, "long_term_profile_ready": True}},
+            "/vault": {"doc_count": 61, "wiki_page_count": 12, "citation_ready": True},
+            "/hooks/status": {"hooks": {"event_count": 7, "blocked_count": 2}},
+            "/cost-policy": {"policy": {"budget_pressure": False, "hard_budget": False, "training_action": "none"}},
+        }
+
+        with patch("jarvis_cli.get", side_effect=lambda path: payloads[path]), \
+             patch("builtins.print") as print_mock:
+            jarvis_cli._print_doctor()
+
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Findings          : no obvious runtime blockers", printed)
+        self.assertIn("Advisories        : 2 behavior-hook action(s) were blocked recently", printed)
 
     def test_print_permissions_reports_gate_examples(self):
         import jarvis_cli
