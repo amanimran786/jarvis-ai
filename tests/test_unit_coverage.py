@@ -1927,6 +1927,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         cancel_mock.assert_called_once_with("task-123")
 
+    def test_doctor_command_routes_to_doctor_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_doctor") as doctor_mock:
+            result = jarvis_cli._handle_console_command("/doctor")
+
+        self.assertEqual(result, 0)
+        doctor_mock.assert_called_once_with()
+
+    def test_permissions_command_routes_to_permissions_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_permissions") as permissions_mock:
+            result = jarvis_cli._handle_console_command("/permissions")
+
+        self.assertEqual(result, 0)
+        permissions_mock.assert_called_once_with()
+
     def test_cancel_task_posts_cancel_endpoint(self):
         import jarvis_cli
 
@@ -1987,6 +2005,83 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn("task not found", stderr.getvalue())
+
+    def test_print_doctor_reports_runtime_findings(self):
+        import jarvis_cli
+
+        payloads = {
+            "/status": {
+                "status": "online",
+                "mode": "open-source",
+                "api_host": "127.0.0.1",
+                "api_port": 8765,
+                "local_available": False,
+                "local_vision": {"state": "unavailable", "selected_model": None, "preferred_model": "llava:7b"},
+            },
+            "/runtime/state": {
+                "state": {
+                    "managed_runtime": {"task_counts": {"total": 3, "running": 1, "queued": 1, "failed": 1, "cancelled": 0}},
+                    "persistence": {"persisted_api_endpoint": {"base_url": "http://127.0.0.1:8765"}},
+                }
+            },
+            "/local/capabilities": {
+                "capabilities": {
+                    "stt": {"active_engine": "unavailable", "local_available": False},
+                    "tts": {"ready": False, "engine": "say", "voice": "Samantha"},
+                    "semantic_memory": {"retrieval_backend": "tfidf", "entries_indexed": 12, "index_ready": False},
+                }
+            },
+            "/memory/status": {"status": {"facts": 5, "projects": 2, "conversation_summaries": 4, "long_term_profile_ready": False}},
+            "/vault": {"doc_count": 61, "wiki_page_count": 12, "citation_ready": True},
+            "/hooks/status": {"hooks": {"event_count": 7, "blocked_count": 2}},
+            "/cost-policy": {"policy": {"budget_pressure": True, "hard_budget": False, "training_action": "distill"}},
+        }
+
+        with patch("jarvis_cli.get", side_effect=lambda path: payloads[path]), \
+             patch("builtins.print") as print_mock:
+            jarvis_cli._print_doctor()
+
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Doctor", printed)
+        self.assertIn("API               : ONLINE @ 127.0.0.1:8765", printed)
+        self.assertIn("Semantic memory   : tfidf | indexed=12 | ready=no", printed)
+        self.assertIn("Findings          :", printed)
+        self.assertIn("local model routing is unavailable", printed)
+
+    def test_print_permissions_reports_gate_examples(self):
+        import jarvis_cli
+
+        def _fake_shell(command, *, admin=False, cwd=None):
+            if command == "ls":
+                return {"ok": True, "rule": "allowed", "reason": ""}
+            if admin:
+                return {"ok": False, "rule": "protected_path_shell_requires_admin", "reason": "requires admin approval."}
+            return {"ok": False, "rule": "protected_path_shell", "reason": "blocked protected path"}
+
+        def _fake_write(path, *, source):
+            if path == "/etc/hosts":
+                return {"ok": False, "rule": "protected_path_write", "reason": "system path blocked"}
+            return {"ok": True, "rule": "allowed", "reason": ""}
+
+        def _fake_improve(target):
+            if target == "router.py":
+                return {"ok": True, "rule": "allowed", "reason": ""}
+            return {"ok": False, "rule": "self_improve_scope", "reason": "not in allowed scope"}
+
+        with patch("jarvis_cli.os.getcwd", return_value="/tmp/jarvis"), \
+             patch("behavior_hooks.max_permissive_profile_enabled", return_value=True), \
+             patch("safety_permissions.can_run_shell", side_effect=_fake_shell), \
+             patch("safety_permissions.can_write_file", side_effect=_fake_write), \
+             patch("safety_permissions.can_self_improve", side_effect=_fake_improve), \
+             patch("builtins.print") as print_mock:
+            jarvis_cli._print_permissions()
+
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Permissions", printed)
+        self.assertIn("Profile           : max-permissive", printed)
+        self.assertIn("Shell (normal)    : allowed [allowed]", printed)
+        self.assertIn("Write (protected) : blocked [protected_path_write]", printed)
+        self.assertIn("Self-improve stop : blocked [self_improve_scope]", printed)
 
 
 class ExtensionRegistryTests(unittest.TestCase):
