@@ -63,6 +63,8 @@ def _pack_id_for_query(user_input: str) -> str | None:
     lower = user_input.lower()
     if "youtube" in lower and any(term in lower for term in ("pem", "policy enforcement manager", "age appropriateness")):
         return "youtube_pem_2026"
+    if "youtube" in lower and any(term in lower for term in ("interview", "prep", "prepare", "google")):
+        return "youtube_pem_2026"
     return _active_pack_id()
 
 
@@ -223,6 +225,68 @@ def _company_variant_hint(user_input: str) -> str:
     if not guidance:
         return ""
     return f"Company-targeted brain note guidance: {guidance}"
+
+
+def _dedupe_sentences(parts: list[str]) -> str:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for part in parts:
+        cleaned = re.sub(r"\s+", " ", (part or "").strip())
+        if not cleaned:
+            continue
+        key = cleaned.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(cleaned)
+    return " ".join(ordered)
+
+
+def _youtube_question_map_text() -> str:
+    questions = [
+        ("Q1", "Why YouTube / why this role", "Lead with B4 (YouTube origin story), then tie it to kids-and-teens safety and AI-generated harm."),
+        ("Q2", "Tell me about yourself", "Use the YouTube-rooted arc, then show the systems layer from Meta, TikTok, Google Play, and AI safety work."),
+        ("Q3", "Own quality / calibration at scale", "Lead with B1 (Meta calibration) and make the mechanism concrete: IRR, blind audits, recalibration, outcome."),
+        ("Q4", "Investigate a spike in removal decisions", "Use the spike-diagnosis framework and anchor it to B2 (TikTok false positive spike)."),
+        ("Q5", "Precision vs recall for age-appropriateness", "Show the tradeoff changes by harm severity, then make creator, user, and advertiser impact explicit."),
+        ("Q6", "Consistency across reviewers, vendors, languages", "Keep the answer on guidance clarity, gold standards, IRR, and recalibration rather than blaming reviewers."),
+        ("Q7", "Working with engineering on classifier accuracy", "Use B3 and frame the tradeoff across user harm, creator burden, and advertiser confidence."),
+        ("Q8", "AI-generated content and new threat patterns", "Use B5 as supporting credibility, but keep the answer operational and applied to YouTube surfaces."),
+        ("Q9", "Why now / leaving Anthropic", "Frame it as a full-circle return with stronger calibration, AI safety, and systems depth."),
+    ]
+    return "\n".join(f"- {label} — {title}: {guidance}" for label, title, guidance in questions)
+
+
+def _youtube_story_bank_quick_reference_text() -> str:
+    stories = [
+        ("Story A", "Meta calibration", "quality ownership, IRR drift, guidance clarity, measurable enforcement improvement"),
+        ("Story B", "TikTok false positive spike", "data diagnosis, classifier-boundary shift, labeled dataset, SQL automation"),
+        ("Story C", "Engineering pushback", "cross-functional influence, review-volume tradeoffs, stakeholder framing"),
+        ("Story D", "YouTube origin story", "why YouTube, why this role, child-safety grounding, full-circle return"),
+        ("Story E", "Anthropic novel pattern", "AI-generated harm, jailbreaks, prompt injection, cross-functional escalation"),
+    ]
+    return "\n".join(f"- {label} — {title}: {why}" for label, title, why in stories)
+
+
+def _youtube_interview_prep_packet() -> str:
+    return (
+        "For this interview, prep it as a deterministic packet, not a loose narrative.\n\n"
+        "**Required Skills - Quick Check**\n"
+        "- Enforcement judgment in child-safety or age-sensitive contexts\n"
+        "- Quality systems ownership: IRR, audits, calibration, overturn-rate thinking\n"
+        "- Data fluency: SQL, labeled datasets, trend diagnosis, anomaly investigation\n"
+        "- Cross-functional execution with policy and engineering\n"
+        "- Applied AI-generated-content judgment, not generic AI commentary\n\n"
+        "**Likely Question Map**\n"
+        f"{_youtube_question_map_text()}\n\n"
+        "**Story Bank - Quick Reference**\n"
+        f"{_youtube_story_bank_quick_reference_text()}\n\n"
+        "**What To Keep Sourced vs Inferred**\n"
+        "- Sourced: Neal Mohan kids-and-teens priority, AI-generated harm priority, YouTube inauthentic-content update, your real company history and metrics\n"
+        "- Inferred: likely interviewer emphasis, likely round order, and where Anthropic work best supports rather than leads\n\n"
+        "**Main Risk To Avoid**\n"
+        "- Do not let Anthropic or AI-safety language overpower the YouTube age-appropriateness core. Lead with YouTube-rooted judgment, then layer AI-safety relevance in support."
+    )
 
 
 def _proof_points_line(limit: int = 3) -> str:
@@ -1106,13 +1170,17 @@ def is_situational_query(lower: str) -> bool:
 
 
 def interview_prep_text(user_input: str) -> str:
+    if _is_youtube_age_role(user_input):
+        return _youtube_interview_prep_packet()
+
     role_pack = target_role_pack_text(user_input)
     playbook_hint = _interview_playbook_hint(user_input)
     story_hint = _story_bank_fit_text(user_input)
+    candidate_hint = _candidate_profile_hint(user_input)
+    combined_hint = _dedupe_sentences([role_pack, playbook_hint, candidate_hint])
     return (
         "For this interview, I would prep it as company-specific intelligence, not a generic script. "
-        f"{role_pack} "
-        f"{playbook_hint} "
+        f"{combined_hint} "
         f"The proof points I would keep at the center are {_proof_points_line()}. "
         f"{story_hint} "
         "The next prep pass should explicitly cover likely rounds, likely question categories, story mapping, and any honest gaps we still need to frame around."

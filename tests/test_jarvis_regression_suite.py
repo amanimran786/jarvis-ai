@@ -1402,9 +1402,14 @@ class InterviewProfileTests(unittest.TestCase):
 
     def test_interview_prep_text_uses_playbook_rules_and_role_pack(self):
         text = interview_profile.interview_prep_text("Help me prep for the YouTube Policy Enforcement Manager interview.")
-        self.assertIn("company-specific intelligence", text.lower())
-        self.assertIn("sourced findings", text.lower())
-        self.assertIn("Policy Enforcement Manager, Age Appropriateness", text)
+        self.assertIn("Required Skills - Quick Check", text)
+        self.assertIn("Likely Question Map", text)
+        self.assertIn("Story Bank - Quick Reference", text)
+        self.assertIn("Q1 — Why YouTube / why this role", text)
+        self.assertIn("Q9 — Why now / leaving Anthropic", text)
+        self.assertEqual(text.count("Q1 —"), 1)
+        self.assertEqual(text.count("Q9 —"), 1)
+        self.assertIn("Sourced", text)
 
     def test_application_states_text_uses_normalized_statuses(self):
         text = interview_profile.application_states_text()
@@ -1414,8 +1419,8 @@ class InterviewProfileTests(unittest.TestCase):
     def test_answer_for_query_routes_interview_prep_and_application_states(self):
         prep = interview_profile.answer_for_query("How should I prep for this interview at YouTube?")
         states = interview_profile.answer_for_query("What application states should I use?")
-        self.assertIn("likely rounds", prep.lower())
-        self.assertIn("sourced findings", prep.lower())
+        self.assertIn("Likely Question Map", prep)
+        self.assertIn("Story Bank - Quick Reference", prep)
         self.assertIn("normalized", states.lower())
 
     def test_situational_framework_for_spike_mentions_characterize_and_timing(self):
@@ -1709,8 +1714,9 @@ class RouterTests(unittest.TestCase):
         stream, label = router.route_stream("Help me prep for the YouTube Policy Enforcement Manager interview.")
         text = "".join(stream)
         self.assertEqual(label, "Interview")
-        self.assertIn("company-specific intelligence", text.lower())
-        self.assertIn("sourced findings", text.lower())
+        self.assertIn("Required Skills - Quick Check", text)
+        self.assertIn("Likely Question Map", text)
+        self.assertIn("Q8 — AI-generated content and new threat patterns", text)
 
     def test_application_states_fast_path(self):
         stream, label = router.route_stream("What application states should I use?")
