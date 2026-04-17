@@ -268,9 +268,27 @@ def _youtube_story_bank_quick_reference_text() -> str:
     return "\n".join(f"- {label} — {title}: {why}" for label, title, why in stories)
 
 
+def _youtube_brain_grounding_text() -> str:
+    parts = []
+    variant = _company_variant_hint("youtube policy enforcement manager age appropriateness")
+    role = _role_targeting_hint("youtube policy enforcement manager age appropriateness")
+    for part in (variant, role):
+        cleaned = re.sub(r"^(Company-targeted brain note guidance:|Role-targeting guidance:)\s*", "", (part or "")).strip()
+        if cleaned:
+            parts.append(cleaned)
+    return _dedupe_sentences(parts)
+
+
 def _youtube_interview_prep_packet() -> str:
+    brain_grounding = _youtube_brain_grounding_text()
+    grounding_block = (
+        f"**Brain-grounded positioning**\n- {brain_grounding}\n\n"
+        if brain_grounding
+        else ""
+    )
     return (
         "For this interview, prep it as a deterministic packet, not a loose narrative.\n\n"
+        f"{grounding_block}"
         "**Required Skills - Quick Check**\n"
         "- Enforcement judgment in child-safety or age-sensitive contexts\n"
         "- Quality systems ownership: IRR, audits, calibration, overturn-rate thinking\n"

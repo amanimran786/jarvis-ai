@@ -909,13 +909,18 @@ def format_with_mini(
 ):
     """Format tool output with free-first routing for lightweight generation."""
     import memory as _mem
+
+    intent_query = ground_query or prompt
     context = _mem.get_context()
-    system_extra, _ = skills.build_system_extra(prompt, skill_id=skill_id, tool=tool)
-    technical_summary = bool(ground_query and _is_engineering_companion_query(ground_query, "chat"))
+    system_extra, _ = skills.build_system_extra(intent_query, skill_id=skill_id, tool=tool)
+    technical_summary = bool(intent_query and _is_engineering_companion_query(intent_query, "chat"))
     if technical_summary:
-        engineering_extra = _engineering_companion_grounding(ground_query)
+        engineering_extra = _engineering_companion_grounding(intent_query)
         if engineering_extra:
             system_extra = engineering_extra + ("\n\n" + system_extra if system_extra else "")
+    vault_extra = vault.build_context(intent_query, tool=tool)
+    if vault_extra:
+        system_extra = vault_extra + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     if technical_summary:
@@ -928,7 +933,7 @@ def format_with_mini(
     if context:
         prompt = prompt + f"\n\nUser context for personalization:{context}"
     local_available = _has_local()
-    local_model = _best_local(prompt) if local_available else ""
+    local_model = _best_local(intent_query) if local_available else ""
     plan = provider_router.build_plan(
         mode=_current_mode,
         tier="mini",

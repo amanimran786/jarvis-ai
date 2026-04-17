@@ -1453,6 +1453,21 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Status")
         self.assertIn("cost policy", text.lower())
 
+    def test_direct_time_query_uses_local_clock_fast_path(self):
+        stream, label = router.route_stream("what time is it")
+        text = "".join(stream)
+        self.assertEqual(label, "Time")
+        self.assertIn("It's", text)
+        self.assertIn(" on ", text)
+
+    def test_lookup_time_query_does_not_open_browser(self):
+        with patch("router.browser.open_url") as open_mock:
+            stream, label = router.route_stream("if you have access to the internet look up the time")
+            text = "".join(stream)
+        self.assertEqual(label, "Time")
+        self.assertIn("It's", text)
+        open_mock.assert_not_called()
+
     def test_capability_boundaries_fast_path(self):
         stream, label = router.route_stream("What are your limitations and scope boundaries?")
         text = "".join(stream)
@@ -3047,6 +3062,7 @@ class ModelRouterFallbackTests(unittest.TestCase):
             with patch("model_router._has_local", return_value=True), \
                  patch("model_router._best_local", return_value="jarvis-local"), \
                  patch("model_router._mem.get_context", return_value=""), \
+                 patch("model_router.vault.build_context", return_value="Relevant local vault context with citations:\n[09 Jarvis Repo Map] repo map"), \
                  patch("model_router.vault.search", side_effect=[
                      [{"title": "Senior Cybersecurity AI Engineering Companion", "path": "wiki/brain/73 Senior Cybersecurity AI Engineering Companion.md", "excerpt": "Jarvis should behave like a local-first senior technical companion who can move across cybersecurity, AI safety, backend and systems engineering."}],
                      [{"title": "Universal Engineer Thinker Problem Solver", "path": "wiki/brain/74 Universal Engineer Thinker Problem Solver.md", "excerpt": "Jarvis should diagnose problems clearly, identify the real failing layer, and choose the smallest correct next step."}],
@@ -3071,6 +3087,31 @@ class ModelRouterFallbackTests(unittest.TestCase):
         injected = ask_mock.call_args.kwargs["system_extra"]
         self.assertIn("Engineering companion guidance", injected)
         self.assertIn("Systems Design Tradeoff Heuristics", injected)
+        self.assertIn("Relevant local vault context with citations", injected)
+
+    def test_format_with_mini_uses_ground_query_for_skill_and_vault_grounding(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("model_router._has_local", return_value=True), \
+                 patch("model_router._best_local", return_value="jarvis-local"), \
+                 patch("model_router._mem.get_context", return_value=""), \
+                 patch("model_router.skills.build_system_extra", return_value=("skill grounding", None)) as skills_mock, \
+                 patch("model_router.vault.build_context", return_value="vault grounding") as vault_mock, \
+                 patch("model_router.ask_local_stream", return_value=iter(["Grounded summary."])):
+                text = "".join(
+                    model_router.format_with_mini(
+                        "Summarize this output.",
+                        tool="terminal",
+                        ground_query="How should I prep for the YouTube interview?",
+                    )
+                )
+        finally:
+            model_router.set_mode(previous)
+
+        self.assertIn("Grounded summary.", text)
+        skills_mock.assert_called_once_with("How should I prep for the YouTube interview?", skill_id=None, tool="terminal")
+        vault_mock.assert_called_once_with("How should I prep for the YouTube interview?", tool="terminal")
 
 
 class OverlayTechnicalGuidanceTests(unittest.TestCase):
@@ -3145,6 +3186,13 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
 
 
 class InterviewProfileBrainRegressionTests(unittest.TestCase):
+    def test_interview_profile_reply_includes_vault_context(self):
+        with patch("router.vault.build_context", return_value="Relevant local vault context with citations:\n[64 YouTube Policy Variant] YouTube-specific positioning."), \
+             patch("router._smem.context_for_query", return_value=""):
+            text = router._interview_profile_reply("Help me prep for the YouTube Policy Enforcement Manager interview.")
+        self.assertIn("Relevant local vault context with citations", text)
+        self.assertIn("64 YouTube Policy Variant", text)
+
     def test_openai_variant_path_is_selected_for_openai_queries(self):
         path = interview_profile._brain_variant_path("Why am I a fit for OpenAI trust and safety operations?")
         self.assertEqual(path, interview_profile.OPENAI_VARIANT)

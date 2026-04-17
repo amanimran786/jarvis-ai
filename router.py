@@ -528,6 +528,9 @@ def _personal_interest_reply() -> str:
 
 def _interview_profile_reply(user_input: str) -> str:
     base = interview_profile.answer_for_query(user_input)
+    vault_ctx = vault.build_context(user_input, tool="knowledge", topn=2)
+    if vault_ctx:
+        base = base + "\n\n" + vault_ctx
     # Enrich with any relevant semantic KB hits not already covered by the profile
     smem_ctx = _smem.context_for_query(user_input, top_k=2, max_chars=600)
     if smem_ctx:
@@ -869,10 +872,9 @@ def _tool_hint(text: str) -> str | None:
 
 def _dispatch_single_intent(query: str) -> str | None:
     """Directly dispatch a single-tool query without going through the full router."""
-    from datetime import datetime
     hint = _tool_hint(query)
     if hint == "time":
-        return f"It's {datetime.now().strftime('%-I:%M %p')}."
+        return _current_time_text()
     if hint == "weather":
         try:
             return tools.get_weather()
@@ -903,6 +905,28 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
     if hint_a and hint_b and hint_a != hint_b:
         return [a, b]
     return None
+
+
+def _current_time_text() -> str:
+    from datetime import datetime
+
+    now = datetime.now().astimezone()
+    return f"It's {now.strftime('%-I:%M %p %Z on %A, %B %-d')}."
+
+
+def _is_direct_time_query(lower: str) -> bool:
+    return any(
+        re.search(pattern, lower)
+        for pattern in (
+            r"\bwhat time is it\b",
+            r"\bwhat(?:'s| is) the time\b",
+            r"\bcurrent time\b",
+            r"\btell me the time\b",
+            r"\bcheck the time\b",
+            r"\btime right now\b",
+            r"\blook up the time\b",
+        )
+    )
 
 
 # ── Main entry ────────────────────────────────────────────────────────────────
@@ -1004,6 +1028,8 @@ def route_stream(user_input: str) -> tuple:
         texts = [_dispatch_single_intent(p) for p in multi_parts]
         if all(t is not None for t in texts):
             return _s(" ".join(texts)), "Multi"
+    if _is_direct_time_query(lower):
+        return _s(_current_time_text()), "Time"
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 
