@@ -24,6 +24,18 @@ _TASK_EVENTS: dict[str, list[dict[str, Any]]] = {}
 _TASK_THREADS: dict[str, threading.Thread] = {}
 
 _TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled"}
+_BLOCKED_ERROR_MARKERS = (
+    "blocked",
+    "blocker",
+    "approval",
+    "permission",
+    "denied",
+    "not installed",
+    "not found",
+    "missing",
+    "unavailable",
+    "requires review",
+)
 
 _TERSE_PREFIXES = {
     "lite": "CAVEMAN LITE",
@@ -105,8 +117,12 @@ def _default_agents() -> list[dict[str, Any]]:
             "kind": "system",
             "owner": "jarvis",
             "status": "idle",
+            "lifecycle_state": "available",
             "capabilities": ["chat", "routing", "reasoning"],
             "current_task_id": "",
+            "current_task_lifecycle_state": "",
+            "last_task_lifecycle_state": "",
+            "blocked_reason": "",
             "last_heartbeat_at": _now(),
             "last_error": "",
             "meta": {"source": "router", "mode": "daemon"},
@@ -117,8 +133,12 @@ def _default_agents() -> list[dict[str, Any]]:
             "kind": "system",
             "owner": "jarvis",
             "status": "idle",
+            "lifecycle_state": "available",
             "capabilities": ["transcript", "suggestion", "call_assist"],
             "current_task_id": "",
+            "current_task_lifecycle_state": "",
+            "last_task_lifecycle_state": "",
+            "blocked_reason": "",
             "last_heartbeat_at": _now(),
             "last_error": "",
             "meta": {"source": "meeting_listener", "mode": "background"},
@@ -129,8 +149,12 @@ def _default_agents() -> list[dict[str, Any]]:
             "kind": "system",
             "owner": "jarvis",
             "status": "idle",
+            "lifecycle_state": "available",
             "capabilities": ["vault", "memory", "grounding"],
             "current_task_id": "",
+            "current_task_lifecycle_state": "",
+            "last_task_lifecycle_state": "",
+            "blocked_reason": "",
             "last_heartbeat_at": _now(),
             "last_error": "",
             "meta": {"source": "vault", "mode": "daemon"},
@@ -141,8 +165,12 @@ def _default_agents() -> list[dict[str, Any]]:
             "kind": "system",
             "owner": "jarvis",
             "status": "idle",
+            "lifecycle_state": "available",
             "capabilities": ["bridge", "devices", "remote_access"],
             "current_task_id": "",
+            "current_task_lifecycle_state": "",
+            "last_task_lifecycle_state": "",
+            "blocked_reason": "",
             "last_heartbeat_at": _now(),
             "last_error": "",
             "meta": {"source": "hardware", "mode": "daemon"},
@@ -201,7 +229,16 @@ def bootstrap(force_reset: bool = False) -> None:
             _append_event(task_id, "error", status="failed", error="daemon_restart", reason="daemon_restart")
             agent_id = task.get("assigned_agent_id", "")
             if agent_id:
-                _touch_agent(agent_id, status="idle", current_task_id="", last_error="daemon_restart")
+                _touch_agent(
+                    agent_id,
+                    status="idle",
+                    lifecycle_state="available",
+                    current_task_id="",
+                    current_task_lifecycle_state="",
+                    last_task_lifecycle_state="failed",
+                    blocked_reason="",
+                    last_error="daemon_restart",
+                )
         _BOOTSTRAPPED = True
 
 
@@ -222,6 +259,28 @@ def _append_event(task_id: str, event_type: str, **payload: Any) -> dict[str, An
     return event
 
 
+def _looks_blocked_error(error: str) -> bool:
+    lower = str(error or "").strip().lower()
+    return bool(lower) and any(marker in lower for marker in _BLOCKED_ERROR_MARKERS)
+
+
+def _task_lifecycle_state(status: str, error: str = "") -> str:
+    normalized = (status or "").strip().lower()
+    if normalized == "queued":
+        return "queued"
+    if normalized == "assigned":
+        return "claimed"
+    if normalized in {"running", "streaming"}:
+        return "running"
+    if normalized == "succeeded":
+        return "completed"
+    if normalized == "cancelled":
+        return "cancelled"
+    if normalized == "failed":
+        return "blocked" if _looks_blocked_error(error) else "failed"
+    return normalized or "queued"
+
+
 def _persist_task(task_id: str) -> None:
     task = _TASKS.get(task_id)
     if not task:
@@ -229,14 +288,32 @@ def _persist_task(task_id: str) -> None:
     task_persistence.upsert_task(_sanitize_task_for_persistence(task))
 
 
-def _touch_agent(agent_id: str, *, status: str | None = None, current_task_id: str | None = None, last_error: str | None = None) -> None:
+def _touch_agent(
+    agent_id: str,
+    *,
+    status: str | None = None,
+    lifecycle_state: str | None = None,
+    current_task_id: str | None = None,
+    current_task_lifecycle_state: str | None = None,
+    last_task_lifecycle_state: str | None = None,
+    blocked_reason: str | None = None,
+    last_error: str | None = None,
+) -> None:
     agent = _AGENTS.get(agent_id)
     if not agent:
         return
     if status is not None:
         agent["status"] = status
+    if lifecycle_state is not None:
+        agent["lifecycle_state"] = lifecycle_state
     if current_task_id is not None:
         agent["current_task_id"] = current_task_id
+    if current_task_lifecycle_state is not None:
+        agent["current_task_lifecycle_state"] = current_task_lifecycle_state
+    if last_task_lifecycle_state is not None:
+        agent["last_task_lifecycle_state"] = last_task_lifecycle_state
+    if blocked_reason is not None:
+        agent["blocked_reason"] = blocked_reason
     if last_error is not None:
         agent["last_error"] = last_error
     agent["last_heartbeat_at"] = _now()
@@ -314,7 +391,12 @@ def list_tasks(limit: int = 25, status: str = "") -> list[dict[str, Any]]:
     with _LOCK:
         tasks = list(_TASKS.values())
         if status:
-            tasks = [task for task in tasks if task.get("status") == status]
+            normalized = status.strip().lower()
+            tasks = [
+                task
+                for task in tasks
+                if task.get("status") == normalized or task.get("lifecycle_state") == normalized
+            ]
         tasks.sort(key=lambda item: item.get("created_at", ""), reverse=True)
         return [_copy(task) for task in tasks[: max(limit, 1)]]
 
@@ -338,8 +420,16 @@ def _set_task_status(task_id: str, status: str, **updates: Any) -> None:
         return
     task["status"] = status
     task.update(updates)
+    task["lifecycle_state"] = _task_lifecycle_state(status, str(task.get("error") or ""))
+    task["blocked_reason"] = str(task.get("error") or "") if task["lifecycle_state"] == "blocked" else ""
     task["updated_at"] = _now()
-    _append_event(task_id, "status", status=status, updates=updates)
+    _append_event(
+        task_id,
+        "status",
+        status=status,
+        lifecycle_state=task["lifecycle_state"],
+        updates=updates,
+    )
     _persist_task(task_id)
 
 
@@ -347,9 +437,11 @@ def _complete_task(task_id: str, *, response: str, model: str, usage: dict[str, 
     task = _TASKS[task_id]
     task.update(
         status="succeeded",
+        lifecycle_state="completed",
         result=response,
         model=model,
         error="",
+        blocked_reason="",
         interaction_id=interaction_id,
         usage=_copy(usage),
         finished_at=_now(),
@@ -369,13 +461,16 @@ def _complete_task(task_id: str, *, response: str, model: str, usage: dict[str, 
 
 def _fail_task(task_id: str, error: str) -> None:
     task = _TASKS[task_id]
+    lifecycle_state = _task_lifecycle_state("failed", error)
     task.update(
         status="failed",
+        lifecycle_state=lifecycle_state,
         error=error,
+        blocked_reason=error if lifecycle_state == "blocked" else "",
         finished_at=_now(),
         updated_at=_now(),
     )
-    _append_event(task_id, "error", status="failed", error=error)
+    _append_event(task_id, "error", status="failed", lifecycle_state=lifecycle_state, error=error)
     _persist_task(task_id)
 
 
@@ -386,7 +481,15 @@ def _run_task(task_id: str) -> None:
             return
         agent_id = task["assigned_agent_id"]
         _set_task_status(task_id, "assigned", assigned_at=_now())
-        _touch_agent(agent_id, status="busy", current_task_id=task_id, last_error="")
+        _touch_agent(
+            agent_id,
+            status="busy",
+            lifecycle_state="claimed",
+            current_task_id=task_id,
+            current_task_lifecycle_state="claimed",
+            blocked_reason="",
+            last_error="",
+        )
 
     try:
         with _EXECUTION_LOCK:
@@ -394,8 +497,23 @@ def _run_task(task_id: str) -> None:
                 task = _TASKS[task_id]
                 if task.get("cancel_requested"):
                     _set_task_status(task_id, "cancelled", finished_at=_now())
+                    _touch_agent(
+                        agent_id,
+                        status="idle",
+                        lifecycle_state="available",
+                        current_task_id="",
+                        current_task_lifecycle_state="",
+                        last_task_lifecycle_state="cancelled",
+                    )
                     return
                 _set_task_status(task_id, "running", started_at=_now())
+                _touch_agent(
+                    agent_id,
+                    status="busy",
+                    lifecycle_state="running",
+                    current_task_id=task_id,
+                    current_task_lifecycle_state="running",
+                )
                 prompt = task.get("effective_prompt") or task["prompt"]
                 original_prompt = task["prompt"]
                 source = task["source"]
@@ -408,9 +526,24 @@ def _run_task(task_id: str) -> None:
                     task = _TASKS[task_id]
                     if task.get("cancel_requested"):
                         _set_task_status(task_id, "cancelled", finished_at=_now())
+                        _touch_agent(
+                            agent_id,
+                            status="idle",
+                            lifecycle_state="available",
+                            current_task_id="",
+                            current_task_lifecycle_state="",
+                            last_task_lifecycle_state="cancelled",
+                        )
                         return
                     if task["status"] != "streaming":
                         _set_task_status(task_id, "streaming")
+                        _touch_agent(
+                            agent_id,
+                            status="busy",
+                            lifecycle_state="running",
+                            current_task_id=task_id,
+                            current_task_lifecycle_state="running",
+                        )
                 chunks.append(chunk)
                 _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
 
@@ -438,7 +571,21 @@ def _run_task(task_id: str) -> None:
             agent_id = task.get("assigned_agent_id", "")
             if agent_id:
                 error = task.get("error", "") if task.get("status") == "failed" else ""
-                _touch_agent(agent_id, status="idle", current_task_id="", last_error=error)
+                lifecycle_state = "available"
+                last_task_state = str(task.get("lifecycle_state") or "")
+                blocked_reason = ""
+                if last_task_state == "blocked":
+                    blocked_reason = str(task.get("error") or "")
+                _touch_agent(
+                    agent_id,
+                    status="idle",
+                    lifecycle_state=lifecycle_state,
+                    current_task_id="",
+                    current_task_lifecycle_state="",
+                    last_task_lifecycle_state=last_task_state,
+                    blocked_reason=blocked_reason,
+                    last_error=error,
+                )
             _TASK_THREADS.pop(task_id, None)
 
 
@@ -468,6 +615,7 @@ def submit_task(
         "kind": normalized_kind,
         "source": source or "api",
         "status": "queued",
+        "lifecycle_state": "queued",
         "prompt": prompt,
         "effective_prompt": _task_prompt_for_kind(prompt, kind=normalized_kind, terse_mode=normalized_terse_mode),
         "assigned_agent_id": chosen_agent_id,
@@ -479,6 +627,7 @@ def submit_task(
         "result": "",
         "model": "",
         "error": "",
+        "blocked_reason": "",
         "interaction_id": "",
         "usage": {},
         "cancel_requested": False,
@@ -494,6 +643,7 @@ def submit_task(
             task_id,
             "status",
             status="queued",
+            lifecycle_state="queued",
             agent_id=chosen_agent_id,
             kind=task["kind"],
             source=task["source"],
@@ -522,7 +672,14 @@ def cancel_task(task_id: str) -> dict[str, Any] | None:
             _set_task_status(task_id, "cancelled", finished_at=_now())
             agent_id = task.get("assigned_agent_id", "")
             if agent_id:
-                _touch_agent(agent_id, status="idle", current_task_id="")
+                _touch_agent(
+                    agent_id,
+                    status="idle",
+                    lifecycle_state="available",
+                    current_task_id="",
+                    current_task_lifecycle_state="",
+                    last_task_lifecycle_state="cancelled",
+                )
         return _copy(task)
 
 
@@ -560,11 +717,29 @@ def runtime_snapshot() -> dict[str, Any]:
     bootstrap()
     with _LOCK:
         tasks = list(_TASKS.values())
+        lifecycle_counts = {
+            "queued": 0,
+            "claimed": 0,
+            "running": 0,
+            "blocked": 0,
+            "completed": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+        for task in tasks:
+            lifecycle = str(task.get("lifecycle_state") or _task_lifecycle_state(task.get("status", ""), str(task.get("error") or "")))
+            if lifecycle not in lifecycle_counts:
+                lifecycle_counts[lifecycle] = 0
+            lifecycle_counts[lifecycle] += 1
         active_tasks = [
             _copy(task)
             for task in tasks
             if task.get("status") not in _TERMINAL_TASK_STATUSES
         ]
+        agent_lifecycle_counts: dict[str, int] = {}
+        for agent in _AGENTS.values():
+            lifecycle = str(agent.get("lifecycle_state") or "available")
+            agent_lifecycle_counts[lifecycle] = agent_lifecycle_counts.get(lifecycle, 0) + 1
         return {
             "agents": [_copy(agent) for agent in _AGENTS.values()],
             "task_counts": {
@@ -575,6 +750,8 @@ def runtime_snapshot() -> dict[str, Any]:
                 "failed": sum(1 for task in tasks if task.get("status") == "failed"),
                 "cancelled": sum(1 for task in tasks if task.get("status") == "cancelled"),
             },
+            "lifecycle_counts": lifecycle_counts,
+            "agent_lifecycle_counts": agent_lifecycle_counts,
             "isolated_workspace_count": sum(
                 1
                 for task in tasks

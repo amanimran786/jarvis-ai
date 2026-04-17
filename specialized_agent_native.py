@@ -19,6 +19,7 @@ import tools
 import vault_capture
 import vault_context
 import vault_edit
+import vault_handoff
 import vault_health
 
 
@@ -75,6 +76,11 @@ def _run_vault_curator_hook(task: str) -> dict | None:
         context_pack_result = _build_context_pack(task)
         if context_pack_result is not None:
             return {"model": "native/vault_curator", "output": context_pack_result}
+
+    if "compact" in lower and "handoff" in lower:
+        handoff_pack_result = _compact_handoffs(task)
+        if handoff_pack_result is not None:
+            return {"model": "native/vault_curator", "output": handoff_pack_result}
 
     if "apply recommended action" in lower:
         recommended_result = _apply_recommended_action(task)
@@ -499,6 +505,24 @@ def _build_context_pack(task: str) -> str | None:
     return (
         f"Built context pack [[{result['title']}]] at {result['path']} "
         f"from {result['note_count']} notes."
+    )
+
+
+def _compact_handoffs(task: str) -> str | None:
+    note_ref = _extract_wikilink(task)
+    if not note_ref:
+        return (
+            "To compact handoffs, tell me which note to target, for example: "
+            "Compact handoffs for [[20 Projects]]."
+        )
+    match = re.search(r"\b(?:top|last|max|limit)\s+(\d+)\b", (task or "").lower())
+    max_handoffs = int(match.group(1)) if match else 5
+    result = vault_handoff.compact_handoffs(note_ref, max_handoffs=max_handoffs)
+    if not result.get("ok"):
+        return _vault_error_text(result, "Could not compact those handoff notes.")
+    return (
+        f"Built compacted handoff pack [[{result['title']}]] at {result['path']} "
+        f"from {result['handoff_count']} handoff notes."
     )
 
 

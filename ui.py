@@ -19,6 +19,7 @@ import api
 import agents
 import evals
 import conversation_context as ctx
+import task_runtime
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLineEdit, QLabel, QFileDialog, QInputDialog,
@@ -1826,6 +1827,7 @@ class JarvisWindow(QMainWindow):
         self._right_telemetry.add_metric("uptime", "SESSION UPTIME")
         self._right_telemetry.add_metric("messages", "MESSAGE COUNT")
         self._right_telemetry.add_metric("workers", "ACTIVE THREADS")
+        self._right_telemetry.add_metric("agent_flow", "AGENT FLOW")
         self._right_telemetry.add_metric("clock", "LOCAL CLOCK")
         orb_layout.addWidget(self._right_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addWidget(orb_panel)
@@ -2696,6 +2698,19 @@ class JarvisWindow(QMainWindow):
         uptime_seconds = int((datetime.now() - self._session_started).total_seconds())
         uptime = f"{uptime_seconds // 60:02d}m {uptime_seconds % 60:02d}s"
         status = self._status_label.text().replace("AWAITING WAKE WORD", "STANDBY")
+        managed_runtime = task_runtime.runtime_snapshot()
+        lifecycle_counts = managed_runtime.get("lifecycle_counts", {})
+        queued = int(lifecycle_counts.get("queued", 0))
+        claimed = int(lifecycle_counts.get("claimed", 0))
+        running = int(lifecycle_counts.get("running", 0))
+        blocked = int(lifecycle_counts.get("blocked", 0))
+        agent_flow = f"Q{queued} C{claimed} R{running} B{blocked}"
+        if blocked:
+            agent_flow_color = C_WARNING
+        elif claimed or running or queued:
+            agent_flow_color = C_CYAN
+        else:
+            agent_flow_color = C_GREEN
 
         self._left_telemetry.set_metric("mode", model_router.get_mode().upper(), C_CYAN)
         self._left_telemetry.set_metric("status", status, self._status_color_for_text(status))
@@ -2705,6 +2720,7 @@ class JarvisWindow(QMainWindow):
         self._right_telemetry.set_metric("uptime", uptime, C_WHITE_DIM)
         self._right_telemetry.set_metric("messages", str(message_count), C_CYAN)
         self._right_telemetry.set_metric("workers", str(active_workers), C_WARNING if active_workers else C_GREEN)
+        self._right_telemetry.set_metric("agent_flow", agent_flow, agent_flow_color)
         self._right_telemetry.set_metric("clock", datetime.now().strftime("%H:%M:%S"), C_WHITE_DIM)
 
     def _status_color_for_text(self, text: str) -> str:

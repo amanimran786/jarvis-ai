@@ -598,6 +598,7 @@ def status(refresh: bool = False):
         "cost_policy": cost_policy.policy_status(),
         "provider_routing": provider_router.runtime_policy(),
         "call_assist": call_assist,
+        "managed_runtime_summary": task_runtime.runtime_snapshot(),
     }
 
 

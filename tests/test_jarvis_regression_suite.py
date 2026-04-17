@@ -931,6 +931,24 @@ class SkillAndAgentTests(unittest.TestCase):
             title="Jarvis Working Context Pack",
         )
 
+    def test_vault_curator_native_compacts_handoffs(self):
+        with patch(
+            "specialized_agent_native.vault_handoff.compact_handoffs",
+            return_value={
+                "ok": True,
+                "title": "20 Projects Handoff Context Pack",
+                "path": "indexes/context_packs/20-projects-handoff-context-pack.md",
+                "handoff_count": 3,
+            },
+        ) as compact_mock, patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "vault_curator",
+                "Compact handoffs for [[20 Projects]] top 3.",
+            )
+        self.assertEqual(result["model"], "native/vault_curator")
+        self.assertIn("Built compacted handoff pack [[20 Projects Handoff Context Pack]]", result["output"])
+        compact_mock.assert_called_once_with("20 Projects", max_handoffs=3)
+
     def test_coder_native_repo_map_read_bypasses_model_call(self):
         with patch(
             "specialized_agent_native.vault_edit.read_note",
@@ -1874,6 +1892,7 @@ class ApiSurfaceTests(unittest.TestCase):
         api._API_TOKEN = ""
 
     def test_status_endpoint_exposes_cost_policy(self):
+        task_runtime.reset_for_tests()
         response = self.client.get("/status")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1881,6 +1900,8 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("api_port", payload)
         self.assertIn("local_vision", payload)
         self.assertIn("state", payload["local_vision"])
+        self.assertIn("managed_runtime_summary", payload)
+        self.assertIn("lifecycle_counts", payload["managed_runtime_summary"])
 
     def test_cost_policy_endpoint(self):
         response = self.client.get("/cost-policy")
@@ -2097,6 +2118,9 @@ class ApiSurfaceTests(unittest.TestCase):
         agent_ids = {agent["id"] for agent in payload["agents"]}
         self.assertIn("chat-router", agent_ids)
         self.assertIn("meeting-assist", agent_ids)
+        chat_router = next(agent for agent in payload["agents"] if agent["id"] == "chat-router")
+        self.assertEqual(chat_router["lifecycle_state"], "available")
+        self.assertIn("last_task_lifecycle_state", chat_router)
 
     def test_tasks_endpoint_runs_managed_task_and_records_workspace(self):
         task_runtime.reset_for_tests()
@@ -2142,6 +2166,48 @@ class ApiSurfaceTests(unittest.TestCase):
         event_types = {event["type"] for event in events.json()["events"]}
         self.assertIn("workspace", event_types)
         self.assertIn("chunk", event_types)
+        self.assertEqual(task["lifecycle_state"], "completed")
+
+    def test_tasks_endpoint_filters_on_lifecycle_state_and_marks_blocked_failures(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream", side_effect=RuntimeError("permission denied opening repo file")), \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "inspect the repo and tell me what failed",
+                    "kind": "chat",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            task_id = response.json()["task"]["id"]
+            task = task_runtime.wait_for_task(task_id, timeout=2.0)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["lifecycle_state"], "blocked")
+        self.assertIn("permission denied", task["blocked_reason"])
+
+        blocked = self.client.get("/tasks", params={"status": "blocked"})
+        self.assertEqual(blocked.status_code, 200)
+        blocked_ids = {item["id"] for item in blocked.json()["tasks"]}
+        self.assertIn(task_id, blocked_ids)
+
+        agent = self.client.get("/agents/chat-router")
+        self.assertEqual(agent.status_code, 200)
+        agent_payload = agent.json()["agent"]
+        self.assertEqual(agent_payload["lifecycle_state"], "available")
+        self.assertEqual(agent_payload["last_task_lifecycle_state"], "blocked")
+        self.assertIn("permission denied", agent_payload["blocked_reason"])
+
+    def test_runtime_state_exposes_lifecycle_counts(self):
+        task_runtime.reset_for_tests()
+        snapshot = task_runtime.runtime_snapshot()
+        self.assertIn("lifecycle_counts", snapshot)
+        self.assertIn("agent_lifecycle_counts", snapshot)
+        self.assertIn("queued", snapshot["lifecycle_counts"])
+        self.assertIn("available", snapshot["agent_lifecycle_counts"])
 
     def test_tasks_endpoint_wraps_vault_kind_with_curator_prompt(self):
         task_runtime.reset_for_tests()

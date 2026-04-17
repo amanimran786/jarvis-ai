@@ -3,6 +3,7 @@ import json
 import socket
 import subprocess
 import time
+import tempfile
 import urllib.error
 import urllib.request
 import unittest
@@ -59,31 +60,34 @@ def _reserve_local_port() -> int:
 @contextmanager
 def packaged_app_process():
     port = str(_reserve_local_port())
-    env = os.environ.copy()
-    env.update(
-        {
-            "JARVIS_API_HOST": "127.0.0.1",
-            "JARVIS_API_PORT": port,
-            "JARVIS_API_TOKEN": "jarvis-packaged-smoke-token",
-        }
-    )
-    proc = subprocess.Popen(
-        [str(PACKAGED_APP), "--no-ui"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        yield proc, port
-    finally:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
+    with tempfile.TemporaryDirectory(prefix="jarvis-packaged-smoke-") as data_dir:
+        env = os.environ.copy()
+        env.update(
+            {
+                "JARVIS_API_HOST": "127.0.0.1",
+                "JARVIS_API_PORT": port,
+                "JARVIS_API_TOKEN": "jarvis-packaged-smoke-token",
+                "JARVIS_ALLOW_PARALLEL_INSTANCE": "1",
+                "JARVIS_DATA_DIR": data_dir,
+            }
+        )
+        proc = subprocess.Popen(
+            [str(PACKAGED_APP), "--no-ui"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            yield proc, port
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
 
 
 def wait_for_packaged_json(

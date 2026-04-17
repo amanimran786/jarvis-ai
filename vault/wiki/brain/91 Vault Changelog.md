@@ -123,3 +123,8 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[12 External Brain Patterns]] to preserve the strongest public Obsidian, memory, and agent patterns worth borrowing without plugin or cloud drift
 - added generated [[94 Brain Health]] so Jarvis can inspect graph quality, stale context packs, duplicate basenames, and weakly linked brain notes without relying on plugin-only graph heuristics
 - added generated specialist handoff notes under `vault/indexes/handoffs/` so note-scoped coder, debugger, researcher, operator, security, and vault-curator work can leave durable markdown artifacts instead of dying in chat
+- added bounded handoff compaction so `Compact handoffs for [[Note]].` can roll recent specialist handoff notes into one generated context pack under `vault/indexes/context_packs/` without deleting the original handoffs
+- hardened handoff compaction to resolve the target note first and fail closed on ambiguous note refs instead of relying on basename-only matching
+- added Multica-style managed-agent lifecycle state on top of the existing task runtime so tasks now expose `queued`, `claimed`, `running`, `blocked`, and `completed` lifecycle phases without breaking the older task status contract
+- exposed managed lifecycle counts through `/status`, `/runtime/state`, `/tasks`, and `/agents`, and surfaced the live agent flow in the desktop telemetry strip as `Q / C / R / B`
+- isolated packaged smoke runs with their own `JARVIS_DATA_DIR` so frozen-app verification can run in parallel without overwriting the live Jarvis app's runtime metadata files

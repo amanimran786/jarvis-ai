@@ -2730,6 +2730,7 @@ class VaultHandoffTests(unittest.TestCase):
             self.assertTrue(note.exists())
             body = note.read_text(encoding="utf-8")
             self.assertIn("write_policy: generated", body)
+            self.assertIn("primary_note_path: wiki/brain/20 Projects.md", body)
             self.assertIn("# 20 Projects Debugger Handoff", body)
             self.assertIn("Likely cache invalidation issue", body)
 
@@ -2739,6 +2740,72 @@ class VaultHandoffTests(unittest.TestCase):
         self.assertTrue(vault_handoff.should_record_handoff("debugger", "Debug [[20 Projects]]."))
         self.assertFalse(vault_handoff.should_record_handoff("planner", "Debug [[20 Projects]]."))
         self.assertFalse(vault_handoff.should_record_handoff("debugger", "Debug the stale read path."))
+
+    def test_compact_handoffs_builds_generated_context_pack(self):
+        import vault
+        import vault_handoff
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            (root / "wiki" / "brain").mkdir(parents=True, exist_ok=True)
+            (root / "wiki" / "brain" / "20 Projects.md").write_text("# Projects\n", encoding="utf-8")
+            handoff_dir = root / "indexes" / "handoffs"
+            handoff_dir.mkdir(parents=True, exist_ok=True)
+            (handoff_dir / "20 Projects Debugger Handoff.md").write_text(
+                "---\n"
+                "type: generated_handoff\n"
+                "updated: 2026-04-16\n"
+                "role: debugger\n"
+                "---\n\n"
+                "# 20 Projects Debugger Handoff\n\n"
+                "Linked notes: [[20 Projects]]\n\n"
+                "## Task\n\nDiagnose stale reads.\n\n"
+                "## Output\n\nLikely cache invalidation issue.\n",
+                encoding="utf-8",
+            )
+            result = vault_handoff.compact_handoffs("20 Projects", max_handoffs=3)
+            self.assertTrue(result["ok"])
+            note = root / result["path"]
+            self.assertTrue(note.exists())
+            body = note.read_text(encoding="utf-8")
+            self.assertIn("type: generated_context_pack", body)
+            self.assertIn("# 20 Projects Handoff Context Pack", body)
+            self.assertIn("[[20 Projects Debugger Handoff]]", body)
+            self.assertIn("Likely cache invalidation issue.", body)
+
+    def test_compact_handoffs_fails_closed_on_ambiguous_note_ref(self):
+        import vault
+        import vault_handoff
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            for ctx in self._patch_vault_dirs(vault, root):
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            (root / "wiki" / "brain").mkdir(parents=True, exist_ok=True)
+            (root / "wiki" / "projects").mkdir(parents=True, exist_ok=True)
+            (root / "wiki" / "brain" / "Roadmap.md").write_text("# Brain Roadmap\n", encoding="utf-8")
+            (root / "wiki" / "projects" / "Roadmap.md").write_text("# Project Roadmap\n", encoding="utf-8")
+
+            with patch.object(vault, "_path_bias", return_value=0):
+                result = vault_handoff.compact_handoffs("Roadmap", max_handoffs=3)
+
+            self.assertFalse(result["ok"])
+            self.assertTrue(result.get("ambiguous"))
+            self.assertGreaterEqual(len(result.get("candidates", [])), 2)
+
+
+class JarvisDaemonTests(unittest.TestCase):
+    def test_parallel_instance_override_disables_single_instance_guard(self):
+        import jarvis_daemon
+
+        with patch.dict(os.environ, {"JARVIS_ALLOW_PARALLEL_INSTANCE": "1"}, clear=False):
+            self.assertFalse(jarvis_daemon._is_another_instance_running())
 
 
 if __name__ == "__main__":

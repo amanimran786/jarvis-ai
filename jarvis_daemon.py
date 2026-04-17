@@ -46,6 +46,8 @@ def _wait_for_api_ready(host: str, port: int, timeout: float = 8.0) -> bool:
 
 def _is_another_instance_running() -> bool:
     """Return True if a healthy Jarvis API is already running (different process)."""
+    if os.getenv("JARVIS_ALLOW_PARALLEL_INSTANCE", "").lower() in {"1", "true", "yes", "on"}:
+        return False
     try:
         existing = runtime_state.read_api_endpoint()
         if not existing:
