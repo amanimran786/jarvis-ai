@@ -6,8 +6,24 @@
 #                                   jarvis --status
 #                                   jarvis --memory
 #
-# The script forwards all arguments to jarvis_cli.py, resolved relative to
-# this file so it works regardless of working directory.
+# The script forwards all arguments to jarvis_cli.py, resolved relative to the
+# real file location so it still works when invoked through a symlink such as
+# ~/.local/bin/jarvis.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$SCRIPT_DIR/jarvis_cli.py" "$@"
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  TARGET="$(readlink "$SOURCE")"
+  if [[ "$TARGET" != /* ]]; then
+    SOURCE="$DIR/$TARGET"
+  else
+    SOURCE="$TARGET"
+  fi
+done
+
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PYTHON_BIN="$SCRIPT_DIR/venv/bin/python"
+if [ ! -x "$PYTHON_BIN" ]; then
+  PYTHON_BIN="python3"
+fi
+exec "$PYTHON_BIN" "$SCRIPT_DIR/jarvis_cli.py" "$@"
