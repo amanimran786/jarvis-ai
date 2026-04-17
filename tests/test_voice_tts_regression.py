@@ -8,6 +8,7 @@ import voice
 class VoiceTtsRegressionTests(unittest.TestCase):
     def tearDown(self):
         voice._kokoro_disabled_reason = ""
+        voice._audio_override_until = 0.0
 
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -64,6 +65,16 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         openai_mock.assert_not_called()
         self.assertTrue(voice._done_speaking.is_set())
 
+    def test_speak_manual_override_bypasses_meeting_safe_suppression(self):
+        voice._allow_audio_override(seconds=30)
+
+        with patch("voice.call_privacy.should_suppress_audio", return_value=True), \
+             patch("voice._speak_with_fallbacks", return_value="Local TTS (say)") as speak_mock:
+            voice.speak("This should be audible.")
+
+        speak_mock.assert_called_once_with("This should be audible.")
+        self.assertTrue(voice._done_speaking.is_set())
+
     def test_speak_stream_splits_complete_sentences_without_breaking_decimals(self):
         spoken = []
         chunks = iter(["Pi is 3.14. Done!"])
@@ -84,6 +95,18 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         self.assertEqual(full_text, "First sentence. Second sentence.")
         speak_mock.assert_not_called()
+
+    def test_speak_stream_manual_override_bypasses_suppression(self):
+        chunks = iter(["First sentence. ", "Second sentence."])
+        spoken = []
+        voice._allow_audio_override(seconds=30)
+
+        with patch("voice.call_privacy.should_suppress_audio", return_value=True), \
+             patch("voice.speak", side_effect=lambda text: spoken.append(text)):
+            full_text = voice.speak_stream(chunks)
+
+        self.assertEqual(full_text, "First sentence. Second sentence.")
+        self.assertEqual(spoken, ["First sentence.", "Second sentence."])
 
     def test_wake_word_match_handles_exact_prefix_and_suffix(self):
         self.assertTrue(voice._wake_word_match("jarvis"))
@@ -124,6 +147,7 @@ class VoiceTtsRegressionTests(unittest.TestCase):
                 voice.wait_for_wake_word()
         finally:
             voice._manual_wake_trigger.clear()
+        self.assertTrue(voice._audio_override_active())
 
     def test_wait_for_wake_word_ignores_broken_pipe_from_debug_logging(self):
         voice._stop_requested.clear()

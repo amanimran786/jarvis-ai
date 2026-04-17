@@ -176,6 +176,7 @@ _done_speaking = threading.Event()
 _done_speaking.set()  # initially not speaking
 _stop_requested = threading.Event()
 _manual_wake_trigger = threading.Event()  # set by UI to skip wake-word wait
+_audio_override_until = 0.0
 
 # ── Ambient noise calibration cache ──────────────────────────────────────────
 # Calibrate once per session and cache the energy threshold.
@@ -209,6 +210,19 @@ def invalidate_noise_calibration() -> None:
     """Force re-calibration on the next listen() call (e.g., after environment change)."""
     global _calibrated_threshold
     _calibrated_threshold = None
+
+
+def _allow_audio_override(seconds: float = 45.0) -> None:
+    global _audio_override_until
+    _audio_override_until = max(_audio_override_until, _time.monotonic() + max(seconds, 1.0))
+
+
+def _audio_override_active() -> bool:
+    return _time.monotonic() < _audio_override_until
+
+
+def _should_suppress_audio_output() -> bool:
+    return call_privacy.should_suppress_audio() and not _audio_override_active()
 
 
 def request_stop() -> None:
@@ -350,7 +364,7 @@ def speak(text: str) -> None:
     if not text or not text.strip():
         return
     _debug_log(f"Jarvis: {text}")
-    if call_privacy.should_suppress_audio():
+    if _should_suppress_audio_output():
         _debug_log("[Voice] Suppressed audio because meeting-safe mode is active.")
         return
     _done_speaking.clear()
@@ -445,7 +459,7 @@ def speak_stream(text_chunks, *, on_text=None) -> str:
     full_text = ""
     sentence_enders = {".", "!", "?"}
 
-    if call_privacy.should_suppress_audio():
+    if _should_suppress_audio_output():
         for chunk in text_chunks:
             full_text += chunk
         if full_text.strip():
@@ -572,6 +586,7 @@ def _transcribe_wake_audio(audio) -> str | None:
 
 def trigger_wake_word() -> None:
     """Manually trigger wake-word detection (skips waiting for the wake word)."""
+    _allow_audio_override()
     _manual_wake_trigger.set()
 
 
@@ -581,6 +596,7 @@ def wait_for_wake_word() -> None:
     # right as a new worker started). The trigger is always cleared after it fires.
     if _manual_wake_trigger.is_set():
         _manual_wake_trigger.clear()
+        _allow_audio_override()
         _debug_log("\n[Wake word manually triggered on entry]")
         return
     _debug_log("Waiting for wake word ('Hey Jarvis')... ", end="", flush=True)
@@ -589,6 +605,7 @@ def wait_for_wake_word() -> None:
             return
         if _manual_wake_trigger.is_set():
             _manual_wake_trigger.clear()
+            _allow_audio_override()
             _debug_log("\n[Wake word manually triggered]")
             return
         # Also wait here if Jarvis is speaking
@@ -597,6 +614,7 @@ def wait_for_wake_word() -> None:
             return
         if _manual_wake_trigger.is_set():
             _manual_wake_trigger.clear()
+            _allow_audio_override()
             _debug_log("\n[Wake word manually triggered]")
             return
         try:
