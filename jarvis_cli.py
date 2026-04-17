@@ -447,6 +447,46 @@ def _decision_text(result: dict) -> str:
     return f"blocked [{result.get('rule', 'blocked')}]{suffix}"
 
 
+def _permissions_profile_name() -> str:
+    import behavior_hooks
+
+    if not behavior_hooks.max_permissive_profile_enabled():
+        return "default"
+    if os.getenv("JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return "max-permissive + protected-writes"
+    return "max-permissive"
+
+
+def _set_permissions_mode(mode: str) -> int:
+    normalized = (mode or "").strip().lower()
+    if normalized == "default":
+        os.environ["JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE"] = "0"
+        os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"] = "0"
+        print("Permissions set to default.")
+        return 0
+    if normalized == "max-permissive":
+        os.environ["JARVIS_MAX_PERMISSIVE_LOCAL_PROFILE"] = "1"
+        os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"] = "0"
+        print("Permissions set to max-permissive. Protected writes are still blocked.")
+        return 0
+    print("Usage: /permissions [default|max-permissive|protected-writes on|off]", file=sys.stderr)
+    return 1
+
+
+def _set_protected_writes(enabled: bool) -> int:
+    import behavior_hooks
+
+    if not behavior_hooks.max_permissive_profile_enabled():
+        print("Enable max-permissive first: /permissions max-permissive", file=sys.stderr)
+        return 1
+    os.environ["JARVIS_PERMISSIVE_ALLOW_PROTECTED_WRITES"] = "1" if enabled else "0"
+    if enabled:
+        print("Protected writes enabled for this console process.")
+    else:
+        print("Protected writes disabled for this console process.")
+    return 0
+
+
 def _print_permissions() -> None:
     import behavior_hooks
     import safety_permissions
@@ -455,7 +495,7 @@ def _print_permissions() -> None:
     repo_write_target = os.path.join(cwd, ".jarvis_permissions_probe")
 
     print("Permissions")
-    print(f"Profile           : {'max-permissive' if behavior_hooks.max_permissive_profile_enabled() else 'default'}")
+    print(f"Profile           : {_permissions_profile_name()}")
     print(f"Shell (normal)    : {_decision_text(safety_permissions.can_run_shell('ls', cwd=cwd))}")
     print(f"Shell (protected) : {_decision_text(safety_permissions.can_run_shell('rm /etc/hosts', cwd=cwd))}")
     print(f"Shell (admin)     : {_decision_text(safety_permissions.can_run_shell('rm /etc/hosts', admin=True, cwd=cwd))}")
@@ -539,6 +579,8 @@ def _console_help() -> str:
             "  /status               Show daemon and runtime status",
             "  /doctor               Show runtime health and likely blockers",
             "  /permissions          Show current shell/write/self-improve gates",
+            "  /permissions <mode>   Set mode: default | max-permissive",
+            "  /permissions protected-writes on|off",
             "  /mode                 Show current routing mode",
             "  /mode <name>          Set mode: auto | local | cloud | open-source",
             "  /effort [level]       Show or set effort: low | medium | high | xhigh",
@@ -638,8 +680,17 @@ def _handle_console_command(line: str) -> int | None:
         _print_doctor()
         return 0
     if command == "permissions":
-        _print_permissions()
-        return 0
+        if not args:
+            _print_permissions()
+            return 0
+        if args in {"default", "max-permissive"}:
+            return _set_permissions_mode(args)
+        if args.startswith("protected-writes "):
+            toggle = args.split(" ", 1)[1].strip().lower()
+            if toggle in {"on", "off"}:
+                return _set_protected_writes(toggle == "on")
+        print("Usage: /permissions [default|max-permissive|protected-writes on|off]", file=sys.stderr)
+        return 1
     if command == "mode":
         if not args:
             payload = get("/mode")
@@ -774,8 +825,15 @@ def main():
         return
 
     if flag == "--permissions":
-        _print_permissions()
-        return
+        if len(sys.argv) == 2:
+            _print_permissions()
+            return
+        if len(sys.argv) == 3 and sys.argv[2] in {"default", "max-permissive"}:
+            sys.exit(_set_permissions_mode(sys.argv[2]))
+        if len(sys.argv) == 4 and sys.argv[2] == "protected-writes" and sys.argv[3] in {"on", "off"}:
+            sys.exit(_set_protected_writes(sys.argv[3] == "on"))
+        print("Usage: python jarvis_cli.py --permissions [default|max-permissive|protected-writes on|off]", file=sys.stderr)
+        sys.exit(1)
 
     if flag == "--skills":
         _print_skills()
