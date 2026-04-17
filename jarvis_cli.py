@@ -482,8 +482,10 @@ def _print_doctor() -> None:
     task_counts = managed.get("task_counts") or {}
     persistence = runtime.get("persistence") or {}
     persisted = persistence.get("persisted_api_endpoint") or {}
+    blocked_hooks = int(hook_status.get("blocked_count", 0) or 0)
 
     findings: list[str] = []
+    advisories: list[str] = []
     if not status.get("local_available"):
         findings.append("local model routing is unavailable")
     if str(local_vision.get("state") or "").lower() not in {"ready", "available", "ok"}:
@@ -496,8 +498,8 @@ def _print_doctor() -> None:
         findings.append("semantic memory index is not ready")
     if not memory_status.get("long_term_profile_ready"):
         findings.append("long-term memory profile is not consolidated")
-    if hook_status.get("blocked_count", 0):
-        findings.append(f"{hook_status.get('blocked_count', 0)} behavior-hook actions were blocked recently")
+    if blocked_hooks:
+        advisories.append(f"{blocked_hooks} behavior-hook action(s) were blocked recently")
     if cost_status.get("hard_budget"):
         findings.append("cloud routing is over the hard budget")
     elif cost_status.get("budget_pressure"):
@@ -514,7 +516,7 @@ def _print_doctor() -> None:
     print(f"Persisted API     : {persisted.get('base_url') or 'none'}")
     print(f"Vault             : docs={vault_status.get('doc_count', 0)} pages={vault_status.get('wiki_page_count', 0)} citation_ready={'yes' if vault_status.get('citation_ready') else 'no'}")
     print(f"Memory            : facts={memory_status.get('facts', 0)} projects={memory_status.get('projects', 0)} conversations={memory_status.get('conversation_summaries', 0)} long_term={'yes' if memory_status.get('long_term_profile_ready') else 'no'}")
-    print(f"Hooks             : events={hook_status.get('event_count', 0)} blocked={hook_status.get('blocked_count', 0)}")
+    print(f"Hooks             : events={hook_status.get('event_count', 0)} blocked={blocked_hooks}")
     print(
         "Cost policy       : "
         f"soft={'yes' if cost_status.get('budget_pressure') else 'no'} "
@@ -525,6 +527,8 @@ def _print_doctor() -> None:
         print("Findings          : " + "; ".join(findings))
     else:
         print("Findings          : no obvious runtime blockers")
+    if advisories:
+        print("Advisories        : " + "; ".join(advisories))
 
 
 def _console_help() -> str:
