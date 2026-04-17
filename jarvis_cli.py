@@ -7,6 +7,8 @@ Usage:
   python jarvis_cli.py remember I prefer dark mode
   python jarvis_cli.py --memory
   python jarvis_cli.py --status
+  python jarvis_cli.py --doctor
+  python jarvis_cli.py --permissions
   python jarvis_cli.py --skills
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
@@ -437,12 +439,102 @@ def _print_vault_status() -> None:
     print(json.dumps(payload, indent=2))
 
 
+def _decision_text(result: dict) -> str:
+    if result.get("ok"):
+        return f"allowed [{result.get('rule', 'allowed')}]"
+    reason = str(result.get("reason") or "").strip()
+    suffix = f" — {reason}" if reason else ""
+    return f"blocked [{result.get('rule', 'blocked')}]{suffix}"
+
+
+def _print_permissions() -> None:
+    import behavior_hooks
+    import safety_permissions
+
+    cwd = os.getcwd()
+    repo_write_target = os.path.join(cwd, ".jarvis_permissions_probe")
+
+    print("Permissions")
+    print(f"Profile           : {'max-permissive' if behavior_hooks.max_permissive_profile_enabled() else 'default'}")
+    print(f"Shell (normal)    : {_decision_text(safety_permissions.can_run_shell('ls', cwd=cwd))}")
+    print(f"Shell (protected) : {_decision_text(safety_permissions.can_run_shell('rm /etc/hosts', cwd=cwd))}")
+    print(f"Shell (admin)     : {_decision_text(safety_permissions.can_run_shell('rm /etc/hosts', admin=True, cwd=cwd))}")
+    print(f"Write (repo path) : {_decision_text(safety_permissions.can_write_file(repo_write_target, source='jarvis_cli_permissions'))}")
+    print(f"Write (protected) : {_decision_text(safety_permissions.can_write_file('/etc/hosts', source='jarvis_cli_permissions'))}")
+    print(f"Self-improve ok   : {_decision_text(safety_permissions.can_self_improve('router.py'))}")
+    print(f"Self-improve stop : {_decision_text(safety_permissions.can_self_improve('secrets.py'))}")
+
+
+def _print_doctor() -> None:
+    status = get("/status")
+    runtime = (get("/runtime/state") or {}).get("state") or {}
+    local = (get("/local/capabilities") or {}).get("capabilities") or {}
+    memory_status = (get("/memory/status") or {}).get("status") or {}
+    vault_status = get("/vault")
+    hook_status = (get("/hooks/status") or {}).get("hooks") or {}
+    cost_status = (get("/cost-policy") or {}).get("policy") or {}
+
+    stt = local.get("stt") or {}
+    tts = local.get("tts") or {}
+    semantic = local.get("semantic_memory") or {}
+    local_vision = status.get("local_vision") or {}
+    managed = runtime.get("managed_runtime") or {}
+    task_counts = managed.get("task_counts") or {}
+    persistence = runtime.get("persistence") or {}
+    persisted = persistence.get("persisted_api_endpoint") or {}
+
+    findings: list[str] = []
+    if not status.get("local_available"):
+        findings.append("local model routing is unavailable")
+    if str(local_vision.get("state") or "").lower() not in {"ready", "available", "ok"}:
+        findings.append(f"local vision is {local_vision.get('state', 'unavailable')}")
+    if not stt.get("local_available"):
+        findings.append("local STT is unavailable")
+    if not tts.get("ready"):
+        findings.append("local TTS is not ready")
+    if not semantic.get("index_ready"):
+        findings.append("semantic memory index is not ready")
+    if not memory_status.get("long_term_profile_ready"):
+        findings.append("long-term memory profile is not consolidated")
+    if hook_status.get("blocked_count", 0):
+        findings.append(f"{hook_status.get('blocked_count', 0)} behavior-hook actions were blocked recently")
+    if cost_status.get("hard_budget"):
+        findings.append("cloud routing is over the hard budget")
+    elif cost_status.get("budget_pressure"):
+        findings.append("cloud routing is over the soft budget")
+
+    print("Doctor")
+    print(f"API               : {status.get('status', 'unknown').upper()} @ {status.get('api_host', '127.0.0.1')}:{status.get('api_port', 'unknown')}")
+    print(f"Mode              : {str(status.get('mode', 'unknown')).upper()} | local={'yes' if status.get('local_available') else 'no'}")
+    print(f"Vision            : {local_vision.get('state', 'unknown')} ({local_vision.get('selected_model') or local_vision.get('preferred_model') or 'no model'})")
+    print(f"STT               : {stt.get('active_engine', 'unknown')} | local={'yes' if stt.get('local_available') else 'no'}")
+    print(f"TTS               : {'ready' if tts.get('ready') else 'not ready'} | {tts.get('engine', 'unknown')}:{tts.get('voice', 'unknown')}")
+    print(f"Semantic memory   : {semantic.get('retrieval_backend', 'unknown')} | indexed={semantic.get('entries_indexed', 0)} | ready={'yes' if semantic.get('index_ready') else 'no'}")
+    print(f"Runtime           : total={task_counts.get('total', 0)} running={task_counts.get('running', 0)} queued={task_counts.get('queued', 0)} failed={task_counts.get('failed', 0)} cancelled={task_counts.get('cancelled', 0)}")
+    print(f"Persisted API     : {persisted.get('base_url') or 'none'}")
+    print(f"Vault             : docs={vault_status.get('doc_count', 0)} pages={vault_status.get('wiki_page_count', 0)} citation_ready={'yes' if vault_status.get('citation_ready') else 'no'}")
+    print(f"Memory            : facts={memory_status.get('facts', 0)} projects={memory_status.get('projects', 0)} conversations={memory_status.get('conversation_summaries', 0)} long_term={'yes' if memory_status.get('long_term_profile_ready') else 'no'}")
+    print(f"Hooks             : events={hook_status.get('event_count', 0)} blocked={hook_status.get('blocked_count', 0)}")
+    print(
+        "Cost policy       : "
+        f"soft={'yes' if cost_status.get('budget_pressure') else 'no'} "
+        f"hard={'yes' if cost_status.get('hard_budget') else 'no'} "
+        f"next={cost_status.get('training_action', 'none')}"
+    )
+    if findings:
+        print("Findings          : " + "; ".join(findings))
+    else:
+        print("Findings          : no obvious runtime blockers")
+
+
 def _console_help() -> str:
     return "\n".join(
         [
             "Jarvis console commands:",
             "  /help                 Show this help",
             "  /status               Show daemon and runtime status",
+            "  /doctor               Show runtime health and likely blockers",
+            "  /permissions          Show current shell/write/self-improve gates",
             "  /mode                 Show current routing mode",
             "  /mode <name>          Set mode: auto | local | cloud | open-source",
             "  /effort [level]       Show or set effort: low | medium | high | xhigh",
@@ -537,6 +629,12 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command == "status":
         _print_status()
+        return 0
+    if command == "doctor":
+        _print_doctor()
+        return 0
+    if command == "permissions":
+        _print_permissions()
         return 0
     if command == "mode":
         if not args:
@@ -665,6 +763,14 @@ def main():
 
     if flag == "--status":
         _print_status()
+        return
+
+    if flag == "--doctor":
+        _print_doctor()
+        return
+
+    if flag == "--permissions":
+        _print_permissions()
         return
 
     if flag == "--skills":
