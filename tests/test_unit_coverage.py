@@ -2645,6 +2645,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         shell_mock.assert_called_once_with("pwd")
 
+    def test_approve_command_routes_to_pending_shell_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._approve_pending_shell_command", return_value=0) as approve_mock:
+            result = jarvis_cli._handle_console_command("/approve")
+
+        self.assertEqual(result, 0)
+        approve_mock.assert_called_once_with()
+
+    def test_deny_command_routes_to_pending_shell_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._deny_pending_shell_command", return_value=0) as deny_mock:
+            result = jarvis_cli._handle_console_command("/deny")
+
+        self.assertEqual(result, 0)
+        deny_mock.assert_called_once_with()
+
     def test_watch_command_routes_to_watch_helper(self):
         import jarvis_cli
 
@@ -2922,6 +2940,46 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         print_mock.assert_called_once_with("Protected writes enabled for this console process.")
+
+    def test_run_shell_command_requires_approval_for_risky_command(self):
+        import jarvis_cli
+
+        with patch.dict(jarvis_cli._CONSOLE_STATE, {"effort": "medium", "pending_shell": ""}, clear=True), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._run_shell_command("echo hi > /tmp/jarvis-approval-smoke")
+            self.assertEqual(jarvis_cli._CONSOLE_STATE["pending_shell"], "echo hi > /tmp/jarvis-approval-smoke")
+
+        self.assertEqual(result, 0)
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("Approval required:", printed)
+        self.assertIn("Use /approve to run once or /deny to cancel.", printed)
+
+    def test_approve_pending_shell_command_executes_once(self):
+        import jarvis_cli
+
+        with patch.dict(jarvis_cli._CONSOLE_STATE, {"effort": "medium", "pending_shell": "echo hi > /tmp/jarvis-approval-smoke"}, clear=True), \
+             patch("terminal.run_command", return_value="ok") as run_mock, \
+             patch("jarvis_cli.os.getcwd", return_value="/tmp/jarvis"), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._approve_pending_shell_command()
+
+        self.assertEqual(result, 0)
+        run_mock.assert_called_once_with("echo hi > /tmp/jarvis-approval-smoke", cwd="/tmp/jarvis")
+        self.assertEqual(jarvis_cli._CONSOLE_STATE["pending_shell"], "")
+        printed = [call.args[0] for call in print_mock.call_args_list if call.args]
+        self.assertIn("Approved          : echo hi > /tmp/jarvis-approval-smoke", printed)
+        self.assertIn("ok", printed)
+
+    def test_deny_pending_shell_command_clears_state(self):
+        import jarvis_cli
+
+        with patch.dict(jarvis_cli._CONSOLE_STATE, {"effort": "medium", "pending_shell": "rm file.txt"}, clear=True), \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli._deny_pending_shell_command()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(jarvis_cli._CONSOLE_STATE["pending_shell"], "")
+        print_mock.assert_called_once_with("Cancelled pending shell command: rm file.txt")
 
 
 class ExtensionRegistryTests(unittest.TestCase):
