@@ -39,7 +39,7 @@ except Exception:
     readline = None
 
 
-_CONSOLE_STATE = {"effort": "medium"}
+_CONSOLE_STATE = {"effort": "medium", "pending_shell": ""}
 _OWNS_DAEMON = False
 _DAEMON_CLEANUP_REGISTERED = False
 
@@ -597,6 +597,8 @@ def _console_help() -> str:
             "  /plugins              List plugins",
             "  /vault                Show vault status",
             "  /run <command>        Run a local shell command",
+            "  /approve              Run the pending risky shell command once",
+            "  /deny                 Clear the pending risky shell command",
             "  !<command>            Shortcut for /run",
             "  /clear                Clear the terminal",
             "  /exit                 Quit the console",
@@ -641,15 +643,83 @@ def _set_effort(level: str) -> int:
     return 0
 
 
-def _run_shell_command(command: str) -> int:
+def _shell_command_needs_approval(command: str) -> bool:
+    lower = (command or "").strip().lower()
+    if not lower:
+        return False
+    risky_markers = (
+        "sudo ",
+        "rm ",
+        "mv ",
+        "cp ",
+        "chmod ",
+        "chown ",
+        "ln ",
+        "tee ",
+        ">",
+        ">>",
+        "git push",
+        "git reset",
+        "git clean",
+        "brew install",
+        "brew uninstall",
+        "pip install",
+        "pip uninstall",
+        "uv pip install",
+        "npm install -g",
+    )
+    return any(marker in lower for marker in risky_markers)
+
+
+def _shell_command_risk_reason(command: str) -> str:
+    lower = (command or "").strip().lower()
+    if "sudo " in lower:
+        return "privileged command"
+    if any(marker in lower for marker in ("rm ", "mv ", "cp ", "chmod ", "chown ", "ln ", "tee ", ">", ">>")):
+        return "state-changing shell command"
+    if any(marker in lower for marker in ("git push", "git reset", "git clean")):
+        return "repo-changing command"
+    if any(marker in lower for marker in ("brew install", "brew uninstall", "pip install", "pip uninstall", "uv pip install", "npm install -g")):
+        return "environment-changing command"
+    return "risky shell command"
+
+
+def _run_shell_command(command: str, *, approved: bool = False) -> int:
     if not command.strip():
         print("Usage: /run <shell command>", file=sys.stderr)
         return 1
+    if not approved and _shell_command_needs_approval(command):
+        _CONSOLE_STATE["pending_shell"] = command
+        print(f"Approval required: {_shell_command_risk_reason(command)}.")
+        print("Use /approve to run once or /deny to cancel.")
+        print(f"Pending command   : {command}")
+        return 0
+
+    _CONSOLE_STATE["pending_shell"] = ""
     import terminal
 
     result = terminal.run_command(command, cwd=os.getcwd())
     print(result)
     return 0 if not result.lower().startswith("error") and not result.lower().startswith("blocked") else 1
+
+
+def _approve_pending_shell_command() -> int:
+    pending = str(_CONSOLE_STATE.get("pending_shell") or "").strip()
+    if not pending:
+        print("No pending shell command.")
+        return 0
+    print(f"Approved          : {pending}")
+    return _run_shell_command(pending, approved=True)
+
+
+def _deny_pending_shell_command() -> int:
+    pending = str(_CONSOLE_STATE.get("pending_shell") or "").strip()
+    if not pending:
+        print("No pending shell command.")
+        return 0
+    _CONSOLE_STATE["pending_shell"] = ""
+    print(f"Cancelled pending shell command: {pending}")
+    return 0
 
 
 def _handle_console_command(line: str) -> int | None:
@@ -673,6 +743,10 @@ def _handle_console_command(line: str) -> int | None:
     if command == "clear":
         print("\033c", end="")
         return 0
+    if command == "approve":
+        return _approve_pending_shell_command()
+    if command == "deny":
+        return _deny_pending_shell_command()
     if command == "status":
         _print_status()
         return 0
