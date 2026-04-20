@@ -34,9 +34,12 @@ import ui
 from desktop import screen_capture
 import self_improve
 import skills
+import skill_factory
 import specialized_agents
 import task_runtime
+import vault
 import voice
+import wiki_builder
 from tests.jarvis_golden_cases import ENGINEERING_GOLDEN_CASES
 
 
@@ -318,6 +321,42 @@ class SkillAndAgentTests(unittest.TestCase):
             "Review this authentication design for security issues."
         )
         self.assertEqual(roles, ["security_reviewer", "reviewer"])
+
+    def test_specialized_agent_role_selection_for_skill_builder(self):
+        roles = specialized_agents.choose_roles(
+            "Use the skill builder to propose a skill for local vault maintenance."
+        )
+        self.assertEqual(roles, ["skill_builder", "reviewer"])
+
+    def test_skill_proposal_uses_path_stem_when_vault_title_is_frontmatter_marker(self):
+        matches = [
+            {
+                "title": "---",
+                "path": "wiki/brain/93 Vault Maintenance.md",
+                "excerpt": "Purpose: deterministic maintenance snapshot.",
+                "keywords": ["vault", "maintenance"],
+                "citation": {"label": "wiki/brain/93 Vault Maintenance.md"},
+            }
+        ]
+        with patch("skill_factory.vault.search", return_value=matches):
+            result = skill_factory.propose_skill_from_vault("local vault maintenance")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["skill_id"], "93-vault-maintenance")
+        self.assertIn("93 Vault Maintenance", result["body"])
+
+    def test_vault_title_extraction_skips_yaml_frontmatter(self):
+        raw = "---\ntype: brain_note\n---\n\n# Local Skill Loop\n\nPurpose: test."
+        self.assertEqual(vault._extract_title(Path("79 Local Skill Loop.md"), raw), "Local Skill Loop")
+        sections = vault._parse_sections(Path("79 Local Skill Loop.md"), raw)
+        self.assertEqual(sections[0]["heading"], "Local Skill Loop")
+        self.assertNotIn("type: brain_note", sections[0]["text"])
+
+    def test_wiki_builder_title_extraction_skips_yaml_frontmatter(self):
+        raw = "---\ntype: source\n---\n\n# Product Surface Source\n\nPurpose: test."
+        self.assertEqual(wiki_builder._extract_title(Path("Product Surface Source.md"), raw), "Product Surface Source")
+        sections = wiki_builder._parse_sections(raw, "Product Surface Source")
+        self.assertEqual(sections[0]["heading"], "Product Surface Source")
+        self.assertNotIn("type: source", sections[0]["summary"])
 
     def test_specialized_agent_run_sequence_for_planner_executor_reviewer(self):
         outputs = {
@@ -903,6 +942,24 @@ class SkillAndAgentTests(unittest.TestCase):
             result = specialized_agents._run_role("operator", "Execute admin command: ls /System")
         self.assertEqual(result["model"], "native/operator")
         self.assertIn("dedicated admin command path", result["output"].lower())
+
+    def test_skill_builder_native_proposes_skill_without_writing(self):
+        proposal = {
+            "ok": True,
+            "skill_id": "local-vault-maintenance",
+            "source_paths": ["wiki/brain/93 Vault Maintenance.md"],
+            "entry": {"triggers": ["local vault maintenance", "stale vault work"]},
+        }
+        with patch("specialized_agent_native.skill_factory.propose_skill_from_vault", return_value=proposal) as propose_mock, \
+             patch("specialized_agents.ask_claude", side_effect=AssertionError("should not call claude")):
+            result = specialized_agents._run_role(
+                "skill_builder",
+                "Use the skill builder to propose a skill for local vault maintenance.",
+            )
+        self.assertEqual(result["model"], "native/skill_builder")
+        self.assertIn("dry run", result["output"].lower())
+        self.assertIn("local-vault-maintenance", result["output"])
+        propose_mock.assert_called_once_with("local vault maintenance")
 
     def test_specialized_agent_choose_roles_for_explicit_debugger_request(self):
         roles = specialized_agents.choose_roles("Use the debugger on this flaky worker issue.")
@@ -1774,6 +1831,16 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(payload["skill"]["id"], "engineering_reasoning")
         self.assertIn("Engineering Reasoning", payload["skill"]["instructions"])
 
+    def test_skill_propose_endpoint_uses_non_mutating_factory(self):
+        proposal = {"ok": True, "skill_id": "local-vault-maintenance", "source_paths": ["wiki/brain/93 Vault Maintenance.md"]}
+        with patch("api.skill_factory.propose_skill_from_vault", return_value=proposal) as propose_mock:
+            response = self.client.post("/skills/propose", json={"query": "local vault maintenance"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("without writing files", payload["message"])
+        propose_mock.assert_called_once_with("local vault maintenance", tool="chat", cost_hint="local")
+
     def test_connectors_endpoint_lists_curated_connectors(self):
         response = self.client.get("/connectors")
         self.assertEqual(response.status_code, 200)
@@ -1900,6 +1967,7 @@ class ApiSurfaceTests(unittest.TestCase):
         agent_ids = {agent["id"] for agent in payload["agents"]}
         self.assertIn("chat-router", agent_ids)
         self.assertIn("meeting-assist", agent_ids)
+        self.assertIn("skill-builder", agent_ids)
 
     def test_tasks_endpoint_runs_managed_task_and_records_workspace(self):
         task_runtime.reset_for_tests()
@@ -1967,6 +2035,46 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(task["assigned_agent_id"], "knowledge-vault")
         self.assertIn("Use the vault curator to handle this vault task.", task["effective_prompt"])
         self.assertIn("distill recent runtime lessons into the roadmap", task["effective_prompt"])
+
+    def test_tasks_endpoint_wraps_skill_kind_with_skill_builder_prompt(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream", return_value=(iter(["Proposed skill."]), "UnitTestModel")), \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "propose a skill for stale vault maintenance",
+                    "kind": "skill",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            task_id = response.json()["task"]["id"]
+            task = task_runtime.wait_for_task(task_id, timeout=2.0)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task["assigned_agent_id"], "skill-builder")
+        self.assertIn("Use the skill builder to handle this skill task.", task["effective_prompt"])
+        self.assertIn("propose a skill for stale vault maintenance", task["effective_prompt"])
+
+    def test_tasks_endpoint_holds_skill_registry_mutation_until_approved(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream") as route_mock, \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "create skill for local vault maintenance",
+                    "kind": "skill",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["task"]["status"], "waiting_approval")
+            self.assertEqual(payload["task"]["approval_reason"], "skill registry mutation")
+
+        route_mock.assert_not_called()
 
     def test_tasks_endpoint_holds_risky_task_until_approved(self):
         task_runtime.reset_for_tests()

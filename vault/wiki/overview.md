@@ -28,4 +28,4 @@ Useful entry points from here:
 - [[07 Import Source Hub]]
 - [[jarvis-vault-strategy]]
 - [[eval-pattern-self-improve]]
-- [[Product Surface Bridge]]
+- [[product-surface-source|Product Surface Source]]

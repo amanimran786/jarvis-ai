@@ -45,7 +45,7 @@ Linked notes: [[00 Home]], [[02 Brain Dashboard]], [[03 Brain Schema]], [[04 Cap
 
 - [[jarvis-vault-strategy]]
 - [[eval-pattern-self-improve]]
-- [[Product Surface Bridge]]
+- [[product-surface-source|Product Surface Source]]
 
 ## Use This Hub For
 

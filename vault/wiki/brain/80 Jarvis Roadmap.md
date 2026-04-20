@@ -124,6 +124,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately
 - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries
 - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure
+- grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation
 
 ## Medium-Term Priorities
 

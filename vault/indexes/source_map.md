@@ -1,12 +1,25 @@
 # Vault Source Map
 
-This map traces raw inputs into compiled wiki pages. For review and upkeep, pair it with [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]].
-
+- `2026-04-15-export/IMPORT_NOTE.md` -> `wiki/compiled/chatgpt-export-import-note.md`
+  - ChatGPT Export Import Note at line 1
+- `chatgpt/ChatGPT Import Guide.md` -> `wiki/compiled/chatgpt-import-staging.md`
+  - ChatGPT Import Staging at line 1
+- `2026-04-15-export/IMPORT_NOTE.md` -> `wiki/compiled/claude-export-import-note.md`
+  - Claude Export Import Note at line 1
+- `claude/Claude Import Guide.md` -> `wiki/compiled/claude-import-staging.md`
+  - Claude Import Staging at line 1
 - `raw/eval-self-improve-patterns.md` -> `wiki/compiled/eval-pattern-self-improve.md`
-  - 423574acb974 at line 3
-- `raw/Product Surface Source.md` -> `wiki/compiled/Product Surface Bridge.md`
-  - Product Surface Source at line 1
-  - Jarvis AI at line 5
-  - Features at line 9
+  - Eval Pattern: self_improve at line 1
+  - 423574acb974 at line 5
+  - Why This Belongs In The Brain at line 11
+- `imports/Import Inbox.md` -> `wiki/compiled/import-inbox.md`
+  - Import Inbox at line 1
 - `raw/jarvis_vault_strategy.md` -> `wiki/compiled/jarvis-vault-strategy.md`
   - Jarvis Vault Strategy at line 1
+  - Strategy Connections at line 11
+- `openai/OpenAI Import Guide.md` -> `wiki/compiled/openai-import-staging.md`
+  - OpenAI Import Staging at line 1
+- `raw/Product Surface Source.md` -> `wiki/compiled/product-surface-source.md`
+  - Product Surface Source at line 1
+  - Jarvis AI at line 7
+  - Features at line 11

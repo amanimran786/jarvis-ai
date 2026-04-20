@@ -33,6 +33,7 @@ Core note set:
 - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering
 - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps
 - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior
+- [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks
@@ -46,7 +47,7 @@ Supporting surfaces:
 - [[07 Import Source Hub]] for the import-layer map
 - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge
 - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule
-- [[Product Surface Bridge]] for the compiled product-surface bridge
+- [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge
 
 Use this note as the first place to connect new knowledge after reviewing raw imports.
 

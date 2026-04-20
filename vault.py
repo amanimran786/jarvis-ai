@@ -137,6 +137,7 @@ def init_vault() -> None:
 
 
 def _clean_text(text: str) -> str:
+    text = re.sub(r"\A---\s*\n.*?\n---\s*", " ", text, flags=re.S)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", text)
@@ -154,13 +155,24 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _extract_title(path: Path, text: str) -> str:
-    for line in text.splitlines():
+    body = _without_frontmatter(text)
+    for line in body.splitlines():
         stripped = line.strip()
         if stripped.startswith("#"):
             return stripped.lstrip("#").strip()
         if stripped:
             return stripped[:80]
     return path.stem.replace("_", " ").replace("-", " ").title()
+
+
+def _without_frontmatter(text: str) -> str:
+    lines = (text or "").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text or ""
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return "\n".join(lines[index + 1:])
+    return text or ""
 
 
 def _iter_docs() -> list[Path]:
@@ -178,10 +190,17 @@ def _parse_sections(path: Path, raw: str) -> list[dict]:
     current = None
     page_number = None
     line_no = 0
+    in_frontmatter = raw.startswith("---")
 
     for line in raw.splitlines():
         line_no += 1
         stripped = line.strip()
+        if line_no == 1 and stripped == "---":
+            continue
+        if in_frontmatter:
+            if stripped == "---":
+                in_frontmatter = False
+            continue
         heading_match = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         page_match = re.match(r"^#+\s+(Page|Slide)\s+(\d+)\b", stripped, re.IGNORECASE)
 

@@ -5,8 +5,8 @@ status: active
 source: repo
 confidence: high
 created: 2026-04-15
-updated: 2026-04-16
-version: 4
+updated: 2026-04-19
+version: 5
 tags:
   - vault
   - changelog
@@ -113,4 +113,15 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review
 - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes
 - renamed the repeated vault `README.md` files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves
-- renamed the old `readme-md` / `ingested-file-readme-md` bridge pair into [[Product Surface Bridge]] plus `raw/Product Surface Source.md` so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact
+- renamed the old `readme-md` / `ingested-file-readme-md` bridge pair into [[product-surface-source|Product Surface Source]] plus `raw/Product Surface Source.md` so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact
+
+## 2026-04-19
+
+### Proposal-first local skill loop
+
+- added [[79 Local Skill Loop]] as the canonical brain policy for Hermes-style local learning without unsafe self-modification
+- added a dedicated `skill_builder` specialist role for drafting reusable skill proposals from local vault evidence
+- added a non-mutating `/skills/propose` endpoint so Jarvis can validate skill payloads without writing files or changing `skills/index.json`
+- added a managed `skill-builder` task lane so background skill work stays separate from chat routing and vault curation
+- kept direct skill creation explicit and approval-sensitive instead of allowing background agents to silently mutate the skill registry
+- refreshed generated vault indexes so the compiled product-surface source now resolves as [[product-surface-source|Product Surface Source]] instead of a stale bridge filename

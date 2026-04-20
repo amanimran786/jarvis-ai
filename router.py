@@ -153,6 +153,14 @@ def _parse_skill_topic(text: str) -> str | None:
     return match.group(1).strip(" .")
 
 
+def _is_skill_proposal_request(lower: str) -> bool:
+    return bool(
+        re.search(r"\b(?:propose|draft|plan|review)\b.*\bskill\b", lower)
+        or re.search(r"\bskill\s+(?:builder|proposal|draft)\b", lower)
+        or "local skill loop" in lower
+    )
+
+
 def _is_model_status_query(lower: str) -> bool:
     return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|are you open source|what mode are you in|which mode are you in)\b", lower))
 
@@ -1246,6 +1254,10 @@ def route_stream(user_input: str) -> tuple:
             f"{local_training.result_text(modelfile_result)} "
             "If you want higher local quality on the failure cases, run a distillation pass next."
         ), "Local Model"
+
+    if _is_skill_proposal_request(lower):
+        result = specialized_agents.run(user_input, roles=["skill_builder", "reviewer"])
+        return _s(specialized_agents.result_text(result)), "Specialized Agent"
 
     if re.search(r"\b(create|generate|make|build|promote)\b.*\bskill\b", lower):
         if any(p in lower for p in ("promote", "failure", "failures", "eval")):

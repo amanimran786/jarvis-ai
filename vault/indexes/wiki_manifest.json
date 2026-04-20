@@ -1,154 +1,197 @@
 {
-  "page_count": 3,
+  "page_count": 9,
   "pages": [
+    {
+      "title": "ChatGPT Export Import Note",
+      "slug": "chatgpt-export-import-note",
+      "source": "2026-04-15-export/IMPORT_NOTE.md",
+      "page": "wiki/compiled/chatgpt-export-import-note.md",
+      "summary": "ChatGPT Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive. Use it to confirm recurring themes, project continuity, and story repetition, not as canonical memory.",
+      "keywords": [
+        "json",
+        "conversations",
+        "export",
+        "identity",
+        "interview",
+        "story",
+        "synthesis",
+        "projects",
+        "bank",
+        "role",
+        "targeting",
+        "map"
+      ],
+      "sections": [
+        {
+          "heading": "ChatGPT Export Import Note",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: broad historical conversation archive."
+        }
+      ]
+    },
+    {
+      "title": "ChatGPT Import Staging",
+      "slug": "chatgpt-import-staging",
+      "source": "chatgpt/ChatGPT Import Guide.md",
+      "page": "wiki/compiled/chatgpt-import-staging.md",
+      "summary": "ChatGPT Import Staging Place ChatGPT exports here before processing them into the main Jarvis brain. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[20 Projects]], [[10 Identity]] Purpose: stage broad conversation history, then extract only the durable identity, project, and synthesis signals.",
+      "keywords": [
+        "synthesis",
+        "identity",
+        "should",
+        "chatgpt",
+        "into",
+        "notes",
+        "projects",
+        "only",
+        "project",
+        "import",
+        "staging",
+        "place"
+      ],
+      "sections": [
+        {
+          "heading": "ChatGPT Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Place ChatGPT exports here before processing them into the main Jarvis brain."
+        }
+      ]
+    },
+    {
+      "title": "Claude Export Import Note",
+      "slug": "claude-export-import-note",
+      "source": "2026-04-15-export/IMPORT_NOTE.md",
+      "page": "wiki/compiled/claude-export-import-note.md",
+      "summary": "Claude Export Import Note Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction. Prefer this source when identity or long-term context conflicts with noisier archives.",
+      "keywords": [
+        "identity",
+        "export",
+        "json",
+        "source",
+        "projects",
+        "interview",
+        "primary",
+        "durable",
+        "context",
+        "claude",
+        "synthesis",
+        "story"
+      ],
+      "sections": [
+        {
+          "heading": "Claude Export Import Note",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Connected notes: [[05 Source Inventory]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]], [[60 Interview Story Bank]], [[61 Role Targeting Map]] Purpose: primary structured export for durable memory extraction."
+        }
+      ]
+    },
+    {
+      "title": "Claude Import Staging",
+      "slug": "claude-import-staging",
+      "source": "claude/Claude Import Guide.md",
+      "page": "wiki/compiled/claude-import-staging.md",
+      "summary": "Claude Import Staging Place Claude conversation exports, summaries, or ZIP contents here before processing. Connected notes: [[05 Source Inventory]], [[04 Capture Workflow]], [[50 Synthesis]], [[10 Identity]], [[20 Projects]] Purpose: stage the strongest durable memory source, then promote only stable identity, project, and decision signals into the curated brain.",
+      "keywords": [
+        "identity",
+        "claude",
+        "here",
+        "notes",
+        "source",
+        "synthesis",
+        "projects",
+        "only",
+        "stable",
+        "project",
+        "into",
+        "import"
+      ],
+      "sections": [
+        {
+          "heading": "Claude Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Place Claude conversation exports, summaries, or ZIP contents here before processing."
+        }
+      ]
+    },
     {
       "title": "Eval Pattern: self_improve",
       "slug": "eval-pattern-self-improve",
       "source": "raw/eval-self-improve-patterns.md",
       "page": "wiki/compiled/eval-pattern-self-improve.md",
-      "summary": "Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.",
+      "summary": "Eval Pattern: self_improve Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.",
       "keywords": [
-        "recent",
-        "eval",
         "improve",
-        "evidence",
-        "self",
         "should",
-        "enough",
-        "pattern",
-        "423574acb974",
-        "issue",
-        "only",
-        "act"
+        "self",
+        "recent",
+        "evidence",
+        "eval",
+        "jarvis",
+        "vault",
+        "brain",
+        "runtime",
+        "decision",
+        "log"
       ],
       "sections": [
+        {
+          "heading": "Eval Pattern: self_improve",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]]"
+        },
         {
           "heading": "423574acb974",
           "level": 2,
           "page": null,
-          "line_start": 3,
+          "line_start": 5,
           "summary": "Issue: Self-improve should only act when there is enough recent failure evidence."
+        },
+        {
+          "heading": "Why This Belongs In The Brain",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "summary": "- supports the local-first guardrail that self-improve should be evidence-gated, not impulse-driven - reinforces the runtime principle that maintenance and mutation should stay explicit, bounded, and reviewable - should be referenced when logging future self-improve policy changes in [[70 Jarvis Decision Log]] or [[91 Vault Changelog]]"
         }
       ]
     },
     {
-      "title": "Product Surface Bridge",
-      "slug": "product-surface-bridge",
-      "source": "raw/Product Surface Source.md",
-      "page": "wiki/compiled/Product Surface Bridge.md",
-      "summary": "Product Surface Source. Source path: /Users/truthseeker/jarvis-ai/README.md. Jarvis AI is a personal voice + text AI assistant for macOS. It combines local-first inference, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+      "title": "Import Inbox",
+      "slug": "import-inbox",
+      "source": "imports/Import Inbox.md",
+      "page": "wiki/compiled/import-inbox.md",
+      "summary": "Import Inbox Use this folder for raw source material that should eventually become part of Jarvis's local brain. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: keep raw provenance traceable while routing durable facts into the curated brain.",
       "keywords": [
-        "local",
-        "jarvis",
-        "vault",
-        "screen",
-        "can",
-        "mode",
-        "context",
-        "skill",
-        "prompt",
-        "self",
-        "skills",
-        "wiki"
+        "raw",
+        "source",
+        "brain",
+        "exports",
+        "openai",
+        "workflow",
+        "synthesis",
+        "keep",
+        "provenance",
+        "traceable",
+        "durable",
+        "facts"
       ],
       "sections": [
         {
-          "heading": "Product Surface Source",
+          "heading": "Import Inbox",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "summary": "Source path: /Users/truthseeker/jarvis-ai/README.md"
-        },
-        {
-          "heading": "Jarvis AI",
-          "level": 1,
-          "page": null,
-          "line_start": 5,
-          "summary": "A personal voice + text AI assistant for macOS."
-        },
-        {
-          "heading": "Features",
-          "level": 2,
-          "page": null,
-          "line_start": 9,
-          "summary": "- **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs"
-        },
-        {
-          "heading": "Requirements",
-          "level": 2,
-          "page": null,
-          "line_start": 28,
-          "summary": "- macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode"
-        },
-        {
-          "heading": "Setup",
-          "level": 2,
-          "page": null,
-          "line_start": 35,
-          "summary": "1."
-        },
-        {
-          "heading": "Running",
-          "level": 2,
-          "page": null,
-          "line_start": 79,
-          "summary": "```bash"
-        },
-        {
-          "heading": "GUI mode (default)",
-          "level": 1,
-          "page": null,
-          "line_start": 82,
-          "summary": "./run.sh"
-        },
-        {
-          "heading": "Headless / terminal-only",
-          "level": 1,
-          "page": null,
-          "line_start": 85,
-          "summary": "./run.sh --no-ui `` Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto`"
-        },
-        {
-          "heading": "Skills",
-          "level": 2,
-          "page": null,
-          "line_start": 99,
-          "summary": "Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it."
-        },
-        {
-          "heading": "Hotkeys",
-          "level": 2,
-          "page": null,
-          "line_start": 115,
-          "summary": "All hotkeys use Cmd + Option and work system-wide, even during screen share."
-        },
-        {
-          "heading": "Configuration",
-          "level": 2,
-          "page": null,
-          "line_start": 154,
-          "summary": "All model identifiers and the system prompt live in config.py."
-        },
-        {
-          "heading": "Vault",
-          "level": 2,
-          "page": null,
-          "line_start": 174,
-          "summary": "Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base."
-        },
-        {
-          "heading": "Self-Improve Safety",
-          "level": 2,
-          "page": null,
-          "line_start": 187,
-          "summary": "Jarvis can modify parts of its own source, but the apply path is guarded: - generated Python is syntax-validated before any file is changed - the original file is backed up to .jarvis_backups/ - writes go through a temporary file and atomic replace - Jarvis tells you to restart after a successful self-improve run so modules reload cleanly"
-        },
-        {
-          "heading": "Security",
-          "level": 2,
-          "page": null,
-          "line_start": 196,
-          "summary": "- API keys are loaded from .env and never hardcoded - credentials.json and token.json are gitignored - memory, knowledge, backup, and session files stay local - meeting overlay is invisible to screen share via NSWindowSharingNone"
+          "summary": "Use this folder for raw source material that should eventually become part of Jarvis's local brain."
         }
       ]
     },
@@ -157,20 +200,20 @@
       "slug": "jarvis-vault-strategy",
       "source": "raw/jarvis_vault_strategy.md",
       "page": "wiki/compiled/jarvis-vault-strategy.md",
-      "summary": "Jarvis Vault Strategy Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap.",
+      "summary": "Jarvis Vault Strategy Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over. The vault should stay inspectable and cheap.",
       "keywords": [
         "vault",
-        "should",
-        "local",
         "jarvis",
-        "markdown",
-        "prompt",
-        "context",
-        "topic",
-        "request",
+        "should",
         "strategy",
-        "use",
-        "before"
+        "local",
+        "runtime",
+        "notes",
+        "capture",
+        "workflow",
+        "decision",
+        "log",
+        "agent"
       ],
       "sections": [
         {
@@ -178,7 +221,172 @@
           "level": 1,
           "page": null,
           "line_start": 1,
-          "summary": "Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over."
+          "summary": "Related brain notes: [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] Jarvis should use a local markdown vault before it grows prompt context or relies on long conversational carry-over."
+        },
+        {
+          "heading": "Strategy Connections",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "summary": "- [[04 Capture Workflow]] defines how raw material should become durable notes without skipping review - [[70 Jarvis Decision Log]] is where retrieval and memory-policy changes should be recorded - [[78 AI Runtime Agent Engineering Principles]] is the runtime lens for keeping vault reads explicit and cheap - [[80 Jarvis Roadmap]] is where this strategy becomes product direction instead of just storage structure - [[91 Vault Changelog]] and [[93 Vault Maintenance]] are the provenance and upkeep layer that keep the strategy self-sustaining"
+        }
+      ]
+    },
+    {
+      "title": "OpenAI Import Staging",
+      "slug": "openai-import-staging",
+      "source": "openai/OpenAI Import Guide.md",
+      "page": "wiki/compiled/openai-import-staging.md",
+      "summary": "OpenAI Import Staging Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault. Connected notes: [[05 Source Inventory]], [[03 Brain Schema]], [[04 Capture Workflow]], [[50 Synthesis]] Purpose: hold future OpenAI-origin raw material in the same provenance-first flow as Claude and ChatGPT imports.",
+      "keywords": [
+        "openai",
+        "raw",
+        "material",
+        "folder",
+        "source",
+        "synthesis",
+        "import",
+        "staging",
+        "use",
+        "related",
+        "exports",
+        "structured"
+      ],
+      "sections": [
+        {
+          "heading": "OpenAI Import Staging",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Use this folder for OpenAI-related exports or structured data that should be reviewed before entering the main vault."
+        }
+      ]
+    },
+    {
+      "title": "Product Surface Source",
+      "slug": "product-surface-source",
+      "source": "raw/Product Surface Source.md",
+      "page": "wiki/compiled/product-surface-source.md",
+      "summary": "Product Surface Source Source path: /Users/truthseeker/jarvis-ai/README.md Brain links: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]] Jarvis AI A personal voice + text AI assistant for macOS. Jarvis combines local-first inference, cloud escalation when needed, persistent memory, self-learning, live browser and system control, and a PyQt6 desktop UI.",
+      "keywords": [
+        "jarvis",
+        "vault",
+        "local",
+        "screen",
+        "can",
+        "mode",
+        "context",
+        "skill",
+        "prompt",
+        "self",
+        "skills",
+        "into"
+      ],
+      "sections": [
+        {
+          "heading": "Product Surface Source",
+          "level": 1,
+          "page": null,
+          "line_start": 1,
+          "summary": "Source path: /Users/truthseeker/jarvis-ai/README.md Brain links: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[04 Capture Workflow]], [[91 Vault Changelog]]"
+        },
+        {
+          "heading": "Jarvis AI",
+          "level": 1,
+          "page": null,
+          "line_start": 7,
+          "summary": "A personal voice + text AI assistant for macOS."
+        },
+        {
+          "heading": "Features",
+          "level": 2,
+          "page": null,
+          "line_start": 11,
+          "summary": "- **Voice + text interface** \u2014 speech-to-text input, ElevenLabs TTS output, and a desktop chat UI - **Local-first model routing** \u2014 Ollama handles private everyday requests first, with GPT-mini, Haiku, Sonnet, or Opus used only when the task warrants the extra cost - **Persistent memory** \u2014 remembers facts, preferences, projects, and recent context from local JSON stores - **Local skills** \u2014 lightweight skill metadata stays cheap to load, while full SKILL.md instructions and references load only for the active request - **Task-scoped conversation context** \u2014 Jarvis keeps only the active task in prompt history, rotates between unrelated requests, and compacts older turns into a short carry-over summary - **Local markdown vault** \u2014 indexed markdown files in vault/ can be searched and selectively injected into the current request before Jarvis grows prompt context or escalates outward - **Wiki compiler** \u2014 raw markdown in vault/raw/ can be compiled into cleaned topic pages and cross-topic indexes for cheaper local retrieval - **Self-learning** \u2014 background knowledge feed, fact extraction, and daily reflection - **Live browser control** \u2014 open sites, search, summarize the current page, navigate back and forward, reload, and click visible links or buttons - **System control** \u2014 volume, brightness, screenshots, app launch, lock screen, clipboard readout, and shell commands - **Admin command path** \u2014 can run a terminal command through the native macOS administrator prompt when explicitly asked - **Google integration** \u2014 Calendar and Gmail read/create/send via OAuth2 - **Meeting overlay** \u2014 floating HUD during calls with live transcript, real-time AI suggestions, and screen scan; invisible to screen share - **Webcam + screen vision** \u2014 image and screen analysis from the camera and desktop - **Self-improvement** \u2014 Jarvis can inspect and rewrite parts of its own source, validate generated Python, back up originals, and apply changes atomically - **Stealth mode** \u2014 windows hidden from screen share using macOS APIs"
+        },
+        {
+          "heading": "Requirements",
+          "level": 2,
+          "page": null,
+          "line_start": 30,
+          "summary": "- macOS - Python 3.12+ - Ollama for local model support - BlackHole 2ch (optional) for capturing call audio in meeting mode"
+        },
+        {
+          "heading": "Setup",
+          "level": 2,
+          "page": null,
+          "line_start": 37,
+          "summary": "1."
+        },
+        {
+          "heading": "Running",
+          "level": 2,
+          "page": null,
+          "line_start": 81,
+          "summary": "```bash"
+        },
+        {
+          "heading": "GUI mode (default)",
+          "level": 1,
+          "page": null,
+          "line_start": 84,
+          "summary": "./run.sh"
+        },
+        {
+          "heading": "Headless / terminal-only",
+          "level": 1,
+          "page": null,
+          "line_start": 87,
+          "summary": "./run.sh --no-ui `` Jarvis exposes a local API while running: - GET /status \u2014 current mode and local-model availability - POST /chat \u2014 chat with Jarvis - GET /context \u2014 inspect current prompt/session footprint and recent request context stats - GET /vault \u2014 inspect the current local vault index status - POST /vault/build \u2014 compile raw markdown into wiki pages and rebuild the vault indexes - GET /memory \u2014 inspect saved memory - POST /mode \u2014 switch local, cloud, or auto`"
+        },
+        {
+          "heading": "Skills",
+          "level": 2,
+          "page": null,
+          "line_start": 101,
+          "summary": "Jarvis now supports a local skill layer under skills/: - skills/index.json is the L1 metadata index used for cheap relevance checks - skills/<skill_id>/SKILL.md holds the full L2 skill instructions - skills/<skill_id>/references/ holds L3 reference files that load only when that skill is active The first built-in skills are: - browser_execution for live browser navigation and page-action recovery - personal_context for Aman-specific answers grounded in memory and eval signals - self_improvement for evidence-gated self-editing behavior This keeps the baseline prompt smaller while still letting Jarvis load deeper guidance when a request actually needs it."
+        },
+        {
+          "heading": "Hotkeys",
+          "level": 2,
+          "page": null,
+          "line_start": 117,
+          "summary": "All hotkeys use Cmd + Option and work system-wide, even during screen share."
+        },
+        {
+          "heading": "Configuration",
+          "level": 2,
+          "page": null,
+          "line_start": 156,
+          "summary": "All model identifiers and the system prompt live in config.py."
+        },
+        {
+          "heading": "Vault",
+          "level": 2,
+          "page": null,
+          "line_start": 176,
+          "summary": "Jarvis now includes a local markdown vault: - vault/raw/ for raw source material - vault/wiki/ for cleaned topic pages - vault/indexes/ for generated indexes - vault/outputs/ for generated reports and artifacts Use phrases like refresh the vault index, search the vault for X, or what's in your local knowledge base."
+        },
+        {
+          "heading": "Brain Relevance",
+          "level": 2,
+          "page": null,
+          "line_start": 189,
+          "summary": "- the product surface described here should stay aligned with [[80 Jarvis Roadmap]] - runtime and routing claims here should be checked against [[78 AI Runtime Agent Engineering Principles]] - major shifts in these promises should be captured in [[70 Jarvis Decision Log]] and [[91 Vault Changelog]] - vault-specific changes should follow [[04 Capture Workflow]] instead of drifting into ad hoc structure"
+        },
+        {
+          "heading": "Self-Improve Safety",
+          "level": 2,
+          "page": null,
+          "line_start": 196,
+          "summary": "Jarvis can modify parts of its own source, but the apply path is guarded: - generated Python is syntax-validated before any file is changed - the original file is backed up to .jarvis_backups/ - writes go through a temporary file and atomic replace - Jarvis tells you to restart after a successful self-improve run so modules reload cleanly"
+        },
+        {
+          "heading": "Security",
+          "level": 2,
+          "page": null,
+          "line_start": 205,
+          "summary": "- API keys are loaded from .env and never hardcoded - credentials.json and token.json are gitignored - memory, knowledge, backup, and session files stay local - meeting overlay is invisible to screen share via NSWindowSharingNone"
         }
       ]
     }

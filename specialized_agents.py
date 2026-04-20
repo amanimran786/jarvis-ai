@@ -45,6 +45,7 @@ AGENTS = {
     "security_reviewer": AgentSpec("security_reviewer", AGENTS_DIR / "security_reviewer.md", SONNET),
     "security_analyst": AgentSpec("security_analyst", AGENTS_DIR / "security_analyst.md", SONNET),
     "self_improve_critic": AgentSpec("self_improve_critic", AGENTS_DIR / "self_improve_critic.md", HAIKU),
+    "skill_builder": AgentSpec("skill_builder", AGENTS_DIR / "skill_builder.md", HAIKU),
 }
 
 # Local model assignment per role — planner/reviewer need speed, executor needs depth.
@@ -61,6 +62,7 @@ _LOCAL_ROLE_MODELS = {
     "security_reviewer":  LOCAL_REASONING,  # needs depth
     "security_analyst":   LOCAL_REASONING,  # abuse-path and trust-boundary analysis
     "self_improve_critic": LOCAL_DEFAULT,   # lightweight check
+    "skill_builder":      LOCAL_DEFAULT,    # proposal and validation wrapper
 }
 
 _LOCAL_SPECIALIST_TIMEOUT_SECONDS = max(
@@ -249,6 +251,14 @@ def _self_improve_fallback() -> str:
     )
 
 
+def _skill_builder_fallback() -> str:
+    return (
+        "Treat reusable learning as a proposal-first skill loop: identify the repeated task or failure, "
+        "ground it in local vault evidence, draft the smallest reusable procedure, verify it locally, "
+        "and only promote it through an explicit auditable write."
+    )
+
+
 def _operator_fallback() -> str:
     return (
         "Start with the exact environment action that changes the state, execute only the requested scope, "
@@ -366,6 +376,8 @@ def _fallback_role_output(role: str, task: str, context: str = "") -> str:
         return _security_analyst_fallback()
     if role == "self_improve_critic":
         return _self_improve_fallback()
+    if role == "skill_builder":
+        return _skill_builder_fallback()
     return "The specialist cloud path is unavailable, so the local fallback is returning the most defensible concise answer."
 
 
@@ -383,6 +395,7 @@ def _explicit_roles(user_input: str) -> list[str]:
         "security_reviewer": ("security reviewer", "security audit", "security review"),
         "security_analyst": ("security analyst", "security_analyst", "threat model this", "analyze the attack surface"),
         "self_improve_critic": ("self improve critic", "self-improve critic", "self review critic"),
+        "skill_builder": ("skill builder", "skill_builder", "propose a skill", "draft a skill", "skill proposal"),
     }
     selected = []
     for role, triggers in aliases.items():
@@ -413,6 +426,11 @@ def choose_roles(user_input: str) -> list[str]:
         "research", "investigate", "look through", "scan github", "browse repos",
         "compare repos", "source-backed", "findings", "what changed", "public repos",
     )
+    skill_builder_markers = (
+        "skill builder", "skill_builder", "skill proposal", "propose a skill", "draft a skill",
+        "local skill loop", "automatic skill creation", "create skills safely", "self-improving skill",
+        "hermes agent", "hermes-style",
+    )
     vault_markers = (
         "distill into the brain", "story bank", "decision log", "roadmap note",
         "changelog", "patch this note", "update this note", "update the vault",
@@ -438,11 +456,15 @@ def choose_roles(user_input: str) -> list[str]:
             return ["vault_curator", "reviewer"]
         if explicit == ["security_analyst"]:
             return ["security_analyst", "reviewer"]
+        if explicit == ["skill_builder"]:
+            return ["skill_builder", "reviewer"]
         if explicit == ["operator"]:
             return ["operator", "reviewer"]
         return explicit
 
     roles = ["planner", "executor", "reviewer"]
+    if any(t in lower for t in skill_builder_markers):
+        return ["skill_builder", "reviewer"]
     if any(t in lower for t in science_markers):
         return ["science_expert", "reviewer"]
     if any(t in lower for t in security_analysis_markers) and (asks_for_reasoning or word_count >= 8):
@@ -525,7 +547,7 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
         stages.append(result)
         if role in {
             "planner", "operator", "researcher", "debugger", "vault_curator",
-            "science_expert", "security_reviewer", "security_analyst", "self_improve_critic"
+            "science_expert", "security_reviewer", "security_analyst", "self_improve_critic", "skill_builder"
         }:
             shared_context += f"{role}: {result['output']}\n\n"
 

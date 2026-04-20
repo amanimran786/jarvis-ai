@@ -1,23 +1,42 @@
 # Vault Keyword Index
 
-Use this generated index with [[02 Brain Dashboard]], [[05 Source Inventory]], [[91 Vault Changelog]], and [[93 Vault Maintenance]] when you need the current curated surface or want to trace why a source exists.
-
-- should: Eval Pattern: self_improve, Jarvis Vault Strategy
-- vault: Product Surface Bridge, Jarvis Vault Strategy
-- local: Product Surface Bridge, Jarvis Vault Strategy
-- jarvis: Product Surface Bridge, Jarvis Vault Strategy
-- context: Product Surface Bridge, Jarvis Vault Strategy
-- recent: Eval Pattern: self_improve
-- eval: Eval Pattern: self_improve
+- synthesis: ChatGPT Export Import Note, ChatGPT Import Staging, Claude Import Staging, Import Inbox, OpenAI Import Staging
+- source: Claude Export Import Note, Claude Import Staging, Import Inbox, OpenAI Import Staging
+- identity: ChatGPT Export Import Note, ChatGPT Import Staging, Claude Export Import Note, Claude Import Staging
+- projects: ChatGPT Export Import Note, ChatGPT Import Staging, Claude Export Import Note, Claude Import Staging
+- jarvis: Eval Pattern: self_improve, Jarvis Vault Strategy, Product Surface Source
+- vault: Eval Pattern: self_improve, Jarvis Vault Strategy, Product Surface Source
+- should: ChatGPT Import Staging, Eval Pattern: self_improve, Jarvis Vault Strategy
+- notes: ChatGPT Import Staging, Claude Import Staging, Jarvis Vault Strategy
+- local: Jarvis Vault Strategy, Product Surface Source
+- raw: Import Inbox, OpenAI Import Staging
+- openai: Import Inbox, OpenAI Import Staging
+- json: ChatGPT Export Import Note, Claude Export Import Note
+- export: ChatGPT Export Import Note, Claude Export Import Note
+- interview: ChatGPT Export Import Note, Claude Export Import Note
+- only: ChatGPT Import Staging, Claude Import Staging
+- screen: Product Surface Source
+- can: Product Surface Source
+- mode: Product Surface Source
+- context: Product Surface Source
+- skill: Product Surface Source
 - improve: Eval Pattern: self_improve
-- evidence: Eval Pattern: self_improve
 - self: Eval Pattern: self_improve
-- enough: Eval Pattern: self_improve
-- pattern: Eval Pattern: self_improve
-- markdown: Jarvis Vault Strategy
-- prompt: Jarvis Vault Strategy
-- topic: Jarvis Vault Strategy
-- screen: Product Surface Bridge
-- can: Product Surface Bridge
-- mode: Product Surface Bridge
-- skill: Product Surface Bridge
+- recent: Eval Pattern: self_improve
+- evidence: Eval Pattern: self_improve
+- eval: Eval Pattern: self_improve
+- brain: Import Inbox
+- exports: Import Inbox
+- workflow: Import Inbox
+- keep: Import Inbox
+- conversations: ChatGPT Export Import Note
+- story: ChatGPT Export Import Note
+- chatgpt: ChatGPT Import Staging
+- into: ChatGPT Import Staging
+- primary: Claude Export Import Note
+- durable: Claude Export Import Note
+- claude: Claude Import Staging
+- here: Claude Import Staging
+- material: OpenAI Import Staging
+- folder: OpenAI Import Staging
+- import: OpenAI Import Staging

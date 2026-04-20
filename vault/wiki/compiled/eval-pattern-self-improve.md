@@ -2,19 +2,13 @@
 
 Source file: `raw/eval-self-improve-patterns.md`
 
-Connected notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]]
-
 ## Summary
-Eval Pattern: self_improve 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.
+Eval Pattern: self_improve Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]] 423574acb974 Issue: Self-improve should only act when there is enough recent failure evidence. Expected: It should require recent eval evidence before proposing changes.
 
 ## Key Terms
-recent, eval, improve, evidence, self, should, enough, pattern, 423574acb974, issue, only, act
+improve, should, self, recent, evidence, eval, jarvis, vault, brain, runtime, decision, log
 
 ## Citation Map
-- 423574acb974 at line 3: Issue: Self-improve should only act when there is enough recent failure evidence.
-
-## Why This Matters
-
-- reinforces the runtime rule that self-improve needs explicit failure evidence before it mutates behavior
-- belongs next to [[78 AI Runtime Agent Engineering Principles]] because it is a concrete eval example of bounded agent behavior
-- should inform future policy updates logged in [[70 Jarvis Decision Log]] and maintenance follow-up tracked through [[93 Vault Maintenance]]
+- Eval Pattern: self_improve at line 1: Related brain notes: [[78 AI Runtime Agent Engineering Principles]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]], [[91 Vault Changelog]], [[93 Vault Maintenance]]
+- 423574acb974 at line 5: Issue: Self-improve should only act when there is enough recent failure evidence.
+- Why This Belongs In The Brain at line 11: - supports the local-first guardrail that self-improve should be evidence-gated, not impulse-driven - reinforces the runtime principle that maintenance and mutation should stay explicit, bounded, and reviewable - should be referenced when logging future self-improve policy changes in [[70 Jarvis Decision Log]] or [[91 Vault Changelog]]
