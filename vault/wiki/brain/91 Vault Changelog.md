@@ -145,3 +145,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - exposed negative triggers through skill registry detail so future skill debugging can inspect both positive and negative activation rules
 - surfaced negative triggers inside orchestrator skill metadata so classification sees positive and negative activation rules together
 - seeded negative triggers into the broadest curated skills: local knowledge, vault overview, personal context, eval self-improve, and self-improvement
+
+### Frontier capability parity
+
+- added [[84 Frontier Capability Parity]] as the measurable local-first scorecard for Claude/GPT/Codex/Gemini/Grok-style capability groups
+- added a `/capability-parity` runtime endpoint and `/parity` console command so Jarvis can report ready, partial, and gap areas from live local state
+- connected parity tracking to roadmap, context budget, and external pattern intake so the ambition stays grounded in verifiable product seams

@@ -127,6 +127,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation
 - enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded
 - route external repo hype through [[83 External Agent Pattern Intake]] so useful patterns become Jarvis-native upgrades without unsafe dependency drift
+- track [[84 Frontier Capability Parity]] so the local Claude/GPT/Codex/Gemini/Grok-style goal is measured by actual product capabilities instead of slogans
 
 ## Medium-Term Priorities
 

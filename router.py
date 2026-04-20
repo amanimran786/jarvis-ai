@@ -41,6 +41,7 @@ import interview_profile
 import semantic_memory as _smem
 import specialized_agents
 import behavior_hooks
+import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
@@ -1129,6 +1130,20 @@ def route_stream(user_input: str) -> tuple:
         "claude-code-best-practice",
     )):
         return _s(external_agent_patterns.summary_text()), "Status"
+    if any(p in lower for p in (
+        "capability parity",
+        "frontier parity",
+        "frontier capability",
+        "same capabilities",
+        "like claude",
+        "like chatgpt",
+        "like gpt",
+        "like codex",
+        "like gemini",
+        "like grok",
+        "claude gpt codex grok and gemini",
+    )):
+        return _s(capability_parity.summary_text()), "Status"
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
     if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):

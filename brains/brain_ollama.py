@@ -472,17 +472,21 @@ def warm_model_cache(model: str = LOCAL_REASONING) -> None:
     Runs a trivial generation — discards output. Safe to call from a background
     thread at startup so it doesn't block the API from coming up.
     """
+    quiet = os.getenv("JARVIS_QUIET_BOOT", "").lower() in {"1", "true", "yes"}
     try:
         target = get_best_available(model)
-        print(f"[Ollama] Warming model cache for {target}...")
+        if not quiet:
+            print(f"[Ollama] Warming model cache for {target}...")
         _client().chat(
             model=target,
             messages=[{"role": "user", "content": "Hi"}],
             stream=False,
         )
-        print(f"[Ollama] {target} loaded and ready.")
+        if not quiet:
+            print(f"[Ollama] {target} loaded and ready.")
     except Exception as e:
-        print(f"[Ollama] Cache warm failed (non-fatal): {e}")
+        if not quiet:
+            print(f"[Ollama] Cache warm failed (non-fatal): {e}")
 
 
 def warm_vision_cache() -> None:
@@ -490,14 +494,18 @@ def warm_vision_cache() -> None:
     target = _best_vision_model()
     if not target:
         return
+    quiet = os.getenv("JARVIS_QUIET_BOOT", "").lower() in {"1", "true", "yes"}
     try:
-        print(f"[Ollama] Warming vision cache for {target}...")
+        if not quiet:
+            print(f"[Ollama] Warming vision cache for {target}...")
         _client().generate(model=target, prompt="", keep_alive="5m")
-        print(f"[Ollama] Vision model {target} loaded and ready.")
+        if not quiet:
+            print(f"[Ollama] Vision model {target} loaded and ready.")
         _mark_vision_success(target)
     except Exception as e:
         _mark_vision_failure(target, e)
-        print(f"[Ollama] Vision warm failed (non-fatal): {e}")
+        if not quiet:
+            print(f"[Ollama] Vision warm failed (non-fatal): {e}")
 
 
 def local_capabilities() -> dict:
