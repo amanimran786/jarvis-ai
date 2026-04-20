@@ -1968,6 +1968,60 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("Use the vault curator to handle this vault task.", task["effective_prompt"])
         self.assertIn("distill recent runtime lessons into the roadmap", task["effective_prompt"])
 
+    def test_tasks_endpoint_holds_risky_task_until_approved(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream", return_value=(iter(["Deployment checklist ready."]), "UnitTestModel")) as route_mock, \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "deploy the current Jarvis build",
+                    "kind": "task",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            task_id = payload["task"]["id"]
+            self.assertEqual(payload["task"]["status"], "waiting_approval")
+            self.assertEqual(payload["task"]["approval_reason"], "deployment")
+            route_mock.assert_not_called()
+
+            approve = self.client.post(f"/tasks/{task_id}/approve")
+            self.assertEqual(approve.status_code, 200)
+            self.assertEqual(approve.json()["task"]["status"], "queued")
+            task = task_runtime.wait_for_task(task_id, timeout=2.0)
+
+        self.assertIsNotNone(task)
+        self.assertEqual(task["status"], "succeeded")
+        self.assertEqual(task["model"], "UnitTestModel")
+        events = self.client.get(f"/tasks/{task_id}/events").json()["events"]
+        statuses = [event.get("status") for event in events if event.get("type") == "status"]
+        self.assertIn("waiting_approval", statuses)
+        self.assertIn("queued", statuses)
+
+    def test_tasks_endpoint_can_deny_risky_waiting_task(self):
+        task_runtime.reset_for_tests()
+        fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
+        with patch("task_runtime.route_stream") as route_mock, \
+             patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
+            response = self.client.post(
+                "/tasks",
+                json={
+                    "prompt": "git push these changes",
+                    "kind": "task",
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            task_id = response.json()["task"]["id"]
+            self.assertEqual(response.json()["task"]["status"], "waiting_approval")
+
+            denied = self.client.post(f"/tasks/{task_id}/deny")
+            self.assertEqual(denied.status_code, 200)
+            self.assertEqual(denied.json()["task"]["status"], "cancelled")
+
+        route_mock.assert_not_called()
+
     def test_router_queues_background_vault_task_and_logs_agent_inbox(self):
         with patch(
             "task_runtime.submit_task",
