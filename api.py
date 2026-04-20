@@ -873,6 +873,22 @@ def cancel_task(task_id: str):
     return {"ok": True, "task": task}
 
 
+@app.post("/tasks/{task_id}/approve")
+def approve_task(task_id: str):
+    task = task_runtime.approve_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+    return {"ok": True, "task": task}
+
+
+@app.post("/tasks/{task_id}/deny")
+def deny_task(task_id: str):
+    task = task_runtime.deny_task(task_id)
+    if not task:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
+    return {"ok": True, "task": task}
+
+
 @app.get("/bridge/status")
 def bridge_status():
     return hw.bridge_status(api_host=get_host(), api_port=get_port())

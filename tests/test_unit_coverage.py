@@ -2681,6 +2681,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         cancel_mock.assert_called_once_with("task-123")
 
+    def test_approve_task_command_routes_to_task_approval_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.approve_task", return_value=0) as approve_mock:
+            result = jarvis_cli._handle_console_command("/approve task-123")
+
+        self.assertEqual(result, 0)
+        approve_mock.assert_called_once_with("task-123")
+
+    def test_deny_task_command_routes_to_task_denial_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.deny_task", return_value=0) as deny_mock:
+            result = jarvis_cli._handle_console_command("/deny task-123")
+
+        self.assertEqual(result, 0)
+        deny_mock.assert_called_once_with("task-123")
+
     def test_doctor_command_routes_to_doctor_helper(self):
         import jarvis_cli
 
@@ -2727,6 +2745,28 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         post_mock.assert_called_once_with("/tasks/task-123/cancel", {})
         print_mock.assert_called_once_with("task-123: cancel_requested")
+
+    def test_approve_task_posts_approve_endpoint(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"task": {"id": "task-123", "status": "queued"}}) as post_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.approve_task("task-123")
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with("/tasks/task-123/approve", {})
+        print_mock.assert_called_once_with("task-123: queued")
+
+    def test_deny_task_posts_deny_endpoint(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"task": {"id": "task-123", "status": "cancelled"}}) as post_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.deny_task("task-123")
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with("/tasks/task-123/deny", {})
+        print_mock.assert_called_once_with("task-123: cancelled")
 
     def test_watch_task_streams_existing_task(self):
         import jarvis_cli
@@ -2777,6 +2817,29 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 1)
         self.assertIn("task not found", stderr.getvalue())
+
+    def test_watch_task_reports_waiting_approval_without_streaming(self):
+        import jarvis_cli
+
+        task_payload = {
+            "task": {
+                "id": "task-123",
+                "status": "waiting_approval",
+                "approval_reason": "deployment",
+                "workspace": {"enabled": False},
+            }
+        }
+
+        with patch("jarvis_cli.get", return_value=task_payload), \
+             patch("jarvis_cli.urllib.request.urlopen") as urlopen_mock, \
+             patch("builtins.print") as print_mock:
+            result = jarvis_cli.watch_task("task-123")
+
+        self.assertEqual(result, 0)
+        urlopen_mock.assert_not_called()
+        printed = "\n".join(call.args[0] for call in print_mock.call_args_list if call.args)
+        self.assertIn("task-123: waiting for approval", printed)
+        self.assertIn("Use /approve task-123 to start it or /deny task-123 to cancel it.", printed)
 
     def test_print_doctor_reports_runtime_findings(self):
         import jarvis_cli
