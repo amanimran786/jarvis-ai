@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -137,6 +138,18 @@ def _default_agents() -> list[dict[str, Any]]:
             "meta": {"source": "vault", "mode": "daemon"},
         },
         {
+            "id": "skill-builder",
+            "label": "Skill Builder",
+            "kind": "system",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["skills", "proposal", "self_improve"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "skill_factory", "mode": "proposal_first"},
+        },
+        {
             "id": "bridge",
             "label": "Bridge",
             "kind": "system",
@@ -251,6 +264,8 @@ def _choose_agent(kind: str, requested_agent_id: str = "") -> str:
         return "meeting-assist"
     if normalized in {"knowledge", "memory", "vault"}:
         return "knowledge-vault"
+    if normalized in {"skill", "skills", "skill_builder", "skill-builder"}:
+        return "skill-builder"
     if normalized in {"bridge", "devices"}:
         return "bridge"
     return "chat-router"
@@ -283,6 +298,15 @@ def _task_prompt_for_kind(prompt: str, *, kind: str = "chat", terse_mode: str = 
                 "and the agent inbox when the work should stay queued instead of mutating a canonical note immediately. "
                 f"{prompt}"
             )
+    if normalized_kind in {"skill", "skills", "skill_builder", "skill-builder"}:
+        lower = prompt.lower()
+        if "skill builder" not in lower:
+            base_prompt = (
+                "Use the skill builder to handle this skill task. "
+                "Draft and validate a proposal by default; do not mutate skills/index.json or create skill files "
+                "unless the user has explicitly requested the separate create/promote skill command. "
+                f"{prompt}"
+            )
     normalized = _normalize_terse_mode(terse_mode)
     if not normalized:
         return base_prompt
@@ -299,6 +323,11 @@ def _should_isolate_workspace(kind: str, isolated_workspace: bool | None) -> boo
 
 def _approval_reason_for_task(prompt: str, *, kind: str = "", source: str = "") -> str:
     lower = (prompt or "").lower()
+    normalized_kind = (kind or "").strip().lower()
+    if normalized_kind in {"skill", "skills", "skill_builder", "skill-builder"} and re.search(
+        r"\b(create|generate|make|build|promote)\b.*\bskill\b", lower
+    ) and not re.search(r"\b(propose|proposal|draft|plan|review)\b", lower):
+        return "skill registry mutation"
     markers = (
         ("git push", "repo push"),
         ("push to github", "repo push"),

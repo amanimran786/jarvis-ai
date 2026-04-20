@@ -14,6 +14,7 @@ import re
 import browser
 import hardware
 import notes
+import skill_factory
 import terminal
 import tools
 import vault_capture
@@ -36,6 +37,8 @@ def run_native_role_hook(role: str, task: str) -> dict | None:
         return _run_vault_curator_hook(task)
     if role == "operator":
         return _run_operator_hook(task)
+    if role == "skill_builder":
+        return _run_skill_builder_hook(task)
     return None
 
 
@@ -249,6 +252,67 @@ def _run_operator_hook(task: str) -> dict | None:
 def _looks_like_admin_shell(command: str) -> bool:
     lower = (command or "").lower()
     return any(pattern in lower for pattern in _ADMIN_SHELL_PATTERNS)
+
+
+def _run_skill_builder_hook(task: str) -> dict | None:
+    lower = (task or "").lower().strip()
+    if "skill" not in lower:
+        return None
+
+    if re.search(r"\b(create|generate|make|build|promote)\b.*\bskill\b", lower) and not re.search(
+        r"\b(propose|proposal|draft|plan|review)\b", lower
+    ):
+        return {
+            "model": "native/skill_builder",
+            "output": (
+                "Skill Builder is proposal-first. I can draft and validate the skill payload without writing files. "
+                "To mutate the skill registry, use the explicit create/promote skill command so the write stays auditable."
+            ),
+        }
+
+    topic = _extract_skill_proposal_topic(task)
+    if not topic:
+        return {
+            "model": "native/skill_builder",
+            "output": "Tell me the topic to propose a skill for, for example: Propose a skill for local vault maintenance.",
+        }
+
+    result = skill_factory.propose_skill_from_vault(topic)
+    if not result.get("ok"):
+        return {"model": "native/skill_builder", "output": result.get("error", "Could not propose that skill.")}
+
+    source_paths = result.get("source_paths") or []
+    sources = ", ".join(source_paths[:3]) if source_paths else "local vault matches"
+    triggers = ", ".join((result.get("entry") or {}).get("triggers", [])[:5])
+    trigger_suffix = f" Suggested triggers: {triggers}." if triggers else ""
+    return {
+        "model": "native/skill_builder",
+        "output": (
+            f"Proposed local skill `{result['skill_id']}` from {sources}. "
+            "This was a dry run; no skill files or registry entries were written."
+            f"{trigger_suffix} To promote it, run an explicit create skill command after review."
+        ),
+    }
+
+
+def _extract_skill_proposal_topic(task: str) -> str:
+    patterns = (
+        r"\b(?:propose|draft|plan|review)\b\s+(?:a\s+)?(?:local\s+)?skill(?:\s+from\s+the\s+vault)?(?:\s+(?:about|for|on))\s+(.+)$",
+        r"\bskill\s+(?:proposal|draft)(?:\s+(?:about|for|on))\s+(.+)$",
+        r"\b(?:turn|save)\b\s+(.+?)\s+(?:as|into)\s+(?:a\s+)?skill\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, task, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return _clean_skill_topic(match.group(1))
+    return ""
+
+
+def _clean_skill_topic(topic: str) -> str:
+    cleaned = (topic or "").strip().strip(" .:\"'")
+    cleaned = re.sub(r"\s+(?:without|but)\s+writing\s+files\b.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+    cleaned = re.sub(r"\s+(?:as|as a)\s+dry\s+run\b.*$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+    return cleaned.strip(" .:\"'")
 
 
 def _vault_error_text(result: dict, default: str) -> str:

@@ -38,6 +38,15 @@ def _title_case(text: str) -> str:
     return " ".join(part.capitalize() for part in re.split(r"[-_\s]+", text) if part)
 
 
+def _skill_source_title(match: dict) -> str:
+    title = str((match or {}).get("title") or "").strip()
+    if title and title != "---":
+        return title
+    path = str((match or {}).get("path") or "").strip()
+    stem = Path(path).stem if path else ""
+    return stem or "Generated Skill"
+
+
 def _load_index() -> dict:
     return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
 
@@ -127,21 +136,17 @@ def _restore_skill_state(skill_id: str, state: dict) -> None:
         skill_dir.rmdir()
 
 
-def create_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "local", dry_run: bool = False) -> dict:
+def _build_skill_payload(query: str, tool: str = "chat", cost_hint: str = "local") -> dict:
     matches = vault.search(query, topn=3)
     if not matches:
         return {"ok": False, "error": f"No relevant vault material found for {query}."}
 
     primary = matches[0]
-    skill_id = _slugify(primary["title"])
+    primary_title = _skill_source_title(primary)
+    skill_id = _slugify(primary_title)
     name = _title_case(skill_id)
     keywords = [kw for kw in primary.get("keywords", [])[:6] if len(kw) > 2]
-    triggers = sorted(set([query.lower(), primary["title"].lower(), *keywords]))[:8]
-
-    skill_dir = SKILLS_DIR / skill_id
-    refs_dir = skill_dir / "references"
-    if not dry_run:
-        refs_dir.mkdir(parents=True, exist_ok=True)
+    triggers = sorted(set([query.lower(), primary_title.lower(), *keywords]))[:8]
 
     rule_lines = []
     for match in matches:
@@ -156,20 +161,18 @@ def create_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "lo
             f"Name: {name}",
             "",
             "Purpose:",
-            f"Use local vault knowledge about {primary['title']} before relying on broader model reasoning.",
+            f"Use local vault knowledge about {primary_title} before relying on broader model reasoning.",
             "",
             "Rules:",
             *rule_lines,
         ]
     )
-    if not dry_run:
-        (skill_dir / "SKILL.md").write_text(body + "\n", encoding="utf-8")
 
     reference = "\n\n".join(
         [
             "\n".join(
                 [
-                    f"# Source: {match['title']}",
+                    f"# Source: {_skill_source_title(match)}",
                     f"Path: `{match['path']}`",
                     f"Citation: `{match.get('citation', {}).get('label', match['path'])}`",
                     "",
@@ -179,14 +182,11 @@ def create_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "lo
             for match in matches
         ]
     )
-    reference_path = refs_dir / "vault_context.md"
-    if not dry_run:
-        reference_path.write_text(reference + "\n", encoding="utf-8")
 
     entry = {
         "id": skill_id,
         "name": name,
-        "description": f"Use local vault knowledge about {primary['title']}.",
+        "description": f"Use local vault knowledge about {primary_title}.",
         "tool": tool,
         "cost_hint": cost_hint,
         "triggers": triggers,
@@ -196,22 +196,70 @@ def create_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "lo
     payload_validation = _validate_skill_payload(skill_id, body, reference, entry)
     if not payload_validation["ok"]:
         return payload_validation
-    if not dry_run:
-        snapshot = _snapshot_skill_state(skill_id)
-        try:
-            _upsert_skill_entry(entry)
-            validation = _validate_skill(skill_id)
-            if not validation["ok"]:
-                raise RuntimeError(validation["error"])
-        except Exception as exc:
-            _restore_skill_state(skill_id, snapshot)
-            return {"ok": False, "error": f"Skill creation rolled back: {exc}"}
 
     return {
         "ok": True,
         "skill_id": skill_id,
         "name": name,
         "source_paths": [match["path"] for match in matches],
+        "body": body,
+        "reference": reference,
+        "entry": entry,
+    }
+
+
+def propose_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "local") -> dict:
+    """Build and validate a skill payload without writing files or registry state."""
+    payload = _build_skill_payload(query, tool=tool, cost_hint=cost_hint)
+    if not payload.get("ok"):
+        return payload
+    payload["dry_run"] = True
+    payload["proposal_only"] = True
+    return payload
+
+
+def create_skill_from_vault(query: str, tool: str = "chat", cost_hint: str = "local", dry_run: bool = False) -> dict:
+    payload = _build_skill_payload(query, tool=tool, cost_hint=cost_hint)
+    if not payload.get("ok"):
+        return payload
+
+    skill_id = payload["skill_id"]
+    skill_dir = SKILLS_DIR / skill_id
+    refs_dir = skill_dir / "references"
+    body = payload["body"]
+    reference = payload["reference"]
+    entry = payload["entry"]
+
+    if dry_run:
+        return {
+            "ok": True,
+            "skill_id": skill_id,
+            "name": payload["name"],
+            "source_paths": payload["source_paths"],
+            "dry_run": True,
+            "body": body,
+            "reference": reference,
+            "entry": entry,
+        }
+
+    snapshot = _snapshot_skill_state(skill_id)
+    try:
+        refs_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(body + "\n", encoding="utf-8")
+        (refs_dir / "vault_context.md").write_text(reference + "\n", encoding="utf-8")
+        _upsert_skill_entry(entry)
+        validation = _validate_skill(skill_id)
+        if not validation["ok"]:
+            raise RuntimeError(validation["error"])
+    except Exception as exc:
+        _restore_skill_state(skill_id, snapshot)
+        return {"ok": False, "error": f"Skill creation rolled back: {exc}"}
+
+    return {
+        "ok": True,
+        "skill_id": skill_id,
+        "name": payload["name"],
+        "source_paths": payload["source_paths"],
         "dry_run": dry_run,
     }
 
