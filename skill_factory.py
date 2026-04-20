@@ -84,7 +84,7 @@ def _validate_skill_payload(skill_id: str, body: str, reference: str, entry: dic
         return {"ok": False, "error": f"Generated skill {skill_id} is missing required sections."}
     if not reference.strip():
         return {"ok": False, "error": f"Generated skill {skill_id} has no reference material."}
-    required_keys = {"id", "name", "description", "tool", "cost_hint", "triggers", "path", "resources"}
+    required_keys = {"id", "name", "description", "tool", "cost_hint", "triggers", "negative_triggers", "path", "resources"}
     missing = sorted(required_keys - set(entry))
     if missing:
         return {"ok": False, "error": f"Generated skill {skill_id} is missing index keys: {', '.join(missing)}."}
@@ -195,6 +195,14 @@ def _build_skill_payload(query: str, tool: str = "chat", cost_hint: str = "local
         "tool": tool,
         "cost_hint": cost_hint,
         "triggers": triggers,
+        "negative_triggers": [
+            "one-off fact",
+            "remember that",
+            "personal preference",
+            "make jarvis smarter",
+            "browser automation",
+            "security exploit",
+        ],
         "path": f"{skill_id}/SKILL.md",
         "resources": [f"{skill_id}/references/vault_context.md"],
     }

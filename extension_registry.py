@@ -117,6 +117,7 @@ def list_skills() -> list[dict[str, Any]]:
                 "tool": skill.tool,
                 "cost_hint": skill.cost_hint,
                 "triggers": list(skill.triggers),
+                "negative_triggers": list(skill.negative_triggers),
                 "path": str(skill.path.relative_to(_ROOT)),
                 "resources": [str(resource.relative_to(_ROOT)) for resource in skill.resources],
             }
@@ -135,6 +136,7 @@ def get_skill_detail(skill_id: str | None) -> dict[str, Any] | None:
         "tool": skill.tool,
         "cost_hint": skill.cost_hint,
         "triggers": list(skill.triggers),
+        "negative_triggers": list(skill.negative_triggers),
         "path": str(skill.path.relative_to(_ROOT)),
         "resources": [str(resource.relative_to(_ROOT)) for resource in skill.resources],
         "instructions": skills.load_skill_bundle(skill.id),

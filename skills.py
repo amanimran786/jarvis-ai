@@ -29,6 +29,7 @@ class Skill:
     tool: str
     cost_hint: str
     triggers: tuple[str, ...]
+    negative_triggers: tuple[str, ...]
     path: Path
     resources: tuple[Path, ...]
 
@@ -59,6 +60,7 @@ def all_skills() -> tuple[Skill, ...]:
                 tool=item.get("tool", "chat"),
                 cost_hint=item.get("cost_hint", "local"),
                 triggers=tuple(item.get("triggers", [])),
+                negative_triggers=tuple(item.get("negative_triggers", [])),
                 path=path,
                 resources=resources,
             )
@@ -81,6 +83,9 @@ def match_skills(user_input: str, limit: int = 3) -> list[tuple[Skill, int]]:
     matches: list[tuple[Skill, int]] = []
 
     for skill in all_skills():
+        negative_triggers = [_normalize(trigger) for trigger in skill.negative_triggers]
+        if any(trigger and trigger in lower for trigger in negative_triggers):
+            continue
         score = 0
         for trigger in skill.triggers:
             trigger_lower = _normalize(trigger)
@@ -139,9 +144,10 @@ def metadata_block(user_input: str, tool: str | None = None, limit: int = 3) -> 
     for skill, score in match_skills(user_input, limit=limit):
         if tool and skill.tool != tool:
             continue
+        negative = f' | negative_triggers: {", ".join(skill.negative_triggers[:4])}' if skill.negative_triggers else ""
         lines.append(
             f'- id: "{skill.id}" | tool: "{skill.tool}" | cost_hint: "{skill.cost_hint}" | '
-            f'description: "{skill.description}" | triggers: {", ".join(skill.triggers[:4])}'
+            f'description: "{skill.description}" | triggers: {", ".join(skill.triggers[:4])}{negative}'
         )
     return "\n".join(lines)
 

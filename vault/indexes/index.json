@@ -8082,25 +8082,25 @@
         "skill",
         "jarvis",
         "local",
-        "vault",
         "skills",
+        "vault",
+        "add",
         "agent",
         "log",
-        "add",
+        "should",
+        "first",
         "without",
         "maintenance",
         "repeated",
-        "should",
-        "first",
+        "task",
+        "not",
         "workflows",
+        "negative",
         "proposal",
         "reusable",
-        "self",
-        "notes",
-        "pattern",
-        "decision"
+        "self"
       ],
-      "chars": 3105,
+      "chars": 3505,
       "sections": [
         {
           "heading": "Local Skill Loop",
@@ -8191,27 +8191,27 @@
           "level": 2,
           "page": null,
           "line_start": 68,
-          "text": "- no silent canonical rewrites - no autonomous code mutation without approval - no registry writes from background agents by default - no cloud dependency for the skill loop - no skill promotion without a repeated need, eval signal, or local vault source - no large skill that mixes unrelated workflows just because the theme sounds useful - no skill without explicit \"Do NOT use for\" boundaries",
+          "text": "- no silent canonical rewrites - no autonomous code mutation without approval - no registry writes from background agents by default - no cloud dependency for the skill loop - no skill promotion without a repeated need, eval signal, or local vault source - no large skill that mixes unrelated workflows just because the theme sounds useful - no skill without explicit \"Do NOT use for\" boundaries - negative triggers should be stored as skill metadata where possible, not only prose inside SKILL.md - broad curated skills need negative triggers first because they are the easiest to over-activate",
           "keywords": [
             "skill",
             "without",
+            "need",
+            "because",
+            "not",
+            "negative",
+            "triggers",
             "silent",
             "canonical",
             "rewrites",
             "autonomous",
-            "code",
-            "mutation",
-            "approval",
-            "registry",
-            "writes",
-            "background"
+            "code"
           ]
         },
         {
           "heading": "Runtime Contract",
           "level": 2,
           "page": null,
-          "line_start": 78,
+          "line_start": 80,
           "text": "The skill_builder specialist should draft and validate skill proposals first. Direct skill creation remains explicit. Background/self-improving work should default to proposal mode and only promote after review. This mirrors the useful part of Hermes-style local agents while preserving Jarvis's safety model: local memory, local skills, approval-gated writes, and provenance in the vault.",
           "keywords": [
             "skill",
@@ -8232,7 +8232,7 @@
           "heading": "Vault Placement Rules",
           "level": 2,
           "page": null,
-          "line_start": 86,
+          "line_start": 88,
           "text": "Skill ideas go to [[92 Agent Inbox]] or candidate notes first. Stable skill policy lives here. Product priority lives in [[80 Jarvis Roadmap]]. Architecture decisions live in [[70 Jarvis Decision Log]]. Maintenance state lives in [[93 Vault Maintenance]].",
           "keywords": [
             "lives",
@@ -8253,21 +8253,21 @@
           "heading": "Implementation Backlog",
           "level": 2,
           "page": null,
-          "line_start": 98,
-          "text": "- [x] Add a proposal-first skill_builder specialist #jarvis #skills - [x] Add a non-mutating skill proposal endpoint #jarvis #skills - [x] Add a managed skill-builder task lane #jarvis #agents - [ ] Add a local skill proposal template #brain #skills - [ ] Add a promotion review checklist before skill registry writes #jarvis #safety",
+          "line_start": 100,
+          "text": "- [x] Add a proposal-first skill_builder specialist #jarvis #skills - [x] Add a non-mutating skill proposal endpoint #jarvis #skills - [x] Add a managed skill-builder task lane #jarvis #agents - [x] Add negative-trigger metadata support so generated skills can stay quiet outside their task family #jarvis #skills - [x] Surface negative triggers in orchestrator skill metadata #jarvis #skills - [ ] Add a local skill proposal template #brain #skills - [ ] Add a promotion review checklist before skill registry writes #jarvis #safety",
           "keywords": [
             "add",
             "skill",
             "jarvis",
-            "proposal",
             "skills",
+            "proposal",
             "builder",
+            "task",
+            "negative",
+            "metadata",
             "first",
             "specialist",
-            "non",
-            "mutating",
-            "endpoint",
-            "managed"
+            "non"
           ]
         }
       ]
@@ -8906,8 +8906,8 @@
       "keywords": [
         "jarvis",
         "useful",
-        "local",
         "skill",
+        "local",
         "adapt",
         "not",
         "verdict",
@@ -8925,7 +8925,7 @@
         "pattern",
         "intake"
       ],
-      "chars": 3347,
+      "chars": 3485,
       "sections": [
         {
           "heading": "External Agent Pattern Intake",
@@ -9121,18 +9121,18 @@
           "level": 2,
           "page": null,
           "line_start": 105,
-          "text": "Every proposed skill should include \"Do NOT use for\" boundaries. Negative triggers matter because a useful skill should activate narrowly and stay quiet on unrelated requests.",
+          "text": "Every proposed skill should include \"Do NOT use for\" boundaries. Negative triggers matter because a useful skill should activate narrowly and stay quiet on unrelated requests. Jarvis now supports this as metadata through negative_triggers, so the matcher can suppress a skill before loading its full instructions.",
           "keywords": [
             "skill",
             "should",
+            "negative",
+            "triggers",
             "every",
             "proposed",
             "include",
             "not",
             "use",
             "boundaries",
-            "negative",
-            "triggers",
             "matter",
             "because"
           ]
@@ -9141,7 +9141,7 @@
           "heading": "Default Safety Posture",
           "level": 2,
           "page": null,
-          "line_start": 109,
+          "line_start": 111,
           "text": "- memory and skill patterns: adapt - teammate lifecycle patterns: adapt - recurrent model architecture: watch - browser/scraping: gate - autonomous offensive security: defensive-only",
           "keywords": [
             "patterns",
@@ -9387,17 +9387,17 @@
         "vault",
         "added",
         "brain",
+        "skill",
         "jarvis",
         "notes",
         "capture",
         "instead",
         "into",
         "local",
+        "can",
         "inbox",
         "candidate",
-        "skill",
         "stale",
-        "can",
         "agent",
         "surface",
         "without",
@@ -9405,7 +9405,7 @@
         "only",
         "curator"
       ],
-      "chars": 8963,
+      "chars": 9675,
       "sections": [
         {
           "heading": "Vault Changelog",
@@ -9694,6 +9694,27 @@
             "gate",
             "defensive",
             "only"
+          ]
+        },
+        {
+          "heading": "Skill precision and negative triggers",
+          "level": 3,
+          "page": null,
+          "line_start": 141,
+          "text": "- added first-class negative_triggers metadata support so skill matching can suppress a skill before loading its full instructions - updated generated skill proposals to carry negative-trigger metadata alongside the prose \"Do NOT use for\" section - exposed negative triggers through skill registry detail so future skill debugging can inspect both positive and negative activation rules - surfaced negative triggers inside orchestrator skill metadata so classification sees positive and negative activation rules together - seeded negative triggers into the broadest curated skills: local knowledge, vault overview, personal context, eval self-improve, and self-improvement",
+          "keywords": [
+            "negative",
+            "skill",
+            "triggers",
+            "metadata",
+            "can",
+            "positive",
+            "activation",
+            "rules",
+            "self",
+            "added",
+            "first",
+            "class"
           ]
         }
       ]

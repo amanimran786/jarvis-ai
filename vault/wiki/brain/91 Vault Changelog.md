@@ -137,3 +137,11 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[83 External Agent Pattern Intake]] as the canonical adopt/adapt/watch/gate/defensive-only review layer for external agent repos
 - added a native runtime pattern registry for GBrain, Multica, Claude Code Best Practice, OpenMythos, Scrapling, Browser Harness, and Decepticon-style signals
 - tightened the skill-builder contract so proposed skills include "Do NOT use for" boundaries before promotion
+
+### Skill precision and negative triggers
+
+- added first-class `negative_triggers` metadata support so skill matching can suppress a skill before loading its full instructions
+- updated generated skill proposals to carry negative-trigger metadata alongside the prose "Do NOT use for" section
+- exposed negative triggers through skill registry detail so future skill debugging can inspect both positive and negative activation rules
+- surfaced negative triggers inside orchestrator skill metadata so classification sees positive and negative activation rules together
+- seeded negative triggers into the broadest curated skills: local knowledge, vault overview, personal context, eval self-improve, and self-improvement

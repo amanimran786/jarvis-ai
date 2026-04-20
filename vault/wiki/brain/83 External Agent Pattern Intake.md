@@ -106,6 +106,8 @@ Jarvis path: strengthen security-review and defensive validation. Do not integra
 
 Every proposed skill should include "Do NOT use for" boundaries. Negative triggers matter because a useful skill should activate narrowly and stay quiet on unrelated requests.
 
+Jarvis now supports this as metadata through `negative_triggers`, so the matcher can suppress a skill before loading its full instructions.
+
 ## Default Safety Posture
 
 - memory and skill patterns: adapt

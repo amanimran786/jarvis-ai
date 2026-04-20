@@ -215,6 +215,12 @@
         "self",
         "should"
       ],
+      "negative_triggers": [
+        "job application",
+        "interview prep",
+        "browser automation",
+        "write a report"
+      ],
       "path": "eval-pattern-self-improve/SKILL.md",
       "resources": [
         "eval-pattern-self-improve/references/vault_context.md"
@@ -236,6 +242,12 @@
         "overview",
         "vault"
       ],
+      "negative_triggers": [
+        "one-off fact",
+        "personal preference",
+        "job application",
+        "code review"
+      ],
       "path": "jarvis-local-vault-overview/SKILL.md",
       "resources": [
         "jarvis-local-vault-overview/references/vault_context.md"
@@ -255,6 +267,12 @@
         "search the vault",
         "from the vault",
         "index the vault"
+      ],
+      "negative_triggers": [
+        "one-off fact",
+        "personal preference",
+        "security exploit",
+        "browser automation"
       ],
       "path": "local_knowledge/SKILL.md",
       "resources": [
@@ -315,6 +333,12 @@
         "my project",
         "my goals"
       ],
+      "negative_triggers": [
+        "generic coding question",
+        "code review",
+        "security exploit",
+        "browser automation"
+      ],
       "path": "personal_context/SKILL.md",
       "resources": [
         "personal_context/references/personalization_rules.md"
@@ -353,6 +377,12 @@
         "routing",
         "evidence",
         "self sustaining"
+      ],
+      "negative_triggers": [
+        "job application",
+        "interview prep",
+        "browser automation",
+        "security exploit"
       ],
       "path": "self_improvement/SKILL.md",
       "resources": [

@@ -74,6 +74,8 @@ Facts, preferences, and stable identity belong in memory or durable brain notes.
 - no skill promotion without a repeated need, eval signal, or local vault source
 - no large skill that mixes unrelated workflows just because the theme sounds useful
 - no skill without explicit "Do NOT use for" boundaries
+- negative triggers should be stored as skill metadata where possible, not only prose inside `SKILL.md`
+- broad curated skills need negative triggers first because they are the easiest to over-activate
 
 ## Runtime Contract
 
@@ -100,5 +102,7 @@ Maintenance state lives in [[93 Vault Maintenance]].
 - [x] Add a proposal-first `skill_builder` specialist #jarvis #skills
 - [x] Add a non-mutating skill proposal endpoint #jarvis #skills
 - [x] Add a managed skill-builder task lane #jarvis #agents
+- [x] Add negative-trigger metadata support so generated skills can stay quiet outside their task family #jarvis #skills
+- [x] Surface negative triggers in orchestrator skill metadata #jarvis #skills
 - [ ] Add a local skill proposal template #brain #skills
 - [ ] Add a promotion review checklist before skill registry writes #jarvis #safety
