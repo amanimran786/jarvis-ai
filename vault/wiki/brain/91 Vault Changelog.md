@@ -163,3 +163,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[86 Capability Eval Harness]] to keep local capability claims tied to explicit regression cases
 - added `/capability-evals` and `/capability-evals <group>` console/API surfaces for eval coverage and live golden commands
 - added harder golden prompts for defensive security ROE and frontier eval coverage
+
+### Production readiness contract
+
+- added [[87 Production Readiness Contract]] so Jarvis answers production/free-use readiness questions from a live contract instead of ambition language
+- added the `/production-readiness` API endpoint and console command to separate local daily-core readiness from full production go-live gates
+- recorded that "100% free regardless of request" is not a valid claim because live sources, third-party accounts, permissions, local hardware limits, and safety boundaries still apply

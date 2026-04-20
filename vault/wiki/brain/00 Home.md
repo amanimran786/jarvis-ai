@@ -39,6 +39,7 @@ Core note set:
 - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first
 - [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails
 - [[86 Capability Eval Harness]] for tying capability claims to local regression cases
+- [[87 Production Readiness Contract]] for keeping readiness and free-use claims bounded by live runtime gates
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks

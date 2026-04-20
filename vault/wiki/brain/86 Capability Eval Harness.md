@@ -19,13 +19,14 @@ related:
   - "[[84 Frontier Capability Parity]]"
   - "[[85 Defensive Security ROE]]"
   - "[[82 Context Budget Discipline]]"
+  - "[[87 Production Readiness Contract]]"
 ---
 
 # Capability Eval Harness
 
 Purpose: make Jarvis prove capability claims through explicit local regression cases.
 
-Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]]
+Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]], [[87 Production Readiness Contract]]
 
 Jarvis now exposes eval coverage through `/capability-evals` and the console command `/capability-evals`.
 
@@ -69,3 +70,5 @@ When Jarvis gains a new major ability, add one of:
 - a console smoke case
 
 This keeps the local-first goal honest. Surface parity is not intelligence parity until it survives eval pressure.
+
+Production readiness adds one more gate: a passing eval catalog is still not enough until live golden runs, packaged voice/UI smokes, backup/restore, crash recovery, and permission onboarding are tested.

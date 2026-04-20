@@ -1348,6 +1348,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Capability eval coverage", text)
         self.assertIn("Live command", text)
 
+    def test_production_readiness_fast_path(self):
+        stream, label = router.route_stream("Is Jarvis 100% production ready and free regardless of request?")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("not 100% production-ready", text)
+        self.assertIn("Unbounded free use: no", text)
+
     def test_security_roe_fast_path(self):
         stream, label = router.route_stream("Show me the security ROE for prompt injection review.")
         text = "".join(stream)
@@ -1827,6 +1834,15 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["coverage_score"], 1.0)
         self.assertTrue(all(item["group"] == "security" for item in payload["cases"]))
+
+    def test_production_readiness_endpoint(self):
+        response = self.client.get("/production-readiness")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["production_ready"])
+        self.assertFalse(payload["unbounded_free_use"])
+        self.assertIn("constraints", payload)
 
     def test_security_roe_endpoint(self):
         response = self.client.get("/security-roe?template=ai")

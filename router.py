@@ -46,6 +46,7 @@ import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
+import production_readiness
 import security_roe
 import usage_tracker
 import prompt_modifiers
@@ -1132,6 +1133,22 @@ def route_stream(user_input: str) -> tuple:
         "claude-code-best-practice",
     )):
         return _s(external_agent_patterns.summary_text()), "Status"
+    if any(p in lower for p in (
+        "production readiness",
+        "production-ready",
+        "production ready",
+        "ready for production",
+        "operational ready",
+        "operationally ready",
+        "100% operational",
+        "100 percent operational",
+        "100% free",
+        "100 percent free",
+        "free regardless",
+        "unbounded free",
+        "regardless of request",
+    )):
+        return _s(production_readiness.summary_text()), "Status"
     if any(p in lower for p in (
         "capability parity",
         "frontier parity",

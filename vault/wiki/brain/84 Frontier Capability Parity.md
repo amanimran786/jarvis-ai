@@ -23,13 +23,14 @@ related:
   - "[[83 External Agent Pattern Intake]]"
   - "[[85 Defensive Security ROE]]"
   - "[[86 Capability Eval Harness]]"
+  - "[[87 Production Readiness Contract]]"
 ---
 
 # Frontier Capability Parity
 
 Purpose: keep Jarvis's "as capable as Claude, GPT, Codex, Gemini, and Grok locally" goal measurable.
 
-Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]]
+Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]], [[87 Production Readiness Contract]]
 
 Use this note when deciding what to build next for the local-first product.
 
@@ -61,6 +62,7 @@ The scorecard should answer:
 ## Guardrails
 
 - do not claim parity just because a model name exists
+- do not treat capability parity as production readiness
 - do not treat cloud fallback as local parity
 - do not hide partial voice, vision, browser, or security gaps behind generic "AI assistant" language
 - do not add offensive automation to satisfy a "Grok/Codex-like" ambition

@@ -139,6 +139,7 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         agent_patterns = self.client.get("/agent-patterns")
         parity = self.client.get("/capability-parity")
         capability_evals = self.client.get("/capability-evals")
+        production_readiness = self.client.get("/production-readiness")
         security_roe = self.client.get("/security-roe")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(usage.status_code, 200)
@@ -147,6 +148,7 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         self.assertEqual(agent_patterns.status_code, 200)
         self.assertEqual(parity.status_code, 200)
         self.assertEqual(capability_evals.status_code, 200)
+        self.assertEqual(production_readiness.status_code, 200)
         self.assertEqual(security_roe.status_code, 200)
         self.assertIn("status", status.json())
         self.assertIn("usage", usage.json())
@@ -155,6 +157,7 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         self.assertIn("patterns", agent_patterns.json())
         self.assertIn("features", parity.json())
         self.assertIn("cases", capability_evals.json())
+        self.assertIn("constraints", production_readiness.json())
         self.assertIn("templates", security_roe.json())
 
     @live_only

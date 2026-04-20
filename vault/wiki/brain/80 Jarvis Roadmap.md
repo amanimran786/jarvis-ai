@@ -130,6 +130,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - track [[84 Frontier Capability Parity]] so the local Claude/GPT/Codex/Gemini/Grok-style goal is measured by actual product capabilities instead of slogans
 - enforce [[85 Defensive Security ROE]] so cybersecurity work stays scoped, defensive, and useful
 - grow [[86 Capability Eval Harness]] so every major capability has an eval case before it is treated as mature
+- enforce [[87 Production Readiness Contract]] so Jarvis does not overclaim "100% ready/free" when permissions, live sources, safety boundaries, or packaged go-live gates still matter
 
 ## Medium-Term Priorities
 
