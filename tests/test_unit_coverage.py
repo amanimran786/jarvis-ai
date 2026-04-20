@@ -1688,6 +1688,28 @@ class ExternalAgentPatternTests(unittest.TestCase):
         self.assertIn("gate browser/scraping", text)
 
 
+class SecurityRoeTests(unittest.TestCase):
+
+    def test_status_exposes_defensive_templates(self):
+        import security_roe
+
+        payload = security_roe.status()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "defensive-only")
+        template_ids = {item["id"] for item in payload["templates"]}
+        self.assertIn("scope_gate", template_ids)
+        self.assertIn("ai_misuse", template_ids)
+
+    def test_summary_text_keeps_security_work_scoped(self):
+        import security_roe
+
+        text = security_roe.summary_text("prompt")
+
+        self.assertIn("Defensive security ROE", text)
+        self.assertIn("ai_misuse", text)
+
+
 class CapabilityParityTests(unittest.TestCase):
 
     def test_scorecard_reports_local_frontier_features(self):
@@ -1700,7 +1722,7 @@ class CapabilityParityTests(unittest.TestCase):
              patch("local_runtime.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
              patch("local_runtime.local_tts.status", return_value={"ready": True}), \
              patch("task_runtime.list_agents", return_value=[{"id": "chat-router"}]), \
-             patch("extension_registry.list_skills", return_value=[{"id": "x", "negative_triggers": ["no"]}]), \
+             patch("extension_registry.list_skills", return_value=[{"id": "defensive_security_roe", "negative_triggers": ["no"]}]), \
              patch("extension_registry.list_connectors", return_value=[{"id": "browser_operator"}]), \
              patch("extension_registry.list_plugins", return_value=[]):
             card = capability_parity.scorecard()
@@ -1710,6 +1732,8 @@ class CapabilityParityTests(unittest.TestCase):
         feature_ids = {feature["id"] for feature in card["features"]}
         self.assertIn("coding_agent", feature_ids)
         self.assertIn("memory_brain", feature_ids)
+        security = next(feature for feature in card["features"] if feature["id"] == "security")
+        self.assertEqual(security["status"], "ready")
 
     def test_summary_text_names_next_seam(self):
         import capability_parity
@@ -2655,6 +2679,25 @@ class JarvisCliEndpointTests(unittest.TestCase):
             {"_JARVIS_CLI_REEXEC_ATTEMPTED": "1"},
         )
 
+    def test_cli_reexecs_when_venv_python_symlinks_to_base_interpreter(self):
+        import jarvis_cli
+
+        def _realpath(path):
+            if path in {"/opt/anaconda3/bin/python3", "/Users/truthseeker/jarvis-ai/venv/bin/python"}:
+                return "/opt/anaconda3/bin/python3.12"
+            return path
+
+        with patch("jarvis_cli.os.path.exists", return_value=True), \
+             patch("jarvis_cli.os.path.realpath", side_effect=_realpath), \
+             patch.object(jarvis_cli.sys, "prefix", "/opt/anaconda3"), \
+             patch.object(jarvis_cli.sys, "argv", ["jarvis_cli.py", "--doctor"]), \
+             patch.dict("jarvis_cli.os.environ", {}, clear=True), \
+             patch("jarvis_cli.os.execve") as execve_mock:
+            jarvis_cli._ensure_supported_cli_runtime()
+
+        execve_mock.assert_called_once()
+        self.assertEqual(execve_mock.call_args.args[0], "/Users/truthseeker/jarvis-ai/venv/bin/python")
+
     def test_auth_headers_use_runtime_token_when_present(self):
         import jarvis_cli
 
@@ -2797,6 +2840,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         parity_mock.assert_called_once_with()
+
+    def test_security_roe_command_prints_templates(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_security_roe") as roe_mock:
+            result = jarvis_cli._handle_console_command("/security-roe ai")
+
+        self.assertEqual(result, 0)
+        roe_mock.assert_called_once_with("ai")
 
     def test_code_ultra_command_uses_isolated_terse_task(self):
         import jarvis_cli

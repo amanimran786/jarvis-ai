@@ -3,7 +3,7 @@ semantic_memory.py — TF-IDF semantic retrieval over memory/ JSON files.
 
 Adds a structured, queryable knowledge layer on top of Jarvis's existing
 memory.json store. Works standalone — no external dependencies beyond
-scikit-learn (already in requirements for other modules).
+Ollama embeddings. Uses scikit-learn TF-IDF only as an optional fallback.
 
 Architecture:
     memory/semantic/public/        → facts safe for any model call
@@ -12,7 +12,7 @@ Architecture:
     memory/episodic/technical/     → architecture decisions, build logs
 
 JSON = persistent source of truth.
-TF-IDF index = in-memory search layer rebuilt per process from JSON.
+Embedding/TF-IDF index = in-memory search layer rebuilt per process from JSON.
 
 Usage:
     import semantic_memory as smem
@@ -40,6 +40,8 @@ import json
 import os
 import re
 import threading
+import contextlib
+import io
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -202,22 +204,26 @@ def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
 
 
 def _build_index() -> None:
-    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready
-    try:
-        from sklearn.feature_extraction.text import TfidfVectorizer
-    except ImportError:
-        _vectorizer = None
-        return
+    global _vectorizer, _matrix, _entries, _embed_vecs, _embed_ready, _embed_matrix
+    _vectorizer = None
+    _matrix = None
+    _embed_vecs = []
+    _embed_ready = False
+    _embed_matrix = None
 
     _entries = _load_all_entries()
     if not _entries:
-        _vectorizer = None
         return
 
-    # Try real embeddings first — better semantic recall
-    if _build_embed_index(_entries):
-        # Still build TF-IDF as fallback so _vectorizer exists
-        pass
+    # Try real embeddings first. TF-IDF is now only a fallback because local
+    # sklearn/scipy wheels can be ABI-incompatible with newer NumPy builds.
+    _build_embed_index(_entries)
+
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            from sklearn.feature_extraction.text import TfidfVectorizer
+    except Exception:
+        return
 
     docs = [_doc_text(e) for e in _entries]
     _vectorizer = TfidfVectorizer(
@@ -226,11 +232,16 @@ def _build_index() -> None:
         sublinear_tf=True,
         strip_accents="unicode",
     )
-    _matrix = _vectorizer.fit_transform(docs)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            _matrix = _vectorizer.fit_transform(docs)
+    except Exception:
+        _vectorizer = None
+        _matrix = None
 
 
 def _ensure_index() -> None:
-    if _vectorizer is None or not _entries:
+    if (not _embed_ready and _vectorizer is None) or not _entries:
         _build_index()
 
 
@@ -346,9 +357,10 @@ def retrieve(
     if _vectorizer is None or _matrix is None:
         return []
     try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        qvec = _vectorizer.transform([query])
-        scores = cosine_similarity(qvec, _matrix)[0]
+        with contextlib.redirect_stderr(io.StringIO()):
+            from sklearn.metrics.pairwise import cosine_similarity
+            qvec = _vectorizer.transform([query])
+            scores = cosine_similarity(qvec, _matrix)[0]
         results = []
         for i, score in enumerate(scores):
             if score < min_score:
@@ -373,10 +385,11 @@ def retrieve_episodic_only(
     if _vectorizer is None or _matrix is None:
         return []
     try:
-        from sklearn.metrics.pairwise import cosine_similarity
         results = []
-        qvec = _vectorizer.transform([query])
-        scores = cosine_similarity(qvec, _matrix)[0]
+        with contextlib.redirect_stderr(io.StringIO()):
+            from sklearn.metrics.pairwise import cosine_similarity
+            qvec = _vectorizer.transform([query])
+            scores = cosine_similarity(qvec, _matrix)[0]
         for i, score in enumerate(scores):
             if score < min_score:
                 continue
@@ -505,7 +518,7 @@ def status() -> dict[str, Any]:
         "semantic_entries": sum(1 for e in _entries if e.get("_source") == "semantic"),
         "episodic_entries": sum(1 for e in _entries if e.get("_source") == "episodic"),
         "conversation_entries": sum(1 for e in _entries if e.get("_source") == "conversation"),
-        "index_ready": _vectorizer is not None,
+        "index_ready": bool(_embed_ready or _vectorizer is not None),
         "retrieval_backend": "ollama-embeddings" if _embed_ready else "tfidf",
         "memory_dir": str(MEMORY_DIR),
         "conversation_log": str(VERBATIM_LOG_PATH),

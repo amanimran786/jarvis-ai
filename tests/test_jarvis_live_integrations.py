@@ -138,18 +138,21 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         context_budget = self.client.get("/context-budget")
         agent_patterns = self.client.get("/agent-patterns")
         parity = self.client.get("/capability-parity")
+        security_roe = self.client.get("/security-roe")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(usage.status_code, 200)
         self.assertEqual(policy.status_code, 200)
         self.assertEqual(context_budget.status_code, 200)
         self.assertEqual(agent_patterns.status_code, 200)
         self.assertEqual(parity.status_code, 200)
+        self.assertEqual(security_roe.status_code, 200)
         self.assertIn("status", status.json())
         self.assertIn("usage", usage.json())
         self.assertIn("policy", policy.json())
         self.assertIn("profiles", context_budget.json())
         self.assertIn("patterns", agent_patterns.json())
         self.assertIn("features", parity.json())
+        self.assertIn("templates", security_roe.json())
 
     @live_only
     def test_router_cost_policy_status_prompt(self):

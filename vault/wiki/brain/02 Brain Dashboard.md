@@ -36,6 +36,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes.
 - [[83 External Agent Pattern Intake]] defines how Jarvis should classify external agent repos before integrating anything.
 - [[84 Frontier Capability Parity]] keeps the Claude/GPT/Codex/Gemini/Grok-style ambition measurable by local capability group.
+- [[85 Defensive Security ROE]] exposes scoped defensive security templates through Jarvis runtime and console surfaces.
 - [[70 Jarvis Decision Log]] preserves architectural and product decisions.
 - [[80 Jarvis Roadmap]] keeps product direction anchored.
 - [[90 Task Hub]] tracks the next curation and product-memory work.

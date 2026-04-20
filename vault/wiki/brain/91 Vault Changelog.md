@@ -151,3 +151,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[84 Frontier Capability Parity]] as the measurable local-first scorecard for Claude/GPT/Codex/Gemini/Grok-style capability groups
 - added a `/capability-parity` runtime endpoint and `/parity` console command so Jarvis can report ready, partial, and gap areas from live local state
 - connected parity tracking to roadmap, context budget, and external pattern intake so the ambition stays grounded in verifiable product seams
+
+### Defensive security ROE
+
+- added [[85 Defensive Security ROE]] as the scoped defensive operating contract for cybersecurity tasks
+- added `/security-roe` and `/security-roe <template>` console/API surfaces for authorization, threat model, code review, incident, AI misuse, and browser/source gates
+- connected the security ROE skill to capability parity so Jarvis can report the cybersecurity companion surface as runtime-backed instead of persona-only

@@ -37,6 +37,7 @@ Core note set:
 - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline
 - [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only
 - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first
+- [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks

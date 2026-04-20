@@ -15,6 +15,7 @@ Usage:
   python jarvis_cli.py --context-budget
   python jarvis_cli.py --agent-patterns
   python jarvis_cli.py --parity
+  python jarvis_cli.py --security-roe
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
   python jarvis_cli.py --agents
@@ -63,12 +64,15 @@ def _ensure_supported_cli_runtime() -> None:
         return
 
     try:
-        current = os.path.realpath(sys.executable)
-        target_real = os.path.realpath(target)
+        venv_root = os.path.realpath(os.path.dirname(os.path.dirname(target)))
+        current_prefix = os.path.realpath(getattr(sys, "prefix", ""))
     except OSError:
         return
 
-    if current == target_real:
+    # A venv executable can be a symlink to the same base Python binary. Checking
+    # only realpath(sys.executable) misses that case; sys.prefix tells us whether
+    # Python actually activated the project environment.
+    if current_prefix == venv_root:
         return
 
     if os.getenv("_JARVIS_CLI_REEXEC_ATTEMPTED", "").lower() in {"1", "true"}:
@@ -76,7 +80,7 @@ def _ensure_supported_cli_runtime() -> None:
 
     env = os.environ.copy()
     env["_JARVIS_CLI_REEXEC_ATTEMPTED"] = "1"
-    os.execve(target_real, [target_real] + sys.argv, env)
+    os.execve(target, [target] + sys.argv, env)
 
 
 def _auth_headers() -> dict[str, str]:
@@ -551,6 +555,23 @@ def _print_capability_parity() -> None:
         print(f"    next: {feature.get('next_gap')}")
 
 
+def _print_security_roe(template: str = "") -> None:
+    suffix = ""
+    if template:
+        suffix = "?" + urllib.parse.urlencode({"template": template})
+    payload = get("/security-roe" + suffix)
+    print(payload.get("purpose") or "Defensive security ROE")
+    print(f"Mode   : {payload.get('mode', 'unknown')}")
+    print("Templates")
+    for item in payload.get("templates", []):
+        print(f"  {item.get('id')}: {item.get('name')} -> {item.get('best_for')}")
+        must = ", ".join((item.get("must_have") or [])[:4])
+        print(f"    require: {must}")
+    print("Guardrails")
+    for guardrail in payload.get("guardrails", []):
+        print(f"  - {guardrail}")
+
+
 def _safe_get(path: str) -> dict:
     try:
         return get(path)
@@ -737,6 +758,7 @@ def _console_help() -> str:
             "  /tokens               Alias for /context-budget",
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /parity               Show local frontier capability parity",
+            "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
             "  /deny                 Clear the pending risky shell command",
@@ -942,6 +964,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"parity", "capability-parity"}:
         _print_capability_parity()
         return 0
+    if command in {"security-roe", "roe"}:
+        _print_security_roe(args)
+        return 0
     if command == "task":
         if not args:
             print("Usage: /task <task description>", file=sys.stderr)
@@ -1136,6 +1161,11 @@ def main():
 
     if flag in {"--parity", "--capability-parity"}:
         _print_capability_parity()
+        return
+
+    if flag in {"--security-roe", "--roe"}:
+        template = sys.argv[2] if len(sys.argv) > 2 else ""
+        _print_security_roe(template)
         return
 
     if flag == "--plugin":
