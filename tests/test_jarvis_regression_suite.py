@@ -344,6 +344,15 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertEqual(result["skill_id"], "93-vault-maintenance")
         self.assertIn("93 Vault Maintenance", result["body"])
         self.assertIn("Do NOT use for:", result["body"])
+        self.assertIn("negative_triggers", result["entry"])
+        self.assertEqual(result["entry"]["negative_triggers"], [
+            "one-off fact",
+            "remember that",
+            "personal preference",
+            "make jarvis smarter",
+            "browser automation",
+            "security exploit",
+        ])
 
     def test_vault_title_extraction_skips_yaml_frontmatter(self):
         raw = "---\ntype: brain_note\n---\n\n# Local Skill Loop\n\nPurpose: test."

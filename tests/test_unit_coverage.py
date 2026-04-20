@@ -3160,6 +3160,74 @@ class ExtensionRegistryTests(unittest.TestCase):
         skill = extension_registry.get_skill_detail("engineering_reasoning")
         self.assertIsNotNone(skill)
         self.assertIn("Engineering Reasoning", skill["instructions"])
+        self.assertIn("negative_triggers", skill)
+
+    def test_curated_skill_detail_round_trips_negative_triggers(self):
+        import extension_registry
+
+        skill = extension_registry.get_skill_detail("personal_context")
+        self.assertIsNotNone(skill)
+        self.assertIn("code review", skill["negative_triggers"])
+
+
+class SkillMatchingTests(unittest.TestCase):
+
+    def test_negative_trigger_suppresses_skill_match(self):
+        import skills
+
+        fake_skill = skills.Skill(
+            id="weekly-report",
+            name="Weekly Report",
+            description="Write weekly reports.",
+            tool="chat",
+            cost_hint="local",
+            triggers=("weekly report",),
+            negative_triggers=("one-off fact",),
+            path=skills.SKILLS_DIR / "weekly-report" / "SKILL.md",
+            resources=(),
+        )
+        with patch("skills.all_skills", return_value=(fake_skill,)):
+            matches = skills.match_skills("weekly report for this one-off fact")
+
+        self.assertEqual(matches, [])
+
+    def test_positive_trigger_still_matches_when_no_negative_trigger(self):
+        import skills
+
+        fake_skill = skills.Skill(
+            id="weekly-report",
+            name="Weekly Report",
+            description="Write weekly reports.",
+            tool="chat",
+            cost_hint="local",
+            triggers=("weekly report",),
+            negative_triggers=("one-off fact",),
+            path=skills.SKILLS_DIR / "weekly-report" / "SKILL.md",
+            resources=(),
+        )
+        with patch("skills.all_skills", return_value=(fake_skill,)):
+            matches = skills.match_skills("weekly report for metrics")
+
+        self.assertEqual(matches[0][0].id, "weekly-report")
+
+    def test_metadata_block_includes_negative_triggers(self):
+        import skills
+
+        fake_skill = skills.Skill(
+            id="weekly-report",
+            name="Weekly Report",
+            description="Write weekly reports.",
+            tool="chat",
+            cost_hint="local",
+            triggers=("weekly report",),
+            negative_triggers=("one-off fact",),
+            path=skills.SKILLS_DIR / "weekly-report" / "SKILL.md",
+            resources=(),
+        )
+        with patch("skills.all_skills", return_value=(fake_skill,)):
+            text = skills.metadata_block("weekly report for metrics")
+
+        self.assertIn("negative_triggers: one-off fact", text)
 
 
 class SourceIngestSafetyTests(unittest.TestCase):
