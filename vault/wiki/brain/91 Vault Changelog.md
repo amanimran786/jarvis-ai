@@ -131,3 +131,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[82 Context Budget Discipline]] as the canonical brain policy for token/context quality during local coding-agent work
 - added a native context-budget runtime surface so Jarvis can answer token-saver and local coding loop questions from live policy instead of hype-thread memory
 - connected context discipline to [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], and [[80 Jarvis Roadmap]]
+
+### External agent pattern intake
+
+- added [[83 External Agent Pattern Intake]] as the canonical adopt/adapt/watch/gate/defensive-only review layer for external agent repos
+- added a native runtime pattern registry for GBrain, Multica, Claude Code Best Practice, OpenMythos, Scrapling, Browser Harness, and Decepticon-style signals
+- tightened the skill-builder contract so proposed skills include "Do NOT use for" boundaries before promotion

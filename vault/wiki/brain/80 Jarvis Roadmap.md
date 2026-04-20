@@ -126,6 +126,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure
 - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation
 - enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded
+- route external repo hype through [[83 External Agent Pattern Intake]] so useful patterns become Jarvis-native upgrades without unsafe dependency drift
 
 ## Medium-Term Priorities
 

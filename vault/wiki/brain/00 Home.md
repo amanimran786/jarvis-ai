@@ -35,6 +35,7 @@ Core note set:
 - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior
 - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules
 - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline
+- [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks

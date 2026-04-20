@@ -13,6 +13,7 @@ Usage:
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
   python jarvis_cli.py --context-budget
+  python jarvis_cli.py --agent-patterns
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
   python jarvis_cli.py --agents
@@ -517,6 +518,24 @@ def _print_context_budget() -> None:
         print(f"  {command}: {description}")
 
 
+def _print_agent_patterns(category: str = "") -> None:
+    suffix = ""
+    if category:
+        suffix = "?" + urllib.parse.urlencode({"category": category})
+    payload = get("/agent-patterns" + suffix)
+    patterns = payload.get("patterns") or []
+    print("External Agent Patterns")
+    if payload.get("verdict_counts"):
+        counts = ", ".join(f"{key}={value}" for key, value in sorted(payload["verdict_counts"].items()))
+        print(f"Verdicts: {counts}")
+    for item in patterns:
+        useful = "; ".join((item.get("useful_patterns") or [])[:2])
+        seams = ", ".join((item.get("jarvis_seams") or [])[:2])
+        print(f"{item.get('id')}: {item.get('verdict')} [{item.get('category')}]")
+        print(f"  use  : {useful}")
+        print(f"  seams: {seams}")
+
+
 def _safe_get(path: str) -> dict:
     try:
         return get(path)
@@ -701,6 +720,7 @@ def _console_help() -> str:
             "  /vault                Show vault status",
             "  /context-budget       Show local coding/token discipline",
             "  /tokens               Alias for /context-budget",
+            "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
             "  /deny                 Clear the pending risky shell command",
@@ -900,6 +920,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"context-budget", "tokens"}:
         _print_context_budget()
         return 0
+    if command in {"agent-patterns", "patterns"}:
+        _print_agent_patterns(args)
+        return 0
     if command == "task":
         if not args:
             print("Usage: /task <task description>", file=sys.stderr)
@@ -1085,6 +1108,11 @@ def main():
 
     if flag in {"--context-budget", "--tokens"}:
         _print_context_budget()
+        return
+
+    if flag in {"--agent-patterns", "--patterns"}:
+        category = sys.argv[2] if len(sys.argv) > 2 else ""
+        _print_agent_patterns(category)
         return
 
     if flag == "--plugin":

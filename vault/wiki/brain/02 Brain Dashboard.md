@@ -34,6 +34,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior.
 - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification.
 - [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes.
+- [[83 External Agent Pattern Intake]] defines how Jarvis should classify external agent repos before integrating anything.
 - [[70 Jarvis Decision Log]] preserves architectural and product decisions.
 - [[80 Jarvis Roadmap]] keeps product direction anchored.
 - [[90 Task Hub]] tracks the next curation and product-memory work.

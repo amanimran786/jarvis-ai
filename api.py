@@ -48,6 +48,7 @@ from local_runtime import local_beta
 import behavior_hooks
 import cost_policy
 import context_budget
+import external_agent_patterns
 import usage_tracker
 import runtime_state
 import provider_router
@@ -917,6 +918,13 @@ def get_usage(hours: int = 24, since_seq: int = 0, recent: int = 10):
 @app.get("/context-budget")
 def get_context_budget(hours: int = 24):
     return context_budget.policy_status(hours=hours)
+
+
+@app.get("/agent-patterns")
+def get_agent_patterns(category: str = ""):
+    if category:
+        return {"ok": True, "patterns": external_agent_patterns.list_patterns(category)}
+    return external_agent_patterns.pattern_status()
 
 
 @app.get("/cost-policy")

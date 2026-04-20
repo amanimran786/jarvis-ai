@@ -343,6 +343,7 @@ class SkillAndAgentTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["skill_id"], "93-vault-maintenance")
         self.assertIn("93 Vault Maintenance", result["body"])
+        self.assertIn("Do NOT use for:", result["body"])
 
     def test_vault_title_extraction_skips_yaml_frontmatter(self):
         raw = "---\ntype: brain_note\n---\n\n# Local Skill Loop\n\nPurpose: test."
@@ -1317,6 +1318,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("context budget", text.lower())
         self.assertIn("/code", text)
 
+    def test_external_agent_pattern_fast_path(self):
+        stream, label = router.route_stream("What can we use from GBrain and Decepticon for Jarvis?")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("External agent pattern intake", text)
+        self.assertIn("defensive-only", text)
+
     def test_capability_boundaries_fast_path(self):
         stream, label = router.route_stream("What are your limitations and scope boundaries?")
         text = "".join(stream)
@@ -1763,6 +1771,15 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("profiles", payload)
         self.assertIn("/code <prompt>", payload["commands"])
+
+    def test_agent_patterns_endpoint(self):
+        response = self.client.get("/agent-patterns")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        ids = {item["id"] for item in payload["patterns"]}
+        self.assertIn("gbrain", ids)
+        self.assertIn("decepticon", ids)
 
     def test_local_beta_status_endpoint(self):
         response = self.client.get("/local/beta/status")

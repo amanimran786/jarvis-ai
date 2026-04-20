@@ -19,6 +19,7 @@ tags:
 related:
   - "[[78 AI Runtime Agent Engineering Principles]]"
   - "[[79 Local Skill Loop]]"
+  - "[[83 External Agent Pattern Intake]]"
   - "[[80 Jarvis Roadmap]]"
   - "[[73 Senior Cybersecurity AI Engineering Companion]]"
   - "[[74 Universal Engineer Thinker Problem Solver]]"
@@ -28,7 +29,7 @@ related:
 
 Purpose: define how Jarvis should preserve context quality while acting like a local coding agent.
 
-Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]]
+Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], [[83 External Agent Pattern Intake]], [[80 Jarvis Roadmap]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]]
 
 Use this note when Jarvis is doing implementation, code review, long terminal work, repo analysis, or multi-agent coordination.
 

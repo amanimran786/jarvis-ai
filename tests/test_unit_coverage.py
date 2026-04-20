@@ -1670,6 +1670,24 @@ class ContextBudgetPolicyTests(unittest.TestCase):
         self.assertIn("local-first", text.lower())
 
 
+class ExternalAgentPatternTests(unittest.TestCase):
+
+    def test_pattern_status_includes_safety_verdicts(self):
+        import external_agent_patterns
+
+        status = external_agent_patterns.pattern_status()
+        self.assertTrue(status["ok"])
+        self.assertIn("defensive-only", status["verdict_counts"])
+        self.assertTrue(any(item["id"] == "scrapling" for item in status["patterns"]))
+
+    def test_summary_text_keeps_offense_gated(self):
+        import external_agent_patterns
+
+        text = external_agent_patterns.summary_text()
+        self.assertIn("defensive-only", text)
+        self.assertIn("gate browser/scraping", text)
+
+
 class UsageTrackerCostTests(unittest.TestCase):
 
     def test_cost_for_known_model(self):
@@ -2690,6 +2708,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         budget_mock.assert_called_once_with()
+
+    def test_agent_patterns_command_prints_registry(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_agent_patterns") as patterns_mock:
+            result = jarvis_cli._handle_console_command("/agent-patterns security")
+
+        self.assertEqual(result, 0)
+        patterns_mock.assert_called_once_with("security")
 
     def test_code_ultra_command_uses_isolated_terse_task(self):
         import jarvis_cli
