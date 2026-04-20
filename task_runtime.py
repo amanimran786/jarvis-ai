@@ -24,6 +24,7 @@ _TASK_EVENTS: dict[str, list[dict[str, Any]]] = {}
 _TASK_THREADS: dict[str, threading.Thread] = {}
 
 _TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled"}
+_WAITING_APPROVAL_STATUS = "waiting_approval"
 
 _TERSE_PREFIXES = {
     "lite": "CAVEMAN LITE",
@@ -189,7 +190,7 @@ def bootstrap(force_reset: bool = False) -> None:
             _TASK_EVENTS[task_id] = [_copy(event) for event in persisted.get("events", {}).get(task_id, [])]
 
         for task_id, task in list(_TASKS.items()):
-            if task.get("status") in _TERMINAL_TASK_STATUSES:
+            if task.get("status") in _TERMINAL_TASK_STATUSES or task.get("status") == _WAITING_APPROVAL_STATUS:
                 continue
             task.update(
                 status="failed",
@@ -296,6 +297,44 @@ def _should_isolate_workspace(kind: str, isolated_workspace: bool | None) -> boo
     return normalized in {"code", "coding", "review", "refactor", "fix", "implementation"}
 
 
+def _approval_reason_for_task(prompt: str, *, kind: str = "", source: str = "") -> str:
+    lower = (prompt or "").lower()
+    markers = (
+        ("git push", "repo push"),
+        ("push to github", "repo push"),
+        ("deploy", "deployment"),
+        ("release", "release action"),
+        ("merge pull request", "merge action"),
+        ("merge pr", "merge action"),
+        ("delete ", "destructive file action"),
+        ("remove ", "destructive file action"),
+        ("rm -", "destructive shell action"),
+        ("reset --hard", "destructive git action"),
+        ("git reset", "destructive git action"),
+        ("git clean", "destructive git action"),
+        ("install ", "environment-changing action"),
+        ("pip install", "environment-changing action"),
+        ("npm install", "environment-changing action"),
+        ("brew install", "environment-changing action"),
+        ("sudo ", "privileged action"),
+        ("/etc", "protected system path"),
+        ("/system", "protected system path"),
+        ("/library", "protected system path"),
+    )
+    for marker, reason in markers:
+        if marker in lower:
+            return reason
+    return ""
+
+
+def _task_requires_approval(prompt: str, *, kind: str = "", source: str = "", meta: dict[str, Any] | None = None) -> tuple[bool, str]:
+    meta = meta or {}
+    if meta.get("approval_required") is True:
+        return True, str(meta.get("approval_reason") or "explicit request")
+    reason = _approval_reason_for_task(prompt, kind=kind, source=source)
+    return bool(reason), reason
+
+
 def list_agents() -> list[dict[str, Any]]:
     bootstrap()
     with _LOCK:
@@ -341,6 +380,12 @@ def _set_task_status(task_id: str, status: str, **updates: Any) -> None:
     task["updated_at"] = _now()
     _append_event(task_id, "status", status=status, updates=updates)
     _persist_task(task_id)
+
+
+def _start_task_thread(task_id: str) -> None:
+    thread = threading.Thread(target=_run_task, args=(task_id,), daemon=True, name=f"JarvisTask-{task_id}")
+    _TASK_THREADS[task_id] = thread
+    thread.start()
 
 
 def _complete_task(task_id: str, *, response: str, model: str, usage: dict[str, Any], interaction_id: str, source: str) -> None:
@@ -458,6 +503,12 @@ def submit_task(
     created_at = _now()
     normalized_kind = (kind or "chat").strip().lower() or "chat"
     normalized_terse_mode = _normalize_terse_mode(terse_mode)
+    approval_required, approval_reason = _task_requires_approval(
+        prompt,
+        kind=normalized_kind,
+        source=source,
+        meta=meta,
+    )
     workspace = worktree_manager.prepare_isolated_workspace(
         task_id,
         prompt,
@@ -467,7 +518,7 @@ def submit_task(
         "id": task_id,
         "kind": normalized_kind,
         "source": source or "api",
-        "status": "queued",
+        "status": _WAITING_APPROVAL_STATUS if approval_required else "queued",
         "prompt": prompt,
         "effective_prompt": _task_prompt_for_kind(prompt, kind=normalized_kind, terse_mode=normalized_terse_mode),
         "assigned_agent_id": chosen_agent_id,
@@ -482,6 +533,10 @@ def submit_task(
         "interaction_id": "",
         "usage": {},
         "cancel_requested": False,
+        "approval_required": approval_required,
+        "approval_reason": approval_reason,
+        "approved_at": "",
+        "denied_at": "",
         "terse_mode": normalized_terse_mode,
         "workspace": _copy(workspace),
         "meta": _copy(meta or {}),
@@ -493,17 +548,47 @@ def submit_task(
         _append_event(
             task_id,
             "status",
-            status="queued",
+            status=task["status"],
             agent_id=chosen_agent_id,
             kind=task["kind"],
             source=task["source"],
             terse_mode=normalized_terse_mode,
+            approval_required=approval_required,
+            approval_reason=approval_reason,
         )
         if workspace.get("enabled"):
             _append_event(task_id, "workspace", workspace=_copy(workspace))
-        thread = threading.Thread(target=_run_task, args=(task_id,), daemon=True, name=f"JarvisTask-{task_id}")
-        _TASK_THREADS[task_id] = thread
-        thread.start()
+        if not approval_required:
+            _start_task_thread(task_id)
+        return _copy(task)
+
+
+def approve_task(task_id: str) -> dict[str, Any] | None:
+    bootstrap()
+    with _LOCK:
+        task = _TASKS.get(task_id)
+        if not task:
+            return None
+        if task.get("status") != _WAITING_APPROVAL_STATUS:
+            return _copy(task)
+        task["approval_required"] = False
+        task["approved_at"] = _now()
+        _set_task_status(task_id, "queued", approved_at=task["approved_at"])
+        _start_task_thread(task_id)
+        return _copy(task)
+
+
+def deny_task(task_id: str) -> dict[str, Any] | None:
+    bootstrap()
+    with _LOCK:
+        task = _TASKS.get(task_id)
+        if not task:
+            return None
+        if task["status"] in _TERMINAL_TASK_STATUSES:
+            return _copy(task)
+        task["denied_at"] = _now()
+        task["cancel_requested"] = True
+        _set_task_status(task_id, "cancelled", finished_at=_now(), denied_at=task["denied_at"])
         return _copy(task)
 
 
@@ -518,7 +603,7 @@ def cancel_task(task_id: str) -> dict[str, Any] | None:
         task["cancel_requested"] = True
         _append_event(task_id, "status", status="cancel_requested")
         _persist_task(task_id)
-        if task["status"] == "queued":
+        if task["status"] in {"queued", _WAITING_APPROVAL_STATUS}:
             _set_task_status(task_id, "cancelled", finished_at=_now())
             agent_id = task.get("assigned_agent_id", "")
             if agent_id:
@@ -570,6 +655,7 @@ def runtime_snapshot() -> dict[str, Any]:
             "task_counts": {
                 "total": len(tasks),
                 "queued": sum(1 for task in tasks if task.get("status") == "queued"),
+                "waiting_approval": sum(1 for task in tasks if task.get("status") == _WAITING_APPROVAL_STATUS),
                 "running": sum(1 for task in tasks if task.get("status") in {"assigned", "running", "streaming"}),
                 "succeeded": sum(1 for task in tasks if task.get("status") == "succeeded"),
                 "failed": sum(1 for task in tasks if task.get("status") == "failed"),

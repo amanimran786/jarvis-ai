@@ -19,6 +19,8 @@ Usage:
   python jarvis_cli.py --task-status <task_id>
   python jarvis_cli.py --watch-task <task_id>
   python jarvis_cli.py --cancel-task <task_id>
+  python jarvis_cli.py --approve-task <task_id>
+  python jarvis_cli.py --deny-task <task_id>
   python jarvis_cli.py --task fix the login bug   # streaming, Multica-compatible
   python jarvis_cli.py --task-code refactor the auth middleware
   python jarvis_cli.py --teach "user prompt" "ideal Jarvis answer"
@@ -233,6 +235,11 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
     workspace = task.get("workspace") or {}
     if workspace.get("enabled") and workspace.get("worktree_path"):
         print(f"[workspace:{workspace.get('worktree_path')}]", flush=True)
+    if task.get("status") == "waiting_approval":
+        print(f"[task:{task_id}] waiting for approval")
+        print(f"Reason            : {task.get('approval_reason') or 'approval required'}")
+        print(f"Use /approve {task_id} to start it or /deny {task_id} to cancel it.")
+        return 0
     try:
         req = urllib.request.Request(base + f"/tasks/{task_id}/stream", headers=_auth_headers())
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -271,7 +278,6 @@ def watch_task(task_id: str) -> int:
         print("Usage: /watch <task_id>", file=sys.stderr)
         return 1
 
-    base = _base()
     try:
         task_payload = get(f"/tasks/{task_id}")
     except urllib.error.HTTPError as exc:
@@ -284,7 +290,13 @@ def watch_task(task_id: str) -> int:
     workspace = task.get("workspace") or {}
     if workspace.get("enabled") and workspace.get("worktree_path"):
         print(f"[workspace:{workspace.get('worktree_path')}]", flush=True)
+    if task.get("status") == "waiting_approval":
+        print(f"{task_id}: waiting for approval")
+        print(f"Reason            : {task.get('approval_reason') or 'approval required'}")
+        print(f"Use /approve {task_id} to start it or /deny {task_id} to cancel it.")
+        return 0
 
+    base = _base()
     try:
         req = urllib.request.Request(base + f"/tasks/{task_id}/stream", headers=_auth_headers())
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -333,6 +345,40 @@ def cancel_task(task_id: str) -> int:
         return 1
     try:
         payload = post(f"/tasks/{task_id}/cancel", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(f"Error: task not found: {task_id}", file=sys.stderr)
+            return 1
+        raise
+    task = payload.get("task") or {}
+    print(f"{task.get('id', task_id)}: {task.get('status', 'unknown')}")
+    return 0
+
+
+def approve_task(task_id: str) -> int:
+    task_id = (task_id or "").strip()
+    if not task_id:
+        print("Usage: /approve <task_id>", file=sys.stderr)
+        return 1
+    try:
+        payload = post(f"/tasks/{task_id}/approve", {})
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            print(f"Error: task not found: {task_id}", file=sys.stderr)
+            return 1
+        raise
+    task = payload.get("task") or {}
+    print(f"{task.get('id', task_id)}: {task.get('status', 'unknown')}")
+    return 0
+
+
+def deny_task(task_id: str) -> int:
+    task_id = (task_id or "").strip()
+    if not task_id:
+        print("Usage: /deny <task_id>", file=sys.stderr)
+        return 1
+    try:
+        payload = post(f"/tasks/{task_id}/deny", {})
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             print(f"Error: task not found: {task_id}", file=sys.stderr)
@@ -396,7 +442,10 @@ def _print_tasks(status: str = "") -> None:
     payload = get(path)
     for task in payload.get("tasks", []):
         lifecycle = task.get("lifecycle_state") or task.get("status")
-        print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}")
+        approval = ""
+        if task.get("status") == "waiting_approval":
+            approval = f" [{task.get('approval_reason') or 'approval required'}]"
+        print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{approval}")
 
 
 def _print_memory() -> None:
@@ -437,6 +486,13 @@ def _print_plugins() -> None:
 def _print_vault_status() -> None:
     payload = get("/vault")
     print(json.dumps(payload, indent=2))
+
+
+def _safe_get(path: str) -> dict:
+    try:
+        return get(path)
+    except Exception as exc:
+        return {"_error": str(exc)}
 
 
 def _decision_text(result: dict) -> str:
@@ -506,13 +562,18 @@ def _print_permissions() -> None:
 
 
 def _print_doctor() -> None:
-    status = get("/status")
-    runtime = (get("/runtime/state") or {}).get("state") or {}
-    local = (get("/local/capabilities") or {}).get("capabilities") or {}
-    memory_status = (get("/memory/status") or {}).get("status") or {}
-    vault_status = get("/vault")
-    hook_status = (get("/hooks/status") or {}).get("hooks") or {}
-    cost_status = (get("/cost-policy") or {}).get("policy") or {}
+    status = _safe_get("/status")
+    runtime_payload = _safe_get("/runtime/state")
+    local_payload = _safe_get("/local/capabilities")
+    memory_payload = _safe_get("/memory/status")
+    vault_status = _safe_get("/vault")
+    hook_payload = _safe_get("/hooks/status")
+    cost_payload = _safe_get("/cost-policy")
+    runtime = (runtime_payload or {}).get("state") or {}
+    local = (local_payload or {}).get("capabilities") or {}
+    memory_status = (memory_payload or {}).get("status") or {}
+    hook_status = (hook_payload or {}).get("hooks") or {}
+    cost_status = (cost_payload or {}).get("policy") or {}
 
     stt = local.get("stt") or {}
     tts = local.get("tts") or {}
@@ -526,6 +587,17 @@ def _print_doctor() -> None:
 
     findings: list[str] = []
     advisories: list[str] = []
+    for label, payload in (
+        ("status", status),
+        ("runtime state", runtime_payload),
+        ("local capabilities", local_payload),
+        ("memory status", memory_payload),
+        ("vault status", vault_status),
+        ("hook status", hook_payload),
+        ("cost policy", cost_payload),
+    ):
+        if payload.get("_error"):
+            findings.append(f"{label} unavailable: {payload['_error']}")
     if not status.get("local_available"):
         findings.append("local model routing is unavailable")
     if str(local_vision.get("state") or "").lower() not in {"ready", "available", "ok"}:
@@ -552,7 +624,7 @@ def _print_doctor() -> None:
     print(f"STT               : {stt.get('active_engine', 'unknown')} | local={'yes' if stt.get('local_available') else 'no'}")
     print(f"TTS               : {'ready' if tts.get('ready') else 'not ready'} | {tts.get('engine', 'unknown')}:{tts.get('voice', 'unknown')}")
     print(f"Semantic memory   : {semantic.get('retrieval_backend', 'unknown')} | indexed={semantic.get('entries_indexed', 0)} | ready={'yes' if semantic.get('index_ready') else 'no'}")
-    print(f"Runtime           : total={task_counts.get('total', 0)} running={task_counts.get('running', 0)} queued={task_counts.get('queued', 0)} failed={task_counts.get('failed', 0)} cancelled={task_counts.get('cancelled', 0)}")
+    print(f"Runtime           : total={task_counts.get('total', 0)} waiting={task_counts.get('waiting_approval', 0)} running={task_counts.get('running', 0)} queued={task_counts.get('queued', 0)} failed={task_counts.get('failed', 0)} cancelled={task_counts.get('cancelled', 0)}")
     print(f"Persisted API     : {persisted.get('base_url') or 'none'}")
     print(f"Vault             : docs={vault_status.get('doc_count', 0)} pages={vault_status.get('wiki_page_count', 0)} citation_ready={'yes' if vault_status.get('citation_ready') else 'no'}")
     print(f"Memory            : facts={memory_status.get('facts', 0)} projects={memory_status.get('projects', 0)} conversations={memory_status.get('conversation_summaries', 0)} long_term={'yes' if memory_status.get('long_term_profile_ready') else 'no'}")
@@ -591,6 +663,8 @@ def _console_help() -> str:
             "  /task-status <id>     Show one task payload",
             "  /watch <task_id>      Stream an existing task until completion",
             "  /cancel <task_id>     Request cancellation for a task",
+            "  /approve <task_id>    Approve a managed task waiting for approval",
+            "  /deny <task_id>       Deny a managed task waiting for approval",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
             "  /connectors           List connectors",
@@ -744,8 +818,12 @@ def _handle_console_command(line: str) -> int | None:
         print("\033c", end="")
         return 0
     if command == "approve":
+        if args:
+            return approve_task(args)
         return _approve_pending_shell_command()
     if command == "deny":
+        if args:
+            return deny_task(args)
         return _deny_pending_shell_command()
     if command == "status":
         _print_status()
@@ -992,6 +1070,18 @@ def main():
             print("Usage: python jarvis_cli.py --cancel-task <task_id>", file=sys.stderr)
             sys.exit(1)
         sys.exit(cancel_task(sys.argv[2]))
+
+    if flag == "--approve-task":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --approve-task <task_id>", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(approve_task(sys.argv[2]))
+
+    if flag == "--deny-task":
+        if len(sys.argv) < 3:
+            print("Usage: python jarvis_cli.py --deny-task <task_id>", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(deny_task(sys.argv[2]))
 
     if flag == "--memory":
         _print_memory()
