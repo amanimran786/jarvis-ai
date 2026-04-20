@@ -1791,6 +1791,49 @@ class CapabilityParityTests(unittest.TestCase):
         self.assertIn("optional probe failed", result["error"])
 
 
+class ProductionReadinessTests(unittest.TestCase):
+
+    def test_contract_refuses_unbounded_production_claims(self):
+        import production_readiness
+
+        with patch("model_router._has_local", return_value=True), \
+             patch("brains.brain_ollama.local_capabilities", return_value={"vision_status": "ready", "vision_model": "llava:7b"}), \
+             patch("vault.status", return_value={"doc_count": 10}), \
+             patch("semantic_memory.status", return_value={"index_ready": True, "retrieval_backend": "ollama-embeddings"}), \
+             patch("local_runtime.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
+             patch("local_runtime.local_tts.status", return_value={"ready": True}), \
+             patch("task_runtime.list_agents", return_value=[{"id": "chat-router"}]), \
+             patch("capability_evals.status", return_value={"coverage_score": 1.0, "live_command": "pytest golden"}), \
+             patch("security_roe.status", return_value={"mode": "defensive-only"}), \
+             patch("production_readiness._which", return_value="/Users/truthseeker/.local/bin/jarvis"), \
+             patch("production_readiness._path_exists", return_value=True):
+            payload = production_readiness.contract()
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["production_ready"])
+        self.assertTrue(payload["free_local_core_ready"])
+        self.assertFalse(payload["unbounded_free_use"])
+        self.assertIn("cannot be unbounded-free", payload["summary"])
+        self.assertTrue(any("third-party accounts" in item for item in payload["constraints"]))
+
+    def test_summary_text_leads_with_no(self):
+        import production_readiness
+
+        with patch("production_readiness.contract", return_value={
+            "summary": "No. Jarvis is not 100% production-ready for every possible request.",
+            "free_local_core_ready": True,
+            "unbounded_free_use": False,
+            "next_best_seam": "run live goldens",
+            "checks": [{"name": "Local model routing", "status": "ready", "evidence": ["default_mode=open-source"]}],
+            "constraints": ["No local assistant can satisfy every possible request for free."],
+        }):
+            text = production_readiness.summary_text()
+
+        self.assertIn("No.", text)
+        self.assertIn("Free local core ready: yes", text)
+        self.assertIn("Unbounded free use: no", text)
+
+
 class UsageTrackerCostTests(unittest.TestCase):
 
     def test_cost_for_known_model(self):
@@ -2755,6 +2798,43 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(payload["status"], "online")
         self.assertEqual(captured, ["http://127.0.0.1:8766/status"])
 
+    def test_get_retries_when_token_metadata_is_still_being_written(self):
+        import jarvis_cli
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({"ok": True}).encode("utf-8")
+
+        calls = {"count": 0}
+
+        def _urlopen(req, timeout=10):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise jarvis_cli.urllib.error.HTTPError(
+                    getattr(req, "full_url", ""),
+                    401,
+                    "Unauthorized",
+                    hdrs=None,
+                    fp=None,
+                )
+            return _Resp()
+
+        with patch("runtime_state.discover_api_endpoint", return_value={"base_url": "http://127.0.0.1:8766"}), \
+             patch("runtime_state.read_api_endpoint", side_effect=[{}, {"token": "runtime-token"}]), \
+             patch("jarvis_cli.urllib.request.urlopen", side_effect=_urlopen), \
+             patch("jarvis_cli.time.sleep") as sleep_mock:
+            payload = jarvis_cli.get("/production-readiness")
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(calls["count"], 2)
+        sleep_mock.assert_called_once_with(0.15)
+
     def test_cli_auto_daemon_defaults_to_quiet_boot(self):
         import jarvis_cli
 
@@ -2871,6 +2951,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         evals_mock.assert_called_once_with("security")
+
+    def test_production_readiness_command_prints_contract(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_production_readiness") as prod_mock:
+            result = jarvis_cli._handle_console_command("/production-readiness")
+
+        self.assertEqual(result, 0)
+        prod_mock.assert_called_once_with()
 
     def test_security_roe_command_prints_templates(self):
         import jarvis_cli

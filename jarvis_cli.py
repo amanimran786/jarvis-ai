@@ -16,6 +16,7 @@ Usage:
   python jarvis_cli.py --agent-patterns
   python jarvis_cli.py --parity
   python jarvis_cli.py --capability-evals
+  python jarvis_cli.py --production-readiness
   python jarvis_cli.py --security-roe
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
@@ -37,6 +38,7 @@ import sys
 import json
 import os
 import atexit
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -402,9 +404,20 @@ def deny_task(task_id: str) -> int:
 
 def get(path: str) -> dict:
     _ensure_daemon_running(reason="jarvis_cli_get")
-    req = urllib.request.Request(_base() + path, headers=_auth_headers())
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    last_401: urllib.error.HTTPError | None = None
+    for attempt in range(6):
+        req = urllib.request.Request(_base() + path, headers=_auth_headers())
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401 or attempt == 5:
+                raise
+            last_401 = exc
+            time.sleep(0.15)
+    if last_401:
+        raise last_401
+    raise RuntimeError(f"Jarvis GET failed unexpectedly: {path}")
 
 
 def teach(prompt: str, answer: str) -> dict:
@@ -569,6 +582,26 @@ def _print_capability_evals(group: str = "") -> None:
     for case in payload.get("cases", []):
         checks = ", ".join((case.get("checks") or [])[:3])
         print(f"  {case.get('group')}/{case.get('id')}: {checks}")
+
+
+def _print_production_readiness() -> None:
+    payload = get("/production-readiness")
+    print(payload.get("summary") or "Production readiness")
+    print(f"Production ready : {'yes' if payload.get('production_ready') else 'no'}")
+    print(f"Daily local core : {'yes' if payload.get('daily_local_core_ready') else 'no'}")
+    print(f"Free local core  : {'yes' if payload.get('free_local_core_ready') else 'no'}")
+    print(f"Unbounded free   : {'yes' if payload.get('unbounded_free_use') else 'no'}")
+    print(f"Next             : {payload.get('next_best_seam', 'unknown')}")
+    print("Core Checks")
+    for check in payload.get("checks", []):
+        evidence = "; ".join((check.get("evidence") or [])[:2])
+        print(f"  {check.get('id')}: {check.get('status')} -> {evidence}")
+    print("Go-Live Gates")
+    for gate in payload.get("go_live_gates", []):
+        print(f"  {gate.get('id')}: {gate.get('status')} -> {gate.get('next_gap')}")
+    print("Constraints")
+    for constraint in (payload.get("constraints") or [])[:4]:
+        print(f"  - {constraint}")
 
 
 def _print_security_roe(template: str = "") -> None:
@@ -775,6 +808,7 @@ def _console_help() -> str:
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /parity               Show local frontier capability parity",
             "  /capability-evals [g] Show eval coverage for local capability claims",
+            "  /production-readiness Show truthful production/free-use readiness",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -984,6 +1018,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"capability-evals", "evals", "frontier-evals"}:
         _print_capability_evals(args)
         return 0
+    if command in {"production-readiness", "prod", "prod-ready", "free-readiness"}:
+        _print_production_readiness()
+        return 0
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
@@ -1186,6 +1223,10 @@ def main():
     if flag in {"--capability-evals", "--evals", "--frontier-evals"}:
         group = sys.argv[2] if len(sys.argv) > 2 else ""
         _print_capability_evals(group)
+        return
+
+    if flag in {"--production-readiness", "--prod", "--prod-ready", "--free-readiness"}:
+        _print_production_readiness()
         return
 
     if flag in {"--security-roe", "--roe"}:
