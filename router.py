@@ -45,6 +45,7 @@ import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
+import security_roe
 import usage_tracker
 import prompt_modifiers
 import self_improve as si
@@ -1144,6 +1145,18 @@ def route_stream(user_input: str) -> tuple:
         "claude gpt codex grok and gemini",
     )):
         return _s(capability_parity.summary_text()), "Status"
+    if any(p in lower for p in (
+        "security roe",
+        "security rules of engagement",
+        "defensive security roe",
+        "defensive security rules",
+        "rules of engagement for security",
+        "security task template",
+        "threat model template",
+        "incident triage template",
+        "prompt injection review template",
+    )):
+        return _s(security_roe.summary_text()), "Status"
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
     if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):

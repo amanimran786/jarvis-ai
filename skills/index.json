@@ -153,6 +153,40 @@
       ]
     },
     {
+      "id": "defensive_security_roe",
+      "name": "Defensive Security ROE",
+      "description": "Handle cybersecurity, abuse, prompt-injection, and security-review work through defensive rules of engagement.",
+      "tool": "chat",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "security roe",
+        "rules of engagement",
+        "threat model",
+        "security review",
+        "prompt injection",
+        "jailbreak",
+        "abuse path",
+        "trust boundary",
+        "incident triage",
+        "vulnerability",
+        "ssrf",
+        "path traversal",
+        "credential",
+        "defensive security"
+      ],
+      "negative_triggers": [
+        "exploit a third-party target",
+        "steal credentials",
+        "persistence",
+        "evade detection",
+        "lateral movement"
+      ],
+      "path": "defensive_security_roe/SKILL.md",
+      "resources": [
+        "defensive_security_roe/references/security_roe_templates.md"
+      ]
+    },
+    {
       "id": "engineering_reasoning",
       "name": "Engineering Reasoning",
       "description": "Answer technical software-engineering questions like a strong senior engineer: direct, concrete, and diagnostic rather than generic.",
