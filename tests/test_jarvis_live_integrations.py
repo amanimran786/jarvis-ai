@@ -136,14 +136,17 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         usage = self.client.get("/usage")
         policy = self.client.get("/cost-policy")
         context_budget = self.client.get("/context-budget")
+        agent_patterns = self.client.get("/agent-patterns")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(usage.status_code, 200)
         self.assertEqual(policy.status_code, 200)
         self.assertEqual(context_budget.status_code, 200)
+        self.assertEqual(agent_patterns.status_code, 200)
         self.assertIn("status", status.json())
         self.assertIn("usage", usage.json())
         self.assertIn("policy", policy.json())
         self.assertIn("profiles", context_budget.json())
+        self.assertIn("patterns", agent_patterns.json())
 
     @live_only
     def test_router_cost_policy_status_prompt(self):
