@@ -41,6 +41,7 @@ import interview_profile
 import semantic_memory as _smem
 import specialized_agents
 import behavior_hooks
+import capability_evals
 import capability_parity
 import cost_policy
 import context_budget
@@ -1145,6 +1146,17 @@ def route_stream(user_input: str) -> tuple:
         "claude gpt codex grok and gemini",
     )):
         return _s(capability_parity.summary_text()), "Status"
+    if any(p in lower for p in (
+        "capability eval",
+        "capability evaluation",
+        "frontier eval",
+        "frontier evaluation",
+        "golden cases",
+        "eval coverage",
+        "raise eval difficulty",
+        "harder evals",
+    )):
+        return _s(capability_evals.summary_text()), "Status"
     if any(p in lower for p in (
         "security roe",
         "security rules of engagement",
