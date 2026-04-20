@@ -129,6 +129,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - route external repo hype through [[83 External Agent Pattern Intake]] so useful patterns become Jarvis-native upgrades without unsafe dependency drift
 - track [[84 Frontier Capability Parity]] so the local Claude/GPT/Codex/Gemini/Grok-style goal is measured by actual product capabilities instead of slogans
 - enforce [[85 Defensive Security ROE]] so cybersecurity work stays scoped, defensive, and useful
+- grow [[86 Capability Eval Harness]] so every major capability has an eval case before it is treated as mature
 
 ## Medium-Term Priorities
 

@@ -1710,6 +1710,28 @@ class SecurityRoeTests(unittest.TestCase):
         self.assertIn("ai_misuse", text)
 
 
+class CapabilityEvalTests(unittest.TestCase):
+
+    def test_status_covers_all_frontier_groups(self):
+        import capability_evals
+
+        payload = capability_evals.status()
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["coverage_score"], 1.0)
+        self.assertEqual(payload["blind_spots"], [])
+        self.assertIn("JARVIS_RUN_GOLDEN_CASES=1", payload["live_command"])
+
+    def test_summary_text_names_live_command(self):
+        import capability_evals
+
+        text = capability_evals.summary_text("security")
+
+        self.assertIn("Capability eval coverage", text)
+        self.assertIn("Live command", text)
+        self.assertIn("security", text)
+
+
 class CapabilityParityTests(unittest.TestCase):
 
     def test_scorecard_reports_local_frontier_features(self):
@@ -2840,6 +2862,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         parity_mock.assert_called_once_with()
+
+    def test_capability_evals_command_prints_catalog(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_capability_evals") as evals_mock:
+            result = jarvis_cli._handle_console_command("/capability-evals security")
+
+        self.assertEqual(result, 0)
+        evals_mock.assert_called_once_with("security")
 
     def test_security_roe_command_prints_templates(self):
         import jarvis_cli

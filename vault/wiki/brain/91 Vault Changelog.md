@@ -157,3 +157,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[85 Defensive Security ROE]] as the scoped defensive operating contract for cybersecurity tasks
 - added `/security-roe` and `/security-roe <template>` console/API surfaces for authorization, threat model, code review, incident, AI misuse, and browser/source gates
 - connected the security ROE skill to capability parity so Jarvis can report the cybersecurity companion surface as runtime-backed instead of persona-only
+
+### Capability eval harness
+
+- added [[86 Capability Eval Harness]] to keep local capability claims tied to explicit regression cases
+- added `/capability-evals` and `/capability-evals <group>` console/API surfaces for eval coverage and live golden commands
+- added harder golden prompts for defensive security ROE and frontier eval coverage

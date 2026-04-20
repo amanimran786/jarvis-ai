@@ -1341,6 +1341,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Local frontier parity", text)
         self.assertIn("Next seam", text)
 
+    def test_capability_evals_fast_path(self):
+        stream, label = router.route_stream("Show the frontier eval coverage for Jarvis.")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("Capability eval coverage", text)
+        self.assertIn("Live command", text)
+
     def test_security_roe_fast_path(self):
         stream, label = router.route_stream("Show me the security ROE for prompt injection review.")
         text = "".join(stream)
@@ -1812,6 +1819,14 @@ class ApiSurfaceTests(unittest.TestCase):
         feature_ids = {item["id"] for item in payload["features"]}
         self.assertIn("coding_agent", feature_ids)
         self.assertIn("skills", feature_ids)
+
+    def test_capability_evals_endpoint(self):
+        response = self.client.get("/capability-evals?group=security")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["coverage_score"], 1.0)
+        self.assertTrue(all(item["group"] == "security" for item in payload["cases"]))
 
     def test_security_roe_endpoint(self):
         response = self.client.get("/security-roe?template=ai")

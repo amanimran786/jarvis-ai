@@ -15,6 +15,7 @@ Usage:
   python jarvis_cli.py --context-budget
   python jarvis_cli.py --agent-patterns
   python jarvis_cli.py --parity
+  python jarvis_cli.py --capability-evals
   python jarvis_cli.py --security-roe
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
@@ -555,6 +556,21 @@ def _print_capability_parity() -> None:
         print(f"    next: {feature.get('next_gap')}")
 
 
+def _print_capability_evals(group: str = "") -> None:
+    suffix = ""
+    if group:
+        suffix = "?" + urllib.parse.urlencode({"group": group})
+    payload = get("/capability-evals" + suffix)
+    print(payload.get("purpose") or "Capability evals")
+    print(f"Coverage: {int(float(payload.get('coverage_score', 0.0)) * 100)}%")
+    print(f"Next    : {payload.get('next_best_seam', 'unknown')}")
+    print(f"Run     : {payload.get('live_command', '')}")
+    print("Cases")
+    for case in payload.get("cases", []):
+        checks = ", ".join((case.get("checks") or [])[:3])
+        print(f"  {case.get('group')}/{case.get('id')}: {checks}")
+
+
 def _print_security_roe(template: str = "") -> None:
     suffix = ""
     if template:
@@ -758,6 +774,7 @@ def _console_help() -> str:
             "  /tokens               Alias for /context-budget",
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /parity               Show local frontier capability parity",
+            "  /capability-evals [g] Show eval coverage for local capability claims",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -964,6 +981,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"parity", "capability-parity"}:
         _print_capability_parity()
         return 0
+    if command in {"capability-evals", "evals", "frontier-evals"}:
+        _print_capability_evals(args)
+        return 0
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
@@ -1161,6 +1181,11 @@ def main():
 
     if flag in {"--parity", "--capability-parity"}:
         _print_capability_parity()
+        return
+
+    if flag in {"--capability-evals", "--evals", "--frontier-evals"}:
+        group = sys.argv[2] if len(sys.argv) > 2 else ""
+        _print_capability_evals(group)
         return
 
     if flag in {"--security-roe", "--roe"}:

@@ -46,6 +46,7 @@ from local_runtime import local_model_eval
 from local_runtime import local_model_automation
 from local_runtime import local_beta
 import behavior_hooks
+import capability_evals
 import capability_parity
 import cost_policy
 import context_budget
@@ -932,6 +933,11 @@ def get_agent_patterns(category: str = ""):
 @app.get("/capability-parity")
 def get_capability_parity():
     return capability_parity.scorecard()
+
+
+@app.get("/capability-evals")
+def get_capability_evals(group: str = ""):
+    return capability_evals.status(group)
 
 
 @app.get("/security-roe")

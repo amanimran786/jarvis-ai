@@ -22,13 +22,14 @@ related:
   - "[[82 Context Budget Discipline]]"
   - "[[83 External Agent Pattern Intake]]"
   - "[[85 Defensive Security ROE]]"
+  - "[[86 Capability Eval Harness]]"
 ---
 
 # Frontier Capability Parity
 
 Purpose: keep Jarvis's "as capable as Claude, GPT, Codex, Gemini, and Grok locally" goal measurable.
 
-Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]]
+Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]]
 
 Use this note when deciding what to build next for the local-first product.
 
@@ -74,5 +75,6 @@ The next useful moves should close real product gaps:
 - portable skill export/import compatibility
 - gated browser/source ingestion that respects privacy and ToS
 - defensive security ROE templates with explicit scope and stop conditions
+- capability eval coverage that tests each major local product surface
 
 This note should make the ambition sharper, not grander.

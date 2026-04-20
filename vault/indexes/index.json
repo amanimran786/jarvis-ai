@@ -1,5 +1,5 @@
 {
-  "doc_count": 66,
+  "doc_count": 67,
   "docs": [
     {
       "path": "indexes/keyword_index.md",
@@ -1137,42 +1137,42 @@
         "product",
         "interview",
         "should",
+        "local",
         "vault",
         "source",
         "variant",
         "framing",
         "agent",
-        "local",
         "notes",
         "role",
         "support",
         "hub",
         "style",
         "first",
+        "capability",
         "map",
-        "import",
-        "safety"
+        "import"
       ],
-      "chars": 4827,
+      "chars": 4914,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline - [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first - [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline - [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first - [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails - [[86 Capability Eval Harness]] for tying capability claims to local regression cases - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
             "product",
             "interview",
             "brain",
             "should",
+            "local",
             "vault",
             "source",
             "variant",
             "framing",
             "agent",
-            "local",
             "notes"
           ]
         }
@@ -1198,13 +1198,13 @@
         "framing",
         "security",
         "gives",
+        "local",
         "defines",
         "new",
         "durable",
-        "support",
-        "hub"
+        "support"
       ],
-      "chars": 5279,
+      "chars": 5398,
       "sections": [
         {
           "heading": "Brain Dashboard",
@@ -1227,7 +1227,7 @@
           "level": 2,
           "page": null,
           "line_start": 5,
-          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification. - [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes. - [[83 External Agent Pattern Intake]] defines how Jarvis should classify external agent repos before integrating anything. - [[84 Frontier Capability Parity]] keeps the Claude/GPT/Codex/Gemini/Grok-style ambition measurable by local capability group. - [[85 Defensive Security ROE]] exposes scoped defensive security templates through Jarvis runtime and console surfaces. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
+          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification. - [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes. - [[83 External Agent Pattern Intake]] defines how Jarvis should classify external agent repos before integrating anything. - [[84 Frontier Capability Parity]] keeps the Claude/GPT/Codex/Gemini/Grok-style ambition measurable by local capability group. - [[85 Defensive Security ROE]] exposes scoped defensive security templates through Jarvis runtime and console surfaces. - [[86 Capability Eval Harness]] turns capability claims into explicit local regression cases and live golden prompts. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
           "keywords": [
             "jarvis",
             "variant",
@@ -1238,16 +1238,16 @@
             "framing",
             "security",
             "gives",
+            "local",
             "defines",
-            "product",
-            "local"
+            "product"
           ]
         },
         {
           "heading": "Use This Dashboard For",
           "level": 2,
           "page": null,
-          "line_start": 47,
+          "line_start": 48,
           "text": "- orienting inside the brain quickly - checking the capture and metadata rules before adding new durable notes - checking whether a fact belongs in identity, project, synthesis, or stories - deciding which durable note should absorb new source material - jumping into the next curation tasks without searching raw imports",
           "keywords": [
             "checking",
@@ -1268,7 +1268,7 @@
           "heading": "Source Paths",
           "level": 2,
           "page": null,
-          "line_start": 55,
+          "line_start": 56,
           "text": "- Raw imports live under vault/raw/imports/ - Curated long-term notes live under vault/wiki/brain/ - The visual Obsidian map lives in [[81 Jarvis Brain Map]]",
           "keywords": [
             "raw",
@@ -1289,7 +1289,7 @@
           "heading": "Support Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 61,
+          "line_start": 62,
           "text": "- [[06 Vault Support Hub]] is the main support-layer anchor. - [[07 Import Source Hub]] is the main import-layer anchor. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[product-surface-source|Product Surface Source]] is the compiled product-surface bridge back to repo truth.",
           "keywords": [
             "source",
@@ -1310,7 +1310,7 @@
           "heading": "Obsidian Usage",
           "level": 2,
           "page": null,
-          "line_start": 69,
+          "line_start": 70,
           "text": "- Open Graph View to see how the curated notes cluster. - Open [[81 Jarvis Brain Map]] for a cleaner designed map of the same structure. - Use vault/templates/ when creating new durable note types. - Use backlinks from any brain note to see where Jarvis should deepen the knowledge next.",
           "keywords": [
             "open",
@@ -8298,7 +8298,7 @@
         "vault",
         "notes"
       ],
-      "chars": 9009,
+      "chars": 9121,
       "sections": [
         {
           "heading": "Jarvis Roadmap",
@@ -8578,10 +8578,11 @@
           "level": 3,
           "page": null,
           "line_start": 119,
-          "text": "- improve tool routing for short natural requests - strengthen self-knowledge and runtime-grounded answers - keep semantic memory and vault retrieval serving current priorities rather than stale context - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation - enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded - route external repo hype through [[83 External Agent Pattern Intake]] so useful patterns become Jarvis-native upgrades without unsafe dependency drift - track [[84 Frontier Capability Parity]] so the local Claude/GPT/Codex/Gemini/Grok-style goal is measured by actual product capabilities instead of slogans - enforce [[85 Defensive Security ROE]] so cybersecurity work stays scoped, defensive, and useful",
+          "text": "- improve tool routing for short natural requests - strengthen self-knowledge and runtime-grounded answers - keep semantic memory and vault retrieval serving current priorities rather than stale context - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation - enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded - route external repo hype through [[83 External Agent Pattern Intake]] so useful patterns become Jarvis-native upgrades without unsafe dependency drift - track [[84 Frontier Capability Parity]] so the local Claude/GPT/Codex/Gemini/Grok-style goal is measured by actual product capabilities instead of slogans - enforce [[85 Defensive Security ROE]] so cybersecurity work stays scoped, defensive, and useful - grow [[86 Capability Eval Harness]] so every major capability has an eval case before it is treated as mature",
           "keywords": [
             "runtime",
             "local",
+            "capability",
             "strengthen",
             "context",
             "jarvis",
@@ -8590,15 +8591,14 @@
             "grounded",
             "vault",
             "technical",
-            "layer",
-            "can"
+            "layer"
           ]
         },
         {
           "heading": "Medium-Term Priorities",
           "level": 2,
           "page": null,
-          "line_start": 133,
+          "line_start": 134,
           "text": "- stronger proactive routines - better meeting support and live context awareness - richer local vision and screen understanding - more polished command-center UI and overlays - clearer user snapshot injection and preference-aware behavior",
           "keywords": [
             "stronger",
@@ -8619,7 +8619,7 @@
           "heading": "Q2 2026",
           "level": 3,
           "page": null,
-          "line_start": 143,
+          "line_start": 144,
           "text": "- stabilize the packaged macOS app so launch, voice, messaging, and core actions stay reliable - finish the first durable brain layer: identity, projects, synthesis, story bank, decision log, roadmap, task hub - tighten short-query tool routing so Jarvis behaves more like an operator in normal spoken use - keep voice grounded in the better local TTS path without regressing to brittle packaging",
           "keywords": [
             "voice",
@@ -8640,7 +8640,7 @@
           "heading": "Q3 2026",
           "level": 3,
           "page": null,
-          "line_start": 150,
+          "line_start": 151,
           "text": "- add stronger proactive follow-through for active tasks, reminders, and obvious continuity cases - deepen meeting support, screen understanding, and live local context handling - push the UI toward a clearer command-center feel without outrunning runtime reliability - strengthen retrieval so curated notes, current runtime state, and active project context shape answers more consistently",
           "keywords": [
             "active",
@@ -8661,7 +8661,7 @@
           "heading": "Things To Avoid",
           "level": 2,
           "page": null,
-          "line_start": 157,
+          "line_start": 158,
           "text": "- adding large quantities of raw memory without curation - broad rewrites that destabilize the packaged app - cloud-first shortcuts that dilute the core local-first direction - cosmetic UI work that outruns runtime usefulness",
           "keywords": [
             "first",
@@ -8682,7 +8682,7 @@
           "heading": "Success Markers",
           "level": 2,
           "page": null,
-          "line_start": 164,
+          "line_start": 165,
           "text": "- Jarvis remembers stable identity and project direction without needing re-explanation - Jarvis can handle frequent real tasks reliably in the packaged app - Jarvis feels more human and more operational over time - the vault becomes a compounding asset rather than a storage bin - every new layer improves coherence instead of adding noise",
           "keywords": [
             "jarvis",
@@ -9163,20 +9163,20 @@
     {
       "path": "wiki/brain/84 Frontier Capability Parity.md",
       "title": "Frontier Capability Parity",
-      "preview": "# Frontier Capability Parity Purpose: keep Jarvis's \"as capable as Claude, GPT, Codex, Gemini, and Grok locally\" goal measurable. Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]] Use this note when deciding what to build next for the local-first product. Principle The goal is not brand imitation. The goal is local capability parity across product classes: - fr",
+      "preview": "# Frontier Capability Parity Purpose: keep Jarvis's \"as capable as Claude, GPT, Codex, Gemini, and Grok locally\" goal measurable. Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]] Use this note when deciding what to build next for the local-first product. Principle The goal is not brand imitation. The goal is local capability par",
       "keywords": [
-        "parity",
-        "not",
-        "local",
         "capability",
+        "parity",
+        "local",
+        "not",
         "agent",
+        "product",
         "jarvis",
         "goal",
         "engineering",
         "defensive",
         "security",
         "next",
-        "product",
         "voice",
         "browser",
         "should",
@@ -9186,14 +9186,14 @@
         "runtime",
         "roe"
       ],
-      "chars": 1852,
+      "chars": 1955,
       "sections": [
         {
           "heading": "Frontier Capability Parity",
           "level": 1,
           "page": null,
-          "line_start": 27,
-          "text": "Purpose: keep Jarvis's \"as capable as Claude, GPT, Codex, Gemini, and Grok locally\" goal measurable. Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]] Use this note when deciding what to build next for the local-first product.",
+          "line_start": 28,
+          "text": "Purpose: keep Jarvis's \"as capable as Claude, GPT, Codex, Gemini, and Grok locally\" goal measurable. Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]] Use this note when deciding what to build next for the local-first product.",
           "keywords": [
             "jarvis",
             "agent",
@@ -9213,7 +9213,7 @@
           "heading": "Principle",
           "level": 2,
           "page": null,
-          "line_start": 35,
+          "line_start": 36,
           "text": "The goal is not brand imitation. The goal is local capability parity across product classes: - frontier chat and reasoning - coding-agent implementation loop - local vision and screen understanding - persistent memory and brain retrieval - voice input and output - managed agents and task lifecycle - portable reusable skills - browser and tool execution - defensive cybersecurity engineering support",
           "keywords": [
             "goal",
@@ -9234,7 +9234,7 @@
           "heading": "Runtime Surface",
           "level": 2,
           "page": null,
-          "line_start": 49,
+          "line_start": 50,
           "text": "Jarvis exposes the current scorecard through /capability-parity and the console command /parity. The scorecard should answer: - what local equivalent exists - whether the capability is ready, partial, or a gap - what evidence supports that state - what the next engineering seam is",
           "keywords": [
             "scorecard",
@@ -9255,7 +9255,7 @@
           "heading": "Guardrails",
           "level": 2,
           "page": null,
-          "line_start": 60,
+          "line_start": 61,
           "text": "- do not claim parity just because a model name exists - do not treat cloud fallback as local parity - do not hide partial voice, vision, browser, or security gaps behind generic \"AI assistant\" language - do not add offensive automation to satisfy a \"Grok/Codex-like\" ambition",
           "keywords": [
             "not",
@@ -9276,21 +9276,21 @@
           "heading": "Current Direction",
           "level": 2,
           "page": null,
-          "line_start": 67,
-          "text": "The next useful moves should close real product gaps: - repo-map and verification helpers for coding-agent work - packaged voice end-to-end reliability - richer screenshot and UI-understanding smoke tests - portable skill export/import compatibility - gated browser/source ingestion that respects privacy and ToS - defensive security ROE templates with explicit scope and stop conditions This note should make the ambition sharper, not grander.",
+          "line_start": 68,
+          "text": "The next useful moves should close real product gaps: - repo-map and verification helpers for coding-agent work - packaged voice end-to-end reliability - richer screenshot and UI-understanding smoke tests - portable skill export/import compatibility - gated browser/source ingestion that respects privacy and ToS - defensive security ROE templates with explicit scope and stop conditions - capability eval coverage that tests each major local product surface This note should make the ambition sharper, not grander.",
           "keywords": [
             "should",
+            "product",
             "end",
+            "tests",
             "next",
             "useful",
             "moves",
             "close",
             "real",
-            "product",
             "gaps",
             "repo",
-            "map",
-            "verification"
+            "map"
           ]
         }
       ]
@@ -9426,6 +9426,119 @@
             "goal",
             "into",
             "inspectable"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/86 Capability Eval Harness.md",
+      "title": "Capability Eval Harness",
+      "preview": "# Capability Eval Harness Purpose: make Jarvis prove capability claims through explicit local regression cases. Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]] Jarvis now exposes eval coverage through /capability-evals and the console command /capability-evals. The point is simple: a capability group is not mature just because the surface exists. It needs regression cases. Covered Groups The eval catalog tracks these local capabili",
+      "keywords": [
+        "capability",
+        "eval",
+        "command",
+        "case",
+        "jarvis",
+        "local",
+        "cases",
+        "parity",
+        "live",
+        "golden",
+        "through",
+        "regression",
+        "security",
+        "evals",
+        "console",
+        "not",
+        "surface",
+        "groups",
+        "catalog",
+        "use"
+      ],
+      "chars": 1039,
+      "sections": [
+        {
+          "heading": "Capability Eval Harness",
+          "level": 1,
+          "page": null,
+          "line_start": 24,
+          "text": "Purpose: make Jarvis prove capability claims through explicit local regression cases. Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]] Jarvis now exposes eval coverage through /capability-evals and the console command /capability-evals. The point is simple: a capability group is not mature just because the surface exists. It needs regression cases.",
+          "keywords": [
+            "capability",
+            "jarvis",
+            "through",
+            "regression",
+            "cases",
+            "evals",
+            "purpose",
+            "make",
+            "prove",
+            "claims",
+            "explicit",
+            "local"
+          ]
+        },
+        {
+          "heading": "Covered Groups",
+          "level": 2,
+          "page": null,
+          "line_start": 34,
+          "text": "The eval catalog tracks these local capability groups: - chat reasoning - coding-agent implementation loop - vision - memory brain - voice - agents - skills - browser tools - security",
+          "keywords": [
+            "eval",
+            "catalog",
+            "tracks",
+            "these",
+            "local",
+            "capability",
+            "groups",
+            "chat",
+            "reasoning",
+            "coding",
+            "agent",
+            "implementation"
+          ]
+        },
+        {
+          "heading": "Live Golden Command",
+          "level": 2,
+          "page": null,
+          "line_start": 48,
+          "text": "Use this command for expensive live golden cases: Use the faster catalog command during normal iteration:",
+          "keywords": [
+            "use",
+            "command",
+            "expensive",
+            "live",
+            "golden",
+            "cases",
+            "faster",
+            "catalog",
+            "during",
+            "normal",
+            "iteration"
+          ]
+        },
+        {
+          "heading": "Rule",
+          "level": 2,
+          "page": null,
+          "line_start": 62,
+          "text": "When Jarvis gains a new major ability, add one of: - a live golden case - a unit-level capability case - a packaged-app smoke case - a console smoke case This keeps the local-first goal honest. Surface parity is not intelligence parity until it survives eval pressure.",
+          "keywords": [
+            "case",
+            "smoke",
+            "parity",
+            "jarvis",
+            "gains",
+            "new",
+            "major",
+            "ability",
+            "add",
+            "one",
+            "live",
+            "golden"
           ]
         }
       ]
@@ -9661,21 +9774,21 @@
         "skill",
         "notes",
         "instead",
-        "capture",
         "local",
+        "capture",
         "can",
         "into",
         "inbox",
         "candidate",
         "stale",
         "surface",
+        "capability",
         "runtime",
         "only",
         "agent",
-        "review",
-        "without"
+        "explicit"
       ],
-      "chars": 10578,
+      "chars": 10911,
       "sections": [
         {
           "heading": "Vault Changelog",
@@ -10027,6 +10140,27 @@
             "template",
             "console",
             "api"
+          ]
+        },
+        {
+          "heading": "Capability eval harness",
+          "level": 3,
+          "page": null,
+          "line_start": 161,
+          "text": "- added [[86 Capability Eval Harness]] to keep local capability claims tied to explicit regression cases - added /capability-evals and /capability-evals <group> console/API surfaces for eval coverage and live golden commands - added harder golden prompts for defensive security ROE and frontier eval coverage",
+          "keywords": [
+            "capability",
+            "added",
+            "eval",
+            "evals",
+            "coverage",
+            "golden",
+            "harness",
+            "keep",
+            "local",
+            "claims",
+            "tied",
+            "explicit"
           ]
         }
       ]
