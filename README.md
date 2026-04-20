@@ -428,6 +428,18 @@ Memory and vault:
 
 ## CLI Examples
 
+If `~/.local/bin` is on your `PATH`, use Jarvis like a console-native assistant:
+
+```bash
+jarvis
+jarvis --doctor
+jarvis --parity
+jarvis --security-roe ai
+jarvis --code-ultra "inspect the auth middleware and propose the smallest safe patch"
+```
+
+The `jarvis` wrapper resolves the project venv before starting the daemon, so local dependencies such as `faster-whisper` stay available even if your shell's default `python3` points at Anaconda or another base interpreter.
+
 ```bash
 ./venv/bin/python jarvis_cli.py --status
 ./venv/bin/python jarvis_cli.py --skills

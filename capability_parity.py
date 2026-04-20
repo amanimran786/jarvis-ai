@@ -78,6 +78,7 @@ def scorecard() -> dict[str, Any]:
     tts_ready = bool(tts_status.get("ready"))
     negative_skill_count = sum(1 for skill in skills if skill.get("negative_triggers"))
     browser_connector = any(connector.get("id") == "browser_operator" for connector in connectors)
+    security_roe_ready = any(skill.get("id") == "defensive_security_roe" for skill in skills)
 
     features = [
         _feature(
@@ -155,10 +156,14 @@ def scorecard() -> dict[str, Any]:
         _feature(
             "security",
             "Cybersecurity engineering companion",
-            "partial",
-            "threat-modeling brain notes, security agents, and permission gates",
-            ["defensive_only_external_patterns=true", "protected_path_gates=true"],
-            "add ROE-style defensive security task templates; do not add autonomous offensive execution",
+            _status_from_ready(security_roe_ready, partial=True),
+            "threat-modeling brain notes, security agents, permission gates, and defensive ROE templates",
+            [
+                "defensive_only_external_patterns=true",
+                "protected_path_gates=true",
+                f"defensive_security_roe={security_roe_ready}",
+            ],
+            "raise security eval quality with defensive-only incident, code-review, and prompt-injection cases",
         ),
     ]
 

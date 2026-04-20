@@ -50,6 +50,7 @@ import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
+import security_roe
 import usage_tracker
 import runtime_state
 import provider_router
@@ -931,6 +932,11 @@ def get_agent_patterns(category: str = ""):
 @app.get("/capability-parity")
 def get_capability_parity():
     return capability_parity.scorecard()
+
+
+@app.get("/security-roe")
+def get_security_roe(template: str = ""):
+    return security_roe.status(template)
 
 
 @app.get("/cost-policy")
