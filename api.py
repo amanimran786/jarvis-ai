@@ -47,6 +47,7 @@ from local_runtime import local_model_automation
 from local_runtime import local_beta
 import behavior_hooks
 import cost_policy
+import context_budget
 import usage_tracker
 import runtime_state
 import provider_router
@@ -911,6 +912,11 @@ def get_context_stats():
 @app.get("/usage")
 def get_usage(hours: int = 24, since_seq: int = 0, recent: int = 10):
     return {"ok": True, "usage": usage_tracker.summarize(hours=hours, since_seq=since_seq, include_recent=recent)}
+
+
+@app.get("/context-budget")
+def get_context_budget(hours: int = 24):
+    return context_budget.policy_status(hours=hours)
 
 
 @app.get("/cost-policy")

@@ -1633,6 +1633,43 @@ class UsageTrackerEstimationTests(unittest.TestCase):
         self.assertEqual(usage_tracker._estimate_tokens_from_text("   "), 0)
 
 
+class ContextBudgetPolicyTests(unittest.TestCase):
+
+    def test_policy_status_exposes_profiles_and_commands(self):
+        import context_budget
+
+        with patch("context_budget.usage_tracker.summarize", return_value={
+            "total_tokens": 120,
+            "call_count": 2,
+            "by_model": {
+                "qwen2.5-coder:7b": {"local": True, "total_tokens": 90},
+                "claude-sonnet-4-6": {"local": False, "total_tokens": 30},
+            },
+            "recent": [],
+        }):
+            status = context_budget.policy_status(hours=24)
+
+        self.assertTrue(status["ok"])
+        self.assertIn("ultra", status["profiles"])
+        self.assertIn("/code-ultra <prompt>", status["commands"])
+        self.assertEqual(status["usage"]["local_tokens"], 90)
+        self.assertEqual(status["usage"]["cloud_tokens"], 30)
+
+    def test_policy_text_mentions_local_coding_loop(self):
+        import context_budget
+
+        with patch("context_budget.usage_tracker.summarize", return_value={
+            "total_tokens": 0,
+            "call_count": 0,
+            "by_model": {},
+            "recent": [],
+        }):
+            text = context_budget.policy_text()
+
+        self.assertIn("/code <prompt>", text)
+        self.assertIn("local-first", text.lower())
+
+
 class UsageTrackerCostTests(unittest.TestCase):
 
     def test_cost_for_known_model(self):
@@ -2644,6 +2681,33 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         shell_mock.assert_called_once_with("pwd")
+
+    def test_context_budget_command_prints_policy(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_context_budget") as budget_mock:
+            result = jarvis_cli._handle_console_command("/context-budget")
+
+        self.assertEqual(result, 0)
+        budget_mock.assert_called_once_with()
+
+    def test_code_ultra_command_uses_isolated_terse_task(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.stream_task", return_value=0) as stream_mock:
+            result = jarvis_cli._handle_console_command("/code-ultra refactor auth")
+
+        self.assertEqual(result, 0)
+        stream_mock.assert_called_once_with("refactor auth", kind="code", terse_mode="ultra", isolated_workspace=True)
+
+    def test_task_lite_command_uses_lite_terse_task(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.stream_task", return_value=0) as stream_mock:
+            result = jarvis_cli._handle_console_command("/task-lite summarize repo")
+
+        self.assertEqual(result, 0)
+        stream_mock.assert_called_once_with("summarize repo", terse_mode="lite")
 
     def test_approve_command_routes_to_pending_shell_helper(self):
         import jarvis_cli
