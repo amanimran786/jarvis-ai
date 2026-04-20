@@ -16,6 +16,7 @@ Endpoints:
   POST /memory/add    — add a fact
   POST /memory/forget — forget by keyword
   GET  /mode          — current model routing mode
+  GET  /production-readiness — truthful local/free/production readiness contract
   POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"|"open-source"}
 """
 
@@ -51,6 +52,7 @@ import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
+import production_readiness
 import security_roe
 import usage_tracker
 import runtime_state
@@ -938,6 +940,11 @@ def get_capability_parity():
 @app.get("/capability-evals")
 def get_capability_evals(group: str = ""):
     return capability_evals.status(group)
+
+
+@app.get("/production-readiness")
+def get_production_readiness():
+    return production_readiness.contract()
 
 
 @app.get("/security-roe")
