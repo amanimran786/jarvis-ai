@@ -146,6 +146,36 @@ ENGINEERING_GOLDEN_CASES = [
         ],
     },
     {
+        "id": "security_roe_prompt_injection",
+        "suite": "engineering",
+        "prompt": "Show me the security ROE for prompt injection review.",
+        "expected_label": "Status",
+        "must_include_all": [
+            "Defensive security ROE",
+            "ai_misuse",
+        ],
+        "must_include_any": [
+            "tool permission boundary",
+            "trusted vs untrusted",
+            "prompt-injection",
+        ],
+    },
+    {
+        "id": "frontier_eval_coverage",
+        "suite": "engineering",
+        "prompt": "Show the frontier eval coverage for Jarvis.",
+        "expected_label": "Status",
+        "must_include_all": [
+            "Capability eval coverage",
+            "Live command",
+        ],
+        "must_include_any": [
+            "coding_agent",
+            "security",
+            "memory_brain",
+        ],
+    },
+    {
         "id": "database_index_tradeoff",
         "suite": "engineering",
         "prompt": "When should I add a database index, and when can it hurt performance?",

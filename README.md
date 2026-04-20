@@ -434,6 +434,7 @@ If `~/.local/bin` is on your `PATH`, use Jarvis like a console-native assistant:
 jarvis
 jarvis --doctor
 jarvis --parity
+jarvis --capability-evals
 jarvis --security-roe ai
 jarvis --code-ultra "inspect the auth middleware and propose the smallest safe patch"
 ```
