@@ -387,6 +387,12 @@ class SkillCreateRequest(BaseModel):
     cost_hint: str = "local"
 
 
+class SkillProposeRequest(BaseModel):
+    query: str
+    tool: str = "chat"
+    cost_hint: str = "local"
+
+
 class SkillPromoteRequest(BaseModel):
     min_failures: int = 2
 
@@ -938,6 +944,17 @@ def ingest_vault(req: VaultIngestRequest):
 def create_skill(req: SkillCreateRequest):
     result = skill_factory.create_skill_from_vault(req.query, tool=req.tool, cost_hint=req.cost_hint)
     return {"ok": result.get("ok", False), "message": skill_factory.result_text(result), "result": result}
+
+
+@app.post("/skills/propose")
+def propose_skill(req: SkillProposeRequest):
+    result = skill_factory.propose_skill_from_vault(req.query, tool=req.tool, cost_hint=req.cost_hint)
+    message = (
+        f"Proposed the skill {result['skill_id']} from local vault sources without writing files."
+        if result.get("ok")
+        else result.get("error", "Skill proposal failed.")
+    )
+    return {"ok": result.get("ok", False), "message": message, "result": result}
 
 
 @app.post("/skills/promote")
