@@ -43,6 +43,7 @@ import specialized_agents
 import behavior_hooks
 import cost_policy
 import context_budget
+import external_agent_patterns
 import usage_tracker
 import prompt_modifiers
 import self_improve as si
@@ -1115,6 +1116,19 @@ def route_stream(user_input: str) -> tuple:
         "reduce context",
     )):
         return _s(context_budget.policy_text(hours=24)), "Status"
+    if any(p in lower for p in (
+        "external agent pattern",
+        "agent pattern intake",
+        "what can we use from",
+        "gbrain",
+        "openmythos",
+        "multica",
+        "scrapling",
+        "decepticon",
+        "claude code best practice",
+        "claude-code-best-practice",
+    )):
+        return _s(external_agent_patterns.summary_text()), "Status"
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
     if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):

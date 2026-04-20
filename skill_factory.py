@@ -165,6 +165,11 @@ def _build_skill_payload(query: str, tool: str = "chat", cost_hint: str = "local
             "",
             "Rules:",
             *rule_lines,
+            "",
+            "Do NOT use for:",
+            "- One-off facts, preferences, or identity details that belong in memory.",
+            "- Broad requests to make Jarvis smarter without a repeated workflow or local evidence.",
+            "- Security, browser, or filesystem automation that needs explicit permission gates.",
         ]
     )
 
