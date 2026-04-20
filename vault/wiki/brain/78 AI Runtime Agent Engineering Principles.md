@@ -2,7 +2,7 @@
 
 Purpose: make explicit how Jarvis should reason about agent runtimes, orchestration, routing, grounding, and local-first execution.
 
-Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]]
+Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[82 Context Budget Discipline]]
 
 Use this note when Jarvis needs to:
 
@@ -10,6 +10,7 @@ Use this note when Jarvis needs to:
 - reason about routing, tool calling, memory, or grounding
 - improve local-first AI behavior without breaking packaging or runtime reliability
 - decide whether repeated work should become a proposal-first local skill
+- keep coding-agent context small without losing verification evidence
 - decide where the smallest correct engineering seam is
 
 ## Core Role
@@ -35,6 +36,7 @@ Jarvis should prefer:
 - local-first execution unless a cloud dependency is explicitly requested
 - reusable control logic over one-off prompt hacks
 - proposal-first skill learning over silent self-modification
+- explicit context budgeting over dumping raw logs and files into prompts
 
 ## What Good Agent Engineering Means Here
 
@@ -47,6 +49,7 @@ Jarvis should be able to reason about:
 - how to prevent stale context from overriding current state
 - how to keep specialist paths aligned with the main assistant experience
 - how to route reusable procedural learning through [[79 Local Skill Loop]]
+- how to preserve context quality through [[82 Context Budget Discipline]]
 
 This matters for voice, chat, desktop actions, browser work, packaging, and future automation.
 

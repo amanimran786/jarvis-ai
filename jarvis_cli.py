@@ -12,6 +12,7 @@ Usage:
   python jarvis_cli.py --skills
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
+  python jarvis_cli.py --context-budget
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
   python jarvis_cli.py --agents
@@ -23,6 +24,7 @@ Usage:
   python jarvis_cli.py --deny-task <task_id>
   python jarvis_cli.py --task fix the login bug   # streaming, Multica-compatible
   python jarvis_cli.py --task-code refactor the auth middleware
+  python jarvis_cli.py --code-ultra refactor the auth middleware
   python jarvis_cli.py --teach "user prompt" "ideal Jarvis answer"
   python jarvis_cli.py -p fix the login bug        # alias for --task
 """
@@ -488,6 +490,33 @@ def _print_vault_status() -> None:
     print(json.dumps(payload, indent=2))
 
 
+def _print_context_budget() -> None:
+    payload = get("/context-budget")
+    print(payload.get("purpose") or "Context budget")
+    models = payload.get("models") or {}
+    if models:
+        print(
+            "Models : "
+            f"default={models.get('default', 'unknown')} "
+            f"coder={models.get('coder', 'unknown')} "
+            f"reasoning={models.get('reasoning', 'unknown')}"
+        )
+    usage = payload.get("usage") or {}
+    print(
+        "Usage  : "
+        f"total={usage.get('total_tokens', 0)} "
+        f"local={usage.get('local_tokens', 0)} "
+        f"cloud={usage.get('cloud_tokens', 0)} "
+        f"calls={usage.get('call_count', 0)}"
+    )
+    print("Profiles")
+    for name, profile in (payload.get("profiles") or {}).items():
+        print(f"  {name}: {profile.get('best_for', '')} -> {profile.get('rule', '')}")
+    print("Commands")
+    for command, description in (payload.get("commands") or {}).items():
+        print(f"  {command}: {description}")
+
+
 def _safe_get(path: str) -> dict:
     try:
         return get(path)
@@ -670,12 +699,20 @@ def _console_help() -> str:
             "  /connectors           List connectors",
             "  /plugins              List plugins",
             "  /vault                Show vault status",
+            "  /context-budget       Show local coding/token discipline",
+            "  /tokens               Alias for /context-budget",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
             "  /deny                 Clear the pending risky shell command",
             "  !<command>            Shortcut for /run",
             "  /clear                Clear the terminal",
             "  /exit                 Quit the console",
+            "",
+            "Terse task aliases:",
+            "  /task-lite <prompt>   Quick managed task with tighter output",
+            "  /task-ultra <prompt>  Managed task with maximum compression",
+            "  /code-lite <prompt>   Quick isolated coding task",
+            "  /code-ultra <prompt>  Isolated coding task with maximum compression",
             "",
             "Any non-slash input is sent as a normal chat message.",
         ]
@@ -860,16 +897,31 @@ def _handle_console_command(line: str) -> int | None:
     if command == "tasks":
         _print_tasks(args)
         return 0
+    if command in {"context-budget", "tokens"}:
+        _print_context_budget()
+        return 0
     if command == "task":
         if not args:
             print("Usage: /task <task description>", file=sys.stderr)
             return 1
         return stream_task(args)
+    if command in {"task-lite", "task-ultra"}:
+        if not args:
+            print(f"Usage: /{command} <task description>", file=sys.stderr)
+            return 1
+        terse_mode = "lite" if command == "task-lite" else "ultra"
+        return stream_task(args, terse_mode=terse_mode)
     if command == "code":
         if not args:
             print("Usage: /code <task description>", file=sys.stderr)
             return 1
         return stream_task(args, kind="code", terse_mode="full", isolated_workspace=True)
+    if command in {"code-lite", "code-ultra"}:
+        if not args:
+            print(f"Usage: /{command} <task description>", file=sys.stderr)
+            return 1
+        terse_mode = "lite" if command == "code-lite" else "ultra"
+        return stream_task(args, kind="code", terse_mode=terse_mode, isolated_workspace=True)
     if command == "task-status":
         if not args:
             print("Usage: /task-status <task_id>", file=sys.stderr)
@@ -960,6 +1012,22 @@ def main():
         task = " ".join(sys.argv[2:])
         sys.exit(stream_task(task, kind="code", terse_mode="full", isolated_workspace=True))
 
+    if flag in {"--task-lite", "--task-ultra"}:
+        if len(sys.argv) < 3:
+            print(f"Usage: python jarvis_cli.py {flag} <task description>", file=sys.stderr)
+            sys.exit(1)
+        task = " ".join(sys.argv[2:])
+        terse_mode = "lite" if flag == "--task-lite" else "ultra"
+        sys.exit(stream_task(task, terse_mode=terse_mode))
+
+    if flag in {"--task-code-lite", "--task-code-ultra", "--code-lite", "--code-ultra"}:
+        if len(sys.argv) < 3:
+            print(f"Usage: python jarvis_cli.py {flag} <task description>", file=sys.stderr)
+            sys.exit(1)
+        task = " ".join(sys.argv[2:])
+        terse_mode = "lite" if flag in {"--task-code-lite", "--code-lite"} else "ultra"
+        sys.exit(stream_task(task, kind="code", terse_mode=terse_mode, isolated_workspace=True))
+
     if flag == "--teach":
         if len(sys.argv) != 4:
             print('Usage: python jarvis_cli.py --teach "<prompt>" "<ideal answer>"', file=sys.stderr)
@@ -1013,6 +1081,10 @@ def main():
 
     if flag == "--plugins":
         _print_plugins()
+        return
+
+    if flag in {"--context-budget", "--tokens"}:
+        _print_context_budget()
         return
 
     if flag == "--plugin":

@@ -17,6 +17,7 @@ tags:
   - local-first
 related:
   - "[[78 AI Runtime Agent Engineering Principles]]"
+  - "[[82 Context Budget Discipline]]"
   - "[[80 Jarvis Roadmap]]"
   - "[[70 Jarvis Decision Log]]"
   - "[[92 Agent Inbox]]"
@@ -27,7 +28,7 @@ related:
 
 Purpose: define how Jarvis learns reusable local skills without unsafe self-modification or graph noise.
 
-Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]]
+Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]]
 
 Use this note when Jarvis needs to decide whether a repeated task, failure pattern, or workflow should become a reusable local skill.
 
@@ -54,6 +55,7 @@ Good skill candidates include:
 
 - recurring terminal or repo workflows
 - coding verification helpers
+- context-budget and log-compression workflows
 - vault maintenance procedures
 - routing and debugging playbooks
 - agent profile instructions

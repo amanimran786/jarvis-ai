@@ -42,6 +42,7 @@ import semantic_memory as _smem
 import specialized_agents
 import behavior_hooks
 import cost_policy
+import context_budget
 import usage_tracker
 import prompt_modifiers
 import self_improve as si
@@ -1099,6 +1100,21 @@ def route_stream(user_input: str) -> tuple:
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("cost policy", "routing policy", "training policy", "should we train", "should we distill")):
         return _s(cost_policy.policy_text()), "Status"
+    if any(p in lower for p in (
+        "context budget",
+        "token budget",
+        "token optimizer",
+        "token efficient",
+        "caveman claude",
+        "rust token killer",
+        "code review graph",
+        "context mode",
+        "token saver",
+        "stop burning tokens",
+        "save context",
+        "reduce context",
+    )):
+        return _s(context_budget.policy_text(hours=24)), "Status"
     if any(p in lower for p in ("token usage", "usage summary", "cost analysis", "model usage", "api usage", "how many tokens", "how much are you burning")):
         return _s(usage_tracker.summary_text(hours=24)), "Status"
     if any(p in lower for p in ("memory status", "tiered memory status", "memory tiers", "memory summary")):

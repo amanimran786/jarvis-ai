@@ -125,3 +125,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added a managed `skill-builder` task lane so background skill work stays separate from chat routing and vault curation
 - kept direct skill creation explicit and approval-sensitive instead of allowing background agents to silently mutate the skill registry
 - refreshed generated vault indexes so the compiled product-surface source now resolves as [[product-surface-source|Product Surface Source]] instead of a stale bridge filename
+
+### Context budget and local coding loop
+
+- added [[82 Context Budget Discipline]] as the canonical brain policy for token/context quality during local coding-agent work
+- added a native context-budget runtime surface so Jarvis can answer token-saver and local coding loop questions from live policy instead of hype-thread memory
+- connected context discipline to [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], and [[80 Jarvis Roadmap]]

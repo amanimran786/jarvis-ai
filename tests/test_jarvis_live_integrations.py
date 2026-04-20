@@ -135,12 +135,15 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         status = self.client.get("/status")
         usage = self.client.get("/usage")
         policy = self.client.get("/cost-policy")
+        context_budget = self.client.get("/context-budget")
         self.assertEqual(status.status_code, 200)
         self.assertEqual(usage.status_code, 200)
         self.assertEqual(policy.status_code, 200)
+        self.assertEqual(context_budget.status_code, 200)
         self.assertIn("status", status.json())
         self.assertIn("usage", usage.json())
         self.assertIn("policy", policy.json())
+        self.assertIn("profiles", context_budget.json())
 
     @live_only
     def test_router_cost_policy_status_prompt(self):
@@ -148,6 +151,13 @@ class LiveApiReadOnlyTests(unittest.TestCase):
         text = "".join(stream)
         self.assertEqual(label, "Status")
         self.assertIn("cost policy", text.lower())
+
+    @live_only
+    def test_router_context_budget_prompt(self):
+        stream, label = route_stream("token optimizer context budget")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("context budget", text.lower())
 
     @live_only
     def test_router_expert_prompt_smoke(self):

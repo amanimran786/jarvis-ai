@@ -1310,6 +1310,13 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Status")
         self.assertIn("cost policy", text.lower())
 
+    def test_context_budget_fast_path(self):
+        stream, label = router.route_stream("stop burning tokens and show the context budget")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("context budget", text.lower())
+        self.assertIn("/code", text)
+
     def test_capability_boundaries_fast_path(self):
         stream, label = router.route_stream("What are your limitations and scope boundaries?")
         text = "".join(stream)
@@ -1748,6 +1755,14 @@ class ApiSurfaceTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertIn("training_action", payload["policy"])
+
+    def test_context_budget_endpoint(self):
+        response = self.client.get("/context-budget")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("profiles", payload)
+        self.assertIn("/code <prompt>", payload["commands"])
 
     def test_local_beta_status_endpoint(self):
         response = self.client.get("/local/beta/status")

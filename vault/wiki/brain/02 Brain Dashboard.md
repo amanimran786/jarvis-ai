@@ -33,6 +33,7 @@ This note is the manual navigation surface for the curated Jarvis brain.
 - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls.
 - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior.
 - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification.
+- [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes.
 - [[70 Jarvis Decision Log]] preserves architectural and product decisions.
 - [[80 Jarvis Roadmap]] keeps product direction anchored.
 - [[90 Task Hub]] tracks the next curation and product-memory work.

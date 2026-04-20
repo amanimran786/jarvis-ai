@@ -125,6 +125,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries
 - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure
 - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation
+- enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded
 
 ## Medium-Term Priorities
 

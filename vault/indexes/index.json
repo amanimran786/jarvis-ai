@@ -1,5 +1,5 @@
 {
-  "doc_count": 62,
+  "doc_count": 63,
   "docs": [
     {
       "path": "indexes/keyword_index.md",
@@ -1143,24 +1143,24 @@
         "framing",
         "notes",
         "role",
+        "local",
         "support",
         "hub",
         "style",
         "map",
-        "local",
         "import",
         "safety",
         "about",
         "systems"
       ],
-      "chars": 4329,
+      "chars": 4451,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
             "product",
@@ -1173,7 +1173,7 @@
             "framing",
             "notes",
             "role",
-            "support"
+            "local"
           ]
         }
       ]
@@ -1185,11 +1185,11 @@
       "keywords": [
         "jarvis",
         "brain",
+        "should",
         "vault",
         "variant",
         "product",
         "map",
-        "should",
         "notes",
         "source",
         "work",
@@ -1204,7 +1204,7 @@
         "layer",
         "note"
       ],
-      "chars": 4769,
+      "chars": 4906,
       "sections": [
         {
           "heading": "Brain Dashboard",
@@ -1227,27 +1227,27 @@
           "level": 2,
           "page": null,
           "line_start": 5,
-          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
+          "text": "- [[00 Home]] keeps the top-level map. - [[03 Brain Schema]] defines the metadata and task contract for new durable notes. - [[04 Capture Workflow]] defines how new durable notes should be created and promoted. - [[06 Vault Support Hub]] groups the support-layer guides, indexes, and strategy bridges. - [[07 Import Source Hub]] groups the staged import families and provenance flow. - [[10 Identity]] holds stable user identity and strengths. - [[20 Projects]] keeps active work visible. - [[30 Preferences]] preserves how Aman likes to work and collaborate. - [[40 Timeline]] captures major milestones and shifts. - [[50 Synthesis]] holds distilled takeaways from long histories. - [[60 Interview Story Bank]] is the reusable career narrative layer. - [[61 Role Targeting Map]] maps those stories to recurring role families. - [[62 Anthropic AI Safety Variant]] is the first concrete target-role variant. - [[63 Apple Ops Leadership Variant]] covers operations-lead and screening-lead framing. - [[64 YouTube Policy Variant]] covers policy-enforcement and judgment-heavy framing. - [[65 Career Answering Rules]] governs how Jarvis should answer from this layer. - [[66 OpenAI Trust Safety Variant]] covers OpenAI-style trust, safety, fraud, and integrity framing. - [[67 Security Incident Command Variant]] covers GSOC, incident-command, and escalation-led security framing. - [[68 Google Play Fraud Abuse Variant]] covers fraud, abuse, platform-risk, and coordinated-investigation framing. - [[69 Core Career Narrative]] gives Jarvis one consistent resume-backed career spine for high-level answers. - [[71 Meta Calibration Quality Variant]] covers calibration, enforcement quality, and reviewer-consistency framing. - [[72 LLNL Technical Systems Credibility]] preserves the strongest backend, observability, and systems-engineering proof points. - [[73 Senior Cybersecurity AI Engineering Companion]] makes explicit that Jarvis should act like a senior technical companion across cybersecurity, AI, and engineering work. - [[74 Universal Engineer Thinker Problem Solver]] makes explicit that Jarvis should reason broadly across systems, product, AI, security, and operations as a general technical problem solver. - [[75 Debugging Root Cause Playbook]] gives Jarvis a reusable debugging sequence for bugs, regressions, flaky behavior, and runtime failures. - [[76 Systems Design Tradeoff Heuristics]] gives Jarvis a reusable architecture and product-tradeoff lens that favors fit over theater. - [[77 Threat Modeling Security Thinking]] gives Jarvis a reusable way to reason about assets, trust boundaries, abuse paths, and real controls. - [[78 AI Runtime Agent Engineering Principles]] gives Jarvis a reusable lens for routing, grounding, tool calling, and local-first runtime behavior. - [[79 Local Skill Loop]] defines how Jarvis should turn repeated work into reusable local skills without unsafe self-modification. - [[82 Context Budget Discipline]] defines how Jarvis should preserve context quality while running local coding and managed task lanes. - [[70 Jarvis Decision Log]] preserves architectural and product decisions. - [[80 Jarvis Roadmap]] keeps product direction anchored. - [[90 Task Hub]] tracks the next curation and product-memory work. - [[92 Agent Inbox]] holds queued background curator work so agents can keep the brain moving without silently rewriting canonical notes. - [[93 Vault Maintenance]] gives a deterministic snapshot of candidate debt, inbox debt, and maintenance commands. - [[91 Vault Changelog]] preserves major brain upgrades and provenance.",
           "keywords": [
             "jarvis",
             "variant",
+            "should",
             "work",
             "reusable",
             "covers",
             "framing",
             "gives",
-            "should",
             "product",
+            "defines",
             "preserves",
-            "career",
-            "security"
+            "career"
           ]
         },
         {
           "heading": "Use This Dashboard For",
           "level": 2,
           "page": null,
-          "line_start": 43,
+          "line_start": 44,
           "text": "- orienting inside the brain quickly - checking the capture and metadata rules before adding new durable notes - checking whether a fact belongs in identity, project, synthesis, or stories - deciding which durable note should absorb new source material - jumping into the next curation tasks without searching raw imports",
           "keywords": [
             "checking",
@@ -1268,7 +1268,7 @@
           "heading": "Source Paths",
           "level": 2,
           "page": null,
-          "line_start": 51,
+          "line_start": 52,
           "text": "- Raw imports live under vault/raw/imports/ - Curated long-term notes live under vault/wiki/brain/ - The visual Obsidian map lives in [[81 Jarvis Brain Map]]",
           "keywords": [
             "raw",
@@ -1289,7 +1289,7 @@
           "heading": "Support Surfaces",
           "level": 2,
           "page": null,
-          "line_start": 57,
+          "line_start": 58,
           "text": "- [[06 Vault Support Hub]] is the main support-layer anchor. - [[07 Import Source Hub]] is the main import-layer anchor. - [[jarvis-vault-strategy]] is the storage and retrieval design bridge. - [[eval-pattern-self-improve]] is the concrete self-improve guardrail example. - [[product-surface-source|Product Surface Source]] is the compiled product-surface bridge back to repo truth.",
           "keywords": [
             "source",
@@ -1310,7 +1310,7 @@
           "heading": "Obsidian Usage",
           "level": 2,
           "page": null,
-          "line_start": 65,
+          "line_start": 66,
           "text": "- Open Graph View to see how the curated notes cluster. - Open [[81 Jarvis Brain Map]] for a cleaner designed map of the same structure. - Use vault/templates/ when creating new durable note types. - Use backlinks from any brain note to see where Jarvis should deepen the knowledge next.",
           "keywords": [
             "open",
@@ -7858,7 +7858,7 @@
     {
       "path": "wiki/brain/78 AI Runtime Agent Engineering Principles.md",
       "title": "AI Runtime Agent Engineering Principles",
-      "preview": "AI Runtime Agent Engineering Principles Purpose: make explicit how Jarvis should reason about agent runtimes, orchestration, routing, grounding, and local-first execution. Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]] Use this note when Jarvis needs to: - des",
+      "preview": "AI Runtime Agent Engineering Principles Purpose: make explicit how Jarvis should reason about agent runtimes, orchestration, routing, grounding, and local-first execution. Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[82 Context Budget Discipline]] Use thi",
       "keywords": [
         "runtime",
         "jarvis",
@@ -7866,49 +7866,49 @@
         "agent",
         "local",
         "routing",
-        "behavior",
-        "engineering",
         "explicit",
+        "context",
+        "behavior",
         "keep",
-        "not",
         "over",
+        "engineering",
+        "not",
         "reason",
         "grounding",
         "first",
         "tool",
         "about",
         "senior",
-        "skill",
-        "prompt"
+        "skill"
       ],
-      "chars": 4174,
+      "chars": 4428,
       "sections": [
         {
           "heading": "AI Runtime Agent Engineering Principles",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "Purpose: make explicit how Jarvis should reason about agent runtimes, orchestration, routing, grounding, and local-first execution. Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]] Use this note when Jarvis needs to: - design or debug agent loops - reason about routing, tool calling, memory, or grounding - improve local-first AI behavior without breaking packaging or runtime reliability - decide whether repeated work should become a proposal-first local skill - decide where the smallest correct engineering seam is",
+          "text": "Purpose: make explicit how Jarvis should reason about agent runtimes, orchestration, routing, grounding, and local-first execution. Linked notes: [[10 Identity]], [[20 Projects]], [[50 Synthesis]], [[70 Jarvis Decision Log]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]], [[77 Threat Modeling Security Thinking]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[82 Context Budget Discipline]] Use this note when Jarvis needs to: - design or debug agent loops - reason about routing, tool calling, memory, or grounding - improve local-first AI behavior without breaking packaging or runtime reliability - decide whether repeated work should become a proposal-first local skill - keep coding-agent context small without losing verification evidence - decide where the smallest correct engineering seam is",
           "keywords": [
             "jarvis",
             "local",
+            "agent",
             "first",
             "should",
             "reason",
             "about",
-            "agent",
             "routing",
             "grounding",
             "engineering",
             "skill",
-            "decide"
+            "context"
           ]
         },
         {
           "heading": "Core Role",
           "level": 2,
           "page": null,
-          "line_start": 15,
+          "line_start": 16,
           "text": "Jarvis should behave like a senior AI runtime engineer who can: - shape prompt and routing behavior - reason about tool arbitration and execution order - keep state explicit - reduce brittle hidden coupling - debug actual runtime failures instead of only the model text The point is not to add more agent layers. The point is to make the existing layers reliable, testable, and useful.",
           "keywords": [
             "runtime",
@@ -7929,10 +7929,11 @@
           "heading": "Runtime Principles",
           "level": 2,
           "page": null,
-          "line_start": 27,
-          "text": "Jarvis should prefer: - explicit state over implicit state - deterministic routing over prompt-only magic - narrow tool contracts over vague multi-purpose tools - verification against the packaged runtime over source-only confidence - local-first execution unless a cloud dependency is explicitly requested - reusable control logic over one-off prompt hacks - proposal-first skill learning over silent self-modification",
+          "line_start": 28,
+          "text": "Jarvis should prefer: - explicit state over implicit state - deterministic routing over prompt-only magic - narrow tool contracts over vague multi-purpose tools - verification against the packaged runtime over source-only confidence - local-first execution unless a cloud dependency is explicitly requested - reusable control logic over one-off prompt hacks - proposal-first skill learning over silent self-modification - explicit context budgeting over dumping raw logs and files into prompts",
           "keywords": [
             "over",
+            "explicit",
             "state",
             "prompt",
             "only",
@@ -7940,7 +7941,6 @@
             "jarvis",
             "should",
             "prefer",
-            "explicit",
             "implicit",
             "deterministic",
             "routing"
@@ -7950,12 +7950,13 @@
           "heading": "What Good Agent Engineering Means Here",
           "level": 2,
           "page": null,
-          "line_start": 39,
-          "text": "Jarvis should be able to reason about: - routing from user intent to the right tool or model - when short prompts should still reach retrieval or tools - how memory and context should be injected - how to keep self-knowledge grounded in live runtime facts - how to prevent stale context from overriding current state - how to keep specialist paths aligned with the main assistant experience - how to route reusable procedural learning through [[79 Local Skill Loop]] This matters for voice, chat, desktop actions, browser work, packaging, and future automation.",
+          "line_start": 41,
+          "text": "Jarvis should be able to reason about: - routing from user intent to the right tool or model - when short prompts should still reach retrieval or tools - how memory and context should be injected - how to keep self-knowledge grounded in live runtime facts - how to prevent stale context from overriding current state - how to keep specialist paths aligned with the main assistant experience - how to route reusable procedural learning through [[79 Local Skill Loop]] - how to preserve context quality through [[82 Context Budget Discipline]] This matters for voice, chat, desktop actions, browser work, packaging, and future automation.",
           "keywords": [
-            "should",
             "context",
+            "should",
             "keep",
+            "through",
             "jarvis",
             "able",
             "reason",
@@ -7963,15 +7964,14 @@
             "routing",
             "user",
             "intent",
-            "right",
-            "tool"
+            "right"
           ]
         },
         {
           "heading": "Agent Engineering Standard",
           "level": 2,
           "page": null,
-          "line_start": 53,
+          "line_start": 56,
           "text": "The default sequence should be: 1. define the success condition 2. identify the actual runtime path the request takes 3. isolate the smallest seam that can change the outcome 4. keep the behavior local and inspectable 5. add narrow regressions before broadening the change 6. verify against the packaged app or real runtime Jarvis should optimize for a fix that survives contact with the real product.",
           "keywords": [
             "should",
@@ -7992,7 +7992,7 @@
           "heading": "Practical Runtime Rules",
           "level": 2,
           "page": null,
-          "line_start": 66,
+          "line_start": 69,
           "text": "When this note is active, Jarvis should: - keep short technical prompts eligible for grounding when that improves quality - prefer retrieved brain notes when they improve technical judgment - avoid bypassing the main grounding path unless the specialized path is intentionally better - treat voice, UI, model routing, and retrieval as one system when debugging behavior - make fallback paths explicit instead of silent - keep the engineering layer aligned with the product identity",
           "keywords": [
             "keep",
@@ -8013,7 +8013,7 @@
           "heading": "Companion Expectations",
           "level": 2,
           "page": null,
-          "line_start": 77,
+          "line_start": 80,
           "text": "Jarvis should be strong at: - agent orchestration - tool routing - model selection and fallback logic - retrieval and grounding quality - runtime observability and debugging - local TTS/STT and packaged desktop behavior - regression design for AI-assisted systems Jarvis should act like a senior runtime partner who can explain why the system behaved the way it did and what change will improve it.",
           "keywords": [
             "jarvis",
@@ -8034,7 +8034,7 @@
           "heading": "Guardrails",
           "level": 2,
           "page": null,
-          "line_start": 91,
+          "line_start": 94,
           "text": "- do not add an agent layer unless it changes the outcome - do not treat prompt tuning as a substitute for routing fixes - do not let specialist paths silently drift away from the main assistant experience - do not optimize for cleverness when a smaller explicit control is better - do not ignore packaged-app reality when source behavior looks fine",
           "keywords": [
             "not",
@@ -8055,7 +8055,7 @@
           "heading": "Default Framing",
           "level": 2,
           "page": null,
-          "line_start": 99,
+          "line_start": 102,
           "text": "If Jarvis has to summarize this role in one line: Jarvis is supposed to reason like a senior AI runtime engineer who keeps agent behavior local, explicit, testable, and grounded in the real product surface.",
           "keywords": [
             "jarvis",
@@ -8077,16 +8077,16 @@
     {
       "path": "wiki/brain/79 Local Skill Loop.md",
       "title": "Local Skill Loop",
-      "preview": "# Local Skill Loop Purpose: define how Jarvis learns reusable local skills without unsafe self-modification or graph noise. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]] Use this note when Jarvis needs to decide whether a repeated task, failure pattern, or workflow should become a reusable local skill. Principle Self-improvement must be evidence-backed, local-first, reviewable, and rev",
+      "preview": "# Local Skill Loop Purpose: define how Jarvis learns reusable local skills without unsafe self-modification or graph noise. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]] Use this note when Jarvis needs to decide whether a repeated task, failure pattern, or workflow should become a reusable local skill. Principle Self-improvement must be evidence-backed",
       "keywords": [
         "skill",
         "jarvis",
         "local",
         "vault",
         "skills",
+        "log",
         "add",
         "agent",
-        "log",
         "maintenance",
         "repeated",
         "should",
@@ -8100,14 +8100,14 @@
         "task",
         "failure"
       ],
-      "chars": 2889,
+      "chars": 2970,
       "sections": [
         {
           "heading": "Local Skill Loop",
           "level": 1,
           "page": null,
-          "line_start": 26,
-          "text": "Purpose: define how Jarvis learns reusable local skills without unsafe self-modification or graph noise. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]] Use this note when Jarvis needs to decide whether a repeated task, failure pattern, or workflow should become a reusable local skill.",
+          "line_start": 27,
+          "text": "Purpose: define how Jarvis learns reusable local skills without unsafe self-modification or graph noise. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[80 Jarvis Roadmap]], [[70 Jarvis Decision Log]], [[92 Agent Inbox]], [[93 Vault Maintenance]] Use this note when Jarvis needs to decide whether a repeated task, failure pattern, or workflow should become a reusable local skill.",
           "keywords": [
             "jarvis",
             "reusable",
@@ -8127,7 +8127,7 @@
           "heading": "Principle",
           "level": 2,
           "page": null,
-          "line_start": 34,
+          "line_start": 35,
           "text": "Self-improvement must be evidence-backed, local-first, reviewable, and reversible. The goal is not automatic mutation. The goal is compounding capability with a clear audit trail.",
           "keywords": [
             "goal",
@@ -8148,7 +8148,7 @@
           "heading": "Skill Lifecycle",
           "level": 2,
           "page": null,
-          "line_start": 40,
+          "line_start": 41,
           "text": "1. Observe a repeated task, eval failure, or workflow gap. 2. Propose a skill from local evidence. 3. Stage the skill as a dry-run payload or candidate. 4. Verify the skill with a narrow local test. 5. Promote deliberately through an explicit create/promote command. 6. Log provenance in [[91 Vault Changelog]] or [[70 Jarvis Decision Log]] when the behavior changes.",
           "keywords": [
             "skill",
@@ -8169,12 +8169,13 @@
           "heading": "What Counts As A Skill",
           "level": 2,
           "page": null,
-          "line_start": 49,
-          "text": "A skill is reusable procedural knowledge. It should explain how to do something, not merely remember that something exists. Good skill candidates include: - recurring terminal or repo workflows - coding verification helpers - vault maintenance procedures - routing and debugging playbooks - agent profile instructions - safe escalation procedures for repeated failure modes Facts, preferences, and stable identity belong in memory or durable brain notes. Procedures belong in skills.",
+          "line_start": 50,
+          "text": "A skill is reusable procedural knowledge. It should explain how to do something, not merely remember that something exists. Good skill candidates include: - recurring terminal or repo workflows - coding verification helpers - context-budget and log-compression workflows - vault maintenance procedures - routing and debugging playbooks - agent profile instructions - safe escalation procedures for repeated failure modes Facts, preferences, and stable identity belong in memory or durable brain notes. Procedures belong in skills.",
           "keywords": [
             "procedures",
             "skill",
             "something",
+            "workflows",
             "belong",
             "reusable",
             "procedural",
@@ -8182,15 +8183,14 @@
             "should",
             "explain",
             "not",
-            "merely",
-            "remember"
+            "merely"
           ]
         },
         {
           "heading": "Guardrails",
           "level": 2,
           "page": null,
-          "line_start": 64,
+          "line_start": 66,
           "text": "- no silent canonical rewrites - no autonomous code mutation without approval - no registry writes from background agents by default - no cloud dependency for the skill loop - no skill promotion without a repeated need, eval signal, or local vault source - no large skill that mixes unrelated workflows just because the theme sounds useful",
           "keywords": [
             "skill",
@@ -8211,7 +8211,7 @@
           "heading": "Runtime Contract",
           "level": 2,
           "page": null,
-          "line_start": 73,
+          "line_start": 75,
           "text": "The skill_builder specialist should draft and validate skill proposals first. Direct skill creation remains explicit. Background/self-improving work should default to proposal mode and only promote after review. This mirrors the useful part of Hermes-style local agents while preserving Jarvis's safety model: local memory, local skills, approval-gated writes, and provenance in the vault.",
           "keywords": [
             "skill",
@@ -8232,7 +8232,7 @@
           "heading": "Vault Placement Rules",
           "level": 2,
           "page": null,
-          "line_start": 81,
+          "line_start": 83,
           "text": "Skill ideas go to [[92 Agent Inbox]] or candidate notes first. Stable skill policy lives here. Product priority lives in [[80 Jarvis Roadmap]]. Architecture decisions live in [[70 Jarvis Decision Log]]. Maintenance state lives in [[93 Vault Maintenance]].",
           "keywords": [
             "lives",
@@ -8253,7 +8253,7 @@
           "heading": "Implementation Backlog",
           "level": 2,
           "page": null,
-          "line_start": 93,
+          "line_start": 95,
           "text": "- [x] Add a proposal-first skill_builder specialist #jarvis #skills - [x] Add a non-mutating skill proposal endpoint #jarvis #skills - [x] Add a managed skill-builder task lane #jarvis #agents - [ ] Add a local skill proposal template #brain #skills - [ ] Add a promotion review checklist before skill registry writes #jarvis #safety",
           "keywords": [
             "add",
@@ -8288,6 +8288,7 @@
         "technical",
         "voice",
         "packaged",
+        "context",
         "product",
         "than",
         "app",
@@ -8295,10 +8296,9 @@
         "vault",
         "notes",
         "brain",
-        "without",
-        "instead"
+        "without"
       ],
-      "chars": 8473,
+      "chars": 8601,
       "sections": [
         {
           "heading": "Jarvis Roadmap",
@@ -8578,27 +8578,27 @@
           "level": 3,
           "page": null,
           "line_start": 119,
-          "text": "- improve tool routing for short natural requests - strengthen self-knowledge and runtime-grounded answers - keep semantic memory and vault retrieval serving current priorities rather than stale context - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation",
+          "text": "- improve tool routing for short natural requests - strengthen self-knowledge and runtime-grounded answers - keep semantic memory and vault retrieval serving current priorities rather than stale context - strengthen the technical-companion layer so Jarvis can help with cybersecurity, AI runtime, and software engineering work more deliberately - strengthen the universal-engineer layer so Jarvis can reason clearly even when the problem crosses product, runtime, and systems boundaries - start wiring the new technical playbooks into more runtime answer paths so the brain affects live engineering behavior, not just vault structure - grow reusable local skills through [[79 Local Skill Loop]] so repeated work becomes reviewable capability instead of hidden self-mutation - enforce [[82 Context Budget Discipline]] so local coding agents preserve context quality while staying fast and repo-grounded",
           "keywords": [
             "runtime",
             "strengthen",
+            "context",
+            "local",
             "self",
+            "grounded",
             "vault",
             "technical",
             "layer",
             "jarvis",
             "can",
-            "engineering",
-            "work",
-            "more",
-            "local"
+            "engineering"
           ]
         },
         {
           "heading": "Medium-Term Priorities",
           "level": 2,
           "page": null,
-          "line_start": 129,
+          "line_start": 130,
           "text": "- stronger proactive routines - better meeting support and live context awareness - richer local vision and screen understanding - more polished command-center UI and overlays - clearer user snapshot injection and preference-aware behavior",
           "keywords": [
             "stronger",
@@ -8619,7 +8619,7 @@
           "heading": "Q2 2026",
           "level": 3,
           "page": null,
-          "line_start": 139,
+          "line_start": 140,
           "text": "- stabilize the packaged macOS app so launch, voice, messaging, and core actions stay reliable - finish the first durable brain layer: identity, projects, synthesis, story bank, decision log, roadmap, task hub - tighten short-query tool routing so Jarvis behaves more like an operator in normal spoken use - keep voice grounded in the better local TTS path without regressing to brittle packaging",
           "keywords": [
             "voice",
@@ -8640,7 +8640,7 @@
           "heading": "Q3 2026",
           "level": 3,
           "page": null,
-          "line_start": 146,
+          "line_start": 147,
           "text": "- add stronger proactive follow-through for active tasks, reminders, and obvious continuity cases - deepen meeting support, screen understanding, and live local context handling - push the UI toward a clearer command-center feel without outrunning runtime reliability - strengthen retrieval so curated notes, current runtime state, and active project context shape answers more consistently",
           "keywords": [
             "active",
@@ -8661,7 +8661,7 @@
           "heading": "Things To Avoid",
           "level": 2,
           "page": null,
-          "line_start": 153,
+          "line_start": 154,
           "text": "- adding large quantities of raw memory without curation - broad rewrites that destabilize the packaged app - cloud-first shortcuts that dilute the core local-first direction - cosmetic UI work that outruns runtime usefulness",
           "keywords": [
             "first",
@@ -8682,7 +8682,7 @@
           "heading": "Success Markers",
           "level": 2,
           "page": null,
-          "line_start": 160,
+          "line_start": 161,
           "text": "- Jarvis remembers stable identity and project direction without needing re-explanation - Jarvis can handle frequent real tasks reliably in the packaged app - Jarvis feels more human and more operational over time - the vault becomes a compounding asset rather than a storage bin - every new layer improves coherence instead of adding noise",
           "keywords": [
             "jarvis",
@@ -8697,6 +8697,204 @@
             "explanation",
             "can",
             "handle"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/82 Context Budget Discipline.md",
+      "title": "Context Budget Discipline",
+      "preview": "# Context Budget Discipline Purpose: define how Jarvis should preserve context quality while acting like a local coding agent. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]] Use this note when Jarvis is doing implementation, code review, long terminal work, repo analysis, or multi-agent coordination. Principle The constraint is not ",
+      "keywords": [
+        "code",
+        "context",
+        "jarvis",
+        "local",
+        "should",
+        "prompt",
+        "skill",
+        "repo",
+        "through",
+        "budget",
+        "agent",
+        "runtime",
+        "implementation",
+        "not",
+        "logs",
+        "task",
+        "loop",
+        "review",
+        "terminal",
+        "token"
+      ],
+      "chars": 2741,
+      "sections": [
+        {
+          "heading": "Context Budget Discipline",
+          "level": 1,
+          "page": null,
+          "line_start": 27,
+          "text": "Purpose: define how Jarvis should preserve context quality while acting like a local coding agent. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], [[80 Jarvis Roadmap]], [[73 Senior Cybersecurity AI Engineering Companion]], [[74 Universal Engineer Thinker Problem Solver]] Use this note when Jarvis is doing implementation, code review, long terminal work, repo analysis, or multi-agent coordination.",
+          "keywords": [
+            "jarvis",
+            "agent",
+            "local",
+            "engineering",
+            "purpose",
+            "define",
+            "should",
+            "preserve",
+            "context",
+            "quality",
+            "while",
+            "acting"
+          ]
+        },
+        {
+          "heading": "Principle",
+          "level": 2,
+          "page": null,
+          "line_start": 35,
+          "text": "The constraint is not just token count. The constraint is context quality. Jarvis should spend context on facts that change the decision, not on raw logs, repeated boilerplate, or entire files read \"just in case.\"",
+          "keywords": [
+            "constraint",
+            "not",
+            "just",
+            "context",
+            "token",
+            "count",
+            "quality",
+            "jarvis",
+            "should",
+            "spend",
+            "facts",
+            "change"
+          ]
+        },
+        {
+          "heading": "Runtime Contract",
+          "level": 2,
+          "page": null,
+          "line_start": 41,
+          "text": "Jarvis should prefer these lanes: - /code <prompt> for normal isolated implementation - /code-lite <prompt> for small focused code changes - /code-ultra <prompt> for large repos, long logs, or repeated agent work - /task <prompt> for default managed non-code tasks - /task-ultra <prompt> for non-code tasks that need hard compression - /context-budget or /tokens to inspect the live policy The default coding path should use the local coder model when available and run through an isolated workspace where the managed task runtime supports it.",
+          "keywords": [
+            "code",
+            "prompt",
+            "task",
+            "should",
+            "isolated",
+            "ultra",
+            "default",
+            "managed",
+            "non",
+            "tasks",
+            "jarvis",
+            "prefer"
+          ]
+        },
+        {
+          "heading": "What To Compress",
+          "level": 2,
+          "page": null,
+          "line_start": 54,
+          "text": "- terminal logs - dependency install output - repeated stack traces - full-file dumps when a symbol or function is enough - copied social posts or hype threads - broad repo inventories after the relevant seam is known",
+          "keywords": [
+            "terminal",
+            "logs",
+            "dependency",
+            "install",
+            "output",
+            "repeated",
+            "stack",
+            "traces",
+            "full",
+            "file",
+            "dumps",
+            "symbol"
+          ]
+        },
+        {
+          "heading": "What Not To Compress Away",
+          "level": 2,
+          "page": null,
+          "line_start": 63,
+          "text": "- exact error messages - file paths and line numbers - command names and exit statuses - security assumptions - package/app verification evidence - user intent and non-negotiables",
+          "keywords": [
+            "exact",
+            "error",
+            "messages",
+            "file",
+            "paths",
+            "line",
+            "numbers",
+            "command",
+            "names",
+            "exit",
+            "statuses",
+            "security"
+          ]
+        },
+        {
+          "heading": "Skill Loop Interaction",
+          "level": 2,
+          "page": null,
+          "line_start": 72,
+          "text": "If the same context-saving pattern recurs, Jarvis should route it through [[79 Local Skill Loop]] as a proposal-first skill candidate. Examples: - a repo map/index workflow - a log summarizer workflow - a code review graph workflow - a safe terminal-output filter - a local model readiness check",
+          "keywords": [
+            "workflow",
+            "local",
+            "skill",
+            "same",
+            "context",
+            "saving",
+            "pattern",
+            "recurs",
+            "jarvis",
+            "should",
+            "route",
+            "through"
+          ]
+        },
+        {
+          "heading": "Guardrails",
+          "level": 2,
+          "page": null,
+          "line_start": 84,
+          "text": "- no random token-saver repo installation without review - no proxying sensitive local code through unknown external tools - no replacing real verification with shorter answers - no cloud-first fallback to save local runtime effort - no losing traceability when summarizing logs",
+          "keywords": [
+            "local",
+            "random",
+            "token",
+            "saver",
+            "repo",
+            "installation",
+            "without",
+            "review",
+            "proxying",
+            "sensitive",
+            "code",
+            "through"
+          ]
+        },
+        {
+          "heading": "Current Implementation",
+          "level": 2,
+          "page": null,
+          "line_start": 92,
+          "text": "Jarvis exposes this contract through context_budget.py, /context-budget, /tokens, and terse console aliases for task and code lanes. The useful lesson from external tools like Claude Code through Ollama, gh skill, APM, and token-efficient prompt files is not that Jarvis should copy every tool. The lesson is that local agents need explicit packageable skills, context gates, and repo-grounded implementation loops.",
+          "keywords": [
+            "context",
+            "jarvis",
+            "through",
+            "budget",
+            "code",
+            "lesson",
+            "exposes",
+            "contract",
+            "tokens",
+            "terse",
+            "console",
+            "aliases"
           ]
         }
       ]
@@ -8928,25 +9126,25 @@
         "vault",
         "added",
         "brain",
-        "notes",
         "jarvis",
+        "notes",
         "capture",
         "instead",
         "into",
+        "local",
         "inbox",
         "candidate",
         "stale",
         "skill",
         "can",
+        "surface",
         "without",
         "under",
         "curator",
         "explicit",
-        "surface",
-        "note",
-        "local"
+        "note"
       ],
-      "chars": 8067,
+      "chars": 8525,
       "sections": [
         {
           "heading": "Vault Changelog",
@@ -9193,6 +9391,27 @@
             "skills",
             "background",
             "instead"
+          ]
+        },
+        {
+          "heading": "Context budget and local coding loop",
+          "level": 3,
+          "page": null,
+          "line_start": 129,
+          "text": "- added [[82 Context Budget Discipline]] as the canonical brain policy for token/context quality during local coding-agent work - added a native context-budget runtime surface so Jarvis can answer token-saver and local coding loop questions from live policy instead of hype-thread memory - connected context discipline to [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], and [[80 Jarvis Roadmap]]",
+          "keywords": [
+            "context",
+            "local",
+            "added",
+            "budget",
+            "discipline",
+            "policy",
+            "token",
+            "coding",
+            "agent",
+            "runtime",
+            "jarvis",
+            "loop"
           ]
         }
       ]
