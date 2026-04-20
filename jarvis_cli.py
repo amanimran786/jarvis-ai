@@ -14,6 +14,7 @@ Usage:
   python jarvis_cli.py --plugins
   python jarvis_cli.py --context-budget
   python jarvis_cli.py --agent-patterns
+  python jarvis_cli.py --parity
   python jarvis_cli.py --graph-query "meeting watchdog"
   python jarvis_cli.py --graph-path JarvisWindow _meeting_watchdog_tick
   python jarvis_cli.py --agents
@@ -137,6 +138,8 @@ def _ensure_daemon_running(reason: str = "jarvis_cli") -> bool:
             return True
         if runtime_state.read_api_endpoint():
             runtime_state.clear_api_endpoint()
+        if os.getenv("JARVIS_CLI_BOOT_LOGS", "").lower() not in {"1", "true", "yes"}:
+            os.environ.setdefault("JARVIS_QUIET_BOOT", "1")
         import jarvis_daemon
         jarvis_daemon.start_daemon(reason=reason)
         discovered = runtime_state.discover_api_endpoint()
@@ -536,6 +539,18 @@ def _print_agent_patterns(category: str = "") -> None:
         print(f"  seams: {seams}")
 
 
+def _print_capability_parity() -> None:
+    payload = get("/capability-parity")
+    print(payload.get("goal") or "Capability parity")
+    print(f"Mode   : {payload.get('mode', 'unknown')}")
+    print(f"Score  : {int(float(payload.get('score', 0.0)) * 100)}% ready")
+    print(f"Next   : {payload.get('next_best_seam', 'unknown')}")
+    print("Features")
+    for feature in payload.get("features", []):
+        print(f"  {feature.get('id')}: {feature.get('status')} -> {feature.get('local_equivalent')}")
+        print(f"    next: {feature.get('next_gap')}")
+
+
 def _safe_get(path: str) -> dict:
     try:
         return get(path)
@@ -721,6 +736,7 @@ def _console_help() -> str:
             "  /context-budget       Show local coding/token discipline",
             "  /tokens               Alias for /context-budget",
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
+            "  /parity               Show local frontier capability parity",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
             "  /deny                 Clear the pending risky shell command",
@@ -923,6 +939,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"agent-patterns", "patterns"}:
         _print_agent_patterns(args)
         return 0
+    if command in {"parity", "capability-parity"}:
+        _print_capability_parity()
+        return 0
     if command == "task":
         if not args:
             print("Usage: /task <task description>", file=sys.stderr)
@@ -1113,6 +1132,10 @@ def main():
     if flag in {"--agent-patterns", "--patterns"}:
         category = sys.argv[2] if len(sys.argv) > 2 else ""
         _print_agent_patterns(category)
+        return
+
+    if flag in {"--parity", "--capability-parity"}:
+        _print_capability_parity()
         return
 
     if flag == "--plugin":

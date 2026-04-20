@@ -1688,6 +1688,63 @@ class ExternalAgentPatternTests(unittest.TestCase):
         self.assertIn("gate browser/scraping", text)
 
 
+class CapabilityParityTests(unittest.TestCase):
+
+    def test_scorecard_reports_local_frontier_features(self):
+        import capability_parity
+
+        with patch("model_router._has_local", return_value=True), \
+             patch("brains.brain_ollama.local_capabilities", return_value={"vision_status": "ready", "vision_model": "llava:7b"}), \
+             patch("vault.status", return_value={"doc_count": 10}), \
+             patch("semantic_memory.status", return_value={"index_ready": True, "retrieval_backend": "ollama-embeddings"}), \
+             patch("local_runtime.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
+             patch("local_runtime.local_tts.status", return_value={"ready": True}), \
+             patch("task_runtime.list_agents", return_value=[{"id": "chat-router"}]), \
+             patch("extension_registry.list_skills", return_value=[{"id": "x", "negative_triggers": ["no"]}]), \
+             patch("extension_registry.list_connectors", return_value=[{"id": "browser_operator"}]), \
+             patch("extension_registry.list_plugins", return_value=[]):
+            card = capability_parity.scorecard()
+
+        self.assertTrue(card["ok"])
+        self.assertIn("features", card)
+        feature_ids = {feature["id"] for feature in card["features"]}
+        self.assertIn("coding_agent", feature_ids)
+        self.assertIn("memory_brain", feature_ids)
+
+    def test_summary_text_names_next_seam(self):
+        import capability_parity
+
+        with patch("capability_parity.scorecard", return_value={
+            "score": 0.5,
+            "mode": "open-source",
+            "next_best_seam": "verify voice",
+            "features": [
+                {"name": "Voice", "status": "partial", "local_equivalent": "local STT/TTS"},
+            ],
+        }):
+            text = capability_parity.summary_text()
+
+        self.assertIn("Local frontier parity", text)
+        self.assertIn("verify voice", text)
+
+    def test_optional_probe_noise_is_suppressed(self):
+        import io
+        import sys
+        import capability_parity
+
+        def _noisy_probe():
+            print("compiled dependency traceback", file=sys.stderr)
+            raise RuntimeError("optional probe failed")
+
+        captured = io.StringIO()
+        with patch("sys.stderr", captured):
+            result = capability_parity._safe("semantic_memory", _noisy_probe, {})
+
+        self.assertEqual(captured.getvalue(), "")
+        self.assertEqual(result["source"], "semantic_memory")
+        self.assertIn("optional probe failed", result["error"])
+
+
 class UsageTrackerCostTests(unittest.TestCase):
 
     def test_cost_for_known_model(self):
@@ -2633,6 +2690,20 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(payload["status"], "online")
         self.assertEqual(captured, ["http://127.0.0.1:8766/status"])
 
+    def test_cli_auto_daemon_defaults_to_quiet_boot(self):
+        import jarvis_cli
+
+        with patch.dict(os.environ, {}, clear=True), \
+             patch("runtime_state.discover_api_endpoint", side_effect=[None, {"base_url": "http://127.0.0.1:8765"}]), \
+             patch("runtime_state.read_api_endpoint", side_effect=[None, {}]), \
+             patch("jarvis_daemon.start_daemon") as start_mock:
+            ok = jarvis_cli._ensure_daemon_running(reason="unit_test")
+            quiet_boot = os.environ.get("JARVIS_QUIET_BOOT")
+
+        self.assertTrue(ok)
+        self.assertEqual(quiet_boot, "1")
+        start_mock.assert_called_once_with(reason="unit_test")
+
     def test_cli_can_fetch_skill_listing_endpoint(self):
         import jarvis_cli
 
@@ -2717,6 +2788,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         patterns_mock.assert_called_once_with("security")
+
+    def test_parity_command_prints_scorecard(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_capability_parity") as parity_mock:
+            result = jarvis_cli._handle_console_command("/parity")
+
+        self.assertEqual(result, 0)
+        parity_mock.assert_called_once_with()
 
     def test_code_ultra_command_uses_isolated_terse_task(self):
         import jarvis_cli

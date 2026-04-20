@@ -46,6 +46,7 @@ from local_runtime import local_model_eval
 from local_runtime import local_model_automation
 from local_runtime import local_beta
 import behavior_hooks
+import capability_parity
 import cost_policy
 import context_budget
 import external_agent_patterns
@@ -927,6 +928,11 @@ def get_agent_patterns(category: str = ""):
     return external_agent_patterns.pattern_status()
 
 
+@app.get("/capability-parity")
+def get_capability_parity():
+    return capability_parity.scorecard()
+
+
 @app.get("/cost-policy")
 def get_cost_policy():
     return {"ok": True, "policy": cost_policy.policy_status()}
@@ -1390,7 +1396,8 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
 
     t = threading.Thread(target=_run, daemon=True, name="JarvisAPI")
     t.start()
-    print(f"[API] Jarvis API running at http://{_host}:{_port}")
+    if os.getenv("JARVIS_QUIET_BOOT", "").lower() not in {"1", "true", "yes"}:
+        print(f"[API] Jarvis API running at http://{_host}:{_port}")
 
     # Pre-load the reasoning model in the background so first query is instant
     import model_router as _mr
