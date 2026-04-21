@@ -37,6 +37,13 @@ _CASES: tuple[dict[str, Any], ...] = (
         "checks": ["upstream", "0.0.0.0 binding", "container networking", "logs"],
     },
     {
+        "id": "coder_workbench_verify_plan",
+        "group": "coding_agent",
+        "prompt": "Show the coder workbench verification plan for the current diff.",
+        "checks": ["changed files", "compile command", "targeted tests", "packaged smoke when runtime changes"],
+        "surface": "console",
+    },
+    {
         "id": "auth_flow_security_review",
         "group": "security",
         "prompt": "Review an auth design that stores JWT access tokens in localStorage and trusts frontend role checks.",

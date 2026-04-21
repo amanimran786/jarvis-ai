@@ -51,6 +51,7 @@ import capability_evals
 import capability_parity
 import cost_policy
 import context_budget
+import coder_workbench
 import external_agent_patterns
 import production_readiness
 import security_roe
@@ -923,6 +924,16 @@ def get_usage(hours: int = 24, since_seq: int = 0, recent: int = 10):
 @app.get("/context-budget")
 def get_context_budget(hours: int = 24):
     return context_budget.policy_status(hours=hours)
+
+
+@app.get("/coder/status")
+def get_coder_status():
+    return coder_workbench.status()
+
+
+@app.get("/coder/verify-plan")
+def get_coder_verify_plan():
+    return {"ok": True, "commands": coder_workbench.verification_plan()}
 
 
 @app.get("/agent-patterns")

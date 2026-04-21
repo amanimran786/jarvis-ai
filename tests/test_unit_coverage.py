@@ -1732,6 +1732,46 @@ class CapabilityEvalTests(unittest.TestCase):
         self.assertIn("security", text)
 
 
+class CoderWorkbenchTests(unittest.TestCase):
+
+    def test_changed_files_preserves_porcelain_leading_space(self):
+        import coder_workbench
+
+        with patch("coder_workbench._git", return_value=" M api.py\n?? coder_workbench.py"):
+            files = coder_workbench.changed_files()
+
+        self.assertEqual(files[0], {"status": "M", "path": "api.py"})
+        self.assertEqual(files[1], {"status": "??", "path": "coder_workbench.py"})
+
+    def test_verification_plan_adds_packaged_smoke_for_runtime_changes(self):
+        import coder_workbench
+
+        plan = coder_workbench.verification_plan(["api.py", "jarvis_cli.py"])
+        ids = [item["id"] for item in plan]
+
+        self.assertIn("diff_check", ids)
+        self.assertIn("compile", ids)
+        self.assertIn("status_unit_regression", ids)
+        self.assertIn("package_rebuild", ids)
+        self.assertIn("packaged_smoke", ids)
+
+    def test_status_reports_changed_files_and_verify_plan(self):
+        import coder_workbench
+
+        with patch("coder_workbench.changed_files", return_value=[{"status": "M", "path": "api.py"}]), \
+             patch("coder_workbench._git", side_effect=lambda args: {
+                 ("branch", "--show-current"): "main",
+                 ("log", "-1", "--oneline"): "abc123 test",
+                 ("rev-parse", "--show-toplevel"): "/repo",
+             }.get(tuple(args), "")):
+            payload = coder_workbench.status()
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["clean"])
+        self.assertEqual(payload["branch"], "main")
+        self.assertIn("recommended_next", payload)
+
+
 class CapabilityParityTests(unittest.TestCase):
 
     def test_scorecard_reports_local_frontier_features(self):
@@ -2924,6 +2964,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         budget_mock.assert_called_once_with()
+
+    def test_code_status_command_prints_workbench(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_code_status") as status_mock:
+            result = jarvis_cli._handle_console_command("/code-status")
+
+        self.assertEqual(result, 0)
+        status_mock.assert_called_once_with()
+
+    def test_verify_plan_command_prints_plan(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_verify_plan") as verify_mock:
+            result = jarvis_cli._handle_console_command("/verify-plan")
+
+        self.assertEqual(result, 0)
+        verify_mock.assert_called_once_with()
 
     def test_agent_patterns_command_prints_registry(self):
         import jarvis_cli
