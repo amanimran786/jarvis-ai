@@ -8905,27 +8905,27 @@
       "preview": "# External Agent Pattern Intake Purpose: turn external agent repos into Jarvis-native decisions without blindly installing unsafe dependencies. Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], [[82 Context Budget Discipline]], [[80 Jarvis Roadmap]], [[77 Threat Modeling Security Thinking]] Use this note when a new repo, hype thread, or agent architecture claim appears and Jarvis needs to decide what to adopt, adapt, gate, watch, or reject. Intake Rule Borrow",
       "keywords": [
         "jarvis",
+        "agent",
         "useful",
-        "skill",
-        "local",
         "adapt",
+        "memory",
+        "skill",
         "not",
         "verdict",
         "path",
-        "agent",
+        "local",
         "only",
+        "review",
+        "agents",
         "runtime",
         "gate",
+        "skills",
         "browser",
+        "without",
         "watch",
-        "defensive",
-        "memory",
-        "agents",
-        "external",
-        "pattern",
-        "intake"
+        "patterns"
       ],
-      "chars": 3485,
+      "chars": 4428,
       "sections": [
         {
           "heading": "External Agent Pattern Intake",
@@ -8970,10 +8970,31 @@
           ]
         },
         {
-          "heading": "GBrain",
+          "heading": "agentic-stack",
           "level": 3,
           "page": null,
           "line_start": 49,
+          "text": "Verdict: adapt. Useful for: portable .agent/ bridge folders, shared memory across Claude Code, OpenClaw, Hermes, Cursor, OpenCode, and other coding harnesses, four memory layers with retention policies, host-agent review tools, and recall-before-action hooks. Jarvis path: treat .agent/ as an export and compatibility layer before making it canonical. Jarvis already has the core primitives: AGENTS.md, semantic and episodic memory, progressive-disclosure skills, candidate staging, and review-gated promotion. The missing seam is a Jarvis-native .agent/ exporter/importer that maps Jarvis memory and skills into a portable folder without letting a foreign installer overwrite AGENTS.md, CLAUDE.md, or skills/index.json. Do not integrate: unattended semantic-memory mutation, installer-driven overwrite of project instructions, or self-rewrite hooks that bypass Jarvis review gates.",
+          "keywords": [
+            "memory",
+            "jarvis",
+            "agent",
+            "review",
+            "skills",
+            "portable",
+            "claude",
+            "before",
+            "hooks",
+            "agents",
+            "semantic",
+            "installer"
+          ]
+        },
+        {
+          "heading": "GBrain",
+          "level": 3,
+          "page": null,
+          "line_start": 59,
           "text": "Verdict: adapt. Useful for: dream-cycle consolidation, entity enrichment, citation repair, and separating stable memory from procedural skills. Jarvis path: strengthen vault maintenance, semantic memory, and agent inbox loops without replacing the plain-markdown vault contract.",
           "keywords": [
             "memory",
@@ -8994,7 +9015,7 @@
           "heading": "Multica",
           "level": 3,
           "page": null,
-          "line_start": 57,
+          "line_start": 67,
           "text": "Verdict: adapt. Useful for: agents as assignees, runtime inventory, progress streaming, blocker reporting, and skill compounding from completed work. Jarvis path: improve task_runtime.py, jarvis_cli.py, and specialist profiles so agents feel like teammates while staying local-first.",
           "keywords": [
             "agents",
@@ -9015,7 +9036,7 @@
           "heading": "Claude Code Best Practice",
           "level": 3,
           "page": null,
-          "line_start": 65,
+          "line_start": 75,
           "text": "Verdict: adapt. Useful for: session memory, command packs, workflow hooks, and explicit coding-agent loops. Jarvis path: reinforce [[82 Context Budget Discipline]] and [[79 Local Skill Loop]] instead of copying prompt packs wholesale.",
           "keywords": [
             "packs",
@@ -9036,7 +9057,7 @@
           "heading": "OpenMythos",
           "level": 3,
           "page": null,
-          "line_start": 73,
+          "line_start": 83,
           "text": "Verdict: watch. Useful for: recurrent-depth reasoning as a local model evaluation idea. Jarvis path: evaluate as research through local_runtime/local_model_eval.py and benchmark notes, not as a desktop runtime dependency.",
           "keywords": [
             "local",
@@ -9057,7 +9078,7 @@
           "heading": "Scrapling",
           "level": 3,
           "page": null,
-          "line_start": 81,
+          "line_start": 91,
           "text": "Verdict: gate. Useful for: adaptive selectors, static-first extraction, and structured scrape output. Jarvis path: possible browser/source-ingest helper only with ToS, privacy, robots.txt, and user-consent gates. Stealth/bot-evasion modes are not default Jarvis behavior.",
           "keywords": [
             "jarvis",
@@ -9078,7 +9099,7 @@
           "heading": "Browser Harness",
           "level": 3,
           "page": null,
-          "line_start": 89,
+          "line_start": 99,
           "text": "Verdict: gate. Useful for: thin CDP harnesses, generated helpers, and domain skills. Jarvis path: borrow deterministic browser-action primitives, but do not let agents self-edit helpers while controlling logged-in browser sessions without review.",
           "keywords": [
             "helpers",
@@ -9099,7 +9120,7 @@
           "heading": "Decepticon",
           "level": 3,
           "page": null,
-          "line_start": 97,
+          "line_start": 107,
           "text": "Verdict: defensive-only. Useful for: rules of engagement, OPPLAN artifacts, sandbox isolation, persistent terminal sessions, phase-specific agents, and findings-to-defense loops. Jarvis path: strengthen security-review and defensive validation. Do not integrate autonomous exploitation, credential harvesting, C2, or kill-chain execution.",
           "keywords": [
             "defensive",
@@ -9120,7 +9141,7 @@
           "heading": "Skill Builder Implication",
           "level": 2,
           "page": null,
-          "line_start": 105,
+          "line_start": 115,
           "text": "Every proposed skill should include \"Do NOT use for\" boundaries. Negative triggers matter because a useful skill should activate narrowly and stay quiet on unrelated requests. Jarvis now supports this as metadata through negative_triggers, so the matcher can suppress a skill before loading its full instructions.",
           "keywords": [
             "skill",
@@ -9141,21 +9162,21 @@
           "heading": "Default Safety Posture",
           "level": 2,
           "page": null,
-          "line_start": 111,
-          "text": "- memory and skill patterns: adapt - teammate lifecycle patterns: adapt - recurrent model architecture: watch - browser/scraping: gate - autonomous offensive security: defensive-only",
+          "line_start": 121,
+          "text": "- memory and skill patterns: adapt - portable agent brain bridge patterns: adapt - teammate lifecycle patterns: adapt - recurrent model architecture: watch - browser/scraping: gate - autonomous offensive security: defensive-only",
           "keywords": [
             "patterns",
             "adapt",
             "memory",
             "skill",
+            "portable",
+            "agent",
+            "brain",
+            "bridge",
             "teammate",
             "lifecycle",
             "recurrent",
-            "model",
-            "architecture",
-            "watch",
-            "browser",
-            "scraping"
+            "model"
           ]
         }
       ]
@@ -10112,25 +10133,25 @@
         "added",
         "vault",
         "jarvis",
-        "local",
         "brain",
+        "local",
         "skill",
         "notes",
         "instead",
         "can",
         "capture",
-        "into",
-        "inbox",
-        "candidate",
         "agent",
-        "stale",
+        "into",
+        "candidate",
+        "inbox",
+        "review",
         "surface",
+        "only",
+        "stale",
         "capability",
-        "runtime",
-        "model",
-        "only"
+        "runtime"
       ],
-      "chars": 12309,
+      "chars": 12860,
       "sections": [
         {
           "heading": "Vault Changelog",
@@ -10566,6 +10587,27 @@
             "should",
             "canonical",
             "brain"
+          ]
+        },
+        {
+          "heading": "agentic-stack portable brain intake",
+          "level": 3,
+          "page": null,
+          "line_start": 186,
+          "text": "- added agentic-stack to [[83 External Agent Pattern Intake]] as an adapt pattern for portable .agent/ brain compatibility - recorded the useful seams: four memory layers, host-agent review of candidate lessons, progressive-disclosure skills, typed permission protocols, and recall-before-action hooks - kept Jarvis's canonical brain unchanged; .agent/ should become an export/import compatibility surface only after safety review, not an installer-driven replacement for AGENTS.md, CLAUDE.md, or skills/index.json",
+          "keywords": [
+            "agent",
+            "pattern",
+            "brain",
+            "compatibility",
+            "review",
+            "skills",
+            "added",
+            "agentic",
+            "stack",
+            "external",
+            "intake",
+            "adapt"
           ]
         }
       ]

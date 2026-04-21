@@ -8,8 +8,8 @@ status: active
 source: repo_research
 confidence: high
 created: 2026-04-20
-updated: 2026-04-20
-version: 1
+updated: 2026-04-21
+version: 2
 tags:
   - jarvis
   - agents
@@ -45,6 +45,16 @@ Jarvis should classify external repos into:
 - defensive-only: dual-use or offensive pattern that must not become autonomous action
 
 ## Current Repo Intake
+
+### agentic-stack
+
+Verdict: adapt.
+
+Useful for: portable `.agent/` bridge folders, shared memory across Claude Code, OpenClaw, Hermes, Cursor, OpenCode, and other coding harnesses, four memory layers with retention policies, host-agent review tools, and recall-before-action hooks.
+
+Jarvis path: treat `.agent/` as an export and compatibility layer before making it canonical. Jarvis already has the core primitives: `AGENTS.md`, semantic and episodic memory, progressive-disclosure skills, candidate staging, and review-gated promotion. The missing seam is a Jarvis-native `.agent/` exporter/importer that maps Jarvis memory and skills into a portable folder without letting a foreign installer overwrite `AGENTS.md`, `CLAUDE.md`, or `skills/index.json`.
+
+Do not integrate: unattended semantic-memory mutation, installer-driven overwrite of project instructions, or self-rewrite hooks that bypass Jarvis review gates.
 
 ### GBrain
 
@@ -111,6 +121,7 @@ Jarvis now supports this as metadata through `negative_triggers`, so the matcher
 ## Default Safety Posture
 
 - memory and skill patterns: adapt
+- portable agent brain bridge patterns: adapt
 - teammate lifecycle patterns: adapt
 - recurrent model architecture: watch
 - browser/scraping: gate

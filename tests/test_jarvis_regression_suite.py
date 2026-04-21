@@ -1349,6 +1349,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("External agent pattern intake", text)
         self.assertIn("defensive-only", text)
 
+    def test_agentic_stack_fast_path(self):
+        stream, label = router.route_stream("Can Claude Code, OpenClaw, and Hermes share the same brain with agentic-stack?")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("agentic-stack", text)
+        self.assertIn("portable", text.lower())
+
     def test_capability_parity_fast_path(self):
         stream, label = router.route_stream("Can Jarvis get the same capabilities as Claude GPT Codex Grok and Gemini locally?")
         text = "".join(stream)
@@ -1844,6 +1851,7 @@ class ApiSurfaceTests(unittest.TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         ids = {item["id"] for item in payload["patterns"]}
+        self.assertIn("agentic-stack", ids)
         self.assertIn("gbrain", ids)
         self.assertIn("decepticon", ids)
 

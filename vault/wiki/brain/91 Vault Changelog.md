@@ -182,3 +182,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added `/local/model-fleet`, `jarvis --model-fleet`, and console `/model-fleet`
 - recorded that Google Colab and Unsloth can be useful training labs for LoRA/SFT/GRPO experiments, but not reliable 24/7 Jarvis hosting
 - recorded that Jarvis should not download every local model; it should install by role, measure, and promote through evals
+
+### agentic-stack portable brain intake
+
+- added agentic-stack to [[83 External Agent Pattern Intake]] as an `adapt` pattern for portable `.agent/` brain compatibility
+- recorded the useful seams: four memory layers, host-agent review of candidate lessons, progressive-disclosure skills, typed permission protocols, and recall-before-action hooks
+- kept Jarvis's canonical brain unchanged; `.agent/` should become an export/import compatibility surface only after safety review, not an installer-driven replacement for `AGENTS.md`, `CLAUDE.md`, or `skills/index.json`
