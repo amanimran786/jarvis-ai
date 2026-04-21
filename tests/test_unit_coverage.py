@@ -2992,6 +2992,65 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         fleet_mock.assert_called_once_with()
 
+    def test_natural_doctor_command_prints_doctor(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_doctor") as doctor_mock:
+            result = jarvis_cli._handle_console_command("Jarvis, please show doctor")
+
+        self.assertEqual(result, 0)
+        doctor_mock.assert_called_once_with()
+
+    def test_natural_model_command_prints_fleet(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_model_fleet") as fleet_mock:
+            result = jarvis_cli._handle_console_command("what models are installed?")
+
+        self.assertEqual(result, 0)
+        fleet_mock.assert_called_once_with()
+
+    def test_natural_shell_command_routes_to_run_helper(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_shell_command", return_value=0) as shell_mock:
+            result = jarvis_cli._handle_console_command("run pwd")
+
+        self.assertEqual(result, 0)
+        shell_mock.assert_called_once_with("pwd")
+
+    def test_natural_run_tests_maps_to_pytest(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_shell_command", return_value=0) as shell_mock:
+            result = jarvis_cli._handle_console_command("run the tests")
+
+        self.assertEqual(result, 0)
+        shell_mock.assert_called_once_with("python3 -m pytest -q")
+
+    def test_natural_code_task_routes_to_isolated_code_task(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.stream_task", return_value=0) as stream_mock:
+            result = jarvis_cli._handle_console_command("fix the failing auth test in this repo")
+
+        self.assertEqual(result, 0)
+        stream_mock.assert_called_once_with(
+            "fix the failing auth test in this repo",
+            kind="code",
+            terse_mode="full",
+            isolated_workspace=True,
+        )
+
+    def test_natural_agentic_stack_query_prints_pattern(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_agent_patterns") as patterns_mock:
+            result = jarvis_cli._handle_console_command("what can we use from agentic-stack?")
+
+        self.assertEqual(result, 0)
+        patterns_mock.assert_called_once_with("agentic-stack")
+
     def test_agent_patterns_command_prints_registry(self):
         import jarvis_cli
 
