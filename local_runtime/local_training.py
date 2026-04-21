@@ -31,6 +31,7 @@ TEACHER_DIR = TRAINING_ROOT / "teacher_examples"
 MODELFILES_DIR = TRAINING_ROOT / "modelfiles"
 PACKS_DIR = TRAINING_ROOT / "packs"
 HANDOFFS_DIR = TRAINING_ROOT / "handoffs"
+COLAB_DEFAULT_TARGET = "qwen2.5-coder:7b"
 
 MODEL_PRESETS = {
     "llama3.1:8b": {
@@ -156,6 +157,38 @@ def _split_examples(examples: list[dict], val_fraction: float = 0.1) -> tuple[li
 
 def _write_handoff_jsonl(path: Path, rows: list[dict]) -> None:
     _write_jsonl(path, rows)
+
+
+def _notebook(cells: list[dict]) -> dict:
+    return {
+        "cells": cells,
+        "metadata": {
+            "accelerator": "GPU",
+            "colab": {"provenance": []},
+            "kernelspec": {"display_name": "Python 3", "name": "python3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+
+
+def _markdown_cell(text: str) -> dict:
+    return {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": [line + "\n" for line in text.splitlines()],
+    }
+
+
+def _code_cell(source: str) -> dict:
+    return {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [line + "\n" for line in source.splitlines()],
+    }
 
 
 def _build_unsloth_script(data_rel: str, val_rel: str, preset: dict) -> str:
@@ -329,6 +362,189 @@ def _build_handoff_readme(preset: dict, handoff_dir: Path) -> str:
             "3. Train adapters first before attempting any full fine-tune.",
             "4. Evaluate the adapter on Jarvis's recent local failure prompts before promoting it.",
             "",
+            f"Generated in: {handoff_dir}",
+            "",
+        ]
+    )
+
+
+def _build_colab_notebook(target: str, preset: dict, train_file: str, val_file: str) -> dict:
+    model_name = preset["unsloth_model"]
+    chat_template = preset["unsloth_chat_template"]
+    max_seq_length = preset["sequence_len"]
+    return _notebook(
+        [
+            _markdown_cell(
+                "\n".join(
+                    [
+                        "# Jarvis Open LLM Colab Trainer",
+                        "",
+                        "This notebook fine-tunes an open model on a Jarvis training pack using Google Colab as an interactive training lab.",
+                        "",
+                        "Use Runtime > Change runtime type > GPU. Free Colab GPU access is best-effort, not guaranteed, and this notebook should not be used as a background service or remote-control workaround.",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "from google.colab import drive",
+                        "drive.mount('/content/drive')",
+                        "",
+                        "# Copy this generated handoff folder into Google Drive, then adjust if you moved it.",
+                        "HANDOFF_DIR = '/content/drive/MyDrive/jarvis_colab_handoff'",
+                        f"TRAIN_FILE = f'{{HANDOFF_DIR}}/data/{train_file}'",
+                        f"VAL_FILE = f'{{HANDOFF_DIR}}/data/{val_file}'",
+                        "OUTPUT_DIR = f'{HANDOFF_DIR}/outputs'",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "import os, json, pathlib, torch",
+                        "for path in (TRAIN_FILE, VAL_FILE):",
+                        "    if not pathlib.Path(path).exists():",
+                        "        raise FileNotFoundError(f'Missing {path}. Upload the handoff folder to Google Drive first.')",
+                        "print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')",
+                        "print('Train file:', TRAIN_FILE)",
+                        "print('Validation file:', VAL_FILE)",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "%%capture",
+                        "!pip install -U unsloth",
+                        "!pip install -U --no-deps trl peft accelerate bitsandbytes datasets",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "from datasets import load_dataset",
+                        "from transformers import TrainingArguments",
+                        "from trl import SFTTrainer",
+                        "from unsloth import FastLanguageModel, is_bfloat16_supported",
+                        "from unsloth.chat_templates import get_chat_template",
+                        "",
+                        f"MODEL_NAME = '{model_name}'",
+                        f"CHAT_TEMPLATE = '{chat_template}'",
+                        f"MAX_SEQ_LENGTH = {max_seq_length}",
+                        "",
+                        "model, tokenizer = FastLanguageModel.from_pretrained(",
+                        "    model_name=MODEL_NAME,",
+                        "    max_seq_length=MAX_SEQ_LENGTH,",
+                        "    dtype=None,",
+                        "    load_in_4bit=True,",
+                        ")",
+                        "tokenizer = get_chat_template(tokenizer, chat_template=CHAT_TEMPLATE)",
+                        "model = FastLanguageModel.get_peft_model(",
+                        "    model,",
+                        "    r=16,",
+                        "    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],",
+                        "    lora_alpha=16,",
+                        "    lora_dropout=0,",
+                        "    bias='none',",
+                        "    use_gradient_checkpointing='unsloth',",
+                        "    random_state=3407,",
+                        ")",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "train_dataset = load_dataset('json', data_files=TRAIN_FILE, split='train')",
+                        "eval_dataset = load_dataset('json', data_files=VAL_FILE, split='train')",
+                        "",
+                        "def format_messages(batch):",
+                        "    texts = [tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False) for messages in batch['messages']]",
+                        "    return {'text': texts}",
+                        "",
+                        "train_dataset = train_dataset.map(format_messages, batched=True)",
+                        "eval_dataset = eval_dataset.map(format_messages, batched=True)",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "trainer = SFTTrainer(",
+                        "    model=model,",
+                        "    tokenizer=tokenizer,",
+                        "    train_dataset=train_dataset,",
+                        "    eval_dataset=eval_dataset,",
+                        "    dataset_text_field='text',",
+                        "    max_seq_length=MAX_SEQ_LENGTH,",
+                        "    packing=False,",
+                        "    args=TrainingArguments(",
+                        "        output_dir=OUTPUT_DIR,",
+                        "        per_device_train_batch_size=2,",
+                        "        gradient_accumulation_steps=4,",
+                        "        warmup_steps=10,",
+                        "        num_train_epochs=2,",
+                        "        learning_rate=2e-4,",
+                        "        logging_steps=1,",
+                        "        optim='adamw_8bit',",
+                        "        weight_decay=0.01,",
+                        "        lr_scheduler_type='linear',",
+                        "        fp16=not is_bfloat16_supported(),",
+                        "        bf16=is_bfloat16_supported(),",
+                        "        report_to='none',",
+                        "    ),",
+                        ")",
+                        "trainer.train()",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "FINAL_ADAPTER = f'{OUTPUT_DIR}/final_adapter'",
+                        "model.save_pretrained(FINAL_ADAPTER)",
+                        "tokenizer.save_pretrained(FINAL_ADAPTER)",
+                        "print('Saved adapter:', FINAL_ADAPTER)",
+                        "print('Next: download or copy this adapter back to the Mac, run Jarvis evals, then promote only if the gate passes.')",
+                    ]
+                )
+            ),
+            _markdown_cell(
+                "\n".join(
+                    [
+                        "## Import Back Into Jarvis",
+                        "",
+                        "After training, bring the adapter or converted model back to the Mac. Do not promote it just because training completed. Run Jarvis local evals first and keep the current model if the candidate does not beat the baseline.",
+                        "",
+                        f"Target preset: `{target}`. Base HF model: `{model_name}`.",
+                    ]
+                )
+            ),
+        ]
+    )
+
+
+def _build_colab_readme(target: str, preset: dict, handoff_dir: Path) -> str:
+    return "\n".join(
+        [
+            f"# Jarvis Colab Training Handoff for {preset['label']}",
+            "",
+            "This folder prepares Jarvis's local training pack for interactive Google Colab training.",
+            "",
+            "Use this as a training lab, not as a 24/7 Jarvis host. Free Colab GPU availability is not guaranteed, usage limits fluctuate, and remote-control/background-service patterns are outside the free-tier intent.",
+            "",
+            "Flow:",
+            "1. Copy this folder to Google Drive as `MyDrive/jarvis_colab_handoff` or edit `HANDOFF_DIR` in the notebook.",
+            "2. Open `Jarvis_Open_LLM_Trainer.ipynb` in Colab.",
+            "3. Select Runtime > Change runtime type > GPU.",
+            "4. Run the notebook cells in order.",
+            "5. Copy the trained adapter or converted model back to the Mac.",
+            "6. Run Jarvis local evals and promote only if the eval gate clears.",
+            "",
+            f"Target preset: {target}",
+            f"Hugging Face model: {preset['hf_model']}",
             f"Generated in: {handoff_dir}",
             "",
         ]
@@ -849,6 +1065,87 @@ def build_finetune_handoff(
     }
 
 
+def build_colab_handoff(
+    pack_path: str | None = None,
+    target: str = COLAB_DEFAULT_TARGET,
+) -> dict:
+    _ensure_dirs()
+    target = (target or COLAB_DEFAULT_TARGET).strip()
+    if target not in MODEL_PRESETS:
+        return {"ok": False, "error": f"Unknown Colab training target: {target}"}
+
+    resolved_pack = Path(pack_path) if pack_path else _latest_pack_path()
+    if not resolved_pack or not resolved_pack.exists():
+        return {"ok": False, "error": "No training pack found. Run the local training pack builder first."}
+
+    examples = _read_jsonl(resolved_pack)
+    if not examples:
+        return {"ok": False, "error": f"Training pack is empty: {resolved_pack}"}
+
+    train_examples, val_examples = _split_examples(examples, val_fraction=0.1)
+    if not train_examples:
+        return {"ok": False, "error": "Training pack did not contain enough examples to create a train split."}
+    if not val_examples:
+        val_examples = train_examples[-1:]
+
+    preset = MODEL_PRESETS[target]
+    stamp = _timestamp()
+    handoff_dir = HANDOFFS_DIR / f"{stamp}_colab_{preset['slug']}"
+    data_dir = handoff_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    train_file = "train_messages.jsonl"
+    val_file = "val_messages.jsonl"
+    train_path = data_dir / train_file
+    val_path = data_dir / val_file
+    notebook_path = handoff_dir / "Jarvis_Open_LLM_Trainer.ipynb"
+    readme_path = handoff_dir / "README.md"
+    manifest_path = handoff_dir / "manifest.json"
+
+    _write_handoff_jsonl(train_path, train_examples)
+    _write_handoff_jsonl(val_path, val_examples)
+    notebook_path.write_text(
+        json.dumps(_build_colab_notebook(target, preset, train_file, val_file), indent=2),
+        encoding="utf-8",
+    )
+    readme_path.write_text(_build_colab_readme(target, preset, handoff_dir), encoding="utf-8")
+
+    manifest = {
+        "target": target,
+        "label": preset["label"],
+        "source_pack": str(resolved_pack),
+        "train_examples": len(train_examples),
+        "val_examples": len(val_examples),
+        "hf_model": preset["hf_model"],
+        "unsloth_model": preset["unsloth_model"],
+        "notebook": str(notebook_path),
+        "readme": str(readme_path),
+        "data": {
+            "train_messages": str(train_path),
+            "val_messages": str(val_path),
+        },
+        "policy": {
+            "google_service": "Google Colab",
+            "free_tier": "best-effort interactive training lab; resources are not guaranteed",
+            "not_for": "24/7 hosting, remote-control bypass, or unattended background service",
+            "promotion_gate": "Run Jarvis local evals before changing defaults.",
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "target": target,
+        "source_pack": str(resolved_pack),
+        "dir": str(handoff_dir),
+        "manifest": str(manifest_path),
+        "notebook": str(notebook_path),
+        "readme": str(readme_path),
+        "train_examples": len(train_examples),
+        "val_examples": len(val_examples),
+    }
+
+
 def build_modelfile(base_model: str = LOCAL_DEFAULT, target_name: str = LOCAL_TUNED) -> dict:
     _ensure_dirs()
     modelfile_path = MODELFILES_DIR / f"{_safe_slug(target_name)}.Modelfile"
@@ -933,6 +1230,11 @@ def result_text(result: dict) -> str:
         return (
             f"Built offline fine-tune handoff folders for {target_names} from {result['source_pack']}. "
             f"The splits contain {result['train_examples']} train examples and {result['val_examples']} validation examples."
+        )
+    if "notebook" in result:
+        return (
+            f"Built a Google Colab training handoff for {result['target']} from {result['source_pack']}. "
+            f"The notebook is at {result['notebook']} with {result['train_examples']} train examples and {result['val_examples']} validation examples."
         )
     if "example_count" in result:
         return (

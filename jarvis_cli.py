@@ -474,6 +474,35 @@ def _run_local_training_pack() -> int:
     return 0 if payload.get("ok") else 1
 
 
+def _colab_training_payload() -> dict:
+    return {
+        "export_limit": 80,
+        "distill_limit": 0,
+        "expert_distill_limit": 0,
+        "target": "qwen2.5-coder:7b",
+        "base_model": "jarvis-local:latest",
+        "target_name": "jarvis-local",
+        "cloud_only_export": True,
+    }
+
+
+def _run_colab_training_handoff() -> int:
+    payload = post("/local/automation/colab-handoff", _colab_training_payload())
+    print(payload.get("message") or json.dumps(payload, indent=2))
+    result = payload.get("result") or {}
+    handoff = result.get("handoff") or {}
+    if handoff.get("dir"):
+        print(f"Handoff : {handoff.get('dir')}")
+    if handoff.get("notebook"):
+        print(f"Notebook: {handoff.get('notebook')}")
+    if handoff.get("readme"):
+        print(f"Readme  : {handoff.get('readme')}")
+    policy = result.get("policy") or {}
+    if policy.get("promotion_gate"):
+        print(f"Gate    : {policy.get('promotion_gate')}")
+    return 0 if payload.get("ok") else 1
+
+
 def _print_status() -> None:
     s = get("/status")
     managed = s.get("managed_runtime_summary") or {}
@@ -933,6 +962,7 @@ def _console_help() -> str:
             "  /model-fleet          Show local LLM fleet and free training lanes",
             "  /training-status      Show local training artifacts",
             "  /train-local          Build a local training pack without cloud distillation",
+            "  /colab-handoff        Build Google Colab training handoff for an open LLM",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -1167,6 +1197,8 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
         return 0
     if any(term in lower for term in ("train jarvis", "train yourself", "run local training", "build training pack", "build a training pack")):
         return _run_local_training_pack()
+    if any(term in lower for term in ("google colab training", "colab handoff", "prepare colab", "free google training", "google free training", "teach open source llm")):
+        return _run_colab_training_handoff()
     if any(term in lower for term in ("verify this diff", "verification plan", "how should i verify", "verify the code")):
         _print_verify_plan()
         return 0
@@ -1345,6 +1377,8 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command in {"train-local", "training-run", "build-training-pack"}:
         return _run_local_training_pack()
+    if command in {"colab-handoff", "colab-training", "google-training"}:
+        return _run_colab_training_handoff()
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
@@ -1564,6 +1598,16 @@ def main():
     if flag in {"--model-fleet", "--models", "--local-models", "--training-lanes"}:
         _print_model_fleet()
         return
+
+    if flag in {"--training-status", "--training"}:
+        _print_training_status()
+        return
+
+    if flag in {"--train-local", "--training-run", "--build-training-pack"}:
+        sys.exit(_run_local_training_pack())
+
+    if flag in {"--colab-handoff", "--colab-training", "--google-training"}:
+        sys.exit(_run_colab_training_handoff())
 
     if flag in {"--security-roe", "--roe"}:
         template = sys.argv[2] if len(sys.argv) > 2 else ""

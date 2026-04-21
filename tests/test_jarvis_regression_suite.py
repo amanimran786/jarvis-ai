@@ -1959,6 +1959,26 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("2 curated teacher examples", payload["message"])
 
+    def test_local_training_colab_endpoint_builds_handoff(self):
+        with patch("api.local_training.build_colab_handoff", return_value={
+            "ok": True,
+            "target": "qwen2.5-coder:7b",
+            "source_pack": "/tmp/pack.jsonl",
+            "notebook": "/tmp/Jarvis_Open_LLM_Trainer.ipynb",
+            "train_examples": 9,
+            "val_examples": 1,
+        }) as handoff_mock:
+            response = self.client.post(
+                "/local/training/colab",
+                json={"pack_path": "/tmp/pack.jsonl", "target": "qwen2.5-coder:7b"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("Google Colab training handoff", payload["message"])
+        handoff_mock.assert_called_once_with(pack_path="/tmp/pack.jsonl", target="qwen2.5-coder:7b")
+
     def test_extensions_endpoint_exposes_skills_connectors_and_plugins(self):
         response = self.client.get("/extensions")
         self.assertEqual(response.status_code, 200)
@@ -2091,6 +2111,29 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("result", payload)
         if not payload["ok"]:
             self.assertIn("Skipped local model automation", payload["message"])
+
+    def test_local_colab_handoff_automation_endpoint_uses_safe_defaults(self):
+        captured = {}
+
+        def fake_cycle(**kwargs):
+            captured.update(kwargs)
+            return {
+                "ok": True,
+                "kind": "colab_handoff",
+                "target": "qwen2.5-coder:7b",
+                "handoff": {"dir": "/tmp/handoff", "notebook": "/tmp/handoff/Jarvis_Open_LLM_Trainer.ipynb"},
+            }
+
+        with patch("local_runtime.local_model_automation.run_colab_handoff_cycle", side_effect=fake_cycle):
+            response = self.client.post("/local/automation/colab-handoff", json={})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(captured["distill_limit"], 0)
+        self.assertEqual(captured["expert_distill_limit"], 0)
+        self.assertTrue(captured["cloud_only_export"])
+        self.assertIn("Google Colab training handoff", payload["message"])
 
     def test_mode_endpoint_accepts_open_source(self):
         previous = model_router.get_mode()
@@ -2601,6 +2644,7 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertIn("Plain-English console requests are action intents first", prompt)
         self.assertIn("\"show doctor\"", prompt)
         self.assertIn("\"train Jarvis locally\"", prompt)
+        self.assertIn("\"prepare Colab\"", prompt)
 
     def test_is_hallucination_rejects_common_junk_fragments(self):
         self.assertTrue(meeting_listener._is_hallucination("thanks for watching"))
@@ -3516,6 +3560,60 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertEqual(captured["examples"][0]["messages"][2]["content"], teacher["messages"][2]["content"])
         self.assertEqual(result["teacher_model"], "claude-sonnet-4-6")
         self.assertEqual(result["teacher_examples"], 1)
+
+    def test_build_colab_handoff_writes_notebook_and_policy_manifest(self):
+        example = {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "show doctor"},
+                {"role": "assistant", "content": "Run the Jarvis doctor flow."},
+            ],
+            "meta": {"teacher_source": "manual_teacher"},
+        }
+        with TemporaryDirectory() as tmp:
+            pack_path = Path(tmp) / "pack.jsonl"
+            rows = [example for _ in range(6)]
+            pack_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            handoffs_dir = Path(tmp) / "handoffs"
+            with patch("local_runtime.local_training._ensure_dirs"), \
+                 patch("local_runtime.local_training.HANDOFFS_DIR", handoffs_dir):
+                result = local_training.build_colab_handoff(
+                    pack_path=str(pack_path),
+                    target="qwen2.5-coder:7b",
+                )
+
+            manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+            notebook_text = Path(result["notebook"]).read_text(encoding="utf-8")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["train_examples"], 5)
+        self.assertEqual(result["val_examples"], 1)
+        self.assertEqual(manifest["policy"]["google_service"], "Google Colab")
+        self.assertIn("not guaranteed", manifest["policy"]["free_tier"])
+        self.assertIn("Qwen/Qwen2.5-Coder-7B-Instruct", notebook_text)
+        self.assertIn("drive.mount", notebook_text)
+
+    def test_colab_handoff_cycle_builds_pack_then_handoff(self):
+        with patch("local_runtime.local_model_automation.local_training.build_training_pack", return_value={
+            "ok": True,
+            "pack_path": "/tmp/pack.jsonl",
+            "modelfile": {"path": "/tmp/modelfile"},
+        }) as pack_mock, \
+             patch("local_runtime.local_model_automation.local_training.build_colab_handoff", return_value={
+                 "ok": True,
+                 "dir": "/tmp/handoff",
+                 "notebook": "/tmp/handoff/Jarvis_Open_LLM_Trainer.ipynb",
+             }) as handoff_mock, \
+             patch("local_runtime.local_model_automation._ensure_dirs"):
+            with TemporaryDirectory() as tmp:
+                with patch("local_runtime.local_model_automation.CYCLES_DIR", Path(tmp)):
+                    result = local_model_automation.run_colab_handoff_cycle()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "colab_handoff")
+        pack_mock.assert_called_once()
+        self.assertEqual(pack_mock.call_args.kwargs["distill_limit"], 0)
+        handoff_mock.assert_called_once_with(pack_path="/tmp/pack.jsonl", target="qwen2.5-coder:7b")
 
     def test_distill_failures_uses_standalone_beta_failures(self):
         captured = {}
