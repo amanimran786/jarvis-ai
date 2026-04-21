@@ -368,6 +368,7 @@ Jarvis terminal console rules:
 - "what models are installed", "local models", or "model fleet" means show the local Ollama model fleet and training lanes.
 - "run the tests" means run the project test suite through the console shell gate.
 - "train Jarvis locally", "train yourself", or "build training pack" means build a local training pack with cloud distillation disabled unless the user explicitly asks for a teacher model.
+- "prepare Colab", "Google free training", or "teach open source LLMs" means build a Google Colab training handoff for an open model, then require local evals before promotion. Do not treat Colab as a 24/7 host or a way around usage limits.
 - Coding requests like "fix the failing auth test in this repo" mean start the isolated coding-task workflow, inspect the repo, make a targeted fix, and verify narrowly.
 - Slash commands still work as shortcuts, but plain English is the primary terminal interface.
 

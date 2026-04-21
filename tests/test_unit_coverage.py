@@ -3047,6 +3047,35 @@ class JarvisCliEndpointTests(unittest.TestCase):
             },
         )
 
+    def test_natural_colab_training_command_builds_handoff(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_colab_training_handoff", return_value=0) as colab_mock:
+            result = jarvis_cli._handle_console_command("prepare Google Colab training")
+
+        self.assertEqual(result, 0)
+        colab_mock.assert_called_once_with()
+
+    def test_colab_handoff_helper_uses_safe_automation_defaults(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"ok": True, "message": "built", "result": {}}) as post_mock:
+            result = jarvis_cli._run_colab_training_handoff()
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with(
+            "/local/automation/colab-handoff",
+            {
+                "export_limit": 80,
+                "distill_limit": 0,
+                "expert_distill_limit": 0,
+                "target": "qwen2.5-coder:7b",
+                "base_model": "jarvis-local:latest",
+                "target_name": "jarvis-local",
+                "cloud_only_export": True,
+            },
+        )
+
     def test_natural_shell_command_routes_to_run_helper(self):
         import jarvis_cli
 
