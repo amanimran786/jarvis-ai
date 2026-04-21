@@ -18,6 +18,7 @@ Endpoints:
   GET  /mode          — current model routing mode
   GET  /production-readiness — truthful local/free/production readiness contract
   GET  /local/model-fleet — local Ollama fleet and free training-lane status
+  POST /local/automation/colab-handoff — build a local training pack plus Colab notebook handoff
   POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"|"open-source"}
 """
 
@@ -441,6 +442,11 @@ class LocalTrainingHandoffRequest(BaseModel):
     targets: list[str] = []
 
 
+class LocalTrainingColabRequest(BaseModel):
+    pack_path: str = ""
+    target: str = "qwen2.5-coder:7b"
+
+
 class LocalTrainingTeachRequest(BaseModel):
     prompt: str
     answer: str
@@ -475,6 +481,16 @@ class LocalModelAutomationRunRequest(BaseModel):
     promote_if_ready: bool = True
     cleanup_failed: bool = False
     force: bool = False
+
+
+class LocalModelAutomationColabRequest(BaseModel):
+    export_limit: int = 80
+    distill_limit: int = 0
+    expert_distill_limit: int = 0
+    target: str = "qwen2.5-coder:7b"
+    base_model: str = ""
+    target_name: str = ""
+    cloud_only_export: bool = True
 
 
 class LocalBetaRunRequest(BaseModel):
@@ -1112,6 +1128,17 @@ def build_local_training_handoff(req: LocalTrainingHandoffRequest):
     return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
 
 
+@app.post("/local/training/colab")
+def build_local_training_colab_handoff(req: LocalTrainingColabRequest):
+    kwargs = {}
+    if req.pack_path:
+        kwargs["pack_path"] = req.pack_path
+    if req.target:
+        kwargs["target"] = req.target
+    result = local_training.build_colab_handoff(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
 @app.post("/local/training/teach")
 def record_local_training_teach(req: LocalTrainingTeachRequest):
     result = local_training.record_teacher_example(
@@ -1170,6 +1197,23 @@ def run_local_automation(req: LocalModelAutomationRunRequest):
     if req.candidate_name:
         kwargs["candidate_name"] = req.candidate_name
     result = local_model_automation.run_cycle(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_model_automation.result_text(result), "result": result}
+
+
+@app.post("/local/automation/colab-handoff")
+def run_local_colab_handoff_automation(req: LocalModelAutomationColabRequest):
+    kwargs = {
+        "export_limit": req.export_limit,
+        "distill_limit": req.distill_limit,
+        "expert_distill_limit": req.expert_distill_limit,
+        "target": req.target,
+        "cloud_only_export": req.cloud_only_export,
+    }
+    if req.base_model:
+        kwargs["base_model"] = req.base_model
+    if req.target_name:
+        kwargs["target_name"] = req.target_name
+    result = local_model_automation.run_colab_handoff_cycle(**kwargs)
     return {"ok": result.get("ok", False), "message": local_model_automation.result_text(result), "result": result}
 
 

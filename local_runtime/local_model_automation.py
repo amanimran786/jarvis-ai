@@ -141,6 +141,54 @@ def run_cycle(
     return cycle
 
 
+def run_colab_handoff_cycle(
+    export_limit: int = 80,
+    distill_limit: int = 0,
+    expert_distill_limit: int = 0,
+    target: str = local_training.COLAB_DEFAULT_TARGET,
+    base_model: str = LOCAL_TUNED,
+    target_name: str = LOCAL_TUNED,
+    cloud_only_export: bool = True,
+) -> dict:
+    _ensure_dirs()
+    stamp = _timestamp()
+    training_result = local_training.build_training_pack(
+        export_limit=export_limit,
+        distill_limit=distill_limit,
+        expert_distill_limit=expert_distill_limit,
+        cloud_only_export=cloud_only_export,
+        base_model=base_model,
+        target_name=target_name,
+    )
+    if not training_result.get("ok"):
+        return training_result
+
+    handoff_result = local_training.build_colab_handoff(
+        pack_path=training_result["pack_path"],
+        target=target,
+    )
+    if not handoff_result.get("ok"):
+        return {"ok": False, "error": handoff_result.get("error", "Colab handoff failed."), "training": training_result}
+
+    cycle = {
+        "ok": True,
+        "created_at": stamp,
+        "kind": "colab_handoff",
+        "target": target,
+        "training": training_result,
+        "handoff": handoff_result,
+        "policy": {
+            "service": "Google Colab",
+            "free_tier": "best-effort interactive GPU training, not guaranteed",
+            "promotion_gate": "Import the adapter/model back locally, run evals, then promote only if the gate clears.",
+        },
+    }
+    cycle_path = CYCLES_DIR / f"colab_handoff_{_safe_slug(target)}_{stamp}.json"
+    cycle_path.write_text(json.dumps(cycle, indent=2), encoding="utf-8")
+    cycle["path"] = str(cycle_path)
+    return cycle
+
+
 def status() -> dict:
     _ensure_dirs()
     cycles = sorted(CYCLES_DIR.glob("cycle_*.json"))
@@ -161,6 +209,13 @@ def result_text(result: dict) -> str:
         if result.get("skipped"):
             return result.get("error", "Local model automation was skipped by policy.")
         return result.get("error", "Local model automation failed.")
+
+    if result.get("kind") == "colab_handoff":
+        handoff = result.get("handoff", {})
+        return (
+            f"Built a Google Colab training handoff for {result.get('target')} at {handoff.get('dir')}. "
+            f"Open {handoff.get('notebook')} in Colab, train interactively, then import the adapter back and run Jarvis evals before promotion."
+        )
 
     eval_result = result.get("eval", {})
     text = (
