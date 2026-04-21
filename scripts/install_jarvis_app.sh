@@ -36,16 +36,26 @@ latest_source_stamp() {
 }
 
 create_desktop_alias() {
-  local candidate=""
-  for candidate in "$HOME"/Desktop/Jarvis*.app; do
+  local candidate="" target="" resolved_target="" resolved_app=""
+  resolved_app="$(/usr/bin/realpath "$APPLICATIONS_APP" 2>/dev/null || printf '%s' "$APPLICATIONS_APP")"
+  while IFS= read -r -d '' candidate; do
     [[ -e "$candidate" || -L "$candidate" ]] || continue
     if [[ "$candidate" == "$DESKTOP_APP" ]]; then
       continue
     fi
-    if [[ -L "$candidate" && "$(readlink "$candidate")" == "$APPLICATIONS_APP" ]]; then
+    if [[ -L "$candidate" ]]; then
+      target="$(readlink "$candidate")"
+      if [[ "$target" != /* ]]; then
+        target="$(cd "$(dirname "$candidate")" && cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+      fi
+      resolved_target="$(/usr/bin/realpath "$target" 2>/dev/null || printf '%s' "$target")"
+    else
+      resolved_target="$(/usr/bin/realpath "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    fi
+    if [[ "$resolved_target" == "$resolved_app" ]]; then
       rm -f "$candidate"
     fi
-  done
+  done < <(/usr/bin/find "$HOME/Desktop" -maxdepth 1 -name 'Jarvis*.app' -print0)
   rm -rf "$DESKTOP_APP"
   ln -s "$APPLICATIONS_APP" "$DESKTOP_APP"
   touch -h "$DESKTOP_APP" 2>/dev/null || true
