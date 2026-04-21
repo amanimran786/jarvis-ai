@@ -1217,6 +1217,19 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if any(term in lower for term in ("capability eval", "eval coverage", "golden cases")):
         _print_capability_evals("")
         return 0
+    if any(term in lower for term in (
+        "cl4r1t4s",
+        "prompt leakage",
+        "prompt leak",
+        "system prompt leak",
+        "system-prompt leak",
+        "hidden system prompt",
+        "extract system prompt",
+        "reveal system prompt",
+        "steal system prompt",
+    )):
+        _print_security_roe("prompt_leakage")
+        return 0
     if "security roe" in lower or "rules of engagement" in lower:
         _print_security_roe("")
         return 0

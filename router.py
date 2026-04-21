@@ -1155,6 +1155,18 @@ def route_stream(user_input: str) -> tuple:
     )):
         return _s(model_fleet.summary_text()), "Status"
     if any(p in lower for p in (
+        "cl4r1t4s",
+        "prompt leakage",
+        "prompt leak",
+        "system prompt leak",
+        "system-prompt leak",
+        "hidden system prompt",
+        "extract system prompt",
+        "reveal system prompt",
+        "steal system prompt",
+    )):
+        return _s(security_roe.summary_text("prompt_leakage")), "Status"
+    if any(p in lower for p in (
         "external agent pattern",
         "agent pattern intake",
         "what can we use from",

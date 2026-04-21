@@ -124,6 +124,25 @@ _TEMPLATES: tuple[dict[str, Any], ...] = (
             "log provenance for anything stored in memory or vault",
         ],
     },
+    {
+        "id": "prompt_leakage",
+        "name": "Prompt Leakage and System-Prompt Extraction Review",
+        "best_for": "Public jailbreak repos, system-prompt leakage attempts, prompt-injection evals, and model-boundary tests.",
+        "must_have": [
+            "trusted instruction boundary",
+            "untrusted prompt corpus provenance",
+            "secret or system-prompt exposure path",
+            "tool or memory exfiltration path",
+            "safe expected refusal or containment behavior",
+            "eval case and regression owner",
+            "no secret reproduction rule",
+        ],
+        "output": [
+            "state whether the request is defensive analysis or extraction",
+            "summarize the attack pattern without reproducing sensitive prompts",
+            "add an eval or control instead of copying jailbreak text into production",
+        ],
+    },
 )
 
 _ALIASES = {
@@ -137,6 +156,13 @@ _ALIASES = {
     "ai": "ai_misuse",
     "prompt": "ai_misuse",
     "jailbreak": "ai_misuse",
+    "leak": "prompt_leakage",
+    "leakage": "prompt_leakage",
+    "prompt_leak": "prompt_leakage",
+    "prompt_leakage": "prompt_leakage",
+    "system_prompt": "prompt_leakage",
+    "system_prompt_leak": "prompt_leakage",
+    "cl4r1t4s": "prompt_leakage",
     "browser": "browser_source_gate",
     "scraping": "browser_source_gate",
     "source": "browser_source_gate",
