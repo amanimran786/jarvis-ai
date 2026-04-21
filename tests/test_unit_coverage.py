@@ -1679,6 +1679,16 @@ class ExternalAgentPatternTests(unittest.TestCase):
         self.assertTrue(status["ok"])
         self.assertIn("defensive-only", status["verdict_counts"])
         self.assertTrue(any(item["id"] == "scrapling" for item in status["patterns"]))
+        self.assertTrue(any(item["id"] == "cl4r1t4s" for item in status["patterns"]))
+
+    def test_cl4r1t4s_is_defensive_only_prompt_security(self):
+        import external_agent_patterns
+
+        patterns = external_agent_patterns.list_patterns("cl4r1t4s")
+
+        self.assertEqual(len(patterns), 1)
+        self.assertEqual(patterns[0]["verdict"], "defensive-only")
+        self.assertEqual(patterns[0]["category"], "prompt-security")
 
     def test_summary_text_keeps_offense_gated(self):
         import external_agent_patterns
@@ -1709,6 +1719,14 @@ class SecurityRoeTests(unittest.TestCase):
         self.assertIn("Defensive security ROE", text)
         self.assertIn("ai_misuse", text)
 
+    def test_prompt_leakage_alias_routes_to_boundary_template(self):
+        import security_roe
+
+        text = security_roe.summary_text("cl4r1t4s")
+
+        self.assertIn("Defensive security ROE", text)
+        self.assertIn("prompt_leakage", text)
+
 
 class CapabilityEvalTests(unittest.TestCase):
 
@@ -1721,6 +1739,7 @@ class CapabilityEvalTests(unittest.TestCase):
         self.assertEqual(payload["coverage_score"], 1.0)
         self.assertEqual(payload["blind_spots"], [])
         self.assertIn("JARVIS_RUN_GOLDEN_CASES=1", payload["live_command"])
+        self.assertTrue(any(item["id"] == "prompt_leakage_boundary" for item in payload["cases"]))
 
     def test_summary_text_names_live_command(self):
         import capability_evals
@@ -3116,6 +3135,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         patterns_mock.assert_called_once_with("agentic-stack")
+
+    def test_natural_cl4r1t4s_query_prints_prompt_leakage_roe(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_security_roe") as roe_mock:
+            result = jarvis_cli._handle_console_command("show CL4R1T4S defensive review")
+
+        self.assertEqual(result, 0)
+        roe_mock.assert_called_once_with("prompt_leakage")
 
     def test_agent_patterns_command_prints_registry(self):
         import jarvis_cli

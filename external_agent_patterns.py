@@ -168,6 +168,30 @@ PATTERNS: tuple[dict[str, Any], ...] = (
             "security workflows must require written authorization, scope, and sandboxing",
         ],
     },
+    {
+        "id": "cl4r1t4s",
+        "name": "CL4R1T4S",
+        "category": "prompt-security",
+        "source_url": "https://github.com/elder-plinius/CL4R1T4S",
+        "verdict": "defensive-only",
+        "useful_patterns": [
+            "treat jailbreak and prompt-leakage corpora as red-team eval inputs, not instructions to execute",
+            "convert public prompt-extraction examples into refusal, containment, and boundary regression cases",
+            "keep untrusted prompt text isolated from system, developer, memory, and vault instructions",
+        ],
+        "jarvis_seams": [
+            "security_roe.py",
+            "capability_evals.py",
+            "router.py",
+            "tests/test_jarvis_regression_suite.py",
+            "vault/wiki/brain/77 Threat Modeling Security Thinking.md",
+        ],
+        "risks": [
+            "do not copy private system prompts, hidden instructions, or extracted secrets into Jarvis",
+            "do not optimize Jarvis to extract prompts, secrets, or hidden policies from third-party systems",
+            "use only for defensive evals, boundary hardening, and safe prompt-injection review",
+        ],
+    },
 )
 
 
