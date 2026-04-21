@@ -36,6 +36,16 @@ latest_source_stamp() {
 }
 
 create_desktop_alias() {
+  local candidate=""
+  for candidate in "$HOME"/Desktop/Jarvis*.app; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    if [[ "$candidate" == "$DESKTOP_APP" ]]; then
+      continue
+    fi
+    if [[ -L "$candidate" && "$(readlink "$candidate")" == "$APPLICATIONS_APP" ]]; then
+      rm -f "$candidate"
+    fi
+  done
   rm -rf "$DESKTOP_APP"
   ln -s "$APPLICATIONS_APP" "$DESKTOP_APP"
   touch -h "$DESKTOP_APP" 2>/dev/null || true
