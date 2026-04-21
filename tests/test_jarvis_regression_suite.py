@@ -1384,6 +1384,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Defensive security ROE", text)
         self.assertIn("ai_misuse", text)
 
+    def test_prompt_leakage_fast_path(self):
+        stream, label = router.route_stream("Use CL4R1T4S defensively to test prompt leakage.")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("Defensive security ROE", text)
+        self.assertIn("prompt_leakage", text)
+
     def test_capability_boundaries_fast_path(self):
         stream, label = router.route_stream("What are your limitations and scope boundaries?")
         text = "".join(stream)
@@ -1854,6 +1861,7 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("agentic-stack", ids)
         self.assertIn("gbrain", ids)
         self.assertIn("decepticon", ids)
+        self.assertIn("cl4r1t4s", ids)
 
     def test_capability_parity_endpoint(self):
         response = self.client.get("/capability-parity")
@@ -1888,6 +1896,14 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["mode"], "defensive-only")
         self.assertEqual(payload["templates"][0]["id"], "ai_misuse")
+
+    def test_prompt_leakage_roe_endpoint(self):
+        response = self.client.get("/security-roe?template=cl4r1t4s")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "defensive-only")
+        self.assertEqual(payload["templates"][0]["id"], "prompt_leakage")
 
     def test_local_beta_status_endpoint(self):
         response = self.client.get("/local/beta/status")
