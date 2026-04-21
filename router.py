@@ -1165,6 +1165,10 @@ def route_stream(user_input: str) -> tuple:
         "decepticon",
         "claude code best practice",
         "claude-code-best-practice",
+        "agentic-stack",
+        "portable agent brain",
+        "portable .agent",
+        "same brain",
     )):
         return _s(external_agent_patterns.summary_text()), "Status"
     if any(p in lower for p in (
