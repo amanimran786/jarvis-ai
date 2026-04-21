@@ -41,6 +41,7 @@ import json
 import os
 import atexit
 import time
+import re
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -848,6 +849,17 @@ def _print_doctor() -> None:
 def _console_help() -> str:
     return "\n".join(
         [
+            "Plain English works here. Slash commands are shortcuts, not the main interface.",
+            "",
+            "Try:",
+            "  show doctor",
+            "  what models are installed?",
+            "  verify this diff",
+            "  run the tests",
+            "  fix the failing auth test",
+            "  start a task to summarize the repo",
+            "  what can we use from agentic-stack?",
+            "",
             "Jarvis console commands:",
             "  /help                 Show this help",
             "  /status               Show daemon and runtime status",
@@ -895,7 +907,7 @@ def _console_help() -> str:
             "  /code-lite <prompt>   Quick isolated coding task",
             "  /code-ultra <prompt>  Isolated coding task with maximum compression",
             "",
-            "Any non-slash input is sent as a normal chat message.",
+            "If plain English does not match a local console action, Jarvis sends it as normal chat.",
         ]
     )
 
@@ -914,7 +926,7 @@ def _banner_text() -> str:
             "Jarvis Console",
             f"Mode: {mode}   Effort: {_CONSOLE_STATE['effort']}   Status: {status}",
             os.getcwd(),
-            "Type /help for commands.",
+            "Ask naturally, or type /help for shortcuts.",
         ]
     )
 
@@ -1014,6 +1026,184 @@ def _deny_pending_shell_command() -> int:
     return 0
 
 
+def _strip_polite_prefix(text: str) -> str:
+    cleaned = text.strip()
+    while cleaned:
+        updated = re.sub(
+            r"^\s*(?:jarvis[, ]+|please\s+|can you\s+|could you\s+|would you\s+|i want you to\s+)",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
+        if updated == cleaned:
+            return cleaned
+        cleaned = updated
+    return cleaned
+
+
+def _extract_after_prefix(text: str, patterns: tuple[str, ...]) -> str:
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .:")
+    return ""
+
+
+def _looks_like_shell_payload(command: str) -> bool:
+    lower = command.strip().lower()
+    if not lower:
+        return False
+    executable_prefixes = (
+        "ls", "pwd", "date", "whoami", "which", "git", "python", "python3",
+        "pytest", "npm", "pnpm", "yarn", "uv", "make", "bash", "zsh",
+        "ollama", "rg", "grep", "find", "cat", "sed", "head", "tail",
+        "curl", "df", "du", "ps",
+    )
+    first = lower.split(maxsplit=1)[0]
+    return (
+        first in executable_prefixes
+        or lower.startswith("./")
+        or lower.startswith("/")
+        or " && " in lower
+        or " | " in lower
+    )
+
+
+def _looks_like_code_task(text: str, lower: str) -> bool:
+    if any(term in lower for term in (
+        "code status",
+        "verify this diff",
+        "verification plan",
+        "how should i verify",
+    )):
+        return False
+    action = re.match(
+        r"^(?:fix|debug|implement|add|update|change|refactor|write|create|build|test|investigate|clean up|improve)\b",
+        lower,
+    )
+    code_context = any(term in lower for term in (
+        "repo", "repository", "codebase", "code", "file", "files", "test",
+        "tests", "bug", "feature", "endpoint", "api", "cli", "console",
+        "function", "class", "module", "import", "script",
+    ))
+    return bool(action and code_context)
+
+
+def _handle_natural_console_intent(text: str) -> int | None | object:
+    normalized = _strip_polite_prefix(text)
+    lower = normalized.lower().strip()
+    if not lower:
+        return 0
+
+    if lower in {"exit", "quit", "close", "leave", "stop console"}:
+        return None
+    if lower in {"help", "commands", "show commands", "what can you do", "how do i use this"}:
+        print(_console_help())
+        return 0
+    if lower in {"clear", "clear screen", "clear the screen", "reset screen"}:
+        print("\033c", end="")
+        return 0
+
+    if any(term in lower for term in ("show doctor", "run doctor", "doctor check", "health check", "diagnose jarvis", "is jarvis healthy")):
+        _print_doctor()
+        return 0
+    if any(term in lower for term in ("show status", "runtime status", "daemon status", "is jarvis online")):
+        _print_status()
+        return 0
+    if any(term in lower for term in ("show permissions", "permission status", "write gates", "self improve gates")):
+        _print_permissions()
+        return 0
+    if lower.startswith("switch to ") and lower.endswith(" mode"):
+        return _set_mode(lower.removeprefix("switch to ").removesuffix(" mode").strip())
+    effort = _extract_after_prefix(normalized, (r"(?:set|use|switch to)\s+effort\s+(low|medium|high|xhigh)$",))
+    if effort:
+        return _set_effort(effort)
+
+    if any(term in lower for term in ("model fleet", "models installed", "models are installed", "installed models", "local models", "training lanes", "free training")):
+        _print_model_fleet()
+        return 0
+    if any(term in lower for term in ("verify this diff", "verification plan", "how should i verify", "verify the code")):
+        _print_verify_plan()
+        return 0
+    if any(term in lower for term in ("code status", "repo status", "what changed", "changed files", "workbench status")):
+        _print_code_status()
+        return 0
+    if any(term in lower for term in ("context budget", "token budget", "save context", "stop burning tokens")):
+        _print_context_budget()
+        return 0
+    if any(term in lower for term in ("production readiness", "production ready", "free readiness", "operational ready")):
+        _print_production_readiness()
+        return 0
+    if any(term in lower for term in ("capability parity", "frontier parity", "like claude", "like chatgpt", "like codex")):
+        _print_capability_parity()
+        return 0
+    if any(term in lower for term in ("capability eval", "eval coverage", "golden cases")):
+        _print_capability_evals("")
+        return 0
+    if "security roe" in lower or "rules of engagement" in lower:
+        _print_security_roe("")
+        return 0
+    if "agentic-stack" in lower:
+        _print_agent_patterns("agentic-stack")
+        return 0
+    if any(term in lower for term in ("agent patterns", "external agent", "what can we use from")):
+        _print_agent_patterns("")
+        return 0
+
+    if any(term in lower for term in ("show tasks", "list tasks", "task list", "what tasks")):
+        _print_tasks("")
+        return 0
+    if any(term in lower for term in ("show agents", "list agents", "managed agents")):
+        _print_agents()
+        return 0
+    if any(term in lower for term in ("show memory", "memory snapshot", "what do you remember")):
+        _print_memory()
+        return 0
+    if any(term in lower for term in ("show vault", "vault status", "brain status")):
+        _print_vault_status()
+        return 0
+    if any(term in lower for term in ("show skills", "list skills")):
+        _print_skills()
+        return 0
+    if any(term in lower for term in ("show connectors", "list connectors")):
+        _print_connectors()
+        return 0
+    if any(term in lower for term in ("show plugins", "list plugins")):
+        _print_plugins()
+        return 0
+
+    command = _extract_after_prefix(normalized, (
+        r"(?:run|execute)\s+(.+)$",
+        r"(?:shell|terminal)\s*:\s*(.+)$",
+    ))
+    if command:
+        if command.lower() in {"the tests", "tests", "all tests", "test suite"}:
+            return _run_shell_command("python3 -m pytest -q")
+        if _looks_like_shell_payload(command):
+            return _run_shell_command(command)
+
+    task = _extract_after_prefix(normalized, (
+        r"(?:start|create|queue|run)\s+(?:a\s+)?task\s+(?:to\s+)?(.+)$",
+        r"(?:have an agent|ask an agent)\s+(?:to\s+)?(.+)$",
+    ))
+    if task:
+        return stream_task(task)
+
+    code_task = _extract_after_prefix(normalized, (
+        r"(?:start|create|queue|run)\s+(?:a\s+)?code\s+task\s+(?:to\s+)?(.+)$",
+        r"(?:code|work on the code)\s*:\s*(.+)$",
+    ))
+    if code_task:
+        return stream_task(code_task, kind="code", terse_mode="full", isolated_workspace=True)
+    if _looks_like_code_task(normalized, lower):
+        return stream_task(normalized, kind="code", terse_mode="full", isolated_workspace=True)
+
+    return _NATURAL_INTENT_UNMATCHED
+
+
+_NATURAL_INTENT_UNMATCHED = object()
+
+
 def _handle_console_command(line: str) -> int | None:
     text = (line or "").strip()
     if not text:
@@ -1021,6 +1211,9 @@ def _handle_console_command(line: str) -> int | None:
     if text.startswith("!"):
         return _run_shell_command(text[1:].strip())
     if not text.startswith("/"):
+        natural_result = _handle_natural_console_intent(text)
+        if natural_result is not _NATURAL_INTENT_UNMATCHED:
+            return natural_result
         return _stream_chat(text)
 
     command, _, raw_args = text[1:].partition(" ")
