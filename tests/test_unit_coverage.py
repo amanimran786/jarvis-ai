@@ -2983,6 +2983,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         verify_mock.assert_called_once_with()
 
+    def test_model_fleet_command_prints_fleet(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_model_fleet") as fleet_mock:
+            result = jarvis_cli._handle_console_command("/model-fleet")
+
+        self.assertEqual(result, 0)
+        fleet_mock.assert_called_once_with()
+
     def test_agent_patterns_command_prints_registry(self):
         import jarvis_cli
 
