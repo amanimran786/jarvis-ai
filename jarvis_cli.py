@@ -634,6 +634,38 @@ def _print_production_readiness() -> None:
         print(f"  - {constraint}")
 
 
+def _print_model_fleet() -> None:
+    payload = get("/local/model-fleet")
+    print(payload.get("purpose") or "Local model fleet")
+    print(f"Installed : {payload.get('installed_count', 0)} models")
+    installed = payload.get("installed_models") or []
+    if installed:
+        print("Models")
+        for model in installed:
+            print(f"  - {model}")
+    roles = payload.get("configured_roles") or {}
+    ready = payload.get("ready_roles") or {}
+    print("Configured Roles")
+    for role, model in roles.items():
+        print(f"  {role}: {model} ({'ready' if ready.get(role) else 'missing'})")
+    print("Recommended Next")
+    next_items = payload.get("recommended_next") or []
+    if next_items:
+        for item in next_items:
+            print(f"  {item.get('ollama_tag')}: {item.get('pull_command')} -> {item.get('why')}")
+    else:
+        print("  none until evals show a gap")
+    print("Training Lanes")
+    for lane in payload.get("training_lanes", []):
+        print(f"  {lane.get('id')}: {lane.get('status')} | {lane.get('cost')}")
+        print(f"    action: {lane.get('action')}")
+        print(f"    caveat: {lane.get('caveat')}")
+    policy = payload.get("policy") or {}
+    print("Policy")
+    print(f"  download_all_models: {policy.get('download_all_models', 'no')}")
+    print(f"  hosting: {policy.get('hosting', '')}")
+
+
 def _print_security_roe(template: str = "") -> None:
     suffix = ""
     if template:
@@ -848,6 +880,7 @@ def _console_help() -> str:
             "  /parity               Show local frontier capability parity",
             "  /capability-evals [g] Show eval coverage for local capability claims",
             "  /production-readiness Show truthful production/free-use readiness",
+            "  /model-fleet          Show local LLM fleet and free training lanes",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -1066,6 +1099,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"production-readiness", "prod", "prod-ready", "free-readiness"}:
         _print_production_readiness()
         return 0
+    if command in {"model-fleet", "models", "local-models", "training-lanes"}:
+        _print_model_fleet()
+        return 0
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
@@ -1280,6 +1316,10 @@ def main():
 
     if flag in {"--production-readiness", "--prod", "--prod-ready", "--free-readiness"}:
         _print_production_readiness()
+        return
+
+    if flag in {"--model-fleet", "--models", "--local-models", "--training-lanes"}:
+        _print_model_fleet()
         return
 
     if flag in {"--security-roe", "--roe"}:
