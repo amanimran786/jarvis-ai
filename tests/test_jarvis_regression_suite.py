@@ -14,6 +14,7 @@ from local_runtime import local_beta
 from local_runtime import local_model_automation
 from local_runtime import local_model_eval
 from local_runtime import local_training
+from local_runtime import model_fleet
 import memory
 import model_router
 from desktop import overlay
@@ -1334,6 +1335,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Jarvis coder workbench", text)
         self.assertIn("Verify plan", text)
 
+    def test_model_fleet_fast_path(self):
+        with patch("router.model_fleet.summary_text", return_value="Local model fleet: installed 3 models."):
+            stream, label = router.route_stream("Can we use Google Colab training lanes and download all local LLMs?")
+            text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("Local model fleet", text)
+
     def test_external_agent_pattern_fast_path(self):
         stream, label = router.route_stream("What can we use from GBrain and Decepticon for Jarvis?")
         text = "".join(stream)
@@ -1892,6 +1900,18 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("semantic_memory", payload["capabilities"])
         self.assertIn("vision_status", payload["capabilities"])
         self.assertIn("vision_status_detail", payload["capabilities"])
+        self.assertIn("model_fleet", payload["capabilities"])
+
+    def test_local_model_fleet_endpoint(self):
+        with patch("local_runtime.model_fleet.brain_ollama.list_local_models", return_value=["qwen2.5-coder:7b", "deepseek-r1:14b"]):
+            response = self.client.get("/local/model-fleet")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["policy"]["download_all_models"], "no")
+        self.assertIn("training_lanes", payload)
+        self.assertIn("recommended_next", payload)
+        self.assertIn("qwen2.5-coder:7b", payload["installed_models"])
 
     def test_local_training_run_endpoint_passes_expert_distill_limit(self):
         captured = {}
@@ -3407,6 +3427,18 @@ class CallPrivacyTests(unittest.TestCase):
 
 
 class LocalTrainingTests(unittest.TestCase):
+    def test_model_fleet_marks_installed_and_keeps_colab_bounded(self):
+        with patch("local_runtime.model_fleet.brain_ollama.list_local_models", return_value=["qwen2.5-coder:7b", "deepseek-r1:14b"]):
+            status = model_fleet.fleet_status()
+
+        candidates = {item["id"]: item for item in status["candidates"]}
+        lanes = {item["id"]: item for item in status["training_lanes"]}
+        self.assertTrue(candidates["qwen2_5_coder_7b"]["installed"])
+        self.assertFalse(candidates["qwen3_coder_30b"]["installed"])
+        self.assertEqual(status["policy"]["download_all_models"], "no")
+        self.assertEqual(lanes["google_colab_gemma_lora"]["status"], "external_optional")
+        self.assertIn("not guaranteed", lanes["google_colab_gemma_lora"]["cost"])
+
     def test_record_teacher_example_writes_curated_training_row(self):
         captured = {}
 

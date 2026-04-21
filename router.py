@@ -37,6 +37,7 @@ from local_runtime import local_model_eval
 from local_runtime import local_model_automation
 from local_runtime import local_beta
 from local_runtime import local_model_benchmark
+from local_runtime import model_fleet
 import interview_profile
 import semantic_memory as _smem
 import specialized_agents
@@ -1133,6 +1134,26 @@ def route_stream(user_input: str) -> tuple:
         "repo grounded coding",
     )):
         return _s(coder_workbench.summary_text()), "Status"
+    if any(p in lower for p in (
+        "model fleet",
+        "local model fleet",
+        "local llm",
+        "local llms",
+        "download all the local",
+        "download every model",
+        "download all models",
+        "ollama models",
+        "free training lane",
+        "free training lanes",
+        "google colab",
+        "colab training",
+        "teach jarvis without",
+        "train jarvis for free",
+        "self learn",
+        "self-learning",
+        "host it for free",
+    )):
+        return _s(model_fleet.summary_text()), "Status"
     if any(p in lower for p in (
         "external agent pattern",
         "agent pattern intake",

@@ -121,6 +121,7 @@ hiddenimports = sorted(set(
         "local_runtime.local_model_automation",
         "local_runtime.local_model_eval",
         "local_runtime.local_training",
+        "local_runtime.model_fleet",
         "local_runtime.local_kokoro_tts",
         "local_runtime.local_stt",
         "local_runtime.local_tts",

@@ -41,6 +41,7 @@ Core note set:
 - [[86 Capability Eval Harness]] for tying capability claims to local regression cases
 - [[87 Production Readiness Contract]] for keeping readiness and free-use claims bounded by live runtime gates
 - [[88 Coder Workbench]] for repo-grounded terminal coding status and verification plans
+- [[89 Local Model Fleet]] for local LLM inventory, free training lanes, and gated self-learning
 - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time
 - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities
 - [[90 Task Hub]] for open distillation and product-memory tasks

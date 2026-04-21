@@ -25,13 +25,14 @@ related:
   - "[[86 Capability Eval Harness]]"
   - "[[87 Production Readiness Contract]]"
   - "[[88 Coder Workbench]]"
+  - "[[89 Local Model Fleet]]"
 ---
 
 # Frontier Capability Parity
 
 Purpose: keep Jarvis's "as capable as Claude, GPT, Codex, Gemini, and Grok locally" goal measurable.
 
-Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]], [[87 Production Readiness Contract]], [[88 Coder Workbench]]
+Linked notes: [[80 Jarvis Roadmap]], [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]], [[85 Defensive Security ROE]], [[86 Capability Eval Harness]], [[87 Production Readiness Contract]], [[88 Coder Workbench]], [[89 Local Model Fleet]]
 
 Use this note when deciding what to build next for the local-first product.
 
@@ -74,6 +75,7 @@ The scorecard should answer:
 The next useful moves should close real product gaps:
 
 - repo-map and verification helpers for coding-agent work
+- local model fleet and free-training-lane status for choosing what to pull, train, and promote next
 - packaged voice end-to-end reliability
 - richer screenshot and UI-understanding smoke tests
 - portable skill export/import compatibility

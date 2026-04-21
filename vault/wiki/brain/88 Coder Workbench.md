@@ -21,13 +21,14 @@ related:
   - "[[84 Frontier Capability Parity]]"
   - "[[86 Capability Eval Harness]]"
   - "[[87 Production Readiness Contract]]"
+  - "[[89 Local Model Fleet]]"
 ---
 
 # Coder Workbench
 
 Purpose: make Jarvis's terminal coding loop more like a local Claude/Codex console without losing repo grounding.
 
-Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[84 Frontier Capability Parity]], [[86 Capability Eval Harness]], [[87 Production Readiness Contract]]
+Linked notes: [[78 AI Runtime Agent Engineering Principles]], [[82 Context Budget Discipline]], [[84 Frontier Capability Parity]], [[86 Capability Eval Harness]], [[87 Production Readiness Contract]], [[89 Local Model Fleet]]
 
 Jarvis now exposes a repo-aware coding workbench through:
 
@@ -51,6 +52,8 @@ The coder workbench should answer:
 ## Rule
 
 Jarvis should not ask the model to invent a verification strategy when git state can generate one deterministically.
+
+Jarvis should also ask [[89 Local Model Fleet]] which local coding model is installed or worth pulling before assuming a Claude/Codex-style terminal loop is model-ready.
 
 The local coding loop is:
 

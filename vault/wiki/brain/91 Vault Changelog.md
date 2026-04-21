@@ -175,3 +175,10 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[88 Coder Workbench]] as the terminal-native coding loop for git state, changed files, and deterministic verification plans
 - added `/coder/status`, `/coder/verify-plan`, `jarvis --code-status`, and `jarvis --verify-plan`
 - added a coding-agent eval case so the workbench is treated as part of the local Claude/Codex parity path
+
+### Local model fleet and free training lanes
+
+- added [[89 Local Model Fleet]] as the canonical brain note for local LLM inventory, role-based model pulls, free training lanes, and self-learning promotion gates
+- added `/local/model-fleet`, `jarvis --model-fleet`, and console `/model-fleet`
+- recorded that Google Colab and Unsloth can be useful training labs for LoRA/SFT/GRPO experiments, but not reliable 24/7 Jarvis hosting
+- recorded that Jarvis should not download every local model; it should install by role, measure, and promote through evals

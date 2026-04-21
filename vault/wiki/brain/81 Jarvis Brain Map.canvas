@@ -172,6 +172,15 @@
       "height": 220
     },
     {
+      "id": "modelfleet",
+      "type": "file",
+      "file": "89 Local Model Fleet.md",
+      "x": 1960,
+      "y": 620,
+      "width": 340,
+      "height": 220
+    },
+    {
       "id": "overview",
       "type": "file",
       "file": "../overview.md",
@@ -404,6 +413,22 @@
       "fromSide": "left",
       "toSide": "right",
       "label": "quality"
+    },
+    {
+      "id": "e20b",
+      "fromNode": "roadmap",
+      "toNode": "modelfleet",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "label": "fleet"
+    },
+    {
+      "id": "e20c",
+      "fromNode": "modelfleet",
+      "toNode": "localreasoning",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "label": "runtime"
     },
     {
       "id": "e21",

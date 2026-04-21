@@ -17,6 +17,7 @@ Endpoints:
   POST /memory/forget — forget by keyword
   GET  /mode          — current model routing mode
   GET  /production-readiness — truthful local/free/production readiness contract
+  GET  /local/model-fleet — local Ollama fleet and free training-lane status
   POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"|"open-source"}
 """
 
@@ -46,6 +47,7 @@ from local_runtime import local_training
 from local_runtime import local_model_eval
 from local_runtime import local_model_automation
 from local_runtime import local_beta
+from local_runtime import model_fleet
 import behavior_hooks
 import capability_evals
 import capability_parity
@@ -1033,6 +1035,11 @@ def get_local_beta_status():
     return {"ok": True, "status": local_beta.status()}
 
 
+@app.get("/local/model-fleet")
+def get_local_model_fleet():
+    return model_fleet.fleet_status()
+
+
 @app.get("/local/capabilities")
 def get_local_capabilities():
     from brains import brain_ollama
@@ -1046,6 +1053,7 @@ def get_local_capabilities():
         "capabilities": {
             **brain_ollama.local_capabilities(),
             "reasoning_route": model_router.describe_runtime_for(example_query),
+            "model_fleet": model_fleet.fleet_status(),
             "stt": local_stt.status(),
             "tts": local_tts.status(),
             "semantic_memory": semantic_memory.status(),
