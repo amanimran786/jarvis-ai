@@ -11,6 +11,31 @@ from typing import Any
 
 PATTERNS: tuple[dict[str, Any], ...] = (
     {
+        "id": "agentic-stack",
+        "name": "agentic-stack",
+        "category": "portable-brain",
+        "source_url": "https://github.com/codejunkie99/agentic-stack",
+        "verdict": "adapt",
+        "useful_patterns": [
+            "portable .agent/ bridge folder shared by multiple coding-agent harnesses",
+            "four memory layers with retention policies: working, episodic, semantic, personal",
+            "host-agent review tools for staged candidate lessons before graduation",
+            "recall-before-action hook for deployments, migrations, debugging, refactors, and timestamp work",
+        ],
+        "jarvis_seams": [
+            "AGENTS.md",
+            "semantic_memory.py",
+            "skills/index.json",
+            "vault/wiki/brain/79 Local Skill Loop.md",
+            "vault/wiki/brain/83 External Agent Pattern Intake.md",
+        ],
+        "risks": [
+            "do not let a foreign installer overwrite Jarvis's AGENTS.md, CLAUDE.md, or skill registry",
+            "keep graduated lessons review-gated; no unattended semantic-memory mutation",
+            "treat .agent/ as an export/compatibility surface before making it Jarvis's canonical brain",
+        ],
+    },
+    {
         "id": "gbrain",
         "name": "GBrain",
         "category": "memory",
