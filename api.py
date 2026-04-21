@@ -447,6 +447,15 @@ class LocalTrainingColabRequest(BaseModel):
     target: str = "qwen2.5-coder:7b"
 
 
+class LocalTrainingPreferenceExportRequest(BaseModel):
+    limit: int = 120
+
+
+class LocalTrainingPreferenceColabRequest(BaseModel):
+    preference_path: str = ""
+    target: str = "qwen2.5-coder:7b"
+
+
 class LocalTrainingTeachRequest(BaseModel):
     prompt: str
     answer: str
@@ -1136,6 +1145,23 @@ def build_local_training_colab_handoff(req: LocalTrainingColabRequest):
     if req.target:
         kwargs["target"] = req.target
     result = local_training.build_colab_handoff(**kwargs)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/preferences")
+def export_local_training_preferences(req: LocalTrainingPreferenceExportRequest):
+    result = local_training.export_preference_dataset(limit=req.limit)
+    return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
+
+
+@app.post("/local/training/rl-colab")
+def build_local_training_preference_colab_handoff(req: LocalTrainingPreferenceColabRequest):
+    kwargs = {}
+    if req.preference_path:
+        kwargs["preference_path"] = req.preference_path
+    if req.target:
+        kwargs["target"] = req.target
+    result = local_training.build_colab_preference_handoff(**kwargs)
     return {"ok": result.get("ok", False), "message": local_training.result_text(result), "result": result}
 
 

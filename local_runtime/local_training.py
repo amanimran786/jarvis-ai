@@ -28,6 +28,7 @@ TRAINING_ROOT = REPO_ROOT / "training"
 EXPORTS_DIR = TRAINING_ROOT / "exports"
 DISTILLED_DIR = TRAINING_ROOT / "distilled"
 TEACHER_DIR = TRAINING_ROOT / "teacher_examples"
+PREFERENCES_DIR = TRAINING_ROOT / "preferences"
 MODELFILES_DIR = TRAINING_ROOT / "modelfiles"
 PACKS_DIR = TRAINING_ROOT / "packs"
 HANDOFFS_DIR = TRAINING_ROOT / "handoffs"
@@ -77,7 +78,7 @@ EXPERT_DISTILL_CASES = [
 
 
 def _ensure_dirs() -> None:
-    for path in (EXPORTS_DIR, DISTILLED_DIR, TEACHER_DIR, MODELFILES_DIR, PACKS_DIR, HANDOFFS_DIR):
+    for path in (EXPORTS_DIR, DISTILLED_DIR, TEACHER_DIR, PREFERENCES_DIR, MODELFILES_DIR, PACKS_DIR, HANDOFFS_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -551,6 +552,184 @@ def _build_colab_readme(target: str, preset: dict, handoff_dir: Path) -> str:
     )
 
 
+def _build_colab_preference_notebook(target: str, preset: dict, train_file: str, val_file: str) -> dict:
+    model_name = preset["unsloth_model"]
+    chat_template = preset["unsloth_chat_template"]
+    max_seq_length = preset["sequence_len"]
+    return _notebook(
+        [
+            _markdown_cell(
+                "\n".join(
+                    [
+                        "# Jarvis Preference RL Colab Trainer",
+                        "",
+                        "This notebook runs RLHF-style preference optimization on Jarvis preference pairs using an open model adapter.",
+                        "",
+                        "It is a training lab only. Free Colab GPU access is best-effort, not guaranteed, and trained adapters must pass local Jarvis evals before promotion.",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "from google.colab import drive",
+                        "drive.mount('/content/drive')",
+                        "",
+                        "# Copy this generated handoff folder into Google Drive, then adjust if you moved it.",
+                        "HANDOFF_DIR = '/content/drive/MyDrive/jarvis_preference_rl_handoff'",
+                        f"TRAIN_FILE = f'{{HANDOFF_DIR}}/data/{train_file}'",
+                        f"VAL_FILE = f'{{HANDOFF_DIR}}/data/{val_file}'",
+                        "OUTPUT_DIR = f'{HANDOFF_DIR}/outputs'",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "import json, pathlib, torch",
+                        "for path in (TRAIN_FILE, VAL_FILE):",
+                        "    if not pathlib.Path(path).exists():",
+                        "        raise FileNotFoundError(f'Missing {path}. Upload the handoff folder to Google Drive first.')",
+                        "print('GPU:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none')",
+                        "print('Train file:', TRAIN_FILE)",
+                        "print('Validation file:', VAL_FILE)",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "%%capture",
+                        "!pip install -U unsloth",
+                        "!pip install -U --no-deps trl peft accelerate bitsandbytes datasets",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "from datasets import load_dataset",
+                        "from trl import DPOTrainer, DPOConfig",
+                        "from unsloth import FastLanguageModel, is_bfloat16_supported",
+                        "from unsloth.chat_templates import get_chat_template",
+                        "",
+                        f"MODEL_NAME = '{model_name}'",
+                        f"CHAT_TEMPLATE = '{chat_template}'",
+                        f"MAX_SEQ_LENGTH = {max_seq_length}",
+                        "",
+                        "model, tokenizer = FastLanguageModel.from_pretrained(",
+                        "    model_name=MODEL_NAME,",
+                        "    max_seq_length=MAX_SEQ_LENGTH,",
+                        "    dtype=None,",
+                        "    load_in_4bit=True,",
+                        ")",
+                        "tokenizer = get_chat_template(tokenizer, chat_template=CHAT_TEMPLATE)",
+                        "model = FastLanguageModel.get_peft_model(",
+                        "    model,",
+                        "    r=16,",
+                        "    target_modules=['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj'],",
+                        "    lora_alpha=16,",
+                        "    lora_dropout=0,",
+                        "    bias='none',",
+                        "    use_gradient_checkpointing='unsloth',",
+                        "    random_state=3407,",
+                        ")",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "train_dataset = load_dataset('json', data_files=TRAIN_FILE, split='train')",
+                        "eval_dataset = load_dataset('json', data_files=VAL_FILE, split='train')",
+                        "",
+                        "def format_pair(row):",
+                        "    prompt_messages = [{'role': 'user', 'content': row['prompt']}]",
+                        "    chosen_messages = prompt_messages + [{'role': 'assistant', 'content': row['chosen']}]",
+                        "    rejected_messages = prompt_messages + [{'role': 'assistant', 'content': row['rejected']}]",
+                        "    return {",
+                        "        'prompt': tokenizer.apply_chat_template(prompt_messages, tokenize=False, add_generation_prompt=True),",
+                        "        'chosen': tokenizer.apply_chat_template(chosen_messages, tokenize=False, add_generation_prompt=False),",
+                        "        'rejected': tokenizer.apply_chat_template(rejected_messages, tokenize=False, add_generation_prompt=False),",
+                        "    }",
+                        "",
+                        "train_dataset = train_dataset.map(format_pair)",
+                        "eval_dataset = eval_dataset.map(format_pair)",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "args = DPOConfig(",
+                        "    output_dir=OUTPUT_DIR,",
+                        "    per_device_train_batch_size=1,",
+                        "    gradient_accumulation_steps=8,",
+                        "    warmup_steps=5,",
+                        "    num_train_epochs=1,",
+                        "    learning_rate=5e-6,",
+                        "    beta=0.1,",
+                        "    logging_steps=1,",
+                        "    optim='adamw_8bit',",
+                        "    lr_scheduler_type='linear',",
+                        "    fp16=not is_bfloat16_supported(),",
+                        "    bf16=is_bfloat16_supported(),",
+                        "    report_to='none',",
+                        ")",
+                        "",
+                        "try:",
+                        "    trainer = DPOTrainer(model=model, ref_model=None, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, processing_class=tokenizer)",
+                        "except TypeError:",
+                        "    trainer = DPOTrainer(model=model, ref_model=None, args=args, train_dataset=train_dataset, eval_dataset=eval_dataset, tokenizer=tokenizer)",
+                        "trainer.train()",
+                    ]
+                )
+            ),
+            _code_cell(
+                "\n".join(
+                    [
+                        "FINAL_ADAPTER = f'{OUTPUT_DIR}/final_preference_adapter'",
+                        "model.save_pretrained(FINAL_ADAPTER)",
+                        "tokenizer.save_pretrained(FINAL_ADAPTER)",
+                        "print('Saved preference adapter:', FINAL_ADAPTER)",
+                        "print('Next: bring this adapter back to the Mac, run Jarvis evals, and promote only if the gate passes.')",
+                    ]
+                )
+            ),
+        ]
+    )
+
+
+def _build_colab_preference_readme(target: str, preset: dict, handoff_dir: Path) -> str:
+    return "\n".join(
+        [
+            f"# Jarvis Preference RL Handoff for {preset['label']}",
+            "",
+            "This folder prepares Jarvis preference pairs for RLHF-style adapter training in Google Colab.",
+            "",
+            "This is not magic frontier parity. It is a controlled preference-learning lane: bad answers become rejected samples, corrected Jarvis answers become chosen samples, and promotion stays eval-gated locally.",
+            "",
+            "Flow:",
+            "1. Copy this folder to Google Drive as `MyDrive/jarvis_preference_rl_handoff` or edit `HANDOFF_DIR` in the notebook.",
+            "2. Open `Jarvis_Preference_RL_Trainer.ipynb` in Colab.",
+            "3. Select Runtime > Change runtime type > GPU.",
+            "4. Run the notebook cells in order.",
+            "5. Copy the trained adapter back to the Mac.",
+            "6. Run Jarvis local evals and promote only if the candidate beats the baseline.",
+            "",
+            "Guardrails:",
+            "- Do not train on private secrets, prompt leaks, or unreviewed hostile prompt text.",
+            "- Do not promote an adapter without local eval evidence.",
+            "- Keep Colab as an interactive training lab, not a 24/7 Jarvis host.",
+            "",
+            f"Target preset: {target}",
+            f"Hugging Face model: {preset['hf_model']}",
+            f"Generated in: {handoff_dir}",
+            "",
+        ]
+    )
+
+
 def _candidate_interactions(limit: int = 200, cloud_only: bool = True) -> list[dict]:
     data = evals.load()
     failures_by_interaction = _linked_failure_map(data)
@@ -640,6 +819,109 @@ def _teacher_examples() -> list[dict]:
     for path in sorted(TEACHER_DIR.glob("*.jsonl")):
         examples.extend(_read_jsonl(path))
     return examples
+
+
+def _assistant_answer_for_prompt(example: dict) -> tuple[str, str]:
+    prompt = ""
+    answer = ""
+    for message in example.get("messages", []):
+        if message.get("role") == "user" and message.get("content"):
+            prompt = str(message["content"]).strip()
+        if message.get("role") == "assistant" and message.get("content"):
+            answer = str(message["content"]).strip()
+    return prompt, answer
+
+
+def _trusted_chosen_answers() -> dict[str, dict]:
+    answers: dict[str, dict] = {}
+    for source_name, rows, priority in (
+        ("manual_teacher", _teacher_examples(), 4),
+        ("failure_distillation", _read_many_jsonl(DISTILLED_DIR.glob("jarvis_distilled_*.jsonl")), 3),
+        ("expert_distillation", _read_many_jsonl(DISTILLED_DIR.glob("jarvis_expert_distilled_*.jsonl")), 2),
+    ):
+        for row in rows:
+            prompt, answer = _assistant_answer_for_prompt(row)
+            if not prompt or not answer:
+                continue
+            existing = answers.get(prompt)
+            if existing is None or priority >= existing["priority"]:
+                answers[prompt] = {"answer": answer, "source": source_name, "priority": priority}
+    return answers
+
+
+def _read_many_jsonl(paths) -> list[dict]:
+    rows: list[dict] = []
+    for path in sorted(paths):
+        rows.extend(_read_jsonl(path))
+    return rows
+
+
+def export_preference_dataset(limit: int = 120) -> dict:
+    _ensure_dirs()
+    data = evals.load()
+    trusted = _trusted_chosen_answers()
+    later_successes: dict[str, dict] = {}
+    for interaction in data.get("interactions", []):
+        prompt = (interaction.get("user_input") or "").strip()
+        response = (interaction.get("response") or "").strip()
+        if not prompt or not response:
+            continue
+        if interaction.get("id") in _linked_failure_map(data):
+            continue
+        if response.lower().startswith("local model error"):
+            continue
+        later_successes[prompt] = {"answer": response, "source": "later_successful_interaction", "priority": 1}
+
+    pairs = []
+    skipped = 0
+    seen: set[tuple[str, str, str]] = set()
+    for failure in reversed(data.get("failures", [])):
+        prompt = (failure.get("user_input") or "").strip()
+        rejected = (failure.get("response") or "").strip()
+        if not prompt or not rejected:
+            skipped += 1
+            continue
+        chosen_payload = trusted.get(prompt) or later_successes.get(prompt)
+        if not chosen_payload:
+            skipped += 1
+            continue
+        chosen = chosen_payload["answer"].strip()
+        if not chosen or chosen == rejected:
+            skipped += 1
+            continue
+        key = (prompt, chosen, rejected)
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.append(
+            {
+                "prompt": prompt,
+                "chosen": chosen,
+                "rejected": rejected,
+                "meta": {
+                    "failure_id": failure.get("id", ""),
+                    "interaction_id": failure.get("interaction_id", ""),
+                    "category": failure.get("category", ""),
+                    "issue": failure.get("issue", ""),
+                    "chosen_source": chosen_payload["source"],
+                    "created_at": _timestamp(),
+                    "policy": "Use for preference optimization only after local eval review; do not include secrets or prompt leaks.",
+                },
+            }
+        )
+        if len(pairs) >= limit:
+            break
+
+    pairs.reverse()
+    path = PREFERENCES_DIR / f"jarvis_preferences_{_timestamp()}.jsonl"
+    _write_jsonl(path, pairs)
+    return {
+        "ok": True,
+        "path": str(path),
+        "pair_count": len(pairs),
+        "skipped_failures": skipped,
+        "source": "eval_failures_plus_trusted_corrections",
+    }
 
 
 def export_sft_dataset(limit: int = 150, cloud_only: bool = True) -> dict:
@@ -1146,6 +1428,104 @@ def build_colab_handoff(
     }
 
 
+def build_colab_preference_handoff(
+    preference_path: str | None = None,
+    target: str = COLAB_DEFAULT_TARGET,
+) -> dict:
+    _ensure_dirs()
+    target = (target or COLAB_DEFAULT_TARGET).strip()
+    if target not in MODEL_PRESETS:
+        return {"ok": False, "error": f"Unknown Colab preference target: {target}"}
+
+    preference_result = None
+    resolved_preferences = Path(preference_path) if preference_path else None
+    if not resolved_preferences:
+        preference_result = export_preference_dataset()
+        resolved_preferences = Path(preference_result["path"])
+    if not resolved_preferences.exists():
+        return {"ok": False, "error": f"Preference dataset not found: {resolved_preferences}"}
+
+    pairs = _read_jsonl(resolved_preferences)
+    if not pairs:
+        return {
+            "ok": False,
+            "error": (
+                "Preference dataset is empty. Add corrected teacher examples for recent Jarvis failures, "
+                "then run the preference export again."
+            ),
+            "preference_path": str(resolved_preferences),
+            "preference_export": preference_result,
+        }
+
+    train_pairs, val_pairs = _split_examples(pairs, val_fraction=0.1)
+    if not train_pairs:
+        return {"ok": False, "error": "Preference dataset did not contain enough pairs to create a train split."}
+    if not val_pairs:
+        val_pairs = train_pairs[-1:]
+
+    preset = MODEL_PRESETS[target]
+    stamp = _timestamp()
+    handoff_dir = HANDOFFS_DIR / f"{stamp}_preference_rl_{preset['slug']}"
+    data_dir = handoff_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    train_file = "train_preferences.jsonl"
+    val_file = "val_preferences.jsonl"
+    train_path = data_dir / train_file
+    val_path = data_dir / val_file
+    notebook_path = handoff_dir / "Jarvis_Preference_RL_Trainer.ipynb"
+    readme_path = handoff_dir / "README.md"
+    manifest_path = handoff_dir / "manifest.json"
+
+    _write_handoff_jsonl(train_path, train_pairs)
+    _write_handoff_jsonl(val_path, val_pairs)
+    notebook_path.write_text(
+        json.dumps(_build_colab_preference_notebook(target, preset, train_file, val_file), indent=2),
+        encoding="utf-8",
+    )
+    readme_path.write_text(_build_colab_preference_readme(target, preset, handoff_dir), encoding="utf-8")
+
+    manifest = {
+        "kind": "preference_rl_handoff",
+        "target": target,
+        "label": preset["label"],
+        "source_preferences": str(resolved_preferences),
+        "train_pairs": len(train_pairs),
+        "val_pairs": len(val_pairs),
+        "hf_model": preset["hf_model"],
+        "unsloth_model": preset["unsloth_model"],
+        "notebook": str(notebook_path),
+        "readme": str(readme_path),
+        "data": {
+            "train_preferences": str(train_path),
+            "val_preferences": str(val_path),
+        },
+        "policy": {
+            "method": "RLHF-style DPO preference optimization",
+            "google_service": "Google Colab",
+            "free_tier": "best-effort interactive training lab; resources are not guaranteed",
+            "not_for": "24/7 hosting, prompt-leak training, secret extraction, or unattended model promotion",
+            "promotion_gate": "Import the adapter locally, run Jarvis evals against the baseline, then promote only if the gate clears.",
+        },
+        "preference_export": preference_result,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    return {
+        "ok": True,
+        "kind": "preference_rl_handoff",
+        "target": target,
+        "source_preferences": str(resolved_preferences),
+        "dir": str(handoff_dir),
+        "manifest": str(manifest_path),
+        "notebook": str(notebook_path),
+        "readme": str(readme_path),
+        "train_pairs": len(train_pairs),
+        "val_pairs": len(val_pairs),
+        "preference_export": preference_result,
+    }
+
+
 def build_modelfile(base_model: str = LOCAL_DEFAULT, target_name: str = LOCAL_TUNED) -> dict:
     _ensure_dirs()
     modelfile_path = MODELFILES_DIR / f"{_safe_slug(target_name)}.Modelfile"
@@ -1177,6 +1557,7 @@ def status() -> dict:
     exports = sorted(EXPORTS_DIR.glob("*.jsonl"))
     distilled = sorted(DISTILLED_DIR.glob("*.jsonl"))
     teachings = sorted(TEACHER_DIR.glob("*.jsonl"))
+    preferences = sorted(PREFERENCES_DIR.glob("*.jsonl"))
     modelfiles = sorted(MODELFILES_DIR.glob("*.Modelfile"))
     packs = sorted(PACKS_DIR.glob("*.jsonl"))
     manifests = sorted(PACKS_DIR.glob("*.manifest.json"))
@@ -1185,6 +1566,7 @@ def status() -> dict:
         "exports": len(exports),
         "distilled": len(distilled),
         "teachings": len(teachings),
+        "preferences": len(preferences),
         "modelfiles": len(modelfiles),
         "packs": len(packs),
         "manifests": len(manifests),
@@ -1192,6 +1574,7 @@ def status() -> dict:
         "latest_export": str(exports[-1]) if exports else "",
         "latest_distilled": str(distilled[-1]) if distilled else "",
         "latest_teaching": str(teachings[-1]) if teachings else "",
+        "latest_preferences": str(preferences[-1]) if preferences else "",
         "latest_modelfile": str(modelfiles[-1]) if modelfiles else "",
         "latest_pack": str(packs[-1]) if packs else "",
         "latest_manifest": str(manifests[-1]) if manifests else "",
@@ -1230,6 +1613,16 @@ def result_text(result: dict) -> str:
         return (
             f"Built offline fine-tune handoff folders for {target_names} from {result['source_pack']}. "
             f"The splits contain {result['train_examples']} train examples and {result['val_examples']} validation examples."
+        )
+    if result.get("kind") == "preference_rl_handoff":
+        return (
+            f"Built a Google Colab preference-RL handoff for {result['target']} from {result['source_preferences']}. "
+            f"The notebook is at {result['notebook']} with {result['train_pairs']} train pairs and {result['val_pairs']} validation pairs."
+        )
+    if "pair_count" in result:
+        return (
+            f"Exported {result['pair_count']} Jarvis preference pairs for RLHF-style local-model training. "
+            f"The dataset is at {result['path']} and skipped {result.get('skipped_failures', 0)} failures without trusted corrections."
         )
     if "notebook" in result:
         return (

@@ -452,10 +452,12 @@ def _print_training_status() -> None:
     status = payload.get("status") or {}
     print("Local Training")
     print(f"Teachings : {status.get('teachings', 0)}")
+    print(f"Prefs     : {status.get('preferences', 0)}")
     print(f"Packs     : {status.get('packs', 0)}")
     print(f"Modelfiles: {status.get('modelfiles', 0)}")
     print(f"Handoffs  : {status.get('handoffs', 0)}")
     print(f"Latest teaching : {status.get('latest_teaching', '')}")
+    print(f"Latest prefs    : {status.get('latest_preferences', '')}")
     print(f"Latest pack     : {status.get('latest_pack', '')}")
     print(f"Latest modelfile: {status.get('latest_modelfile', '')}")
 
@@ -500,6 +502,32 @@ def _run_colab_training_handoff() -> int:
     policy = result.get("policy") or {}
     if policy.get("promotion_gate"):
         print(f"Gate    : {policy.get('promotion_gate')}")
+    return 0 if payload.get("ok") else 1
+
+
+def _run_preference_export() -> int:
+    payload = post("/local/training/preferences", {"limit": 120})
+    print(payload.get("message") or json.dumps(payload, indent=2))
+    result = payload.get("result") or {}
+    if result.get("path"):
+        print(f"Prefs    : {result.get('path')}")
+    if "skipped_failures" in result:
+        print(f"Skipped  : {result.get('skipped_failures')}")
+    return 0 if payload.get("ok") else 1
+
+
+def _run_preference_rl_handoff() -> int:
+    payload = post("/local/training/rl-colab", {"target": "qwen2.5-coder:7b"})
+    print(payload.get("message") or json.dumps(payload, indent=2))
+    result = payload.get("result") or {}
+    if result.get("dir"):
+        print(f"Handoff : {result.get('dir')}")
+    if result.get("notebook"):
+        print(f"Notebook: {result.get('notebook')}")
+    if result.get("readme"):
+        print(f"Readme  : {result.get('readme')}")
+    if result.get("source_preferences"):
+        print(f"Prefs   : {result.get('source_preferences')}")
     return 0 if payload.get("ok") else 1
 
 
@@ -963,6 +991,8 @@ def _console_help() -> str:
             "  /training-status      Show local training artifacts",
             "  /train-local          Build a local training pack without cloud distillation",
             "  /colab-handoff        Build Google Colab training handoff for an open LLM",
+            "  /preference-export    Export Jarvis preference pairs from failures and corrections",
+            "  /rl-colab-handoff     Build Colab DPO preference-RL handoff",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -1197,6 +1227,10 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
         return 0
     if any(term in lower for term in ("train jarvis", "train yourself", "run local training", "build training pack", "build a training pack")):
         return _run_local_training_pack()
+    if any(term in lower for term in ("preference export", "export preference", "preference pairs", "rl dataset", "dpo dataset")):
+        return _run_preference_export()
+    if any(term in lower for term in ("reinforcement learning", "reinforced learning", "preference rl", "rl colab", "dpo handoff", "rl handoff")):
+        return _run_preference_rl_handoff()
     if any(term in lower for term in ("google colab training", "colab handoff", "prepare colab", "free google training", "google free training", "teach open source llm")):
         return _run_colab_training_handoff()
     if any(term in lower for term in ("verify this diff", "verification plan", "how should i verify", "verify the code")):
@@ -1392,6 +1426,10 @@ def _handle_console_command(line: str) -> int | None:
         return _run_local_training_pack()
     if command in {"colab-handoff", "colab-training", "google-training"}:
         return _run_colab_training_handoff()
+    if command in {"preference-export", "preferences", "rl-export", "dpo-export"}:
+        return _run_preference_export()
+    if command in {"rl-colab-handoff", "rl-handoff", "dpo-handoff", "preference-rl"}:
+        return _run_preference_rl_handoff()
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
@@ -1621,6 +1659,12 @@ def main():
 
     if flag in {"--colab-handoff", "--colab-training", "--google-training"}:
         sys.exit(_run_colab_training_handoff())
+
+    if flag in {"--preference-export", "--preferences", "--rl-export", "--dpo-export"}:
+        sys.exit(_run_preference_export())
+
+    if flag in {"--rl-colab-handoff", "--rl-handoff", "--dpo-handoff", "--preference-rl"}:
+        sys.exit(_run_preference_rl_handoff())
 
     if flag in {"--security-roe", "--roe"}:
         template = sys.argv[2] if len(sys.argv) > 2 else ""

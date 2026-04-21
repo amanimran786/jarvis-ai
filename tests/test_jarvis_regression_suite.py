@@ -1342,6 +1342,15 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Status")
         self.assertIn("Local model fleet", text)
 
+    def test_preference_rl_fast_path_builds_handoff(self):
+        with patch("router.local_training.build_colab_preference_handoff", return_value={"ok": True, "kind": "preference_rl_handoff"}), \
+             patch("router.local_training.result_text", return_value="Built a Google Colab preference-RL handoff."):
+            stream, label = router.route_stream("Keep working on reinforcement learning for Jarvis.")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Local Model")
+        self.assertIn("preference-RL handoff", text)
+
     def test_external_agent_pattern_fast_path(self):
         stream, label = router.route_stream("What can we use from GBrain and Decepticon for Jarvis?")
         text = "".join(stream)
@@ -1994,6 +2003,42 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("Google Colab training handoff", payload["message"])
         handoff_mock.assert_called_once_with(pack_path="/tmp/pack.jsonl", target="qwen2.5-coder:7b")
+
+    def test_local_training_preferences_endpoint_exports_pairs(self):
+        with patch("api.local_training.export_preference_dataset", return_value={
+            "ok": True,
+            "path": "/tmp/preferences.jsonl",
+            "pair_count": 3,
+            "skipped_failures": 1,
+        }) as export_mock:
+            response = self.client.post("/local/training/preferences", json={"limit": 12})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("preference pairs", payload["message"])
+        export_mock.assert_called_once_with(limit=12)
+
+    def test_local_training_rl_colab_endpoint_builds_preference_handoff(self):
+        with patch("api.local_training.build_colab_preference_handoff", return_value={
+            "ok": True,
+            "kind": "preference_rl_handoff",
+            "target": "qwen2.5-coder:7b",
+            "source_preferences": "/tmp/preferences.jsonl",
+            "notebook": "/tmp/Jarvis_Preference_RL_Trainer.ipynb",
+            "train_pairs": 9,
+            "val_pairs": 1,
+        }) as handoff_mock:
+            response = self.client.post(
+                "/local/training/rl-colab",
+                json={"preference_path": "/tmp/preferences.jsonl", "target": "qwen2.5-coder:7b"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("preference-RL handoff", payload["message"])
+        handoff_mock.assert_called_once_with(preference_path="/tmp/preferences.jsonl", target="qwen2.5-coder:7b")
 
     def test_extensions_endpoint_exposes_skills_connectors_and_plugins(self):
         response = self.client.get("/extensions")
@@ -3510,6 +3555,8 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertTrue(candidates["qwen2_5_coder_7b"]["installed"])
         self.assertFalse(candidates["qwen3_coder_30b"]["installed"])
         self.assertEqual(status["policy"]["download_all_models"], "no")
+        self.assertEqual(lanes["preference_pairs"]["status"], "ready")
+        self.assertEqual(lanes["jarvis_colab_dpo"]["status"], "ready")
         self.assertEqual(lanes["google_colab_gemma_lora"]["status"], "external_optional")
         self.assertIn("not guaranteed", lanes["google_colab_gemma_lora"]["cost"])
 
@@ -3608,6 +3655,84 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertIn("not guaranteed", manifest["policy"]["free_tier"])
         self.assertIn("Qwen/Qwen2.5-Coder-7B-Instruct", notebook_text)
         self.assertIn("drive.mount", notebook_text)
+
+    def test_export_preference_dataset_pairs_failures_with_trusted_corrections(self):
+        fake_data = {
+            "interactions": [
+                {
+                    "id": "bad1",
+                    "user_input": "Explain optimistic locking",
+                    "response": "It locks everything optimistically.",
+                    "model": "Local",
+                }
+            ],
+            "failures": [
+                {
+                    "id": "fail1",
+                    "interaction_id": "bad1",
+                    "category": "general_quality",
+                    "issue": "Wrong mechanism.",
+                    "user_input": "Explain optimistic locking",
+                    "response": "It locks everything optimistically.",
+                    "model": "Local",
+                }
+            ],
+        }
+        teacher = {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "Explain optimistic locking"},
+                {"role": "assistant", "content": "Optimistic locking lets work proceed without holding a lock, then detects conflicting writes at commit time."},
+            ],
+            "meta": {"teacher_source": "manual_teacher"},
+        }
+        with TemporaryDirectory() as tmp:
+            preferences_dir = Path(tmp) / "preferences"
+            preferences_dir.mkdir(parents=True, exist_ok=True)
+            with patch("local_runtime.local_training._ensure_dirs"), \
+                 patch("local_runtime.local_training.PREFERENCES_DIR", preferences_dir), \
+                 patch("local_runtime.local_training.evals.load", return_value=fake_data), \
+                 patch("local_runtime.local_training._teacher_examples", return_value=[teacher]), \
+                 patch("local_runtime.local_training._read_many_jsonl", return_value=[]):
+                result = local_training.export_preference_dataset()
+
+            rows = [json.loads(line) for line in Path(result["path"]).read_text(encoding="utf-8").splitlines()]
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["pair_count"], 1)
+        self.assertEqual(rows[0]["prompt"], "Explain optimistic locking")
+        self.assertIn("without holding a lock", rows[0]["chosen"])
+        self.assertEqual(rows[0]["rejected"], "It locks everything optimistically.")
+
+    def test_build_colab_preference_handoff_writes_dpo_notebook_and_policy(self):
+        pair = {
+            "prompt": "Explain optimistic locking",
+            "chosen": "Optimistic locking detects conflicts at commit time.",
+            "rejected": "It locks everything optimistically.",
+            "meta": {"category": "general_quality"},
+        }
+        with TemporaryDirectory() as tmp:
+            preference_path = Path(tmp) / "preferences.jsonl"
+            rows = [pair for _ in range(6)]
+            preference_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            handoffs_dir = Path(tmp) / "handoffs"
+            with patch("local_runtime.local_training._ensure_dirs"), \
+                 patch("local_runtime.local_training.HANDOFFS_DIR", handoffs_dir):
+                result = local_training.build_colab_preference_handoff(
+                    preference_path=str(preference_path),
+                    target="qwen2.5-coder:7b",
+                )
+
+            manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+            notebook_text = Path(result["notebook"]).read_text(encoding="utf-8")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["train_pairs"], 5)
+        self.assertEqual(result["val_pairs"], 1)
+        self.assertEqual(manifest["kind"], "preference_rl_handoff")
+        self.assertEqual(manifest["policy"]["method"], "RLHF-style DPO preference optimization")
+        self.assertIn("DPOTrainer", notebook_text)
+        self.assertIn("final_preference_adapter", notebook_text)
 
     def test_colab_handoff_cycle_builds_pack_then_handoff(self):
         with patch("local_runtime.local_model_automation.local_training.build_training_pack", return_value={

@@ -3190,6 +3190,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         roe_mock.assert_called_once_with("ai")
 
+    def test_preference_export_command_runs_local_export(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_preference_export", return_value=0) as export_mock:
+            result = jarvis_cli._handle_console_command("/preference-export")
+
+        self.assertEqual(result, 0)
+        export_mock.assert_called_once_with()
+
+    def test_natural_reinforcement_learning_query_builds_rl_handoff(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_preference_rl_handoff", return_value=0) as handoff_mock:
+            result = jarvis_cli._handle_console_command("work on reinforcement learning for Jarvis")
+
+        self.assertEqual(result, 0)
+        handoff_mock.assert_called_once_with()
+
     def test_code_ultra_command_uses_isolated_terse_task(self):
         import jarvis_cli
 
