@@ -2596,6 +2596,12 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertIn("Never invent hardware specs, network details, router access", prompt)
         self.assertIn("Never simulate background work, hidden integrations, system administration, or tool use", prompt)
 
+    def test_system_prompt_teaches_plain_english_console_intents(self):
+        prompt = config.SYSTEM_PROMPT
+        self.assertIn("Plain-English console requests are action intents first", prompt)
+        self.assertIn("\"show doctor\"", prompt)
+        self.assertIn("\"train Jarvis locally\"", prompt)
+
     def test_is_hallucination_rejects_common_junk_fragments(self):
         self.assertTrue(meeting_listener._is_hallucination("thanks for watching"))
         self.assertTrue(meeting_listener._is_hallucination("subtitles by"))
