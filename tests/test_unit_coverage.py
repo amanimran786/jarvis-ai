@@ -3010,6 +3010,43 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         fleet_mock.assert_called_once_with()
 
+    def test_natural_training_status_command_prints_training_status(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_training_status") as training_mock:
+            result = jarvis_cli._handle_console_command("show training status")
+
+        self.assertEqual(result, 0)
+        training_mock.assert_called_once_with()
+
+    def test_natural_train_jarvis_command_builds_local_training_pack(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._run_local_training_pack", return_value=0) as train_mock:
+            result = jarvis_cli._handle_console_command("train Jarvis locally")
+
+        self.assertEqual(result, 0)
+        train_mock.assert_called_once_with()
+
+    def test_training_pack_helper_disables_cloud_distillation(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli.post", return_value={"ok": True, "message": "built", "result": {}}) as post_mock:
+            result = jarvis_cli._run_local_training_pack()
+
+        self.assertEqual(result, 0)
+        post_mock.assert_called_once_with(
+            "/local/training/run",
+            {
+                "export_limit": 80,
+                "distill_limit": 0,
+                "expert_distill_limit": 0,
+                "cloud_only_export": True,
+                "base_model": "jarvis-local:latest",
+                "target_name": "jarvis-local",
+            },
+        )
+
     def test_natural_shell_command_routes_to_run_helper(self):
         import jarvis_cli
 

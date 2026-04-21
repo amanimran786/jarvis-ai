@@ -436,6 +436,44 @@ def teach(prompt: str, answer: str) -> dict:
     )
 
 
+def _local_training_payload() -> dict:
+    return {
+        "export_limit": 80,
+        "distill_limit": 0,
+        "expert_distill_limit": 0,
+        "cloud_only_export": True,
+        "base_model": "jarvis-local:latest",
+        "target_name": "jarvis-local",
+    }
+
+
+def _print_training_status() -> None:
+    payload = get("/local/training/status")
+    status = payload.get("status") or {}
+    print("Local Training")
+    print(f"Teachings : {status.get('teachings', 0)}")
+    print(f"Packs     : {status.get('packs', 0)}")
+    print(f"Modelfiles: {status.get('modelfiles', 0)}")
+    print(f"Handoffs  : {status.get('handoffs', 0)}")
+    print(f"Latest teaching : {status.get('latest_teaching', '')}")
+    print(f"Latest pack     : {status.get('latest_pack', '')}")
+    print(f"Latest modelfile: {status.get('latest_modelfile', '')}")
+
+
+def _run_local_training_pack() -> int:
+    payload = post("/local/training/run", _local_training_payload())
+    print(payload.get("message") or json.dumps(payload, indent=2))
+    result = payload.get("result") or {}
+    if result.get("pack_path"):
+        print(f"Pack      : {result.get('pack_path')}")
+    if result.get("manifest_path"):
+        print(f"Manifest  : {result.get('manifest_path')}")
+    modelfile = result.get("modelfile") or {}
+    if modelfile.get("command"):
+        print(f"Register  : {modelfile.get('command')}")
+    return 0 if payload.get("ok") else 1
+
+
 def _print_status() -> None:
     s = get("/status")
     managed = s.get("managed_runtime_summary") or {}
@@ -893,6 +931,8 @@ def _console_help() -> str:
             "  /capability-evals [g] Show eval coverage for local capability claims",
             "  /production-readiness Show truthful production/free-use readiness",
             "  /model-fleet          Show local LLM fleet and free training lanes",
+            "  /training-status      Show local training artifacts",
+            "  /train-local          Build a local training pack without cloud distillation",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
@@ -1122,6 +1162,11 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if any(term in lower for term in ("model fleet", "models installed", "models are installed", "installed models", "local models", "training lanes", "free training")):
         _print_model_fleet()
         return 0
+    if any(term in lower for term in ("training status", "show training", "latest training", "training artifacts")):
+        _print_training_status()
+        return 0
+    if any(term in lower for term in ("train jarvis", "train yourself", "run local training", "build training pack", "build a training pack")):
+        return _run_local_training_pack()
     if any(term in lower for term in ("verify this diff", "verification plan", "how should i verify", "verify the code")):
         _print_verify_plan()
         return 0
@@ -1295,6 +1340,11 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"model-fleet", "models", "local-models", "training-lanes"}:
         _print_model_fleet()
         return 0
+    if command in {"training-status", "training"}:
+        _print_training_status()
+        return 0
+    if command in {"train-local", "training-run", "build-training-pack"}:
+        return _run_local_training_pack()
     if command in {"security-roe", "roe"}:
         _print_security_roe(args)
         return 0
