@@ -1348,7 +1348,7 @@ def route_stream(user_input: str) -> tuple:
         return _s("Restarting now."), "Self-Improve"
 
     # Local vault
-    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model", "benchmark local model", "benchmark local models", "compare local models", "local model benchmark", "best local model for apple silicon")):
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "preference export", "preference pairs", "reinforcement learning", "reinforced learning", "preference rl", "rl colab", "dpo handoff", "rl handoff", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model", "benchmark local model", "benchmark local models", "compare local models", "local model benchmark", "best local model for apple silicon")):
         if any(p in lower for p in ("local eval status", "local model status")):
             return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
         if any(p in lower for p in ("beta test jarvis", "run local beta", "beta test local model")):
@@ -1376,6 +1376,10 @@ def route_stream(user_input: str) -> tuple:
             return _s(local_model_eval.result_text(local_model_eval.run_eval(candidate_model=candidate))), "Local Model"
         if any(p in lower for p in ("fine tune handoff", "axolotl", "unsloth", "lora config")):
             return _s(local_training.result_text(local_training.build_finetune_handoff())), "Local Model"
+        if any(p in lower for p in ("preference export", "preference pairs")):
+            return _s(local_training.result_text(local_training.export_preference_dataset())), "Local Model"
+        if any(p in lower for p in ("reinforcement learning", "reinforced learning", "preference rl", "rl colab", "dpo handoff", "rl handoff")):
+            return _s(local_training.result_text(local_training.build_colab_preference_handoff())), "Local Model"
         if "distill" in lower:
             return _s(local_training.result_text(local_training.distill_failures())), "Local Model"
         if "export" in lower:
@@ -1547,6 +1551,12 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             return _s(local_training.result_text(result)), "Local Model"
         if action in {"handoff", "lora"}:
             result = local_training.build_finetune_handoff()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action in {"preferences", "preference", "rl_export", "dpo_export"}:
+            result = local_training.export_preference_dataset()
+            return _s(local_training.result_text(result)), "Local Model"
+        if action in {"rl", "dpo", "preference_rl", "rl_handoff"}:
+            result = local_training.build_colab_preference_handoff()
             return _s(local_training.result_text(result)), "Local Model"
         if action in {"automate", "autopilot", "cycle"}:
             result = local_model_automation.run_cycle()

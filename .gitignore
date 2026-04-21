@@ -21,6 +21,7 @@ usage_state.json
 hook_events.jsonl
 training/exports/
 training/distilled/
+training/preferences/
 training/modelfiles/
 training/packs/
 training/handoffs/
