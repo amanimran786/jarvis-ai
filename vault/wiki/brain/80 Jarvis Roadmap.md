@@ -131,6 +131,7 @@ Jarvis is much closer to the intended local-first shape than the older project s
 - enforce [[85 Defensive Security ROE]] so cybersecurity work stays scoped, defensive, and useful
 - grow [[86 Capability Eval Harness]] so every major capability has an eval case before it is treated as mature
 - enforce [[87 Production Readiness Contract]] so Jarvis does not overclaim "100% ready/free" when permissions, live sources, safety boundaries, or packaged go-live gates still matter
+- use [[88 Coder Workbench]] so terminal coding work starts from git state and produces deterministic verification plans instead of generic model advice
 
 ## Medium-Term Priorities
 

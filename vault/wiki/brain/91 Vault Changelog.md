@@ -169,3 +169,9 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[87 Production Readiness Contract]] so Jarvis answers production/free-use readiness questions from a live contract instead of ambition language
 - added the `/production-readiness` API endpoint and console command to separate local daily-core readiness from full production go-live gates
 - recorded that "100% free regardless of request" is not a valid claim because live sources, third-party accounts, permissions, local hardware limits, and safety boundaries still apply
+
+### Coder workbench
+
+- added [[88 Coder Workbench]] as the terminal-native coding loop for git state, changed files, and deterministic verification plans
+- added `/coder/status`, `/coder/verify-plan`, `jarvis --code-status`, and `jarvis --verify-plan`
+- added a coding-agent eval case so the workbench is treated as part of the local Claude/Codex parity path

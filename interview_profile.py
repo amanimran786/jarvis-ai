@@ -317,7 +317,7 @@ def _interview_playbook_hint(user_input: str = "") -> str:
 PROFILE = {
     "candidate_name": "Aman Imran",
     "target_direction": (
-        "roles at the intersection of trust and safety, AI safety, security operations, "
+        "technical roles at the intersection of trust and safety, AI safety, security operations, "
         "incident response, and software-driven operations leadership"
     ),
     "headline": (
@@ -516,7 +516,7 @@ ROLE_PROFILES = {
     "security": {
         "label": "Cybersecurity",
         "tell_me_about_yourself": (
-            "I'm a security-operations and incident-response candidate with a background that combines GSOC leadership, adversarial investigation, and software-driven systems thinking. "
+            "I'm a security-oriented, security-operations and incident-response candidate with a background that combines GSOC leadership, adversarial investigation, and software-driven systems thinking. "
             "I have worked in incident-oriented environments, threat detection, monitoring, access control, audit-minded operations, and high-severity escalation, and I also bring experience from Trust and Safety and AI safety roles where I investigated coordinated abuse, misuse patterns, and high-risk behavior. "
             "On top of that, I have a software engineering foundation in Python, SQL, backend systems, and automation, which means I can help improve detection and response workflows rather than only operate inside them. "
             "So the through-line in my work is risk triage, clear judgment, and building stronger systems around the threat landscape."
@@ -702,13 +702,6 @@ def _pack_key(user_input: str) -> str:
 
 
 def target_role_pack_text(user_input: str = "") -> str:
-    variant_hint = _company_variant_hint(user_input)
-    if variant_hint:
-        role_hint = _role_targeting_hint(user_input)
-        combined = " ".join(part for part in (variant_hint, role_hint) if part).strip()
-        if combined:
-            return combined
-
     requested_pack_id = _pack_id_for_query(user_input)
     if requested_pack_id:
         markdown = _load_pack_text(requested_pack_id)
@@ -727,6 +720,13 @@ def target_role_pack_text(user_input: str = "") -> str:
                 f"The lead stories for this pack are {story_text}. "
                 "For interview prep, separate sourced findings from inferred ones and map the likely questions back to those stories."
             )
+
+    variant_hint = _company_variant_hint(user_input)
+    if variant_hint:
+        role_hint = _role_targeting_hint(user_input)
+        combined = " ".join(part for part in (variant_hint, role_hint) if part).strip()
+        if combined:
+            return combined
 
     pack = TARGET_ROLE_PACKS[_pack_key(user_input)]
     stories = ", ".join(UNIVERSAL_STORIES[key].split(". ", 1)[0] for key in pack["best_stories"])

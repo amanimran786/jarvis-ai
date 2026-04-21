@@ -13,6 +13,8 @@ Usage:
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
   python jarvis_cli.py --context-budget
+  python jarvis_cli.py --code-status
+  python jarvis_cli.py --verify-plan
   python jarvis_cli.py --agent-patterns
   python jarvis_cli.py --parity
   python jarvis_cli.py --capability-evals
@@ -402,13 +404,13 @@ def deny_task(task_id: str) -> int:
     return 0
 
 
-def get(path: str) -> dict:
+def get(path: str, *, timeout: float = 10) -> dict:
     _ensure_daemon_running(reason="jarvis_cli_get")
     last_401: urllib.error.HTTPError | None = None
     for attempt in range(6):
         req = urllib.request.Request(_base() + path, headers=_auth_headers())
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read())
         except urllib.error.HTTPError as exc:
             if exc.code != 401 or attempt == 5:
@@ -539,6 +541,34 @@ def _print_context_budget() -> None:
         print(f"  {command}: {description}")
 
 
+def _print_code_status() -> None:
+    payload = get("/coder/status")
+    print(payload.get("purpose") or "Jarvis coder workbench")
+    print(f"Root   : {payload.get('root', 'unknown')}")
+    print(f"Branch : {payload.get('branch', 'unknown')}")
+    print(f"Head   : {payload.get('head', 'unknown')}")
+    print(f"Clean  : {'yes' if payload.get('clean') else 'no'}")
+    print("Changed Files")
+    for item in payload.get("changed_files", []):
+        print(f"  {item.get('status', '?')} {item.get('path', '')}")
+    if not payload.get("changed_files"):
+        print("  none")
+    print("Verify Plan")
+    for item in payload.get("recommended_next", []):
+        required = "required" if item.get("required") else "optional"
+        print(f"  {item.get('id')}: {required} -> {item.get('command')}")
+
+
+def _print_verify_plan() -> None:
+    payload = get("/coder/verify-plan")
+    print("Coder Verify Plan")
+    for item in payload.get("commands", []):
+        required = "required" if item.get("required") else "optional"
+        print(f"  {item.get('id')}: {required}")
+        print(f"    why: {item.get('why')}")
+        print(f"    run: {item.get('command')}")
+
+
 def _print_agent_patterns(category: str = "") -> None:
     suffix = ""
     if category:
@@ -621,9 +651,16 @@ def _print_security_roe(template: str = "") -> None:
         print(f"  - {guardrail}")
 
 
-def _safe_get(path: str) -> dict:
+def _safe_get(path: str, *, timeout: float = 10) -> dict:
     try:
-        return get(path)
+        return get(path, timeout=timeout)
+    except TypeError as exc:
+        if "timeout" not in str(exc):
+            return {"_error": str(exc)}
+        try:
+            return get(path)
+        except Exception as fallback_exc:
+            return {"_error": str(fallback_exc)}
     except Exception as exc:
         return {"_error": str(exc)}
 
@@ -697,7 +734,7 @@ def _print_permissions() -> None:
 def _print_doctor() -> None:
     status = _safe_get("/status")
     runtime_payload = _safe_get("/runtime/state")
-    local_payload = _safe_get("/local/capabilities")
+    local_payload = _safe_get("/local/capabilities", timeout=45)
     memory_payload = _safe_get("/memory/status")
     vault_status = _safe_get("/vault")
     hook_payload = _safe_get("/hooks/status")
@@ -805,6 +842,8 @@ def _console_help() -> str:
             "  /vault                Show vault status",
             "  /context-budget       Show local coding/token discipline",
             "  /tokens               Alias for /context-budget",
+            "  /code-status          Show repo-grounded coding workbench state",
+            "  /verify-plan          Show verification commands for current diff",
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /parity               Show local frontier capability parity",
             "  /capability-evals [g] Show eval coverage for local capability claims",
@@ -1009,6 +1048,12 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"context-budget", "tokens"}:
         _print_context_budget()
         return 0
+    if command in {"code-status", "coder-status", "workbench"}:
+        _print_code_status()
+        return 0
+    if command in {"verify-plan", "code-verify", "verification"}:
+        _print_verify_plan()
+        return 0
     if command in {"agent-patterns", "patterns"}:
         _print_agent_patterns(args)
         return 0
@@ -1209,6 +1254,14 @@ def main():
 
     if flag in {"--context-budget", "--tokens"}:
         _print_context_budget()
+        return
+
+    if flag in {"--code-status", "--coder-status", "--workbench"}:
+        _print_code_status()
+        return
+
+    if flag in {"--verify-plan", "--code-verify", "--verification"}:
+        _print_verify_plan()
         return
 
     if flag in {"--agent-patterns", "--patterns"}:

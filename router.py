@@ -45,6 +45,7 @@ import capability_evals
 import capability_parity
 import cost_policy
 import context_budget
+import coder_workbench
 import external_agent_patterns
 import production_readiness
 import security_roe
@@ -1120,6 +1121,18 @@ def route_stream(user_input: str) -> tuple:
         "reduce context",
     )):
         return _s(context_budget.policy_text(hours=24)), "Status"
+    if any(p in lower for p in (
+        "coder workbench",
+        "code workbench",
+        "code status",
+        "coder status",
+        "verify plan",
+        "verification plan",
+        "how should i verify this diff",
+        "how should i verify the code",
+        "repo grounded coding",
+    )):
+        return _s(coder_workbench.summary_text()), "Status"
     if any(p in lower for p in (
         "external agent pattern",
         "agent pattern intake",

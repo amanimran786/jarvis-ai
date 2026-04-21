@@ -1327,6 +1327,13 @@ class RouterTests(unittest.TestCase):
         self.assertIn("context budget", text.lower())
         self.assertIn("/code", text)
 
+    def test_coder_workbench_fast_path(self):
+        stream, label = router.route_stream("Show the coder workbench verification plan.")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("Jarvis coder workbench", text)
+        self.assertIn("Verify plan", text)
+
     def test_external_agent_pattern_fast_path(self):
         stream, label = router.route_stream("What can we use from GBrain and Decepticon for Jarvis?")
         text = "".join(stream)
@@ -1808,6 +1815,20 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("profiles", payload)
         self.assertIn("/code <prompt>", payload["commands"])
+
+    def test_coder_workbench_endpoint(self):
+        response = self.client.get("/coder/status")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("changed_files", payload)
+        self.assertIn("recommended_next", payload)
+
+        plan = self.client.get("/coder/verify-plan")
+        self.assertEqual(plan.status_code, 200)
+        plan_payload = plan.json()
+        self.assertTrue(plan_payload["ok"])
+        self.assertIn("commands", plan_payload)
 
     def test_agent_patterns_endpoint(self):
         response = self.client.get("/agent-patterns")

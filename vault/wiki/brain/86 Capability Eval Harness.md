@@ -20,13 +20,14 @@ related:
   - "[[85 Defensive Security ROE]]"
   - "[[82 Context Budget Discipline]]"
   - "[[87 Production Readiness Contract]]"
+  - "[[88 Coder Workbench]]"
 ---
 
 # Capability Eval Harness
 
 Purpose: make Jarvis prove capability claims through explicit local regression cases.
 
-Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]], [[87 Production Readiness Contract]]
+Linked notes: [[84 Frontier Capability Parity]], [[85 Defensive Security ROE]], [[82 Context Budget Discipline]], [[87 Production Readiness Contract]], [[88 Coder Workbench]]
 
 Jarvis now exposes eval coverage through `/capability-evals` and the console command `/capability-evals`.
 
