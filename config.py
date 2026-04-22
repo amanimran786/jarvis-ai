@@ -178,6 +178,7 @@ LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
 LOCAL_PREFER_TUNED = os.getenv("LOCAL_PREFER_TUNED", "0").strip().lower() in {"1", "true", "yes", "on"}
 LOCAL_DEFAULT   = os.getenv("LOCAL_DEFAULT_MODEL", "gemma4:e4b")
 LOCAL_CODER     = os.getenv("LOCAL_CODER_MODEL", "qwen2.5-coder:7b")
+LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen3-coder:30b")
 # DeepSeek R1 has built-in chain-of-thought reasoning — pull it with:
 #   ollama pull deepseek-r1:14b   (8GB, best balance)
 #   ollama pull deepseek-r1:32b   (20GB, near-GPT4 level)
