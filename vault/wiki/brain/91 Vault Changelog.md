@@ -158,6 +158,15 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added `/security-roe` and `/security-roe <template>` console/API surfaces for authorization, threat model, code review, incident, AI misuse, and browser/source gates
 - connected the security ROE skill to capability parity so Jarvis can report the cybersecurity companion surface as runtime-backed instead of persona-only
 
+## 2026-04-21
+
+### Claude shared brain bridge
+
+- added [[95 Claude Shared Brain Contract]] so Claude Code and Jarvis can share the local Obsidian vault without unreviewed memory writes
+- added `vault/indexes/Repo Map.md` as a cheap repo-orientation layer for Claude and Jarvis before opening source or vault files
+- added `.claude/commands/search-shared-brain.md`, `.claude/commands/append-session-lesson.md`, `.claude/commands/propose-vault-update.md`, and `.claude/commands/token-discipline.md`
+- appended the shared-brain rules to `CLAUDE.md`, including targeted search, proposal-first writes, and no-auto-commit rules for vault changes
+
 ### Capability eval harness
 
 - added [[86 Capability Eval Harness]] to keep local capability claims tied to explicit regression cases

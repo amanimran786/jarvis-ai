@@ -202,6 +202,34 @@ Prefer:
 
 Do not turn the brain into plugin-dependent app logic. Borrow the good conventions from Obsidian Git, Dataview, Tasks, QuickAdd, Templater, JSON Canvas, and thin local bridge tools, but keep Jarvis able to read and write the vault correctly as plain markdown.
 
+### Claude Shared Brain Contract
+
+Claude Code and Jarvis share one local Obsidian brain.
+
+- Vault path: `/Users/truthseeker/jarvis-ai/vault`
+- Contract: `vault/wiki/brain/95 Claude Shared Brain Contract.md`
+- Repo map: `vault/indexes/Repo Map.md`
+- Context policy: `vault/wiki/brain/82 Context Budget Discipline.md`
+
+For Jarvis/project/memory questions, search the vault before answering:
+
+```bash
+rg -n --hidden -g '!.git' "QUERY" vault/
+```
+
+Read targeted files only. Do not bulk-load the vault, raw imports, generated indexes, or giant logs.
+
+Write to the vault only when Aman explicitly says "remember this", "log this", "save to brain", "append session lesson", or approves a proposed diff. Otherwise use `.claude/commands/propose-vault-update.md` and stop.
+
+Available Claude commands:
+
+- `/search-shared-brain <query>` — read-only targeted vault search
+- `/append-session-lesson <lesson>` — approval-gated append to the shared brain
+- `/propose-vault-update <path|new note>` — proposal-first vault update
+- `/token-discipline <task>` — context-saving preflight for large Jarvis work
+
+Do not auto-commit vault changes. Stage or show diffs for review.
+
 ## Repo Facts To Preserve
 
 ### Runtime / Entry Points
