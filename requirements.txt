@@ -19,6 +19,8 @@ PyQt6
 pyobjc-framework-Cocoa
 ollama
 pypdf
+rich
+prompt_toolkit
 # self_improve uses stdlib only (difflib, shutil, subprocess)
 cryptography
 kokoro-onnx  # Local TTS — free, no API
