@@ -51,10 +51,79 @@ try:
 except Exception:
     readline = None
 
+try:
+    from prompt_toolkit import prompt as _pt_prompt
+    from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+    from prompt_toolkit.completion import WordCompleter
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.styles import Style
+except Exception:
+    _pt_prompt = None
+    AutoSuggestFromHistory = None
+    FileHistory = None
+    Style = None
+    WordCompleter = None
+
+try:
+    from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
+except Exception:
+    box = None
+    Console = None
+    Panel = None
+    Table = None
+    Text = None
+
 
 _CONSOLE_STATE = {"effort": "medium", "pending_shell": ""}
 _OWNS_DAEMON = False
 _DAEMON_CLEANUP_REGISTERED = False
+_RICH_CONSOLE = Console() if Console else None
+
+_SLASH_COMMANDS = (
+    "/help",
+    "/status",
+    "/doctor",
+    "/interface",
+    "/permissions",
+    "/mode",
+    "/effort",
+    "/agents",
+    "/tasks",
+    "/task",
+    "/code",
+    "/task-status",
+    "/watch",
+    "/cancel",
+    "/approve",
+    "/deny",
+    "/memory",
+    "/skills",
+    "/connectors",
+    "/plugins",
+    "/vault",
+    "/context-budget",
+    "/tokens",
+    "/code-status",
+    "/verify-plan",
+    "/agent-patterns",
+    "/parity",
+    "/capability-evals",
+    "/production-readiness",
+    "/model-fleet",
+    "/training-status",
+    "/train-local",
+    "/colab-handoff",
+    "/preference-export",
+    "/rl-colab-handoff",
+    "/security-roe",
+    "/run",
+    "/clear",
+    "/exit",
+)
 
 
 def _project_venv_python() -> str:
@@ -959,6 +1028,7 @@ def _console_help() -> str:
             "  /help                 Show this help",
             "  /status               Show daemon and runtime status",
             "  /doctor               Show runtime health and likely blockers",
+            "  /interface            Show terminal, desktop, and daemon interface map",
             "  /permissions          Show current shell/write/self-improve gates",
             "  /permissions <mode>   Set mode: default | max-permissive",
             "  /permissions protected-writes on|off",
@@ -1029,6 +1099,72 @@ def _banner_text() -> str:
             "Ask naturally, or type /help for shortcuts.",
         ]
     )
+
+
+def _console_snapshot() -> dict:
+    try:
+        payload = get("/status")
+    except Exception:
+        payload = {}
+    return {
+        "status": str(payload.get("status", "unknown")).upper(),
+        "mode": str(payload.get("mode", "unknown")).upper(),
+        "cwd": os.getcwd(),
+        "effort": _CONSOLE_STATE["effort"],
+        "base_url": _base(),
+    }
+
+
+def _print_banner() -> None:
+    snapshot = _console_snapshot()
+    if not sys.stdout.isatty() or not _RICH_CONSOLE or not Panel or not Table or not Text or not box:
+        print(_banner_text())
+        return
+
+    grid = Table.grid(expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(justify="right")
+    title = Text("Jarvis Console", style="bold cyan")
+    subtitle = Text("local-first terminal interface", style="dim")
+    grid.add_row(title, Text(f"{snapshot['status']}", style="bold green" if snapshot["status"] == "ONLINE" else "bold yellow"))
+    grid.add_row(subtitle, Text(f"mode {snapshot['mode']} | effort {snapshot['effort']}", style="dim"))
+    grid.add_row(Text(snapshot["cwd"], style="white"), Text(snapshot["base_url"], style="dim"))
+    grid.add_row(Text("Ask naturally, or use /help, /interface, /code, /task.", style="yellow"), Text("Ctrl-C keeps console open", style="dim"))
+    _RICH_CONSOLE.print(Panel(grid, border_style="cyan", box=box.ROUNDED, padding=(1, 2)))
+
+
+def _prompt_line() -> str:
+    if not sys.stdin.isatty() or not sys.stdout.isatty() or not _pt_prompt or not FileHistory or not WordCompleter or not AutoSuggestFromHistory:
+        return input("› ")
+
+    history_path = os.path.expanduser("~/.jarvis_console_history")
+    completer = WordCompleter(list(_SLASH_COMMANDS), ignore_case=True, sentence=True)
+    style = Style.from_dict({"prompt": "bold cyan"}) if Style else None
+    return _pt_prompt(
+        [("class:prompt", "› ")],
+        history=FileHistory(history_path),
+        completer=completer,
+        auto_suggest=AutoSuggestFromHistory(),
+        complete_while_typing=False,
+        style=style,
+    )
+
+
+def _print_interface_status() -> None:
+    snapshot = _console_snapshot()
+    lines = [
+        "Jarvis interfaces",
+        f"Terminal console : `jarvis` in Terminal, currently connected to {snapshot['base_url']}",
+        "Desktop app      : /Users/truthseeker/Applications/Jarvis.app",
+        "Desktop shortcut : /Users/truthseeker/Desktop/Jarvis.app -> /Users/truthseeker/Applications/Jarvis.app",
+        "Web/API daemon   : FastAPI daemon behind the console and desktop app",
+        "Useful commands  : /help, /status, /doctor, /code <task>, /task <task>, /interface",
+        "Console upgrades : command history, slash-command autocomplete, rich status panel, natural-language routing",
+    ]
+    if not sys.stdout.isatty() or not _RICH_CONSOLE or not Panel:
+        print("\n".join(lines))
+        return
+    _RICH_CONSOLE.print(Panel("\n".join(lines[1:]), title=lines[0], border_style="cyan"))
 
 
 def _set_mode(mode: str) -> int:
@@ -1200,6 +1336,9 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if lower in {"help", "commands", "show commands", "what can you do", "how do i use this"}:
         print(_console_help())
         return 0
+    if any(term in lower for term in ("where is the interface", "show interface", "interface status", "what interface", "terminal interface", "console interface")):
+        _print_interface_status()
+        return 0
     if lower in {"clear", "clear screen", "clear the screen", "reset screen"}:
         print("\033c", end="")
         return 0
@@ -1348,6 +1487,9 @@ def _handle_console_command(line: str) -> int | None:
         return None
     if command == "help":
         print(_console_help())
+        return 0
+    if command in {"interface", "ui", "where-interface"}:
+        _print_interface_status()
         return 0
     if command == "clear":
         print("\033c", end="")
@@ -1498,10 +1640,10 @@ def run_interactive_console() -> int:
         atexit.register(runtime_state.clear_console_session)
     except Exception:
         pass
-    print(_banner_text())
+    _print_banner()
     while True:
         try:
-            line = input("› ")
+            line = _prompt_line()
         except EOFError:
             print()
             return 0
