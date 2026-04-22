@@ -3190,6 +3190,24 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         roe_mock.assert_called_once_with("ai")
 
+    def test_interface_command_prints_interface_status(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_interface_status") as interface_mock:
+            result = jarvis_cli._handle_console_command("/interface")
+
+        self.assertEqual(result, 0)
+        interface_mock.assert_called_once_with()
+
+    def test_natural_where_is_interface_prints_interface_status(self):
+        import jarvis_cli
+
+        with patch("jarvis_cli._print_interface_status") as interface_mock:
+            result = jarvis_cli._handle_console_command("where is the interface")
+
+        self.assertEqual(result, 0)
+        interface_mock.assert_called_once_with()
+
     def test_preference_export_command_runs_local_export(self):
         import jarvis_cli
 
