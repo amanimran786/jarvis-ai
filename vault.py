@@ -132,7 +132,7 @@ def _rewrite_context_query(query: str, tool: str | None = None) -> str:
 
 
 def init_vault() -> None:
-    for path in (RAW_DIR, WIKI_DIR, INDEXES_DIR, OUTPUTS_DIR, TEMPLATES_DIR):
+    for path in (RAW_DIR, WIKI_DIR, INDEXES_DIR, OUTPUTS_DIR, TEMPLATES_DIR, VAULT_ROOT / "sessions"):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -178,7 +178,7 @@ def _without_frontmatter(text: str) -> str:
 def _iter_docs() -> list[Path]:
     init_vault()
     docs = []
-    for root in (WIKI_DIR, INDEXES_DIR, RAW_DIR):
+    for root in (WIKI_DIR, INDEXES_DIR, RAW_DIR, VAULT_ROOT / "sessions"):
         for path in root.rglob("*"):
             if path.is_file() and path.suffix.lower() in _TEXT_EXTENSIONS:
                 docs.append(path)

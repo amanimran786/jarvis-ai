@@ -5,7 +5,7 @@ import memory as mem
 import conversation_context as ctx
 import usage_tracker
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 
 def ask_claude(
@@ -44,6 +44,9 @@ def ask_claude_stream(
     system_extra: str = "",
     track_context: bool = False,
 ):
+    if client is None:
+        raise RuntimeError("Anthropic API key is not configured.")
+
     system_base = system if system is not None else (SYSTEM_PROMPT + mem.get_context())
     if track_context:
         ctx.begin_turn(user_input)

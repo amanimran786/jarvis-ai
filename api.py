@@ -49,6 +49,7 @@ from local_runtime import local_model_eval
 from local_runtime import local_model_automation
 from local_runtime import local_beta
 from local_runtime import model_fleet
+from config import LOCAL_REASONING
 import behavior_hooks
 import capability_evals
 import capability_parity
@@ -419,7 +420,7 @@ class LocalTrainingExportRequest(BaseModel):
 
 class LocalTrainingDistillRequest(BaseModel):
     limit: int = 12
-    teacher_model: str = "claude-sonnet-4-6"
+    teacher_model: str = LOCAL_REASONING
 
 
 class LocalTrainingModelfileRequest(BaseModel):
@@ -431,7 +432,7 @@ class LocalTrainingRunRequest(BaseModel):
     export_limit: int = 150
     distill_limit: int = 8
     expert_distill_limit: int = 3
-    teacher_model: str = "claude-sonnet-4-6"
+    teacher_model: str = LOCAL_REASONING
     cloud_only_export: bool = True
     base_model: str = ""
     target_name: str = ""
@@ -468,7 +469,7 @@ class LocalModelEvalRunRequest(BaseModel):
     candidate_model: str
     baseline_model: str = ""
     limit: int = 8
-    teacher_model: str = "claude-haiku-4-5-20251001"
+    teacher_model: str = LOCAL_REASONING
 
 
 class LocalModelPromoteRequest(BaseModel):
@@ -485,8 +486,8 @@ class LocalModelAutomationRunRequest(BaseModel):
     base_model: str = ""
     baseline_model: str = ""
     candidate_name: str = ""
-    teacher_model: str = "claude-sonnet-4-6"
-    judge_model: str = "claude-haiku-4-5-20251001"
+    teacher_model: str = LOCAL_REASONING
+    judge_model: str = LOCAL_REASONING
     promote_if_ready: bool = True
     cleanup_failed: bool = False
     force: bool = False
@@ -507,8 +508,15 @@ class LocalBetaRunRequest(BaseModel):
     limit: int = 0
     log_failures: bool = True
     build_training_pack: bool = False
-    teacher_model: str = "claude-sonnet-4-6"
+    teacher_model: str = LOCAL_REASONING
     suite: str = "all"
+
+
+class CoderRunVerifyPlanRequest(BaseModel):
+    paths: list[str] = []
+    required_only: bool = True
+    stop_on_failure: bool = True
+    timeout_seconds: int = 120
 
 
 class OsintUsernameRequest(BaseModel):
@@ -961,6 +969,16 @@ def get_coder_status():
 @app.get("/coder/verify-plan")
 def get_coder_verify_plan():
     return {"ok": True, "commands": coder_workbench.verification_plan()}
+
+
+@app.post("/coder/run-verify-plan")
+def run_coder_verify_plan(req: CoderRunVerifyPlanRequest):
+    return coder_workbench.run_verification_plan(
+        req.paths or None,
+        required_only=req.required_only,
+        stop_on_failure=req.stop_on_failure,
+        timeout_seconds=req.timeout_seconds,
+    )
 
 
 @app.get("/agent-patterns")

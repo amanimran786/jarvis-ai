@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 import evals
+from config import LOCAL_REASONING
 from local_runtime import local_training
 from tests.jarvis_golden_cases import GOLDEN_CASES
 
@@ -130,7 +131,7 @@ def run_beta_suite(
     limit: int = 0,
     log_failures: bool = True,
     build_training_pack: bool = False,
-    teacher_model: str = "claude-sonnet-4-6",
+    teacher_model: str = LOCAL_REASONING,
     suite: str = "all",
 ) -> dict:
     _ensure_dirs()

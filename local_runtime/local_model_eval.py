@@ -10,10 +10,10 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from brains.brain_claude import ask_claude
 from brains.brain_ollama import ask_local
-from config import LOCAL_DEFAULT, LOCAL_TUNED, SONNET, HAIKU
+from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED, SONNET
 import evals
+from provider_priority import ask_with_priority
 import skills
 
 
@@ -163,9 +163,26 @@ def _judge_prompt(case: dict, model_name: str, answer: str) -> str:
     )
 
 
+def _teacher_tier(model: str) -> str:
+    model_lower = (model or "").lower()
+    if "opus" in model_lower or "deep" in model_lower:
+        return "deep"
+    if "sonnet" in model_lower or "pro" in model_lower or "gpt-4" in model_lower:
+        return "strong"
+    return "cheap"
+
+
+def _ask_judge(prompt: str, *, teacher_model: str, system_extra: str = "") -> str:
+    return ask_with_priority(prompt, tier=_teacher_tier(teacher_model), system_extra=system_extra)
+
+
 def _judge_answer(case: dict, model_name: str, answer: str, teacher_model: str) -> dict:
     system_extra, _ = skills.build_system_extra(case["prompt"], tool="chat")
-    raw = ask_claude(_judge_prompt(case, model_name, answer), model=teacher_model, system_extra=system_extra).strip()
+    raw = _ask_judge(
+        _judge_prompt(case, model_name, answer),
+        teacher_model=teacher_model,
+        system_extra=system_extra,
+    ).strip()
     if raw.startswith("```"):
         raw = "\n".join(raw.splitlines()[1:-1]).strip()
     match = re.search(r"\{.*\}", raw, re.DOTALL)
@@ -205,7 +222,7 @@ def run_eval(
     candidate_model: str,
     baseline_model: str | None = None,
     limit: int = 8,
-    teacher_model: str = HAIKU,
+    teacher_model: str = LOCAL_REASONING,
 ) -> dict:
     _ensure_dirs()
     cases = benchmark_cases(limit=limit)

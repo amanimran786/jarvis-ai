@@ -51,7 +51,7 @@ def _save_knowledge(data: dict) -> None:
 
 def extract_and_learn(conversation: list[str]) -> None:
     """
-    After a conversation, use Claude Haiku to extract what was learned
+    After a conversation, use free-first routing to extract what was learned
     and automatically update memory. No user action required.
     """
     if len(conversation) < 2:
@@ -172,7 +172,7 @@ def refresh_knowledge_feed() -> None:
         try:
             results = web_search(f"latest news {topic} 2025", max_results=2)
             if results and "couldn't find" not in results:
-                # Summarize with Haiku (cheap)
+                # Summarize through free-first routing so open-source mode stays local.
                 summary = ask_with_priority(
                     f"Summarize these news results about '{topic}' in 1-2 sentences for a voice assistant:\n{results}",
                     tier="cheap",

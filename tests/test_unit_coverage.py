@@ -1790,6 +1790,41 @@ class CoderWorkbenchTests(unittest.TestCase):
         self.assertEqual(payload["branch"], "main")
         self.assertIn("recommended_next", payload)
 
+    def test_run_verification_plan_executes_required_commands_and_skips_optional(self):
+        import coder_workbench
+
+        fake_plan = [
+            {"id": "required", "command": "true", "required": True, "why": "must pass"},
+            {"id": "optional", "command": "false", "required": False, "why": "nice to have"},
+        ]
+        with patch("coder_workbench.verification_plan", return_value=fake_plan), \
+             patch("coder_workbench._run_shell", return_value=(0, "ok", 0.25)) as run_mock:
+            payload = coder_workbench.run_verification_plan(required_only=True)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["ran_count"], 1)
+        self.assertEqual(payload["skipped_count"], 1)
+        run_mock.assert_called_once_with("true", timeout_seconds=120)
+
+
+class ProviderPriorityTests(unittest.TestCase):
+
+    def test_open_source_mode_uses_local_and_does_not_import_cloud_clients(self):
+        import provider_priority
+
+        with patch("provider_priority._open_source_mode", return_value=True), \
+             patch("provider_priority._try_local", return_value="local answer") as local_mock, \
+             patch("provider_priority._ask_openai") as openai_mock, \
+             patch("provider_priority._ask_gemini") as gemini_mock, \
+             patch("provider_priority._ask_anthropic") as anthropic_mock:
+            result = provider_priority.ask_with_priority("extract a memory fact", tier="cheap")
+
+        self.assertEqual(result, "local answer")
+        local_mock.assert_called_once()
+        openai_mock.assert_not_called()
+        gemini_mock.assert_not_called()
+        anthropic_mock.assert_not_called()
+
 
 class CapabilityParityTests(unittest.TestCase):
 

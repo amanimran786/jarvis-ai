@@ -1,6 +1,120 @@
 {
-  "doc_count": 70,
+  "doc_count": 74,
   "docs": [
+    {
+      "path": "indexes/Repo Map.md",
+      "title": "Repo Map",
+      "preview": "# Repo Map Purpose: give Claude Code and Jarvis a cheap orientation layer before reading source or vault notes. Repo Root /Users/truthseeker/jarvis-ai/ | Path | Purpose | |---|---| | AGENTS.md | Cross-agent operating contract. Read first. | | CLAUDE.md | Claude Code repo rules and shared-brain contract. | | main.py | Desktop/headless runtime entry point. | | api.py | FastAPI daemon surface used by desktop and console. | | jarvis_cli.py | Terminal console and Claude-style CLI surface. | | router.",
+      "keywords": [
+        "vault",
+        "jarvis",
+        "app",
+        "desktop",
+        "local",
+        "claude",
+        "users",
+        "truthseeker",
+        "path",
+        "runtime",
+        "model",
+        "memory",
+        "repo",
+        "purpose",
+        "code",
+        "brain",
+        "surface",
+        "console",
+        "wiki",
+        "obsidian"
+      ],
+      "chars": 2096,
+      "sections": [
+        {
+          "heading": "Repo Map",
+          "level": 1,
+          "page": null,
+          "line_start": 23,
+          "text": "Purpose: give Claude Code and Jarvis a cheap orientation layer before reading source or vault notes.",
+          "keywords": [
+            "purpose",
+            "give",
+            "claude",
+            "code",
+            "jarvis",
+            "cheap",
+            "orientation",
+            "layer",
+            "before",
+            "reading",
+            "source",
+            "vault"
+          ]
+        },
+        {
+          "heading": "Repo Root",
+          "level": 2,
+          "page": null,
+          "line_start": 27,
+          "text": "/Users/truthseeker/jarvis-ai/ | Path | Purpose | |---|---| | AGENTS.md | Cross-agent operating contract. Read first. | | CLAUDE.md | Claude Code repo rules and shared-brain contract. | | main.py | Desktop/headless runtime entry point. | | api.py | FastAPI daemon surface used by desktop and console. | | jarvis_cli.py | Terminal console and Claude-style CLI surface. | | router.py | Intent/tool routing before LLM use. | | model_router.py | Local/cloud/open-source model routing policy. | | config.py | Runtime defaults and local model identifiers. | | ui.py | PyQt6 desktop app. | | desktop/ | Desktop overlay, bridge, hotkeys, screen capture, device panel. | | local_runtime/ | Local STT/TTS/model training/eval/fleet code. | | task_runtime.py | Managed agent/task lifecycle. | | semantic_memory.py, memory_layer.py, memory/ | Local memory and retrieval. | | vault.py, vault_capture.py, vault_edit.py, wiki_builder.py | Obsidian vault read/write/build path. | | tests/ | Regression, unit, live, packaged-app smoke tests. | | scripts/install_jarvis_app.sh | Real packaged-app install path. |",
+          "keywords": [
+            "desktop",
+            "local",
+            "runtime",
+            "model",
+            "app",
+            "memory",
+            "vault",
+            "jarvis",
+            "path",
+            "claude",
+            "agent",
+            "contract"
+          ]
+        },
+        {
+          "heading": "Vault Layout",
+          "level": 2,
+          "page": null,
+          "line_start": 50,
+          "text": "| Path | Purpose | Write rule | |---|---|---| | vault/wiki/brain/ | Curated durable Jarvis brain | schema-gated | | vault/raw/ | Raw local evidence | append/import only | | vault/raw/imports/ | Imported Claude/OpenAI/ChatGPT exports | do not mutate casually | | vault/wiki/candidates/ | Review/staging lane | explicit promotion only | | vault/templates/ | Markdown templates | deliberate edits | | vault/indexes/ | Generated and curated indexes | prefer generator for generated files | | vault/.obsidian/ | Obsidian UI state/config | avoid unless user asks |",
+          "keywords": [
+            "vault",
+            "raw",
+            "wiki",
+            "brain",
+            "curated",
+            "only",
+            "templates",
+            "indexes",
+            "generated",
+            "obsidian",
+            "path",
+            "purpose"
+          ]
+        },
+        {
+          "heading": "Current Product Surface",
+          "level": 2,
+          "page": null,
+          "line_start": 71,
+          "text": "- Real app: /Users/truthseeker/Applications/Jarvis.app - Desktop shortcut: /Users/truthseeker/Desktop/Jarvis.app -> /Users/truthseeker/Applications/Jarvis.app - Terminal console: jarvis - Local daemon: FastAPI on discovered localhost port, usually 127.0.0.1:8765",
+          "keywords": [
+            "app",
+            "jarvis",
+            "users",
+            "truthseeker",
+            "applications",
+            "desktop",
+            "real",
+            "shortcut",
+            "terminal",
+            "console",
+            "local",
+            "daemon"
+          ]
+        }
+      ]
+    },
     {
       "path": "indexes/keyword_index.md",
       "title": "Vault Keyword Index",
@@ -1128,6 +1242,97 @@
       ]
     },
     {
+      "path": "sessions/lessons.md",
+      "title": "Session Lessons",
+      "preview": "# Session Lessons Purpose: append candidate lessons from Jarvis sessions before they graduate into durable brain notes, skills, or model-training examples. Linked notes: [[96 Learning Loop]], [[79 Local Skill Loop]], [[92 Agent Inbox]] Capture Rules - Capture only lessons backed by repeated behavior, explicit user correction, eval failure, or verified repo evidence. - Keep raw context short. Link the source artifact when possible instead of pasting full logs. - Do not graduate a lesson directly ",
+      "keywords": [
+        "lessons",
+        "session",
+        "append",
+        "candidate",
+        "graduate",
+        "notes",
+        "training",
+        "loop",
+        "local",
+        "skill",
+        "agent",
+        "inbox",
+        "capture",
+        "lesson",
+        "vault",
+        "purpose",
+        "jarvis",
+        "sessions",
+        "before",
+        "they"
+      ],
+      "chars": 753,
+      "sections": [
+        {
+          "heading": "Session Lessons",
+          "level": 1,
+          "page": null,
+          "line_start": 24,
+          "text": "Purpose: append candidate lessons from Jarvis sessions before they graduate into durable brain notes, skills, or model-training examples. Linked notes: [[96 Learning Loop]], [[79 Local Skill Loop]], [[92 Agent Inbox]]",
+          "keywords": [
+            "notes",
+            "loop",
+            "purpose",
+            "append",
+            "candidate",
+            "lessons",
+            "jarvis",
+            "sessions",
+            "before",
+            "they",
+            "graduate",
+            "into"
+          ]
+        },
+        {
+          "heading": "Capture Rules",
+          "level": 2,
+          "page": null,
+          "line_start": 30,
+          "text": "- Capture only lessons backed by repeated behavior, explicit user correction, eval failure, or verified repo evidence. - Keep raw context short. Link the source artifact when possible instead of pasting full logs. - Do not graduate a lesson directly from this file. Stage it for review through [[92 Agent Inbox]], vault/wiki/candidates/, a skill proposal, or a local training example.",
+          "keywords": [
+            "capture",
+            "only",
+            "lessons",
+            "backed",
+            "repeated",
+            "behavior",
+            "explicit",
+            "user",
+            "correction",
+            "eval",
+            "failure",
+            "verified"
+          ]
+        },
+        {
+          "heading": "Candidate Lessons",
+          "level": 2,
+          "page": null,
+          "line_start": 36,
+          "text": "<!-- Append session lessons below this heading using vault/templates/session-lesson-template.md. -->",
+          "keywords": [
+            "session",
+            "append",
+            "lessons",
+            "below",
+            "heading",
+            "using",
+            "vault",
+            "templates",
+            "lesson",
+            "template"
+          ]
+        }
+      ]
+    },
+    {
       "path": "wiki/brain/00 Home.md",
       "title": "Jarvis Brain Home",
       "preview": "Jarvis Brain Home This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Sourc",
@@ -1153,14 +1358,14 @@
         "map",
         "import"
       ],
-      "chars": 5211,
+      "chars": 5327,
       "sections": [
         {
           "heading": "Jarvis Brain Home",
           "level": 1,
           "page": null,
           "line_start": 1,
-          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline - [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first - [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails - [[86 Capability Eval Harness]] for tying capability claims to local regression cases - [[87 Production Readiness Contract]] for keeping readiness and free-use claims bounded by live runtime gates - [[88 Coder Workbench]] for repo-grounded terminal coding status and verification plans - [[89 Local Model Fleet]] for local LLM inventory, free training lanes, and gated self-learning - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
+          "text": "This note is the top-level map for Jarvis's local Obsidian-compatible brain. Core note set: - [[02 Brain Dashboard]] for manual summaries across the curated brain - [[03 Brain Schema]] for the vault metadata, task, and linking contract - [[04 Capture Workflow]] for how durable notes should be created and promoted - [[05 Source Inventory]] for imported data sources and staging status - [[06 Vault Support Hub]] for support guides, indexes, and strategy bridges - [[07 Import Source Hub]] for raw import families and provenance flow - [[10 Identity]] for stable user identity, role, strengths, and goals - [[20 Projects]] for active and important ongoing work - [[30 Preferences]] for communication, product, and operating preferences - [[40 Timeline]] for major events, milestones, and decisions - [[50 Synthesis]] for distilled takeaways from exports and long conversations - [[60 Interview Story Bank]] for reusable professional stories and evidence-backed examples - [[61 Role Targeting Map]] for mapping the right stories to the right role families - [[62 Anthropic AI Safety Variant]] for Anthropic-style AI safety interview framing - [[63 Apple Ops Leadership Variant]] for Apple-style operations leadership interview framing - [[64 YouTube Policy Variant]] for YouTube-style policy enforcement interview framing - [[65 Career Answering Rules]] for how Jarvis should use these notes in interview and role-fit answers - [[66 OpenAI Trust Safety Variant]] for OpenAI-style trust, safety, and integrity interview framing - [[67 Security Incident Command Variant]] for GSOC, incident-command, and security-operations interview framing - [[68 Google Play Fraud Abuse Variant]] for fraud, abuse, platform-risk, and investigation interview framing - [[69 Core Career Narrative]] for a resume-backed tell-me-about-yourself and why-you narrative spine - [[71 Meta Calibration Quality Variant]] for Meta-style calibration, QA, and enforcement-quality interview framing - [[72 LLNL Technical Systems Credibility]] for backend, systems, observability, and engineering-credibility support - [[73 Senior Cybersecurity AI Engineering Companion]] for Jarvis's technical-partner role across cybersecurity, AI, and software engineering work - [[74 Universal Engineer Thinker Problem Solver]] for Jarvis's broader systems, product, and first-principles problem-solving role - [[75 Debugging Root Cause Playbook]] for how Jarvis should debug bugs, regressions, and runtime issues without guessing - [[76 Systems Design Tradeoff Heuristics]] for how Jarvis should reason about architecture and product tradeoffs without overengineering - [[77 Threat Modeling Security Thinking]] for how Jarvis should think about trust boundaries, adversarial behavior, and control gaps - [[78 AI Runtime Agent Engineering Principles]] for how Jarvis should reason about routing, grounding, tool arbitration, and local-first agent behavior - [[79 Local Skill Loop]] for proposal-first local skill learning, review, promotion, and provenance rules - [[82 Context Budget Discipline]] for local coding-agent context control, terse task lanes, and token-quality discipline - [[83 External Agent Pattern Intake]] for deciding what external agent repos Jarvis should adopt, adapt, gate, watch, or keep defensive-only - [[84 Frontier Capability Parity]] for measuring Jarvis against frontier assistant/coding-agent capability groups while staying local-first - [[85 Defensive Security ROE]] for scoped, defensive cybersecurity templates and guardrails - [[86 Capability Eval Harness]] for tying capability claims to local regression cases - [[87 Production Readiness Contract]] for keeping readiness and free-use claims bounded by live runtime gates - [[88 Coder Workbench]] for repo-grounded terminal coding status and verification plans - [[89 Local Model Fleet]] for local LLM inventory, free training lanes, and gated self-learning - [[96 Learning Loop]] for capture, distillation, retrieval, grading, and review-gated promotion of session lessons - [[70 Jarvis Decision Log]] for product and architecture decisions that should compound over time - [[80 Jarvis Roadmap]] for long-term product direction, sequencing, and capability priorities - [[90 Task Hub]] for open distillation and product-memory tasks - [[92 Agent Inbox]] for bounded background brain-maintenance work queued by smart agents - [[93 Vault Maintenance]] for the live maintenance snapshot of candidates, inbox debt, and recommended upkeep commands - [[91 Vault Changelog]] for major brain upgrades and provenance Supporting surfaces: - [[06 Vault Support Hub]] for the support-layer map - [[07 Import Source Hub]] for the import-layer map - [[jarvis-vault-strategy]] for the storage and retrieval strategy bridge - [[eval-pattern-self-improve]] for the bounded self-improve evidence rule - [[product-surface-source|Product Surface Source]] for the compiled product-surface bridge Use this note as the first place to connect new knowledge after reviewing raw imports. The graph becomes useful only if the curated notes stay linked and structured. Keep durable facts in the core brain notes, keep noisy source material in [[05 Source Inventory]] or vault/raw/imports/, follow [[03 Brain Schema]] when creating new notes, and add links whenever two notes reinforce each other.",
           "keywords": [
             "jarvis",
             "local",
@@ -10132,32 +10337,32 @@
       "keywords": [
         "added",
         "vault",
+        "local",
         "jarvis",
         "brain",
-        "local",
         "skill",
         "notes",
         "instead",
         "can",
+        "claude",
         "capture",
         "agent",
-        "into",
         "candidate",
-        "inbox",
+        "into",
+        "model",
         "review",
-        "surface",
+        "source",
+        "without",
         "only",
-        "stale",
-        "capability",
-        "runtime"
+        "inbox"
       ],
-      "chars": 12860,
+      "chars": 14924,
       "sections": [
         {
           "heading": "Vault Changelog",
           "level": 1,
           "page": null,
-          "line_start": 22,
+          "line_start": 23,
           "text": "Purpose: preserve note-level provenance for major brain upgrades so Jarvis can compound knowledge without losing change history. Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]]",
           "keywords": [
             "jarvis",
@@ -10178,7 +10383,7 @@
           "heading": "2026-04-15",
           "level": 2,
           "page": null,
-          "line_start": 28,
+          "line_start": 29,
           "text": "vault_capture.py integrated and all intent tests pass",
           "keywords": [
             "vault",
@@ -10194,7 +10399,7 @@
           "heading": "Brain foundation from exports",
           "level": 3,
           "page": null,
-          "line_start": 31,
+          "line_start": 32,
           "text": "- staged Claude and ChatGPT exports into vault/raw/imports/ - created the curated brain spine under vault/wiki/brain/ - established identity, projects, preferences, timeline, and synthesis as the durable core",
           "keywords": [
             "vault",
@@ -10215,7 +10420,7 @@
           "heading": "Career and technical companion expansion",
           "level": 3,
           "page": null,
-          "line_start": 37,
+          "line_start": 38,
           "text": "- added role-targeting variants for Anthropic, OpenAI, Apple, YouTube, Meta, Google Play, security incident command, and LLNL technical credibility - added technical playbooks for debugging, systems design, threat modeling, and AI runtime reasoning - made Jarvis explicitly responsible for senior cybersecurity, AI, and software-engineering companionship - made Jarvis explicitly responsible for broader universal engineering and problem-solving behavior",
           "keywords": [
             "added",
@@ -10236,7 +10441,7 @@
           "heading": "Obsidian operating layer",
           "level": 3,
           "page": null,
-          "line_start": 44,
+          "line_start": 45,
           "text": "- added [[03 Brain Schema]] as the plugin-optional metadata and task contract - added [[04 Capture Workflow]] as the deterministic capture and promotion flow - added reusable templates under vault/templates/ - promoted changelog-backed provenance as a first-class brain rule - updated [[81 Jarvis Brain Map]] to include schema, capture workflow, and changelog navigation",
           "keywords": [
             "added",
@@ -10257,7 +10462,7 @@
           "heading": "Runtime state correction",
           "level": 3,
           "page": null,
-          "line_start": 52,
+          "line_start": 53,
           "text": "- updated [[80 Jarvis Roadmap]] with a current runtime snapshot instead of the older overstated \"goal delivered\" framing - corrected the default local chat model from gemma4:e4b to jarvis-local:latest - corrected the voice stack from say-only framing to Kokoro -> say - recorded that semantic retrieval uses ollama-embeddings with TF-IDF fallback still in code - recorded that local STT is configured for faster-whisper, but the current development shell audit showed an import/runtime gap, so packaged-app verification and shell verification should not be conflated",
           "keywords": [
             "local",
@@ -10278,7 +10483,7 @@
           "heading": "Self-sustaining vault lane",
           "level": 3,
           "page": null,
-          "line_start": 60,
+          "line_start": 61,
           "text": "- added [[92 Agent Inbox]] as the bounded queue for ongoing background brain-maintenance work - taught vault_curator to append explicit inbox items instead of only mutating canonical notes - added a background vault task lane so Jarvis can keep curating the brain while other work continues - kept canonical note changes explicit by routing unresolved or open-ended curation into the inbox first - added note ownership and write_policy metadata to the template/schema contract - blocked generated and propose_only notes from direct curator append paths inside vault_edit.py",
           "keywords": [
             "added",
@@ -10299,7 +10504,7 @@
           "heading": "Obsidian write-back pipeline",
           "level": 3,
           "page": null,
-          "line_start": 71,
+          "line_start": 72,
           "text": "- created vault_capture.py \u2014 natural-language capture pipeline that writes directly to brain notes without requiring wikilink syntax from the user - add_task() \u2192 [[90 Task Hub]] under Incoming heading with Obsidian checkbox format and \ud83d\udcc5 YYYY-MM-DD #brain tag - log_decision() \u2192 [[70 Jarvis Decision Log]] under Decisions with full ### heading and YAML-style fields - add_changelog_entry() \u2192 this file, under a dated heading - capture_story() \u2192 [[60 Interview Story Bank]] under Stories with full STAR format - update_projects() \u2192 [[20 Projects]] under Recent Updates - save_to_brain() \u2192 new brain notes via brain-note-template or appends to existing notes - append_to_note() / read_note() \u2014 generic wikilink-addressed mutation and read - all write functions call _patch_frontmatter() to bump updated date and increment version - detect_capture_intent() \u2014 regex-based intent detection without LLM cost - handle_capture() \u2014 single entry point for router; tasks, changelog entries, brain saves, project updates, and append/read commands resolved without LLM; decisions and stories fall through to vault_curator for structured field extraction",
           "keywords": [
             "brain",
@@ -10320,7 +10525,7 @@
           "heading": "Router integration",
           "level": 3,
           "page": null,
-          "line_start": 85,
+          "line_start": 86,
           "text": "- wired vault_capture import and fast-path into router.py just before the vault search block - capture commands now handled inline before orchestrator, keeping latency near zero for simple vault writes",
           "keywords": [
             "vault",
@@ -10341,7 +10546,7 @@
           "heading": "Vault curator agent spec expanded",
           "level": 3,
           "page": null,
-          "line_start": 90,
+          "line_start": 91,
           "text": "- agents/vault_curator.md rewritten with explicit capture targets, heading formats, frontmatter rules, wikilink discipline, and extraction rules for decisions and stories - decisions and stories now have field-by-field instructions so the LLM path produces consistent structured output Affected: [[90 Task Hub]] \u00b7 [[70 Jarvis Decision Log]] \u00b7 [[60 Interview Story Bank]] \u00b7 [[20 Projects]] \u00b7 [[80 Jarvis Roadmap]]",
           "keywords": [
             "rules",
@@ -10362,7 +10567,7 @@
           "heading": "Candidate staging lane",
           "level": 3,
           "page": null,
-          "line_start": 99,
+          "line_start": 100,
           "text": "- added vault/wiki/candidates/ as the explicit staging layer between inbox work and canonical notes - taught vault_curator to stage writes for propose_only notes into candidate notes instead of failing dead-end - kept vault_edit.append_under_heading() strict so canonical notes still fail closed unless the write policy allows direct mutation - documented candidate-note promotion rules in [[03 Brain Schema]] and [[04 Capture Workflow]] - added explicit candidate promotion so accepted staged updates can merge back into canon with a promotion log instead of copy-paste drift - added stale-review helpers for candidate notes and [[92 Agent Inbox]] so the self-sustaining lane can surface review debt instead of only accumulating it - added explicit next-step recommendations for stale candidate notes and stale inbox items so curator review surfaces promote, requeue, or archive style actions without taking them implicitly - added explicit maintenance actions for candidate and inbox debt: archive candidate notes, close inbox items, requeue inbox items, and promote-plus-archive when a candidate is resolved - tightened native curator behavior so review_required: true curated notes stage into candidates instead of appending directly - tightened maintenance hygiene so archived candidate notes stop showing up as stale debt and resolved inbox items move into Done instead of cluttering active sections - added apply recommended action support so stale review output can turn into a bounded maintenance command instead of only a suggestion - added a vault maintenance status snapshot so Jarvis can report active, archived, stale, queued, in-review, and done counts without piecing them together manually - added a bounded batch maintenance action for stale vault work so Jarvis can archive low-risk stale candidate drafts and close low-risk stale inbox items with a hard cap, while skipping anything that would promote into canon or otherwise needs manual review - agent-led graph cleanup connected raw imports, compiled notes, templates, indexes, and support READMEs back into the curated brain so Obsidian graph view reflects the real vault structure instead of isolated leaf notes - renamed the repeated vault README.md files into descriptive guide names and added [[06 Vault Support Hub]] plus [[07 Import Source Hub]] so the graph clusters around deliberate hubs instead of several ambiguous filename-only leaves - renamed the old readme-md / ingested-file-readme-md bridge pair into [[product-surface-source|Product Surface Source]] plus raw/Product Surface Source.md so product-surface evidence reads like a deliberate knowledge node instead of an ingest artifact",
           "keywords": [
             "notes",
@@ -10383,7 +10588,7 @@
           "heading": "Proposal-first local skill loop",
           "level": 3,
           "page": null,
-          "line_start": 120,
+          "line_start": 121,
           "text": "- added [[79 Local Skill Loop]] as the canonical brain policy for Hermes-style local learning without unsafe self-modification - added a dedicated skill_builder specialist role for drafting reusable skill proposals from local vault evidence - added a non-mutating /skills/propose endpoint so Jarvis can validate skill payloads without writing files or changing skills/index.json - added a managed skill-builder task lane so background skill work stays separate from chat routing and vault curation - kept direct skill creation explicit and approval-sensitive instead of allowing background agents to silently mutate the skill registry - refreshed generated vault indexes so the compiled product-surface source now resolves as [[product-surface-source|Product Surface Source]] instead of a stale bridge filename",
           "keywords": [
             "skill",
@@ -10404,7 +10609,7 @@
           "heading": "Context budget and local coding loop",
           "level": 3,
           "page": null,
-          "line_start": 129,
+          "line_start": 130,
           "text": "- added [[82 Context Budget Discipline]] as the canonical brain policy for token/context quality during local coding-agent work - added a native context-budget runtime surface so Jarvis can answer token-saver and local coding loop questions from live policy instead of hype-thread memory - connected context discipline to [[78 AI Runtime Agent Engineering Principles]], [[79 Local Skill Loop]], and [[80 Jarvis Roadmap]]",
           "keywords": [
             "context",
@@ -10425,7 +10630,7 @@
           "heading": "External agent pattern intake",
           "level": 3,
           "page": null,
-          "line_start": 135,
+          "line_start": 136,
           "text": "- added [[83 External Agent Pattern Intake]] as the canonical adopt/adapt/watch/gate/defensive-only review layer for external agent repos - added a native runtime pattern registry for GBrain, Multica, Claude Code Best Practice, OpenMythos, Scrapling, Browser Harness, and Decepticon-style signals - tightened the skill-builder contract so proposed skills include \"Do NOT use for\" boundaries before promotion",
           "keywords": [
             "added",
@@ -10446,7 +10651,7 @@
           "heading": "Skill precision and negative triggers",
           "level": 3,
           "page": null,
-          "line_start": 141,
+          "line_start": 142,
           "text": "- added first-class negative_triggers metadata support so skill matching can suppress a skill before loading its full instructions - updated generated skill proposals to carry negative-trigger metadata alongside the prose \"Do NOT use for\" section - exposed negative triggers through skill registry detail so future skill debugging can inspect both positive and negative activation rules - surfaced negative triggers inside orchestrator skill metadata so classification sees positive and negative activation rules together - seeded negative triggers into the broadest curated skills: local knowledge, vault overview, personal context, eval self-improve, and self-improvement",
           "keywords": [
             "negative",
@@ -10467,7 +10672,7 @@
           "heading": "Frontier capability parity",
           "level": 3,
           "page": null,
-          "line_start": 149,
+          "line_start": 150,
           "text": "- added [[84 Frontier Capability Parity]] as the measurable local-first scorecard for Claude/GPT/Codex/Gemini/Grok-style capability groups - added a /capability-parity runtime endpoint and /parity console command so Jarvis can report ready, partial, and gap areas from live local state - connected parity tracking to roadmap, context budget, and external pattern intake so the ambition stays grounded in verifiable product seams",
           "keywords": [
             "parity",
@@ -10488,7 +10693,7 @@
           "heading": "Defensive security ROE",
           "level": 3,
           "page": null,
-          "line_start": 155,
+          "line_start": 156,
           "text": "- added [[85 Defensive Security ROE]] as the scoped defensive operating contract for cybersecurity tasks - added /security-roe and /security-roe <template> console/API surfaces for authorization, threat model, code review, incident, AI misuse, and browser/source gates - connected the security ROE skill to capability parity so Jarvis can report the cybersecurity companion surface as runtime-backed instead of persona-only",
           "keywords": [
             "security",
@@ -10506,10 +10711,31 @@
           ]
         },
         {
+          "heading": "Claude shared brain bridge",
+          "level": 3,
+          "page": null,
+          "line_start": 164,
+          "text": "- added [[95 Claude Shared Brain Contract]] so Claude Code and Jarvis can share the local Obsidian vault without unreviewed memory writes - added vault/indexes/Repo Map.md as a cheap repo-orientation layer for Claude and Jarvis before opening source or vault files - added .claude/commands/search-shared-brain.md, .claude/commands/append-session-lesson.md, .claude/commands/propose-vault-update.md, and .claude/commands/token-discipline.md - appended the shared-brain rules to CLAUDE.md, including targeted search, proposal-first writes, and no-auto-commit rules for vault changes",
+          "keywords": [
+            "claude",
+            "vault",
+            "commands",
+            "added",
+            "shared",
+            "brain",
+            "jarvis",
+            "writes",
+            "repo",
+            "search",
+            "rules",
+            "contract"
+          ]
+        },
+        {
           "heading": "Capability eval harness",
           "level": 3,
           "page": null,
-          "line_start": 161,
+          "line_start": 171,
           "text": "- added [[86 Capability Eval Harness]] to keep local capability claims tied to explicit regression cases - added /capability-evals and /capability-evals <group> console/API surfaces for eval coverage and live golden commands - added harder golden prompts for defensive security ROE and frontier eval coverage",
           "keywords": [
             "capability",
@@ -10530,7 +10756,7 @@
           "heading": "Production readiness contract",
           "level": 3,
           "page": null,
-          "line_start": 167,
+          "line_start": 177,
           "text": "- added [[87 Production Readiness Contract]] so Jarvis answers production/free-use readiness questions from a live contract instead of ambition language - added the /production-readiness API endpoint and console command to separate local daily-core readiness from full production go-live gates - recorded that \"100% free regardless of request\" is not a valid claim because live sources, third-party accounts, permissions, local hardware limits, and safety boundaries still apply",
           "keywords": [
             "production",
@@ -10551,7 +10777,7 @@
           "heading": "Coder workbench",
           "level": 3,
           "page": null,
-          "line_start": 173,
+          "line_start": 183,
           "text": "- added [[88 Coder Workbench]] as the terminal-native coding loop for git state, changed files, and deterministic verification plans - added /coder/status, /coder/verify-plan, jarvis --code-status, and jarvis --verify-plan - added a coding-agent eval case so the workbench is treated as part of the local Claude/Codex parity path",
           "keywords": [
             "added",
@@ -10572,7 +10798,7 @@
           "heading": "Local model fleet and free training lanes",
           "level": 3,
           "page": null,
-          "line_start": 179,
+          "line_start": 189,
           "text": "- added [[89 Local Model Fleet]] as the canonical brain note for local LLM inventory, role-based model pulls, free training lanes, and self-learning promotion gates - added /local/model-fleet, jarvis --model-fleet, and console /model-fleet - recorded that Google Colab and Unsloth can be useful training labs for LoRA/SFT/GRPO experiments, but not reliable 24/7 Jarvis hosting - recorded that Jarvis should not download every local model; it should install by role, measure, and promote through evals",
           "keywords": [
             "model",
@@ -10593,7 +10819,7 @@
           "heading": "agentic-stack portable brain intake",
           "level": 3,
           "page": null,
-          "line_start": 186,
+          "line_start": 196,
           "text": "- added agentic-stack to [[83 External Agent Pattern Intake]] as an adapt pattern for portable .agent/ brain compatibility - recorded the useful seams: four memory layers, host-agent review of candidate lessons, progressive-disclosure skills, typed permission protocols, and recall-before-action hooks - kept Jarvis's canonical brain unchanged; .agent/ should become an export/import compatibility surface only after safety review, not an installer-driven replacement for AGENTS.md, CLAUDE.md, or skills/index.json",
           "keywords": [
             "agent",
@@ -10608,6 +10834,48 @@
             "external",
             "intake",
             "adapt"
+          ]
+        },
+        {
+          "heading": "Local-first upgrade loop",
+          "level": 3,
+          "page": null,
+          "line_start": 204,
+          "text": "- guarded OpenAI and Anthropic clients so open-source mode can import cloud backends without API keys - changed provider-priority helper calls to try local Ollama first and fail closed in open-source mode instead of falling through to cloud - moved self-improve analysis and code generation onto the local-first provider path rather than directly importing Claude as the default teacher - moved local training distillation and local model-eval judging onto the same free-first provider path so teacher and judge calls stay local in open-source mode - changed local training, beta, automation, and eval request defaults from Claude model labels to the configured local reasoning model - registered LOCAL_CODER_RECOMMENDED for the Qwen3-Coder 30B next-pull candidate while keeping the installed 7B coder as the active default until eval promotion - added role-aware specialist-agent local timeouts so deep roles get enough time without making lightweight roles hang - added a runnable coder verification loop behind /coder/run-verify-plan, console /run-verify-plan, and jarvis --run-verify-plan",
+          "keywords": [
+            "local",
+            "coder",
+            "open",
+            "source",
+            "mode",
+            "provider",
+            "first",
+            "model",
+            "eval",
+            "run",
+            "verify",
+            "plan"
+          ]
+        },
+        {
+          "heading": "Learning loop scaffold",
+          "level": 3,
+          "page": null,
+          "line_start": 215,
+          "text": "- added [[96 Learning Loop]] as the canonical capture, distill, retrieve, grade, and promote policy - added vault/sessions/lessons.md as an append-only, indexed candidate lesson lane - added vault/templates/session-lesson-template.md so future lesson captures stay structured and review-gated",
+          "keywords": [
+            "added",
+            "lesson",
+            "vault",
+            "learning",
+            "loop",
+            "canonical",
+            "capture",
+            "distill",
+            "retrieve",
+            "grade",
+            "promote",
+            "policy"
           ]
         }
       ]
@@ -10855,6 +11123,318 @@
             "review",
             "actions",
             "show"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/95 Claude Shared Brain Contract.md",
+      "title": "Claude Shared Brain Contract",
+      "preview": "# Claude Shared Brain Contract Purpose: let Claude Code and Jarvis share one local Obsidian brain without turning the vault into an unreviewed scratchpad. Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]] Scope - Vault root: /Users/truthseeker/jarvis-ai/vault - Curated brain: vault/wiki/brain/ - Raw evidence: vault/raw/ and vault/raw/imports/ - Indexes: vault/indexes/ - Staging lane: vault/wiki/candidates/ Claude Co",
+      "keywords": [
+        "vault",
+        "claude",
+        "brain",
+        "raw",
+        "code",
+        "wiki",
+        "indexes",
+        "may",
+        "read",
+        "only",
+        "jarvis",
+        "context",
+        "discipline",
+        "imports",
+        "write",
+        "use",
+        "before",
+        "commit",
+        "one",
+        "obsidian"
+      ],
+      "chars": 1797,
+      "sections": [
+        {
+          "heading": "Claude Shared Brain Contract",
+          "level": 1,
+          "page": null,
+          "line_start": 25,
+          "text": "Purpose: let Claude Code and Jarvis share one local Obsidian brain without turning the vault into an unreviewed scratchpad. Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[82 Context Budget Discipline]], [[83 External Agent Pattern Intake]]",
+          "keywords": [
+            "brain",
+            "purpose",
+            "let",
+            "claude",
+            "code",
+            "jarvis",
+            "share",
+            "one",
+            "local",
+            "obsidian",
+            "without",
+            "turning"
+          ]
+        },
+        {
+          "heading": "Scope",
+          "level": 2,
+          "page": null,
+          "line_start": 31,
+          "text": "- Vault root: /Users/truthseeker/jarvis-ai/vault - Curated brain: vault/wiki/brain/ - Raw evidence: vault/raw/ and vault/raw/imports/ - Indexes: vault/indexes/ - Staging lane: vault/wiki/candidates/ Claude Code may read the vault for Jarvis context. Claude Code may write only through explicit human-approved workflows.",
+          "keywords": [
+            "vault",
+            "raw",
+            "jarvis",
+            "brain",
+            "wiki",
+            "indexes",
+            "claude",
+            "code",
+            "may",
+            "root",
+            "users",
+            "truthseeker"
+          ]
+        },
+        {
+          "heading": "Read Protocol",
+          "level": 2,
+          "page": null,
+          "line_start": 41,
+          "text": "1. Start with vault/indexes/Repo Map.md for repo orientation. 2. Use rg before opening files. 3. Prefer curated notes under vault/wiki/brain/ before raw imports. 4. Read the smallest file ranges that answer the question. 5. Cite vault/... paths when using vault evidence.",
+          "keywords": [
+            "vault",
+            "repo",
+            "before",
+            "start",
+            "indexes",
+            "map",
+            "orientation",
+            "use",
+            "opening",
+            "files",
+            "prefer",
+            "curated"
+          ]
+        },
+        {
+          "heading": "Write Protocol",
+          "level": 2,
+          "page": null,
+          "line_start": 49,
+          "text": "Claude may write only when Aman explicitly says one of: - remember this - log this - save to brain - append session lesson - approve If approval is missing, use /propose-vault-update and stop.",
+          "keywords": [
+            "claude",
+            "may",
+            "write",
+            "only",
+            "aman",
+            "explicitly",
+            "says",
+            "one",
+            "remember",
+            "log",
+            "save",
+            "brain"
+          ]
+        },
+        {
+          "heading": "Do Not Mutate",
+          "level": 2,
+          "page": null,
+          "line_start": 61,
+          "text": "- vault/raw/imports/** - vault/wiki/candidates/** unless asked to stage a candidate - vault/.obsidian/** - generated indexes except through the existing generator - note filenames, moves, or deletes - frontmatter provenance except append-only updates",
+          "keywords": [
+            "vault",
+            "except",
+            "raw",
+            "imports",
+            "wiki",
+            "candidates",
+            "unless",
+            "asked",
+            "stage",
+            "candidate",
+            "obsidian",
+            "generated"
+          ]
+        },
+        {
+          "heading": "Token Discipline",
+          "level": 2,
+          "page": null,
+          "line_start": 70,
+          "text": "- Search first, read second. - Keep vault reads under roughly 8k tokens per turn unless Aman asks for a deep dive. - Never load the whole vault. - Never paste giant logs or generated files into chat. - Use [[82 Context Budget Discipline]] before large coding tasks.",
+          "keywords": [
+            "vault",
+            "never",
+            "search",
+            "first",
+            "read",
+            "second",
+            "keep",
+            "reads",
+            "under",
+            "roughly",
+            "tokens",
+            "per"
+          ]
+        },
+        {
+          "heading": "Commit Rule",
+          "level": 2,
+          "page": null,
+          "line_start": 78,
+          "text": "Claude may commit code/config changes only when asked. Claude should not auto-commit vault changes; stage or show diffs for review.",
+          "keywords": [
+            "claude",
+            "commit",
+            "changes",
+            "may",
+            "code",
+            "config",
+            "only",
+            "asked",
+            "should",
+            "not",
+            "auto",
+            "vault"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "wiki/brain/96 Learning Loop.md",
+      "title": "Learning Loop",
+      "preview": "# Learning Loop Purpose: define the safe path for Jarvis to learn from sessions without silently mutating production behavior. Linked notes: [[03 Brain Schema]], [[79 Local Skill Loop]], [[82 Context Budget Discipline]], [[92 Agent Inbox]], [[95 Claude Shared Brain Contract]] Loop 1. Capture a short candidate lesson in vault/sessions/lessons.md. 2. Distill repeated lessons into a candidate note, skill proposal, or local training example. 3. Retrieve only the relevant top-k lesson context when a ",
+      "keywords": [
+        "loop",
+        "local",
+        "not",
+        "behavior",
+        "brain",
+        "skill",
+        "candidate",
+        "lessons",
+        "repeated",
+        "weekly",
+        "learning",
+        "path",
+        "sessions",
+        "production",
+        "notes",
+        "context",
+        "agent",
+        "inbox",
+        "lesson",
+        "vault"
+      ],
+      "chars": 1540,
+      "sections": [
+        {
+          "heading": "Learning Loop",
+          "level": 1,
+          "page": null,
+          "line_start": 26,
+          "text": "Purpose: define the safe path for Jarvis to learn from sessions without silently mutating production behavior. Linked notes: [[03 Brain Schema]], [[79 Local Skill Loop]], [[82 Context Budget Discipline]], [[92 Agent Inbox]], [[95 Claude Shared Brain Contract]]",
+          "keywords": [
+            "brain",
+            "purpose",
+            "define",
+            "safe",
+            "path",
+            "jarvis",
+            "learn",
+            "sessions",
+            "without",
+            "silently",
+            "mutating",
+            "production"
+          ]
+        },
+        {
+          "heading": "Loop",
+          "level": 2,
+          "page": null,
+          "line_start": 32,
+          "text": "1. Capture a short candidate lesson in vault/sessions/lessons.md. 2. Distill repeated lessons into a candidate note, skill proposal, or local training example. 3. Retrieve only the relevant top-k lesson context when a future task matches its trigger. 4. Grade the result with evals, user correction, or a concrete verification command. 5. Promote only after review, passing evidence, and a rollback path.",
+          "keywords": [
+            "candidate",
+            "lesson",
+            "lessons",
+            "only",
+            "capture",
+            "short",
+            "vault",
+            "sessions",
+            "distill",
+            "repeated",
+            "into",
+            "note"
+          ]
+        },
+        {
+          "heading": "Timing Policy",
+          "level": 2,
+          "page": null,
+          "line_start": 40,
+          "text": "- Run a weekly synthesis pass so the vault does not drift. - Also synthesize when repeated candidate lessons cross a threshold before the weekly pass. - Keep both paths review-gated. Weekly and threshold synthesis should stage proposals; neither should rewrite canonical notes unattended.",
+          "keywords": [
+            "weekly",
+            "synthesis",
+            "pass",
+            "threshold",
+            "should",
+            "run",
+            "vault",
+            "does",
+            "not",
+            "drift",
+            "also",
+            "synthesize"
+          ]
+        },
+        {
+          "heading": "Promotion Targets",
+          "level": 2,
+          "page": null,
+          "line_start": 46,
+          "text": "- Stable preference or operating rule: curated brain note. - Repeated task pattern: [[79 Local Skill Loop]] proposal. - Model behavior correction: local training teacher example or preference pair. - Unclear or high-impact change: [[92 Agent Inbox]] first.",
+          "keywords": [
+            "preference",
+            "local",
+            "stable",
+            "operating",
+            "rule",
+            "curated",
+            "brain",
+            "note",
+            "repeated",
+            "task",
+            "pattern",
+            "skill"
+          ]
+        },
+        {
+          "heading": "Non-Goals",
+          "level": 2,
+          "page": null,
+          "line_start": 53,
+          "text": "- Do not treat one-off conversation noise as durable memory. - Do not train on secrets, credentials, private raw logs, jailbreak payloads, or unreviewed hostile text. - Do not claim self-learning has improved production behavior until evals or verification show it.",
+          "keywords": [
+            "not",
+            "treat",
+            "one",
+            "off",
+            "conversation",
+            "noise",
+            "durable",
+            "memory",
+            "train",
+            "secrets",
+            "credentials",
+            "private"
           ]
         }
       ]

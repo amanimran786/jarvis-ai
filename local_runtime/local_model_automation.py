@@ -14,7 +14,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import HAIKU, LOCAL_DEFAULT, LOCAL_TUNED, SONNET
+from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED
 from brains.brain_ollama import list_local_models
 import cost_policy
 from local_runtime import local_model_eval
@@ -70,8 +70,8 @@ def run_cycle(
     base_model: str = LOCAL_DEFAULT,
     baseline_model: str = "",
     candidate_name: str = "",
-    teacher_model: str = SONNET,
-    judge_model: str = HAIKU,
+    teacher_model: str = LOCAL_REASONING,
+    judge_model: str = LOCAL_REASONING,
     promote_if_ready: bool = True,
     cleanup_failed: bool = False,
     force: bool = False,

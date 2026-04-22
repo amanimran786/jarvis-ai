@@ -17,6 +17,7 @@ related:
   - "[[04 Capture Workflow]]"
   - "[[70 Jarvis Decision Log]]"
   - "[[80 Jarvis Roadmap]]"
+  - "[[96 Learning Loop]]"
 ---
 
 # Vault Changelog
@@ -197,3 +198,22 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added agentic-stack to [[83 External Agent Pattern Intake]] as an `adapt` pattern for portable `.agent/` brain compatibility
 - recorded the useful seams: four memory layers, host-agent review of candidate lessons, progressive-disclosure skills, typed permission protocols, and recall-before-action hooks
 - kept Jarvis's canonical brain unchanged; `.agent/` should become an export/import compatibility surface only after safety review, not an installer-driven replacement for `AGENTS.md`, `CLAUDE.md`, or `skills/index.json`
+
+## 2026-04-22
+
+### Local-first upgrade loop
+
+- guarded OpenAI and Anthropic clients so open-source mode can import cloud backends without API keys
+- changed provider-priority helper calls to try local Ollama first and fail closed in open-source mode instead of falling through to cloud
+- moved self-improve analysis and code generation onto the local-first provider path rather than directly importing Claude as the default teacher
+- moved local training distillation and local model-eval judging onto the same free-first provider path so teacher and judge calls stay local in open-source mode
+- changed local training, beta, automation, and eval request defaults from Claude model labels to the configured local reasoning model
+- registered `LOCAL_CODER_RECOMMENDED` for the Qwen3-Coder 30B next-pull candidate while keeping the installed 7B coder as the active default until eval promotion
+- added role-aware specialist-agent local timeouts so deep roles get enough time without making lightweight roles hang
+- added a runnable coder verification loop behind `/coder/run-verify-plan`, console `/run-verify-plan`, and `jarvis --run-verify-plan`
+
+### Learning loop scaffold
+
+- added [[96 Learning Loop]] as the canonical capture, distill, retrieve, grade, and promote policy
+- added `vault/sessions/lessons.md` as an append-only, indexed candidate lesson lane
+- added `vault/templates/session-lesson-template.md` so future lesson captures stay structured and review-gated

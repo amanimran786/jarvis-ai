@@ -5,7 +5,7 @@ import memory as mem
 import conversation_context as ctx
 import usage_tracker
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 def _strip_markdown(text: str) -> str:
@@ -24,6 +24,9 @@ def ask(user_input: str, model: str = GPT_MINI, system_extra: str = "", track_co
 
 
 def ask_stream(user_input: str, model: str = GPT_MINI, system_extra: str = "", track_context: bool = False):
+    if client is None:
+        raise RuntimeError("OpenAI API key is not configured.")
+
     system_base = SYSTEM_PROMPT + mem.get_context()
     if track_context:
         ctx.begin_turn(user_input)

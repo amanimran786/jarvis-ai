@@ -67,8 +67,32 @@ _LOCAL_ROLE_MODELS = {
 
 _LOCAL_SPECIALIST_TIMEOUT_SECONDS = max(
     1.0,
-    float(os.getenv("JARVIS_SPECIALIST_LOCAL_TIMEOUT_SECONDS", "8")),
+    float(os.getenv("JARVIS_SPECIALIST_LOCAL_TIMEOUT_SECONDS", "12")),
 )
+_LOCAL_ROLE_TIMEOUTS = {
+    "planner": 15.0,
+    "reviewer": 15.0,
+    "vault_curator": 15.0,
+    "self_improve_critic": 15.0,
+    "skill_builder": 15.0,
+    "executor": 45.0,
+    "operator": 30.0,
+    "researcher": 45.0,
+    "debugger": 45.0,
+    "science_expert": 45.0,
+    "security_reviewer": 45.0,
+    "security_analyst": 45.0,
+}
+
+
+def _timeout_for_role(role: str) -> float:
+    raw = os.getenv(f"JARVIS_SPECIALIST_{role.upper()}_TIMEOUT_SECONDS")
+    if raw:
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            pass
+    return max(_LOCAL_SPECIALIST_TIMEOUT_SECONDS, _LOCAL_ROLE_TIMEOUTS.get(role, _LOCAL_SPECIALIST_TIMEOUT_SECONDS))
 
 
 def _load_agent_instructions(role: str) -> str:
@@ -80,7 +104,7 @@ def available_roles() -> list[str]:
     return list(AGENTS)
 
 
-def _ask_local_with_timeout(prompt: str, *, model: str, system_extra: str) -> str:
+def _ask_local_with_timeout(prompt: str, *, model: str, system_extra: str, timeout_seconds: float | None = None) -> str:
     result_queue: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1)
 
     def _worker() -> None:
@@ -97,9 +121,10 @@ def _ask_local_with_timeout(prompt: str, *, model: str, system_extra: str) -> st
 
     thread = threading.Thread(target=_worker, daemon=True, name=f"SpecialistLocal-{model}")
     thread.start()
-    thread.join(_LOCAL_SPECIALIST_TIMEOUT_SECONDS)
+    timeout = timeout_seconds or _LOCAL_SPECIALIST_TIMEOUT_SECONDS
+    thread.join(timeout)
     if thread.is_alive():
-        raise TimeoutError(f"local specialist timeout after {_LOCAL_SPECIALIST_TIMEOUT_SECONDS:.1f}s")
+        raise TimeoutError(f"local specialist timeout after {timeout:.1f}s")
     try:
         status, payload = result_queue.get_nowait()
     except queue.Empty as exc:
@@ -508,7 +533,12 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         try:
             local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = _ask_local_with_timeout(prompt, model=local_model, system_extra=full_system)
+            output = _ask_local_with_timeout(
+                prompt,
+                model=local_model,
+                system_extra=full_system,
+                timeout_seconds=_timeout_for_role(role),
+            )
             return {"role": role, "model": f"local/{local_model}", "output": output}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()
@@ -529,7 +559,12 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
         try:
             local_model = get_best_available(preferred)
             full_system = system + ("\n\n" + system_extra if system_extra else "")
-            output = _ask_local_with_timeout(prompt, model=local_model, system_extra=full_system)
+            output = _ask_local_with_timeout(
+                prompt,
+                model=local_model,
+                system_extra=full_system,
+                timeout_seconds=_timeout_for_role(role),
+            )
             return {"role": role, "model": f"local/{local_model}", "output": output, "fallback": True}
         except Exception as local_exc:
             output = _fallback_role_output(role, task, context=context).strip()
@@ -545,6 +580,13 @@ def run(user_input: str, roles: list[str] | None = None) -> dict:
     for role in selected:
         result = _run_role(role, user_input, context=shared_context)
         stages.append(result)
+        if result.get("native") and selected == [role, "reviewer"]:
+            return {
+                "ok": True,
+                "roles": [role],
+                "stages": stages,
+                "final": result["output"],
+            }
         if role in {
             "planner", "operator", "researcher", "debugger", "vault_curator",
             "science_expert", "security_reviewer", "security_analyst", "self_improve_critic", "skill_builder"

@@ -20,8 +20,8 @@ import difflib
 import tempfile
 import re
 from datetime import datetime
-from brains.brain_claude import ask_claude
-from config import OPUS, LOCAL_CODER, LOCAL_REASONING
+from config import LOCAL_CODER, LOCAL_REASONING
+from provider_priority import ask_with_priority
 import evals
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -210,7 +210,7 @@ def apply_improvement(filename: str, new_code: str) -> tuple[str, str]:
 # ── Model routing helpers ─────────────────────────────────────────────────────
 
 def _ask_for_analysis(prompt: str) -> str:
-    """Route analysis prompts: local deepseek-r1 in open-source mode, Opus otherwise."""
+    """Route analysis prompts through local-first policy before any cloud teacher."""
     try:
         import model_router
         if model_router.is_open_source_mode():
@@ -218,11 +218,11 @@ def _ask_for_analysis(prompt: str) -> str:
             return ask_local(prompt, model=LOCAL_REASONING)
     except Exception:
         pass
-    return ask_claude(prompt, model=OPUS)
+    return ask_with_priority(prompt, tier="deep")
 
 
 def _ask_for_code(prompt: str) -> str:
-    """Route code-generation prompts: local qwen2.5-coder in open-source mode, Opus otherwise."""
+    """Route code-generation prompts through local-first policy before any cloud teacher."""
     try:
         import model_router
         if model_router.is_open_source_mode():
@@ -230,7 +230,7 @@ def _ask_for_code(prompt: str) -> str:
             return ask_local(prompt, model=LOCAL_CODER)
     except Exception:
         pass
-    return ask_claude(prompt, model=OPUS)
+    return ask_with_priority(prompt, tier="deep")
 
 
 # ── Self-analysis ─────────────────────────────────────────────────────────────

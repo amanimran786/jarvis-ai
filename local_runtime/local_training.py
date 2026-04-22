@@ -5,7 +5,7 @@ This does not magically make small local models equal to frontier hosted models.
 It does give Jarvis a practical, low-cost loop:
 
 1. Export strong interaction examples into SFT-style JSONL.
-2. Distill failed or weak interactions with a stronger teacher model only on demand.
+2. Distill failed or weak interactions through the free-first teacher path on demand.
 3. Generate an Ollama Modelfile target for a tuned Jarvis-local model.
 """
 
@@ -19,8 +19,8 @@ from collections import Counter
 
 import evals
 import skills
-from brains.brain_claude import ask_claude
-from config import LOCAL_DEFAULT, LOCAL_TUNED, SONNET, SYSTEM_PROMPT
+from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED, SYSTEM_PROMPT
+from provider_priority import ask_with_priority
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -118,6 +118,19 @@ def _read_jsonl(path: Path) -> list[dict]:
                 continue
             rows.append(json.loads(line))
     return rows
+
+
+def _teacher_tier(model: str) -> str:
+    model_lower = (model or "").lower()
+    if "opus" in model_lower or "deep" in model_lower:
+        return "deep"
+    if "sonnet" in model_lower or "pro" in model_lower or "gpt-4" in model_lower:
+        return "strong"
+    return "cheap"
+
+
+def _ask_teacher(prompt: str, *, teacher_model: str, system_extra: str = "") -> str:
+    return ask_with_priority(prompt, tier=_teacher_tier(teacher_model), system_extra=system_extra)
 
 
 def _latest_pack_path() -> Path | None:
@@ -977,7 +990,7 @@ def _failure_priority(failures: list[dict], interaction: dict | None = None) -> 
 
 def distill_failures(
     limit: int = 12,
-    teacher_model: str = SONNET,
+    teacher_model: str = LOCAL_REASONING,
     categories: list[str] | None = None,
     prioritize_local: bool = True,
 ) -> dict:
@@ -1042,9 +1055,9 @@ def distill_failures(
             break
 
         system_extra, _ = skills.build_system_extra(interaction.get("user_input", ""), tool="chat")
-        improved = ask_claude(
+        improved = _ask_teacher(
             _build_distill_prompt(interaction, failures),
-            model=teacher_model,
+            teacher_model=teacher_model,
             system_extra=system_extra,
         ).strip()
         if not improved:
@@ -1098,7 +1111,7 @@ def _build_expert_distill_prompt(case: dict) -> str:
 
 def distill_expert_cases(
     limit: int = 3,
-    teacher_model: str = SONNET,
+    teacher_model: str = LOCAL_REASONING,
     case_ids: list[str] | None = None,
 ) -> dict:
     _ensure_dirs()
@@ -1125,9 +1138,9 @@ def distill_expert_cases(
     examples = []
     for case in selected:
         system_extra, _ = skills.build_system_extra(case["prompt"], tool="chat")
-        improved = ask_claude(
+        improved = _ask_teacher(
             _build_expert_distill_prompt(case),
-            model=teacher_model,
+            teacher_model=teacher_model,
             system_extra=system_extra,
         ).strip()
         if not improved:
@@ -1190,7 +1203,7 @@ def build_training_pack(
     export_limit: int = 150,
     distill_limit: int = 8,
     expert_distill_limit: int = 3,
-    teacher_model: str = SONNET,
+    teacher_model: str = LOCAL_REASONING,
     cloud_only_export: bool = True,
     base_model: str = LOCAL_DEFAULT,
     target_name: str = LOCAL_TUNED,
