@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from config import LOCAL_CODER, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED
+from config import LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED
 from brains import brain_ollama
 from local_runtime import local_model_automation, local_model_eval, local_training
 
@@ -49,10 +49,10 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         id="qwen3_coder_30b",
         role="coding_agent",
         label="Qwen3-Coder 30B",
-        ollama_tag="qwen3-coder:30b",
+        ollama_tag=LOCAL_CODER_RECOMMENDED,
         status="recommended",
         priority="high",
-        pull_command="ollama pull qwen3-coder:30b",
+        pull_command=f"ollama pull {LOCAL_CODER_RECOMMENDED}",
         disk_estimate="about 19GB",
         context_window="256K listed by Ollama",
         why="Best next local coding-agent candidate for a Claude/Codex-style terminal loop.",

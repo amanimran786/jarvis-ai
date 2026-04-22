@@ -734,6 +734,24 @@ def _print_verify_plan() -> None:
         print(f"    run: {item.get('command')}")
 
 
+def _run_verify_plan() -> None:
+    payload = post(
+        "/coder/run-verify-plan",
+        {"required_only": True, "stop_on_failure": True, "timeout_seconds": 120},
+    )
+    print("Coder Verify Run")
+    print(f"Result: {'PASS' if payload.get('ok') else 'FAIL'}")
+    for item in payload.get("commands", []):
+        if item.get("skipped"):
+            print(f"  {item.get('id')}: skipped")
+            continue
+        status = "PASS" if item.get("ok") else "FAIL"
+        print(f"  {item.get('id')}: {status} ({item.get('elapsed_seconds', 0)}s)")
+        output = (item.get("output") or "").strip()
+        if output:
+            print(f"    {output[:800]}")
+
+
 def _print_agent_patterns(category: str = "") -> None:
     suffix = ""
     if category:
@@ -1053,6 +1071,7 @@ def _console_help() -> str:
             "  /tokens               Alias for /context-budget",
             "  /code-status          Show repo-grounded coding workbench state",
             "  /verify-plan          Show verification commands for current diff",
+            "  /run-verify-plan      Run required verification commands for current diff",
             "  /agent-patterns [id]  Show external repo patterns Jarvis can adapt",
             "  /parity               Show local frontier capability parity",
             "  /capability-evals [g] Show eval coverage for local capability claims",
@@ -1546,6 +1565,9 @@ def _handle_console_command(line: str) -> int | None:
     if command in {"verify-plan", "code-verify", "verification"}:
         _print_verify_plan()
         return 0
+    if command in {"run-verify-plan", "verify-run", "run-verification"}:
+        _run_verify_plan()
+        return 0
     if command in {"agent-patterns", "patterns"}:
         _print_agent_patterns(args)
         return 0
@@ -1768,6 +1790,10 @@ def main():
 
     if flag in {"--verify-plan", "--code-verify", "--verification"}:
         _print_verify_plan()
+        return
+
+    if flag in {"--run-verify-plan", "--verify-run", "--run-verification"}:
+        _run_verify_plan()
         return
 
     if flag in {"--agent-patterns", "--patterns"}:

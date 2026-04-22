@@ -1861,6 +1861,12 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(plan_payload["ok"])
         self.assertIn("commands", plan_payload)
 
+        with patch("api.coder_workbench.run_verification_plan", return_value={"ok": True, "commands": []}) as run_mock:
+            run = self.client.post("/coder/run-verify-plan", json={"paths": ["api.py"], "required_only": True})
+        self.assertEqual(run.status_code, 200)
+        self.assertTrue(run.json()["ok"])
+        run_mock.assert_called_once()
+
     def test_agent_patterns_endpoint(self):
         response = self.client.get("/agent-patterns")
         self.assertEqual(response.status_code, 200)
@@ -1945,6 +1951,14 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("training_lanes", payload)
         self.assertIn("recommended_next", payload)
         self.assertIn("qwen2.5-coder:7b", payload["installed_models"])
+
+    def test_local_training_and_eval_defaults_use_local_reasoning_model(self):
+        self.assertEqual(api.LocalTrainingDistillRequest().teacher_model, config.LOCAL_REASONING)
+        self.assertEqual(api.LocalTrainingRunRequest().teacher_model, config.LOCAL_REASONING)
+        self.assertEqual(api.LocalModelEvalRunRequest(candidate_model="candidate").teacher_model, config.LOCAL_REASONING)
+        self.assertEqual(api.LocalModelAutomationRunRequest().teacher_model, config.LOCAL_REASONING)
+        self.assertEqual(api.LocalModelAutomationRunRequest().judge_model, config.LOCAL_REASONING)
+        self.assertEqual(api.LocalBetaRunRequest().teacher_model, config.LOCAL_REASONING)
 
     def test_local_training_run_endpoint_passes_expert_distill_limit(self):
         captured = {}
@@ -3621,7 +3635,7 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["example_count"], 1)
         self.assertEqual(captured["examples"][0]["messages"][2]["content"], teacher["messages"][2]["content"])
-        self.assertEqual(result["teacher_model"], "claude-sonnet-4-6")
+        self.assertEqual(result["teacher_model"], config.LOCAL_REASONING)
         self.assertEqual(result["teacher_examples"], 1)
 
     def test_build_colab_handoff_writes_notebook_and_policy_manifest(self):
@@ -3782,7 +3796,7 @@ class LocalTrainingTests(unittest.TestCase):
         with patch("local_runtime.local_training._ensure_dirs"), \
              patch("local_runtime.local_training.evals.load", return_value=fake_data), \
              patch("local_runtime.local_training.skills.build_system_extra", return_value=("", [])), \
-             patch("local_runtime.local_training.ask_claude", return_value="You work on AI safety systems and you're building Jarvis, so the interesting part is how often you push toward local-first, inspectable AI workflows."), \
+             patch("local_runtime.local_training._ask_teacher", return_value="You work on AI safety systems and you're building Jarvis, so the interesting part is how often you push toward local-first, inspectable AI workflows."), \
              patch("local_runtime.local_training._write_jsonl", side_effect=fake_write):
             result = local_training.distill_failures(limit=3)
 
@@ -3794,7 +3808,7 @@ class LocalTrainingTests(unittest.TestCase):
     def test_zero_limit_distill_paths_do_not_call_teacher(self):
         with patch("local_runtime.local_training._ensure_dirs"), \
              patch("local_runtime.local_training._write_jsonl"), \
-             patch("local_runtime.local_training.ask_claude") as mock_teacher:
+             patch("local_runtime.local_training._ask_teacher") as mock_teacher:
             result_failures = local_training.distill_failures(limit=0)
             result_expert = local_training.distill_expert_cases(limit=0)
         self.assertTrue(result_failures["ok"])
@@ -3802,6 +3816,22 @@ class LocalTrainingTests(unittest.TestCase):
         self.assertTrue(result_expert["ok"])
         self.assertEqual(result_expert["example_count"], 0)
         mock_teacher.assert_not_called()
+
+    def test_model_eval_judge_uses_free_first_provider_path(self):
+        case = {
+            "category": "quality",
+            "prompt": "Tell me something useful.",
+            "expected": "Answer directly.",
+        }
+        with patch("local_runtime.local_model_eval.skills.build_system_extra", return_value=("vault context", [])), \
+             patch("local_runtime.local_model_eval.ask_with_priority", return_value='{"pass": true, "score": 4.5, "rationale": "grounded"}') as ask_mock:
+            result = local_model_eval._judge_answer(case, "candidate", "A direct answer.", "claude-3-5-haiku-latest")
+
+        self.assertTrue(result["pass"])
+        self.assertEqual(result["score"], 4.5)
+        ask_mock.assert_called_once()
+        self.assertEqual(ask_mock.call_args.kwargs["tier"], "cheap")
+        self.assertEqual(ask_mock.call_args.kwargs["system_extra"], "vault context")
 
 
 class LocalBetaTests(unittest.TestCase):

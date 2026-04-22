@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,27 @@ def _run(args: list[str], *, cwd: Path = ROOT) -> tuple[int, str]:
     except Exception as exc:
         return 1, str(exc)
     return completed.returncode, completed.stdout.rstrip()
+
+
+def _run_shell(command: str, *, cwd: Path = ROOT, timeout_seconds: int = 120) -> tuple[int, str, float]:
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=str(cwd),
+            shell=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        return completed.returncode, completed.stdout.rstrip(), time.monotonic() - started
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "") + (exc.stderr or "")
+        return 124, output.rstrip() or f"Timed out after {timeout_seconds}s", time.monotonic() - started
+    except Exception as exc:
+        return 1, str(exc), time.monotonic() - started
 
 
 def _git(args: list[str]) -> str:
@@ -119,6 +141,7 @@ def status() -> dict[str, Any]:
             "Inspect repo state before coding.",
             "Make the smallest correct diff.",
             "Run the verify plan generated from changed files.",
+            "Execute the required verify plan when Jarvis needs to close the loop itself.",
             "Rebuild the packaged app when runtime surfaces change.",
             "Commit and push only after verification passes.",
         ],
@@ -213,6 +236,45 @@ def verification_plan(paths: list[str] | None = None) -> list[dict[str, Any]]:
             }
         )
     return commands
+
+
+def run_verification_plan(
+    paths: list[str] | None = None,
+    *,
+    required_only: bool = True,
+    stop_on_failure: bool = True,
+    timeout_seconds: int = 120,
+) -> dict[str, Any]:
+    commands = verification_plan(paths)
+    results: list[dict[str, Any]] = []
+    for item in commands:
+        if required_only and not item.get("required"):
+            results.append({**item, "skipped": True, "ok": True, "output": ""})
+            continue
+        code, output, elapsed = _run_shell(item["command"], timeout_seconds=timeout_seconds)
+        result = {
+            **item,
+            "skipped": False,
+            "ok": code == 0,
+            "returncode": code,
+            "elapsed_seconds": round(elapsed, 2),
+            "output": output[-4000:],
+        }
+        results.append(result)
+        if code != 0 and stop_on_failure:
+            break
+
+    failed = [item for item in results if not item.get("ok")]
+    return {
+        "ok": not failed,
+        "required_only": required_only,
+        "stop_on_failure": stop_on_failure,
+        "timeout_seconds": timeout_seconds,
+        "commands": results,
+        "failed_count": len(failed),
+        "ran_count": sum(1 for item in results if not item.get("skipped")),
+        "skipped_count": sum(1 for item in results if item.get("skipped")),
+    }
 
 
 def summary_text() -> str:
