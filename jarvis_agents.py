@@ -185,6 +185,84 @@ def _agent_research(context: str = "") -> dict:
                 "result": f"Research error: {e}", "escalate": False}
 
 
+def _agent_email(context: str = "") -> dict:
+    """Scan unread emails for urgency signals."""
+    try:
+        gs = _safe_import("google_services")
+        if not gs or not hasattr(gs, "get_unread_email_subjects"):
+            return {"agent": "email", "status": "ok",
+                    "result": "Email: not connected.", "escalate": False}
+        emails = gs.get_unread_email_subjects(max_results=10)
+        if not emails:
+            return {"agent": "email", "status": "ok",
+                    "result": "Email: no unread messages.", "escalate": False}
+        urgent = [
+            e for e in emails
+            if _needs_escalation(e["subject"] + " " + e["snippet"])
+        ]
+        if urgent:
+            lines = [f"From {e['sender']}: {e['subject']}" for e in urgent[:3]]
+            result = f"Urgent emails ({len(urgent)}):\n" + "\n".join(f"  • {l}" for l in lines)
+            escalate = True
+        else:
+            result = f"Email: {len(emails)} unread, none flagged urgent."
+            escalate = False
+        return {"agent": "email", "status": "ok", "result": result, "escalate": escalate}
+    except Exception as e:
+        return {"agent": "email", "status": "error",
+                "result": f"Email error: {e}", "escalate": False}
+
+
+def _agent_meeting_prep(context: str = "") -> dict:
+    """Pull the next meeting details and any vault context about attendees/topic."""
+    try:
+        gs = _safe_import("google_services")
+        event = None
+        if gs and hasattr(gs, "get_next_event"):
+            event = gs.get_next_event()
+        if not event:
+            return {"agent": "meeting_prep", "status": "ok",
+                    "result": "No upcoming meetings found.", "escalate": False}
+
+        import datetime as _dt
+        start_str = event["start"]
+        if "T" in start_str:
+            try:
+                dt = _dt.datetime.fromisoformat(start_str)
+                time_label = dt.strftime("%-I:%M %p")
+            except Exception:
+                time_label = start_str
+        else:
+            time_label = start_str
+
+        attendees_str = ", ".join(event["attendees"][:5]) or "no attendees listed"
+        lines = [
+            f"Next meeting: {event['title']} at {time_label}",
+            f"Attendees: {attendees_str}",
+        ]
+        if event.get("location"):
+            lines.append(f"Location: {event['location']}")
+        if event.get("description"):
+            lines.append(f"Notes: {event['description'][:200]}")
+
+        # Pull vault context about the meeting title / attendees
+        vault_hint = ""
+        try:
+            import vault
+            query = event["title"] + " " + " ".join(event["attendees"][:3])
+            vault_hint = vault.build_context(query, tool="chat")
+            if vault_hint:
+                lines.append(f"Brain context:\n{vault_hint[:400]}")
+        except Exception:
+            pass
+
+        result = "\n".join(lines)
+        return {"agent": "meeting_prep", "status": "ok", "result": result, "escalate": False}
+    except Exception as e:
+        return {"agent": "meeting_prep", "status": "error",
+                "result": f"Meeting prep error: {e}", "escalate": False}
+
+
 def _agent_week(context: str = "") -> dict:
     """Pull the next 7 days of calendar events."""
     try:
@@ -206,16 +284,19 @@ def _agent_week(context: str = "") -> dict:
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 _AGENTS: dict[str, Callable[[str], dict]] = {
-    "calendar": _agent_calendar,
-    "week":     _agent_week,
-    "tasks":    _agent_tasks,
-    "vault":    _agent_vault,
-    "code":     _agent_code,
-    "research": _agent_research,
+    "calendar":     _agent_calendar,
+    "week":         _agent_week,
+    "tasks":        _agent_tasks,
+    "vault":        _agent_vault,
+    "code":         _agent_code,
+    "research":     _agent_research,
+    "email":        _agent_email,
+    "meeting_prep": _agent_meeting_prep,
 }
 
-_BRIEFING_AGENTS = ["calendar", "tasks", "vault"]
-_WEEK_AGENTS     = ["week", "tasks"]
+_BRIEFING_AGENTS      = ["calendar", "tasks", "vault", "email"]
+_WEEK_AGENTS          = ["week", "tasks"]
+_MEETING_PREP_AGENTS  = ["meeting_prep"]
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -386,6 +467,23 @@ def week_ahead() -> str:
             "You are Jarvis. Summarise the week ahead for Aman in 2-4 natural spoken sentences. "
             "Mention the number of events, any deadlines or tasks, and flag anything urgent. "
             "No bullet points. Under 80 words."
+        ),
+    )
+
+
+def meeting_prep() -> str:
+    """Pull the next meeting details and brain context, synthesised as a spoken prep brief."""
+    results = dispatch_parallel(_MEETING_PREP_AGENTS)
+    raw = _merge_results(results)
+    if not raw or "No upcoming meetings" in raw:
+        return "You don't have any upcoming meetings on the calendar."
+    return _synthesise(
+        raw,
+        system=(
+            "You are Jarvis. Prepare Aman for his next meeting in 3-5 spoken sentences. "
+            "Mention who he's meeting, what it's about, any relevant context from his notes. "
+            "Close with one thing he should have ready or know going in. "
+            "No bullet points. Under 100 words. Sound like JARVIS from Iron Man."
         ),
     )
 

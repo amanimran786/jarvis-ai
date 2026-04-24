@@ -295,3 +295,24 @@ Affected: router.py · main.py · ui.py · api.py · local_runtime/model_fleet.p
   - override via `JARVIS_FASTER_WHISPER_MODEL=small.en` for low-RAM machines
 
 Affected: jarvis_agents.py · google_services.py · router.py · config.py
+
+### Email urgency watcher, meeting prep agent
+
+- `google_services.py`
+  - `get_unread_email_subjects(max_results)` — structured list of dicts with sender/subject/snippet
+  - `get_next_event()` — returns next upcoming calendar event as dict with title/start/attendees/description
+- `jarvis_agents.py`
+  - `_agent_email()` — scans unread inbox for urgency signals, escalates if found
+  - `_agent_meeting_prep()` — pulls next event details + vault context about attendees/topic
+  - `meeting_prep()` — public function, LLM-synthesised meeting brief in Iron Man Jarvis voice
+  - `_BRIEFING_AGENTS` now includes email agent (4-way parallel: calendar+tasks+vault+email)
+  - `_MEETING_PREP_AGENTS` registry entry
+- `jarvis_watcher.py`
+  - `_EMAIL_URGENT_PATTERNS` — regex for urgent/action required/deadline/follow-up etc.
+  - `_check_emails()` — scans unread subjects+snippets, returns notifiable alerts
+  - watcher loop now fans out to 3 checks: calendar + tasks + emails
+- `router.py` — `_MEETING_PREP_TRIGGERS` fast-path
+  - "prep me for my meeting" / "next meeting" / "who am i meeting" / "meeting brief" → `meeting_prep()`
+- `tests/test_jarvis_watcher.py` — 6 new email urgency pattern tests (23 total, all pass)
+
+Affected: jarvis_agents.py · jarvis_watcher.py · google_services.py · router.py

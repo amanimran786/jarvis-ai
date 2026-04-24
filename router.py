@@ -2197,6 +2197,16 @@ def route_stream(user_input: str) -> tuple:
         def _week_gen():
             yield _jagents.week_ahead()
         return _week_gen(), "Jarvis"
+    _MEETING_PREP_TRIGGERS = (
+        "prep me for my meeting", "prep for my meeting", "meeting prep",
+        "prepare me for", "what's my next meeting", "who am i meeting",
+        "meeting brief", "next meeting", "prep me for", "before my meeting",
+        "about my meeting", "what's the meeting about",
+    )
+    if any(t in lower for t in _MEETING_PREP_TRIGGERS):
+        def _meeting_prep_gen():
+            yield _jagents.meeting_prep()
+        return _meeting_prep_gen(), "Jarvis"
     # ── Proactive watcher status / control ──────────────────────────────────────
     _WATCHER_TRIGGERS = (
         "watcher status", "watcher running", "are you watching",
