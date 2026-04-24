@@ -1,6 +1,6 @@
 import unittest
 import json
-from unittest.mock import patch
+from unittest.mock import call, patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -32,6 +32,7 @@ import graph_context
 import interview_profile
 import meeting_listener
 import ui
+import stealth
 from desktop import screen_capture
 import self_improve
 import skills
@@ -1302,6 +1303,7 @@ class RouterTests(unittest.TestCase):
         router._clear_pending_message_draft()
         router._awaiting_msg_recipient = False
         router._last_msg_recipient = ""
+        router._fuzzy_contact_suggestions.clear()
 
     def test_open_source_mode_switch_fast_path(self):
         previous = model_router.get_mode()
@@ -1438,8 +1440,39 @@ class RouterTests(unittest.TestCase):
             stream, label = router.route_stream("message Aman Imran Hello")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn("draft ready for aman imran", text.lower())
+        self.assertIn('draft ready for aman imran: "hello"', text.lower())
         send_mock.assert_not_called()
+
+    def test_message_single_turn_understands_text_message_phrase(self):
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+            stream, label = router.route_stream("Send a text message to dad to get chocolate milk")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for dad: "get chocolate milk"', text.lower())
+        send_mock.assert_not_called()
+
+    def test_message_single_turn_understands_text_my_dad_phrase(self):
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+            stream, label = router.route_stream("text my dad to get milk")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for dad: "get milk"', text.lower())
+        send_mock.assert_not_called()
+
+    def test_new_message_compose_replaces_existing_draft(self):
+        router.route_stream("message Dad old reminder")
+        stream, label = router.route_stream("send a message to mom telling her bring milk")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for mom: "bring milk"', text.lower())
+        self.assertNotIn("dad", text.lower())
+
+    def test_new_message_compose_replaces_existing_draft_with_contact_scope_phrase(self):
+        router.route_stream("message Dad old reminder")
+        stream, label = router.route_stream("send a message to dad in my contacts using iMessage, to get milk")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for dad: "get milk"', text.lower())
 
     def test_message_requires_confirmation_before_sending(self):
         with patch("router.msg.send_imessage", return_value="Sent to Harry Singh.") as send_mock:
@@ -1466,6 +1499,106 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label2, "Messages")
         self.assertIn("canceled the draft to harry singh", text2.lower())
         send_mock.assert_not_called()
+
+    def test_pending_recipient_accepts_contact_correction_phrase(self):
+        router.route_stream("message")
+        stream, label = router.route_stream("no his name in contacts is: dad")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to dad", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "dad")
+        self.assertIsNone(router._pending_message_draft)
+
+    def test_pending_draft_generic_rephrase_clears_loop_and_restarts(self):
+        router.route_stream("message Dad get milk")
+        stream, label = router.route_stream("no thats not what i want")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("who would you like to message", text.lower())
+        self.assertFalse(router._has_pending_message_draft())
+        self.assertTrue(router._awaiting_msg_recipient)
+
+    def test_confirm_send_ambiguous_contact_preserves_draft_and_prompts_for_selection(self):
+        ambiguous = (
+            "I found multiple contacts for Aman Imran: "
+            "1. Aman Imran (ending 0179); 2. Aman Imran (ending 4421). "
+            "Reply with option 1, option 2, or the exact contact label."
+        )
+        with patch("router.msg.send_imessage", return_value=ambiguous) as send_mock, \
+             patch(
+                 "router.msg.get_last_contact_options",
+                 return_value=["Aman Imran (ending 0179)", "Aman Imran (ending 4421)"],
+             ):
+            router.route_stream("message Aman Imran Hello there")
+            stream, label = router.route_stream("confirm send")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("reply with option 1", text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
+        self.assertEqual(router._pending_message_draft["body"], "Hello there")
+        self.assertTrue(router._awaiting_msg_recipient)
+        self.assertEqual(
+            router._fuzzy_contact_suggestions,
+            ["Aman Imran (ending 0179)", "Aman Imran (ending 4421)"],
+        )
+        send_mock.assert_called_once_with("Aman Imran", "Hello there")
+
+    def test_ambiguous_contact_option_selection_reconfirms_same_body_and_sends_to_resolved_contact(self):
+        ambiguous = (
+            "I found multiple contacts for Aman Imran: "
+            "1. Aman Imran (ending 0179); 2. Aman Imran (ending 4421). "
+            "Reply with option 1, option 2, or the exact contact label."
+        )
+        with patch("router.msg.send_imessage", side_effect=[ambiguous, "Sent to +15105550179."]) as send_mock, \
+             patch(
+                 "router.msg.get_last_contact_options",
+                 return_value=["Aman Imran (ending 0179)", "Aman Imran (ending 4421)"],
+             ), \
+             patch("router.msg.resolve_last_contact_selection", return_value="+15105550179"):
+            router.route_stream("message Aman Imran Hello there")
+            router.route_stream("confirm send")
+            stream1, label1 = router.route_stream("option 1")
+            text1 = "".join(stream1)
+            stream2, label2 = router.route_stream("confirm send")
+            text2 = "".join(stream2)
+
+        self.assertEqual(label1, "Messages")
+        self.assertIn('draft ready for aman imran (ending 0179): "hello there"', text1.lower())
+        self.assertEqual(label2, "Messages")
+        self.assertIn("sent to aman imran (ending 0179).", text2.lower())
+        self.assertFalse(router._has_pending_message_draft())
+        self.assertFalse(router._awaiting_msg_recipient)
+        self.assertEqual(
+            send_mock.call_args_list,
+            [
+                call("Aman Imran", "Hello there"),
+                call("+15105550179", "Hello there"),
+            ],
+        )
+
+    def test_cancel_message_clears_ambiguous_contact_resolution_state(self):
+        ambiguous = (
+            "I found multiple contacts for Aman Imran: "
+            "1. Aman Imran (ending 0179); 2. Aman Imran (ending 4421). "
+            "Reply with option 1, option 2, or the exact contact label."
+        )
+        with patch("router.msg.send_imessage", return_value=ambiguous), \
+             patch(
+                 "router.msg.get_last_contact_options",
+                 return_value=["Aman Imran (ending 0179)", "Aman Imran (ending 4421)"],
+             ):
+            router.route_stream("message Aman Imran Hello there")
+            router.route_stream("confirm send")
+            stream, label = router.route_stream("cancel message")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("canceled the draft to aman imran", text.lower())
+        self.assertFalse(router._has_pending_message_draft())
+        self.assertFalse(router._awaiting_msg_recipient)
+        self.assertEqual(router._fuzzy_contact_suggestions, [])
 
     def test_message_tool_does_not_reuse_last_recipient_for_body_only(self):
         router._last_msg_recipient = "Harry Singh"
@@ -1495,6 +1628,82 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say to 5107071879", text.lower())
         self.assertNotIn("this number", text.lower())
+
+    def test_contact_details_query_routes_to_contacts(self):
+        with patch("router.msg.describe_contact_handles", return_value="Here are the contact handles I found for Dad:\n- Dad: home phone (510) 828-8207"):
+            stream, label = router.route_stream("show contact details for dad")
+            text = "".join(stream)
+        self.assertEqual(label, "Contacts")
+        self.assertIn("home phone", text.lower())
+        self.assertIn("510", text)
+
+    def test_contact_details_query_bypasses_pending_message_draft(self):
+        router.route_stream("message Dad get milk")
+        with patch("router.msg.describe_contact_handles", return_value="Here are the contact handles I found for Dad:\n- Dad: home phone (510) 828-8207"):
+            stream, label = router.route_stream("show contact details for dad")
+            text = "".join(stream)
+        self.assertEqual(label, "Contacts")
+        self.assertIn("home phone", text.lower())
+        self.assertFalse(router._has_pending_message_draft())
+        self.assertFalse(router._awaiting_msg_recipient)
+        self.assertEqual(router._pending_msg_recipient, "")
+
+    def test_pending_draft_can_be_replaced_by_new_compose_phrase(self):
+        router.route_stream("message Dad get milk")
+        stream, label = router.route_stream("no thats not what i want, message mom hi")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for mom: "hi"', text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "mom")
+        self.assertEqual(router._pending_message_draft["body"], "hi")
+
+    def test_pending_recipient_accepts_send_it_to_instead(self):
+        router.route_stream("message dad")
+        stream, label = router.route_stream("send it to mom instead")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to mom", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "mom")
+
+    def test_pending_recipient_accepts_full_compose_after_rephrase(self):
+        router.route_stream("message dad")
+        stream, label = router.route_stream("actually message mom hi")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for mom: "hi"', text.lower())
+        self.assertEqual(router._pending_msg_recipient, "")
+        self.assertTrue(router._has_pending_message_draft())
+
+    def test_pending_recipient_switches_when_user_restarts_with_message_name(self):
+        router.route_stream("message dad")
+        router.route_stream("send it to mom instead")
+        stream, label = router.route_stream("message dad")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to dad", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "dad")
+        self.assertFalse(router._has_pending_message_draft())
+
+    def test_cancel_message_clears_pending_recipient_state(self):
+        router.route_stream("message dad")
+        stream, label = router.route_stream("cancel message")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("canceled the message flow for dad", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "")
+        self.assertFalse(router._awaiting_msg_recipient)
+        self.assertFalse(router._has_pending_message_draft())
+
+    def test_pending_recipient_rephrase_keeps_recipient_and_asks_for_body(self):
+        router.route_stream("message dad")
+        stream, label = router.route_stream("no thats not what i want")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what should i say to dad", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "dad")
+        self.assertFalse(router._awaiting_msg_recipient)
+        self.assertFalse(router._has_pending_message_draft())
 
     def test_message_tool_normalizes_number_phrase_recipient_param(self):
         import orchestrator
@@ -3557,6 +3766,47 @@ class CallPrivacyTests(unittest.TestCase):
             self.assertTrue(call_privacy.should_suppress_audio())
             call_privacy.set_enabled(False)
             self.assertFalse(call_privacy.should_suppress_audio())
+
+
+class StealthVisibilityTests(unittest.TestCase):
+    def tearDown(self):
+        stealth.set_enabled(True)
+
+    def test_detectable_mode_uses_readonly_window_sharing(self):
+        calls = []
+
+        class FakeWindow:
+            def windowNumber(self):
+                return 42
+
+            def setSharingType_(self, value):
+                calls.append(value)
+
+        fake_appkit = SimpleNamespace(NSApp=SimpleNamespace(windows=lambda: [FakeWindow()]))
+        with patch.dict("sys.modules", {"AppKit": fake_appkit}):
+            stealth.set_enabled(False)
+            stealth.apply_current_mode(42)
+
+        self.assertEqual(calls, [1, 1])
+        self.assertEqual(stealth.snapshot()["mode"], "detectable")
+
+    def test_undetectable_mode_uses_none_window_sharing(self):
+        calls = []
+
+        class FakeWindow:
+            def windowNumber(self):
+                return 7
+
+            def setSharingType_(self, value):
+                calls.append(value)
+
+        fake_appkit = SimpleNamespace(NSApp=SimpleNamespace(windows=lambda: [FakeWindow()]))
+        with patch.dict("sys.modules", {"AppKit": fake_appkit}):
+            stealth.set_enabled(True)
+            stealth.apply_current_mode(7)
+
+        self.assertEqual(calls, [0, 0])
+        self.assertEqual(stealth.snapshot()["mode"], "undetectable")
 
 
 class LocalTrainingTests(unittest.TestCase):

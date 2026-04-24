@@ -107,6 +107,9 @@ _SLASH_COMMANDS = (
     "/vault",
     "/context-budget",
     "/tokens",
+    "/cloud-leaks",
+    "/teacher-capture",
+    "/eval-delta",
     "/code-status",
     "/verify-plan",
     "/agent-patterns",
@@ -115,6 +118,7 @@ _SLASH_COMMANDS = (
     "/production-readiness",
     "/model-fleet",
     "/training-status",
+    "/run-verify-plan",
     "/train-local",
     "/colab-handoff",
     "/preference-export",
@@ -651,11 +655,59 @@ def _print_memory() -> None:
         print(f"  [{c['date']}] {c['summary']}")
 
 
+def _shared_skill_path(command: str) -> str:
+    """Return the on-disk path for a shared slash command, if any."""
+    safe = (command or "").strip().lower()
+    if not safe or "/" in safe or ".." in safe:
+        return ""
+    return os.path.join(os.path.dirname(__file__), ".claude", "commands", f"{safe}.md")
+
+
+def _load_shared_skill(command: str) -> str | None:
+    """Load a shared .claude/commands/<command>.md and return its prompt body.
+
+    The frontmatter (--- ... ---) at the top is stripped so what's left is the
+    runbook the LLM should execute. None when the file doesn't exist.
+    """
+    path = _shared_skill_path(command)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    body = text
+    if body.startswith("---"):
+        end = body.find("\n---", 3)
+        if end != -1:
+            body = body[end + 4 :].lstrip("\n")
+    return body.strip()
+
+
+def _list_shared_skills() -> list[str]:
+    """List shared slash commands available on disk."""
+    folder = os.path.join(os.path.dirname(__file__), ".claude", "commands")
+    if not os.path.isdir(folder):
+        return []
+    return sorted(
+        os.path.splitext(name)[0]
+        for name in os.listdir(folder)
+        if name.endswith(".md")
+    )
+
+
 def _print_skills() -> None:
     payload = get("/skills")
     for skill in payload.get("skills", []):
         print(f"{skill['id']}: {skill['tool']} [{skill['cost_hint']}]")
         print(f"  {skill['description']}")
+    shared = _list_shared_skills()
+    if shared:
+        print()
+        print("Shared slash commands (.claude/commands/):")
+        for name in shared:
+            print(f"  /{name}")
 
 
 def _print_connectors() -> None:
@@ -674,9 +726,40 @@ def _print_plugins() -> None:
         print(f"  {plugin['description']}")
 
 
+def _candidate_lesson_count(repo_root: str) -> int:
+    path = os.path.join(repo_root, "vault", "sessions", "lessons.md")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return 0
+    marker = "## Candidate Lessons"
+    idx = text.find(marker)
+    if idx < 0:
+        return 0
+    body = text[idx + len(marker):]
+    return sum(1 for line in body.splitlines() if line.startswith("### "))
+
+
+def _print_distill_hint(count: int, threshold: int) -> None:
+    if count < threshold:
+        return
+    print(
+        f"[learning-loop] {count} candidate lessons in vault/sessions/lessons.md "
+        f"(threshold {threshold}). Run /distill-lessons to stage proposals."
+    )
+
+
 def _print_vault_status() -> None:
     payload = get("/vault")
     print(json.dumps(payload, indent=2))
+    try:
+        threshold = int(os.getenv("JARVIS_DISTILL_THRESHOLD", "5"))
+    except ValueError:
+        threshold = 5
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    count = _candidate_lesson_count(repo_root)
+    _print_distill_hint(count, threshold)
 
 
 def _print_context_budget() -> None:
@@ -704,6 +787,85 @@ def _print_context_budget() -> None:
     print("Commands")
     for command, description in (payload.get("commands") or {}).items():
         print(f"  {command}: {description}")
+
+
+def _print_cloud_leaks(days: int = 14, top: int = 10) -> None:
+    """Show which Jarvis call sites are still routing to cloud."""
+    try:
+        import usage_tracker
+    except ImportError as exc:
+        print(f"usage_tracker unavailable: {exc}", file=sys.stderr)
+        sys.exit(1)
+    data = usage_tracker.summary(days=days, top=top)
+    print(f"Cloud-leak audit (since {data['since_iso']}, last {data['days']}d)")
+    print(
+        f"Calls  : total={data['total_calls']} "
+        f"local={data['local_calls']} cloud={data['cloud_calls']}"
+    )
+    print(
+        f"Tokens : total={data['total_tokens']} "
+        f"cloud={data['cloud_tokens']} "
+        f"est_cost=${data['estimated_cost_usd']:.4f}"
+    )
+    sites = data.get("cloud_only_call_sites") or []
+    if not sites:
+        print("No cloud call sites in this window — local-first holding.")
+        return
+    print("Top cloud call sites by tokens:")
+    for site in sites:
+        print(
+            f"  {site['source']:<48s} model={site['model']:<28s} "
+            f"calls={site['calls']:<5d} tokens={site['tokens']}"
+        )
+
+
+def _print_teacher_capture(toggle: str = "") -> int:
+    """Show or toggle the JARVIS_TEACHER_CAPTURE env flag.
+
+    Off by default. When on, successful cloud answers from
+    provider_priority.ask_with_priority (strong/deep tier) are recorded as
+    teacher examples for local fine-tuning. Toggling here only affects the
+    current process; export the env var in your shell rc to persist.
+    """
+    flag = "JARVIS_TEACHER_CAPTURE"
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off"}
+    current = os.getenv(flag, "").strip().lower()
+    is_on = current in truthy
+
+    target = (toggle or "").strip().lower()
+    if target == "":
+        state = "on" if is_on else "off"
+        print(f"teacher-capture: {state} (env {flag}={current or 'unset'})")
+        if is_on:
+            print("Cloud strong/deep answers WILL be recorded under training/teacher_examples/.")
+        else:
+            print("Cloud answers are NOT being recorded. Use /teacher-capture on to enable.")
+        return 0
+
+    if target in truthy:
+        os.environ[flag] = "1"
+        print(f"teacher-capture: ON (this process). Persist with: export {flag}=1")
+        return 0
+    if target in falsy:
+        os.environ.pop(flag, None)
+        print(f"teacher-capture: OFF (this process). Persist with: unset {flag}")
+        return 0
+
+    print("Usage: /teacher-capture [on|off]", file=sys.stderr)
+    return 1
+
+
+def _print_eval_delta(group: str = "", limit: int = 3) -> int:
+    """Run N cases through local + cloud lanes and print side-by-side."""
+    try:
+        import eval_delta
+    except ImportError as exc:
+        print(f"eval_delta unavailable: {exc}", file=sys.stderr)
+        return 1
+    rows = eval_delta.run_delta(group=group or None, limit=limit)
+    print(eval_delta.format_delta(rows))
+    return 0
 
 
 def _print_code_status() -> None:
@@ -1083,6 +1245,8 @@ def _console_help() -> str:
             "  /preference-export    Export Jarvis preference pairs from failures and corrections",
             "  /rl-colab-handoff     Build Colab DPO preference-RL handoff",
             "  /security-roe [id]    Show defensive cybersecurity ROE templates",
+            "  /teacher-capture [on|off]  Show or toggle cloud->local teacher capture",
+            "  /eval-delta [group] [N]    Run N eval cases through local + cloud, side-by-side",
             "  /run <command>        Run a local shell command",
             "  /approve              Run the pending risky shell command once",
             "  /deny                 Clear the pending risky shell command",
@@ -1112,10 +1276,10 @@ def _banner_text() -> str:
         pass
     return "\n".join(
         [
-            "Jarvis Console",
-            f"Mode: {mode}   Effort: {_CONSOLE_STATE['effort']}   Status: {status}",
+            "JARVIS // Command Deck",
+            f"Mode: {mode}   Effort: {_CONSOLE_STATE['effort']}   Link: {status}",
             os.getcwd(),
-            "Ask naturally, or type /help for shortcuts.",
+            "Ask naturally, or type /help, /interface, /code, /task.",
         ]
     )
 
@@ -1143,24 +1307,26 @@ def _print_banner() -> None:
     grid = Table.grid(expand=True)
     grid.add_column(ratio=1)
     grid.add_column(justify="right")
-    title = Text("Jarvis Console", style="bold cyan")
-    subtitle = Text("local-first terminal interface", style="dim")
-    grid.add_row(title, Text(f"{snapshot['status']}", style="bold green" if snapshot["status"] == "ONLINE" else "bold yellow"))
-    grid.add_row(subtitle, Text(f"mode {snapshot['mode']} | effort {snapshot['effort']}", style="dim"))
-    grid.add_row(Text(snapshot["cwd"], style="white"), Text(snapshot["base_url"], style="dim"))
-    grid.add_row(Text("Ask naturally, or use /help, /interface, /code, /task.", style="yellow"), Text("Ctrl-C keeps console open", style="dim"))
-    _RICH_CONSOLE.print(Panel(grid, border_style="cyan", box=box.ROUNDED, padding=(1, 2)))
+    title = Text("JARVIS // Command Deck", style="bold bright_cyan")
+    subtitle = Text("local-first terminal interface", style="cyan")
+    status_style = "bold bright_green" if snapshot["status"] == "ONLINE" else "bold yellow"
+    grid.add_row(title, Text(f"LINK {snapshot['status']}", style=status_style))
+    grid.add_row(subtitle, Text(f"mode {snapshot['mode']} | effort {snapshot['effort']}", style="bright_black"))
+    grid.add_row(Text(snapshot["cwd"], style="white"), Text(snapshot["base_url"], style="bright_black"))
+    grid.add_row(Text("Natural language active | /help /interface /code /task", style="yellow"), Text("Ctrl-C keeps console open", style="bright_black"))
+    _RICH_CONSOLE.print(Panel(grid, border_style="bright_cyan", box=box.DOUBLE, padding=(1, 2)))
 
 
 def _prompt_line() -> str:
+    prompt_text = "J> "
     if not sys.stdin.isatty() or not sys.stdout.isatty() or not _pt_prompt or not FileHistory or not WordCompleter or not AutoSuggestFromHistory:
-        return input("› ")
+        return input(prompt_text)
 
     history_path = os.path.expanduser("~/.jarvis_console_history")
     completer = WordCompleter(list(_SLASH_COMMANDS), ignore_case=True, sentence=True)
-    style = Style.from_dict({"prompt": "bold cyan"}) if Style else None
+    style = Style.from_dict({"prompt": "bold brightcyan"}) if Style else None
     return _pt_prompt(
-        [("class:prompt", "› ")],
+        [("class:prompt", prompt_text)],
         history=FileHistory(history_path),
         completer=completer,
         auto_suggest=AutoSuggestFromHistory(),
@@ -1359,7 +1525,7 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
         _print_interface_status()
         return 0
     if lower in {"clear", "clear screen", "clear the screen", "reset screen"}:
-        print("\033c", end="")
+        print("\033[2J\033[H", end="")
         return 0
 
     if any(term in lower for term in ("show doctor", "run doctor", "doctor check", "health check", "diagnose jarvis", "is jarvis healthy")):
@@ -1511,7 +1677,7 @@ def _handle_console_command(line: str) -> int | None:
         _print_interface_status()
         return 0
     if command == "clear":
-        print("\033c", end="")
+        print("\033[2J\033[H", end="")
         return 0
     if command == "approve":
         if args:
@@ -1645,8 +1811,26 @@ def _handle_console_command(line: str) -> int | None:
     if command == "vault":
         _print_vault_status()
         return 0
+    if command in {"teacher-capture", "teacher", "capture"}:
+        return _print_teacher_capture(args)
+    if command in {"eval-delta", "delta", "eval-compare"}:
+        parts = args.split()
+        group = parts[0] if parts else ""
+        try:
+            limit = int(parts[1]) if len(parts) > 1 else 3
+        except ValueError:
+            limit = 3
+        return _print_eval_delta(group=group, limit=limit)
     if command == "run":
         return _run_shell_command(args)
+
+    # Shared-skill fallback: any /<command> that matches a file under
+    # .claude/commands/ is treated as a runbook prompt that we send to the
+    # LLM. This lets Jarvis execute the same slash commands Claude Code does.
+    shared = _load_shared_skill(command)
+    if shared is not None:
+        body = shared.replace("$ARGUMENTS", args)
+        return _stream_chat(body)
 
     print(f"Unknown command: /{command}. Use /help.", file=sys.stderr)
     return 1
@@ -1783,6 +1967,38 @@ def main():
     if flag in {"--context-budget", "--tokens"}:
         _print_context_budget()
         return
+
+    if flag in {"--cloud-leaks", "--cloud-audit", "--leaks"}:
+        days = 14
+        top = 10
+        if len(sys.argv) >= 3:
+            try:
+                days = int(sys.argv[2])
+            except ValueError:
+                print("Usage: python jarvis_cli.py --cloud-leaks [days] [top]", file=sys.stderr)
+                sys.exit(1)
+        if len(sys.argv) >= 4:
+            try:
+                top = int(sys.argv[3])
+            except ValueError:
+                print("Usage: python jarvis_cli.py --cloud-leaks [days] [top]", file=sys.stderr)
+                sys.exit(1)
+        _print_cloud_leaks(days=days, top=top)
+        return
+
+    if flag in {"--teacher-capture", "--teacher", "--capture"}:
+        toggle = sys.argv[2] if len(sys.argv) >= 3 else ""
+        rc = _print_teacher_capture(toggle)
+        sys.exit(rc)
+
+    if flag in {"--eval-delta", "--delta", "--eval-compare"}:
+        group = sys.argv[2] if len(sys.argv) >= 3 else ""
+        try:
+            limit = int(sys.argv[3]) if len(sys.argv) >= 4 else 3
+        except ValueError:
+            limit = 3
+        rc = _print_eval_delta(group=group, limit=limit)
+        sys.exit(rc)
 
     if flag in {"--code-status", "--coder-status", "--workbench"}:
         _print_code_status()
