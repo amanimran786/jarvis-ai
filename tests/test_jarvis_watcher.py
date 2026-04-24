@@ -189,5 +189,58 @@ class EmailUrgencyPatternTests(unittest.TestCase):
         self.assertIsInstance(result, list)
 
 
+class EodSummaryTests(unittest.TestCase):
+    def test_status_includes_eod_hour(self):
+        """status() must expose eod_hour."""
+        s = jw.status()
+        self.assertIn("eod_hour", s)
+        self.assertIsInstance(s["eod_hour"], int)
+
+    def test_status_includes_eod_sent(self):
+        """status() must expose eod_sent (None before first delivery)."""
+        s = jw.status()
+        self.assertIn("eod_sent", s)
+
+    def test_should_deliver_eod_not_now(self):
+        """_should_deliver_eod returns False when it's not EOD hour."""
+        import unittest.mock as _um
+        import datetime as _dt
+        fake_now = _dt.datetime(2026, 4, 24, 14, 30)
+        with _um.patch("jarvis_watcher.datetime") as mock_dt:
+            mock_dt.datetime.now.return_value = fake_now
+            mock_dt.date = _dt.date
+            mock_dt.timedelta = _dt.timedelta
+            jw._eod_date = None
+            result = jw._should_deliver_eod()
+        self.assertFalse(result)
+
+    def test_should_deliver_eod_at_correct_hour(self):
+        """_should_deliver_eod returns True at EOD hour when not already sent."""
+        import unittest.mock as _um
+        import datetime as _dt
+        fake_now = _dt.datetime(2026, 4, 24, jw._EOD_HOUR, 3)
+        with _um.patch("jarvis_watcher.datetime") as mock_dt:
+            mock_dt.datetime.now.return_value = fake_now
+            mock_dt.date = _dt.date
+            mock_dt.timedelta = _dt.timedelta
+            jw._eod_date = None
+            result = jw._should_deliver_eod()
+        self.assertTrue(result)
+
+    def test_should_not_deliver_eod_twice(self):
+        """_should_deliver_eod returns False if already sent today."""
+        import unittest.mock as _um
+        import datetime as _dt
+        today = _dt.date(2026, 4, 24)
+        fake_now = _dt.datetime(2026, 4, 24, jw._EOD_HOUR, 3)
+        with _um.patch("jarvis_watcher.datetime") as mock_dt:
+            mock_dt.datetime.now.return_value = fake_now
+            mock_dt.date = _dt.date
+            mock_dt.timedelta = _dt.timedelta
+            jw._eod_date = today
+            result = jw._should_deliver_eod()
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

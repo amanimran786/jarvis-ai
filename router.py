@@ -2160,6 +2160,50 @@ def route_stream(user_input: str) -> tuple:
             f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
         ), "Tasks"
 
+    # ── Screen vision fast-path ───────────────────────────────────────────────
+    # Routes directly to camera.screenshot_and_describe() — local llava first,
+    # OCR+local-LLM second — without touching the cloud orchestrator.
+    _SCREEN_TRIGGERS = (
+        "what's on my screen", "what is on my screen",
+        "analyze my screen", "analyse my screen",
+        "what do you see", "what can you see",
+        "scan my screen", "look at my screen", "read my screen",
+        "what's this", "what is this on screen",
+        "describe my screen", "describe the screen",
+        "what does this say", "read this for me",
+        "what's this error", "what is this error",
+        "help me with what's on my screen",
+        "explain what's on my screen",
+        "what am i looking at",
+        "check my screen",
+    )
+    if any(t in lower for t in _SCREEN_TRIGGERS):
+        def _screen_gen(prompt=user_input):
+            try:
+                result = camera.screenshot_and_describe(prompt)
+                yield result or "I could not read your screen. Check Screen Recording permission in System Settings > Privacy & Security."
+            except Exception as e:
+                yield f"Screen capture failed: {e}. Check Screen Recording permission in System Settings."
+        return _screen_gen(), "Vision"
+
+    # ── Focus advisor fast-path ───────────────────────────────────────────────
+    # "what should i work on", "what's my priority", "what do i focus on today"
+    # Synthesises calendar + tasks + vault into a ranked focus recommendation.
+    _FOCUS_TRIGGERS = (
+        "what should i work on", "what should i do", "what's my priority",
+        "what are my priorities", "what's most important", "what to work on",
+        "where should i focus", "what should i focus on",
+        "what do i focus on today", "what's the plan", "what's next for me",
+        "help me prioritise", "help me prioritize", "prioritise my day",
+        "prioritize my day", "what's the highest priority", "top priority",
+        "what's the most important thing", "what needs to happen today",
+        "what should i tackle", "what am i missing", "what have i been neglecting",
+    )
+    if any(t in lower for t in _FOCUS_TRIGGERS):
+        def _focus_gen():
+            yield _jagents.focus_advisor()
+        return _focus_gen(), "Jarvis"
+
     # ── Health check fast-path ────────────────────────────────────────────────
     _HEALTH_TRIGGERS = (
         "health check", "system health", "system status", "are you working",
@@ -2243,6 +2287,30 @@ def route_stream(user_input: str) -> tuple:
             yield _jagents.meeting_prep()
         return _meeting_prep_gen(), "Jarvis"
     # ── Proactive watcher status / control ──────────────────────────────────────
+    # ── Daily note fast-path ──────────────────────────────────────────────────
+    _DAILY_NOTE_TRIGGERS = (
+        "create daily note", "write daily note", "today's note",
+        "make a daily note", "create today's note", "open daily note",
+        "set up today", "start today's note", "write today's plan",
+        "create my daily plan", "create my daily note",
+    )
+    if any(t in lower for t in _DAILY_NOTE_TRIGGERS):
+        def _daily_note_gen():
+            try:
+                brief = _jagents.run_briefing()
+                focus = _jagents.focus_advisor()
+                result = _jagents.write_daily_note(briefing_text=brief, focus_text=focus)
+                if result.get("action") == "already_exists":
+                    yield f"Today's daily note already exists in the vault."
+                elif result.get("ok"):
+                    note_name = (result.get("path") or "").split("/")[-1]
+                    yield f"Daily note created: {note_name}. It's in vault/daily/ with your calendar, tasks, and focus for today."
+                else:
+                    yield "Couldn't create the daily note — check vault permissions."
+            except Exception as e:
+                yield f"Daily note creation failed: {e}"
+        return _daily_note_gen(), "Vault"
+
     _WATCHER_TRIGGERS = (
         "watcher status", "watcher running", "are you watching",
         "proactive mode", "background alerts", "are you monitoring",
@@ -2253,8 +2321,11 @@ def route_stream(user_input: str) -> tuple:
             w = _jwatcher.status()
             if w["running"]:
                 last = w.get("last_escalation") or "none yet"
+                eod = w.get("eod_hour", 18)
+                brief_h = w.get("morning_brief_hour", 8)
                 yield (
                     f"Proactive watcher is active — checking every {w['interval_sec'] // 60} minutes. "
+                    f"Morning brief at {brief_h}:00, end-of-day summary at {eod}:00. "
                     f"Quiet hours: {w['quiet_start_hour']}:00 – {w['quiet_end_hour']}:00. "
                     f"{w['notified_count']} alerts sent this session. "
                     f"Last: {last}"

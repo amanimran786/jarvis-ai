@@ -1517,6 +1517,46 @@ def extract_facts(req: dict):
     return {"ok": True, "facts": facts, "count": len(facts)}
 
 
+@app.post("/daily-note")
+def create_daily_note(req: dict = None):
+    """Create today's daily note in vault/daily/YYYY-MM-DD.md.
+
+    Optional body: {"briefing": "...", "focus": "..."}
+    If omitted, runs the briefing and focus agents to populate the note.
+    """
+    import jarvis_agents as _ja
+    body = req or {}
+    briefing_text = body.get("briefing", "")
+    focus_text    = body.get("focus", "")
+    # Auto-generate from agents if not provided
+    if not briefing_text:
+        try:
+            briefing_text = _ja.run_briefing()
+        except Exception:
+            briefing_text = ""
+    if not focus_text:
+        try:
+            focus_text = _ja.focus_advisor()
+        except Exception:
+            focus_text = ""
+    result = _ja.write_daily_note(briefing_text=briefing_text, focus_text=focus_text)
+    return result
+
+
+@app.get("/daily-note")
+def get_daily_note_status():
+    """Return whether today's daily note exists and its path."""
+    import datetime
+    import vault
+    today = datetime.date.today().isoformat()
+    note_path = vault.VAULT_ROOT / "daily" / f"{today}.md"
+    return {
+        "date": today,
+        "exists": note_path.exists(),
+        "path": str(note_path) if note_path.exists() else None,
+    }
+
+
 @app.post("/memory/consolidate")
 def consolidate_memory():
     result = mem.consolidate_memory()
