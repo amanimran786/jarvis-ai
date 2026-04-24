@@ -271,9 +271,70 @@ def _deliver_morning_brief() -> None:
     try:
         import jarvis_agents as _ja
         brief = _ja.run_briefing()
+
+        # Write the daily note to vault (fire-and-forget, never blocks brief)
+        try:
+            focus = _ja.focus_advisor()
+            note_result = _ja.write_daily_note(briefing_text=brief, focus_text=focus)
+            if note_result.get("ok") and note_result.get("action") == "created":
+                _note_path = note_result.get("path", "")
+                notify(
+                    "Jarvis — Daily Note",
+                    f"Today's note created: {_note_path.split('/')[-1]}",
+                )
+        except Exception:
+            pass
+
         notify("Jarvis — Morning Brief", "Your daily briefing is ready.")
         if _speak_cb is not None and not _is_quiet_hours():
             _speak_cb(brief)
+    except Exception:
+        pass
+
+
+# ── End-of-day summary ────────────────────────────────────────────────────────
+
+_EOD_HOUR   = _int_env("JARVIS_EOD_HOUR", 18)      # 6 PM default
+_EOD_WINDOW = 10                                    # fire within 10-min window
+_eod_date: datetime.date | None = None              # tracks last delivery date
+
+_EOD_SYSTEM = (
+    "You are Jarvis. Give a brief end-of-day summary in 3-4 spoken sentences. "
+    "Mention what's still open on the task list, any unfinished items from today, "
+    "and one clear thing to prioritise first thing tomorrow. "
+    "Sound calm, direct, and like you're closing out the day. Under 80 words. No bullet points."
+)
+
+
+def _should_deliver_eod() -> bool:
+    """Return True once per day inside the configured end-of-day window."""
+    global _eod_date
+    now = datetime.datetime.now()
+    today = now.date()
+    if _eod_date == today:
+        return False
+    if now.hour == _EOD_HOUR and now.minute < _EOD_WINDOW:
+        return True
+    return False
+
+
+def _deliver_eod_summary() -> None:
+    global _eod_date
+    _eod_date = datetime.datetime.now().date()
+    try:
+        import jarvis_agents as _ja
+        import model_router as _mr
+
+        # Pull tasks and calendar for tomorrow via agents
+        results = _ja.dispatch_parallel(["tasks", "calendar"])
+        raw = _ja.escalation_summary()  # surface anything still urgent
+        if not raw or raw.startswith("Nothing"):
+            raw = _ja._merge_results(results) or "No open tasks or events found."
+        eod_text = _ja._synthesise(raw, system=_EOD_SYSTEM)
+
+        notify("Jarvis — End of Day", "Closing out — your EOD summary is ready.")
+        if _speak_cb is not None and not _is_quiet_hours():
+            _speak_cb(eod_text)
     except Exception:
         pass
 
@@ -294,6 +355,13 @@ def _watcher_loop() -> None:
         try:
             if _should_deliver_morning_brief():
                 _deliver_morning_brief()
+        except Exception:
+            pass
+
+        # End-of-day summary fires once per day at the configured hour
+        try:
+            if _should_deliver_eod():
+                _deliver_eod_summary()
         except Exception:
             pass
 
@@ -361,4 +429,6 @@ def status() -> dict:
         "notified_count":        len(_notified_keys),
         "morning_brief_hour":    _MORNING_BRIEF_HOUR,
         "morning_brief_sent":    _morning_brief_date.isoformat() if _morning_brief_date else None,
+        "eod_hour":              _EOD_HOUR,
+        "eod_sent":              _eod_date.isoformat() if _eod_date else None,
     }

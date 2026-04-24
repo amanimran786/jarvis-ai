@@ -491,3 +491,88 @@ def meeting_prep() -> str:
 def research_and_brief(topic: str) -> str:
     """Run research agent on a topic and return the briefing."""
     return run_parallel(["research", "vault"], context=topic)
+
+
+_FOCUS_AGENTS = ["calendar", "tasks", "vault"]
+
+_FOCUS_SYSTEM = (
+    "You are Jarvis. Based on Aman's calendar events, open tasks, and active vault "
+    "context, give a crisp spoken focus recommendation for right now. "
+    "Name the single highest-priority item he should work on and briefly why. "
+    "If there's a meeting soon, mention it. If something is overdue, flag it first. "
+    "Close with one sentence acknowledging anything that can safely wait. "
+    "Maximum 80 words. No bullet points. Sound like JARVIS from Iron Man — "
+    "calm, direct, and operating with full situational awareness."
+)
+
+
+def focus_advisor() -> str:
+    """What should Aman work on right now? Calendar + tasks + vault synthesised."""
+    results = dispatch_parallel(_FOCUS_AGENTS)
+    raw = _merge_results(results)
+    if not raw:
+        return "Your calendar and task list are clear. Good time for deep work or a break."
+    return _synthesise(raw, system=_FOCUS_SYSTEM)
+
+
+# ── Daily note ────────────────────────────────────────────────────────────────
+
+_DAILY_NOTES_DIR = "daily"   # vault/daily/<YYYY-MM-DD>.md
+
+
+def write_daily_note(briefing_text: str = "", focus_text: str = "") -> dict:
+    """Create today's daily note in vault/daily/YYYY-MM-DD.md.
+
+    Populates Calendar and Focus sections from agent output.
+    Idempotent — if the note already exists it appends only missing sections.
+    Returns {"ok": bool, "path": str, "action": str}.
+    """
+    import datetime
+    import vault
+
+    today = datetime.date.today().isoformat()        # "2026-04-24"
+    daily_dir = vault.VAULT_ROOT / _DAILY_NOTES_DIR
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    note_path = daily_dir / f"{today}.md"
+
+    # Build the note body from template
+    calendar_section = ""
+    tasks_section    = ""
+
+    # Extract calendar and tasks from briefing_text heuristically
+    lines = briefing_text.splitlines() if briefing_text else []
+    cal_lines: list[str] = []
+    task_lines: list[str] = []
+    for line in lines:
+        ll = line.lower()
+        if any(kw in ll for kw in ("meeting", "event", "calendar", "appointment", "call", "interview")):
+            cal_lines.append(f"- {line.strip()}")
+        elif any(kw in ll for kw in ("task", "todo", "[ ]", "action")):
+            task_lines.append(f"- {line.strip()}")
+
+    calendar_section = "\n".join(cal_lines) if cal_lines else "_No events pulled._"
+    tasks_section    = "\n".join(task_lines) if task_lines else "_No tasks pulled._"
+    focus_block      = focus_text.strip() if focus_text else "_Run 'focus advisor' for today's priority._"
+
+    frontmatter = (
+        f"---\n"
+        f"type: daily-note\n"
+        f"date: {today}\n"
+        f"tags: [daily, brain]\n"
+        f"---\n\n"
+    )
+    body = (
+        f"# {today}\n\n"
+        f"## Focus\n\n{focus_block}\n\n"
+        f"## Calendar\n\n{calendar_section}\n\n"
+        f"## Open Tasks\n\n{tasks_section}\n\n"
+        f"## Notes\n\n\n"
+        f"## End of Day\n\n\n"
+    )
+
+    if note_path.exists():
+        return {"ok": True, "path": str(note_path), "action": "already_exists"}
+
+    note_path.write_text(frontmatter + body, encoding="utf-8")
+    return {"ok": True, "path": str(note_path), "action": "created"}
