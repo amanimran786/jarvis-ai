@@ -260,6 +260,74 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
     return summary
 
 
+def summary(days: int = 14, top: int = 10) -> dict:
+    """Rank recent provider usage by call site to surface cloud-leaking sources.
+
+    A "call site" is the (source, model) pair recorded by usage_tracker.record.
+    Use this to answer: which Jarvis modules are still routing to cloud
+    instead of local? Top lists are independent rankings by call count and by
+    total tokens.
+    """
+    rows = entries(hours=days * 24)
+    cutoff = _now() - timedelta(days=days)
+
+    result: dict = {
+        "since_iso": cutoff.isoformat(),
+        "days": days,
+        "total_calls": 0,
+        "cloud_calls": 0,
+        "local_calls": 0,
+        "total_tokens": 0,
+        "cloud_tokens": 0,
+        "estimated_cost_usd": 0.0,
+        "top_call_sites_by_count": [],
+        "top_call_sites_by_tokens": [],
+        "cloud_only_call_sites": [],
+    }
+
+    call_sites: dict[tuple[str, str, bool], dict] = {}
+    for row in rows:
+        local = bool(row.get("local"))
+        total_tokens = int(row.get("total_tokens") or 0)
+        cost = row.get("estimated_cost_usd")
+
+        result["total_calls"] += 1
+        result["total_tokens"] += total_tokens
+        if local:
+            result["local_calls"] += 1
+        else:
+            result["cloud_calls"] += 1
+            result["cloud_tokens"] += total_tokens
+            if isinstance(cost, (int, float)):
+                result["estimated_cost_usd"] += float(cost)
+
+        key = (row.get("source", "unknown"), row.get("model", "unknown"), local)
+        bucket = call_sites.setdefault(key, {
+            "source": key[0],
+            "model": key[1],
+            "local": local,
+            "calls": 0,
+            "tokens": 0,
+        })
+        bucket["calls"] += 1
+        bucket["tokens"] += total_tokens
+
+    result["estimated_cost_usd"] = round(result["estimated_cost_usd"], 6)
+    sites = list(call_sites.values())
+    result["top_call_sites_by_count"] = sorted(
+        sites, key=lambda x: x["calls"], reverse=True
+    )[:top]
+    result["top_call_sites_by_tokens"] = sorted(
+        sites, key=lambda x: x["tokens"], reverse=True
+    )[:top]
+    result["cloud_only_call_sites"] = sorted(
+        (s for s in sites if not s["local"]),
+        key=lambda x: x["tokens"],
+        reverse=True,
+    )[:top]
+    return result
+
+
 def summary_text(hours: int = 24) -> str:
     data = summarize(hours=hours, include_recent=0)
     if data["call_count"] == 0:

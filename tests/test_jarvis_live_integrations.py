@@ -263,6 +263,27 @@ class PackagedAppSmokeTests(unittest.TestCase):
             self.assertEqual(response["model"], "Specialized Agents")
             self.assertIn("Jarvis Roadmap", response["response"])
 
+    @packaged_smoke_only
+    def test_packaged_app_chat_parses_text_message_draft(self):
+        headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
+        payload = {
+            "message": "Send a text message to dad to get chocolate milk",
+            "stream": False,
+            "source": "packaged_smoke",
+        }
+        with packaged_app_process() as (proc, port):
+            wait_for_packaged_json("/status", port=port, proc=proc)
+            response = wait_for_packaged_json(
+                "/chat",
+                port=port,
+                headers=headers,
+                payload=payload,
+                request_timeout=15.0,
+                proc=proc,
+            )
+            self.assertEqual(response["model"], "Messages")
+            self.assertIn('Draft ready for dad: "get chocolate milk"', response["response"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

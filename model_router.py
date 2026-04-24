@@ -640,6 +640,13 @@ def _classify_complexity(text: str, skill_id: str | None = None, active_skills: 
     return "local"
 
 
+def _capture_cloud_stream(prompt, tier, candidate, raw_stream, source: str = "model_router_cloud_teacher"):
+    """Thin shim around brains._teacher_capture.wrap_stream so callers in this
+    module can keep their existing import surface."""
+    from brains import _teacher_capture
+    yield from _teacher_capture.wrap_stream(prompt, tier, candidate, raw_stream, source=source)
+
+
 def smart_stream(
     user_input: str,
     skill_id: str | None = None,
@@ -796,7 +803,16 @@ def smart_stream(
                 raise_on_error=True,
             )
         if candidate.provider == "openai":
-            return ask_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+            # bypass_local=True: provider_router already considered local at
+            # the planner level. If we're here we explicitly chose OpenAI;
+            # brain.ask_stream should not re-run the local-first gate.
+            return ask_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                bypass_local=True,
+            )
         if candidate.provider == "gemini":
             return ask_gemini_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
         if candidate.provider == "anthropic":
@@ -822,7 +838,19 @@ def smart_stream(
                     selected=selected,
                     reason=plan.reason,
                 )
-                yield from _candidate_stream(candidate)
+                # Wrap cloud streams so successful answers feed the local
+                # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
+                # tier in {strong, deep}).
+                raw_stream = _candidate_stream(candidate)
+                if candidate.provider == "ollama":
+                    yield from raw_stream
+                else:
+                    yield from _capture_cloud_stream(
+                        prompt=user_input,
+                        tier=plan.tier,
+                        candidate=candidate,
+                        raw_stream=raw_stream,
+                    )
                 return
             except Exception as exc:
                 last_error = exc
@@ -890,7 +918,14 @@ def format_with_mini(
                 if candidate.provider == "anthropic":
                     yield from ask_claude_stream(prompt, candidate.model, system_extra=system_extra, track_context=False)
                     return
-                yield from ask_stream(prompt, candidate.model, system_extra=system_extra, track_context=False)
+                # bypass_local=True: planner already handled local routing.
+                yield from ask_stream(
+                    prompt,
+                    candidate.model,
+                    system_extra=system_extra,
+                    track_context=False,
+                    bypass_local=True,
+                )
                 return
             except Exception as exc:
                 last_error = exc

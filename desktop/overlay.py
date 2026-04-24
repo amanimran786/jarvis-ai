@@ -785,11 +785,11 @@ class MeetingOverlay(QMainWindow):
 
     def _apply_macos_window_props(self):
         """
-        1. Hide from screen share (NSWindowSharingNone).
+        1. Apply the current Jarvis visibility mode.
         2. Allow window to appear in ALL spaces, including fullscreen Zoom/Teams.
         3. Raise window level above normal windows.
         """
-        stealth.apply_stealth(int(self.winId()))
+        stealth.apply_current_mode(int(self.winId()))
         try:
             from AppKit import NSApp
             # NSWindowCollectionBehaviorCanJoinAllSpaces = 1 << 0

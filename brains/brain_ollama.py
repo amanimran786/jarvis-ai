@@ -144,6 +144,52 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
+# Approximate effective context windows of locally-installed models. The
+# values are deliberately conservative — we route by 80% of the limit so the
+# model never gets an over-filled prompt. Override at runtime via env if you
+# pull a model with a larger context (e.g. `LOCAL_MODEL_CTX_qwen3-coder=...`).
+_LOCAL_MODEL_CONTEXT_TOKENS = {
+    "gemma4:e4b": 8192,
+    "gemma3:4b": 8192,
+    "llama3.1:8b": 8192,
+    "qwen2.5-coder:7b": 32768,
+    "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
+    "qwen3-coder:30b": 262144,
+}
+
+# Escalation order when the requested model can't fit the prompt.
+_LOCAL_FALLBACK_ORDER = ("qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-r1:14b")
+
+
+def _model_context_limit(model: str) -> int:
+    for known, limit in _LOCAL_MODEL_CONTEXT_TOKENS.items():
+        if known in model:
+            return limit
+    return 8192
+
+
+def _fits_local(prompt: str, model: str) -> str:
+    """Return a model that can fit the prompt, escalating only when needed.
+
+    Token estimate is the cheap chars/4 heuristic — good enough to catch the
+    cliff between a 7B (8k) and qwen3-coder:30b (262k). We require an 80%
+    headroom so generation has room to grow.
+    """
+    if not prompt:
+        return model
+    estimated_tokens = max(1, len(prompt) // 4)
+    limit = _model_context_limit(model)
+    if estimated_tokens < int(limit * 0.8):
+        return model
+    for candidate in _LOCAL_FALLBACK_ORDER:
+        cand_limit = _model_context_limit(candidate)
+        if estimated_tokens < int(cand_limit * 0.8):
+            print(f"[Ollama] Escalating from {model} to {candidate} for prompt fit "
+                  f"(~{estimated_tokens} tokens > {int(limit * 0.8)} headroom).")
+            return candidate
+    return model
+
+
 def _is_available(model: str) -> bool:
     """Check if a model is pulled and available."""
     try:
@@ -181,6 +227,8 @@ def ask_local_stream(
     raise_on_error: bool = False,
 ):
     """Stream a response from a local Ollama model."""
+    # Escalate to a larger-context local model when the prompt won't fit.
+    model = _fits_local(user_input, model)
     model = get_best_available(model)
 
     # Inject chain-of-thought boost for non-trivial inputs (skip for short commands)

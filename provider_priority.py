@@ -10,6 +10,7 @@ from config import (
     OPUS,
     SONNET,
 )
+from brains import _teacher_capture
 
 
 def _local_model_for_tier(tier: str) -> str:
@@ -39,7 +40,10 @@ def _try_local(prompt: str, tier: str, system_extra: str = "") -> str:
 def _ask_openai(prompt: str, *, model: str, system_extra: str = "") -> str:
     from brains.brain import ask
 
-    return ask(prompt, model=model, system_extra=system_extra)
+    # bypass_local=True: ask_with_priority already tried the local lane at the
+    # top of its plan. By the time we reach this helper we have explicitly
+    # chosen the cloud, so brain.ask should not re-run the local-first gate.
+    return ask(prompt, model=model, system_extra=system_extra, bypass_local=True)
 
 
 def _ask_gemini(prompt: str, *, model: str, system: str | None, system_extra: str = "") -> str:
@@ -90,9 +94,23 @@ def ask_with_priority(
             if open_source_mode:
                 raise
 
-    for _, runner in plans.get(tier, plans["cheap"]):
+    for provider_name, runner in plans.get(tier, plans["cheap"]):
         try:
-            return runner()
+            answer = runner()
+            # Best-effort teacher capture: high-tier cloud answers can train the
+            # local open-source model. No-op unless JARVIS_TEACHER_CAPTURE=1.
+            try:
+                _teacher_capture.capture(
+                    prompt,
+                    answer,
+                    tier=tier,
+                    provider=provider_name,
+                    model="",  # exact model is in the lambda; left blank to avoid coupling
+                    source="provider_priority_cloud_teacher",
+                )
+            except Exception:
+                pass
+            return answer
         except Exception as exc:
             last_error = exc
             print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
