@@ -2547,8 +2547,6 @@ class JarvisWindow(QMainWindow):
         _force_text_widget_update(self.transcript_label, hint or "Live suggestion ready.")
         if hasattr(self, "_subtitle"):
             self._subtitle.setText(hint or "Smart Listen active")
-        if suggestion:
-            self._add_message(suggestion, "jarvis", "Meeting")
         self._update_meeting_toolbar_layout()
 
     def _show_suggestion(self, suggestion: str):
@@ -4038,8 +4036,6 @@ end tell
         hint = meeting_listener.actionable_hint(suggestion)
         _force_text_widget_update(self.suggest_label, suggestion)
         self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
-        if suggestion:
-            self._add_message(suggestion, "jarvis", "Meeting")
         self._current_summary = f"SUGGESTION: {preview}"
         self._peek_label.setText(self._current_summary)
         self._top_chip.setText("SMART LISTEN ACTIVE")
