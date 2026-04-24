@@ -1473,6 +1473,18 @@ def watcher_notify(req: dict):
     return {"ok": True}
 
 
+@app.post("/extract")
+def extract_facts(req: dict):
+    """Run fact extraction on a conversation turn and write to vault/mem0."""
+    import jarvis_extractor as _jex
+    user_msg  = (req or {}).get("user", "")
+    assistant = (req or {}).get("assistant", "")
+    if not user_msg or not assistant:
+        return {"ok": False, "error": "user and assistant fields required"}
+    facts = _jex.extract(user_msg, assistant)
+    return {"ok": True, "facts": facts, "count": len(facts)}
+
+
 @app.post("/memory/consolidate")
 def consolidate_memory():
     result = mem.consolidate_memory()
