@@ -185,10 +185,29 @@ def _agent_research(context: str = "") -> dict:
                 "result": f"Research error: {e}", "escalate": False}
 
 
+def _agent_week(context: str = "") -> dict:
+    """Pull the next 7 days of calendar events."""
+    try:
+        gs = _safe_import("google_services")
+        if gs and hasattr(gs, "get_week_events"):
+            events = gs.get_week_events(days=7)
+            if events:
+                result = "This week's calendar:\n" + "\n".join(f"  • {e}" for e in events[:15])
+            else:
+                result = "Nothing on the calendar this week."
+        else:
+            result = "Calendar not connected."
+        return {"agent": "week", "status": "ok", "result": result,
+                "escalate": _needs_escalation(result)}
+    except Exception as e:
+        return {"agent": "week", "status": "error", "result": f"Week calendar error: {e}", "escalate": False}
+
+
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 _AGENTS: dict[str, Callable[[str], dict]] = {
     "calendar": _agent_calendar,
+    "week":     _agent_week,
     "tasks":    _agent_tasks,
     "vault":    _agent_vault,
     "code":     _agent_code,
@@ -196,6 +215,7 @@ _AGENTS: dict[str, Callable[[str], dict]] = {
 }
 
 _BRIEFING_AGENTS = ["calendar", "tasks", "vault"]
+_WEEK_AGENTS     = ["week", "tasks"]
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -264,6 +284,65 @@ def _merge_results(results: list[dict], include_errors: bool = False) -> str:
     return "\n\n".join(lines).strip()
 
 
+# ── LLM synthesis ─────────────────────────────────────────────────────────────
+
+_SYNTH_SYSTEM = (
+    "You are Jarvis, Aman's local-first AI runtime. "
+    "You speak in a calm, direct, slightly formal tone — think JARVIS from Iron Man, not a chatbot. "
+    "Convert the raw agent data below into a concise spoken briefing. "
+    "Use natural sentences. Do not use bullet points or markdown. "
+    "Prioritise urgent/escalated items first. "
+    "Keep the total response under 120 words. "
+    "Start directly with the content — no 'Here is your briefing' preamble."
+)
+
+_SYNTH_ESCALATION_SYSTEM = (
+    "You are Jarvis. Convert the following raw escalation data into 1-3 spoken sentences "
+    "that tell Aman exactly what needs his attention right now. "
+    "Be direct. No bullet points. Under 60 words."
+)
+
+
+def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
+    """Run raw agent output through the fastest available local model.
+
+    Falls back to returning the raw merged text if synthesis fails or times out.
+    Hard timeout: 8s so briefings never feel sluggish.
+    """
+    if not raw or not raw.strip():
+        return raw
+    try:
+        import model_router as mr
+
+        result_holder: list[str] = []
+
+        def _run():
+            try:
+                chunks: list[str] = []
+                # Inject synthesis persona via extra_system; raw data is the user turn
+                stream, _ = mr.smart_stream(
+                    raw,
+                    tool="briefing",
+                    extra_system=system,
+                )
+                for chunk in stream:
+                    chunks.append(chunk)
+                    if sum(len(c) for c in chunks) > 600:
+                        break
+                result_holder.append("".join(chunks).strip())
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=8.0)
+        if result_holder and result_holder[0]:
+            return result_holder[0]
+    except Exception:
+        pass
+    return raw
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def run_briefing() -> str:
@@ -271,8 +350,9 @@ def run_briefing() -> str:
     results = dispatch_parallel(_BRIEFING_AGENTS)
     body = _merge_results(results)
     if not body:
-        return "Briefing complete. Nothing urgent flagged."
-    return f"Good morning, Aman. Here's your status:\n\n{body}"
+        return "All clear. Nothing on the calendar or task list that needs attention."
+    synthesised = _synthesise(body)
+    return synthesised
 
 
 def run_parallel(agents: list[str], context: str = "") -> str:
@@ -280,7 +360,8 @@ def run_parallel(agents: list[str], context: str = "") -> str:
     if not agents:
         return "No agents specified."
     results = dispatch_parallel(agents, context=context)
-    return _merge_results(results)
+    raw = _merge_results(results)
+    return _synthesise(raw)
 
 
 def escalation_summary() -> str:
@@ -289,10 +370,24 @@ def escalation_summary() -> str:
     escalations = [r for r in results if r.get("escalate") and r["status"] == "ok"]
     if not escalations:
         return "Nothing needs your attention right now."
-    lines = ["Items that need your attention:"]
-    for r in escalations:
-        lines.append(f"\n  [{r['agent'].title()}]\n  {r['result']}")
-    return "\n".join(lines)
+    raw = "\n".join(r["result"] for r in escalations)
+    return _synthesise(raw, system=_SYNTH_ESCALATION_SYSTEM)
+
+
+def week_ahead() -> str:
+    """What's coming up this week — calendar + open tasks, synthesised."""
+    results = dispatch_parallel(_WEEK_AGENTS)
+    raw = _merge_results(results)
+    if not raw:
+        return "Nothing scheduled or pending this week."
+    return _synthesise(
+        raw,
+        system=(
+            "You are Jarvis. Summarise the week ahead for Aman in 2-4 natural spoken sentences. "
+            "Mention the number of events, any deadlines or tasks, and flag anything urgent. "
+            "No bullet points. Under 80 words."
+        ),
+    )
 
 
 def research_and_brief(topic: str) -> str:

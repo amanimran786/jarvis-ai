@@ -275,3 +275,23 @@ Affected: [[10 Identity]] · [[20 Projects]] · [[30 Preferences]] · [[80 Jarvi
 - 17 new unit tests in `tests/test_jarvis_watcher.py` — all pass
 
 Affected: router.py · main.py · ui.py · api.py · local_runtime/model_fleet.py
+
+### LLM briefing synthesis, week-ahead agent, STT turbo default
+
+- `jarvis_agents.py` — LLM synthesis layer for all briefing outputs
+  - `_synthesise(raw, system)` pipes raw agent data through fastest available local model
+  - 8s hard timeout — falls back to raw merged text if model is slow or unavailable
+  - `_SYNTH_SYSTEM` persona: calm, direct, spoken-word, Iron Man Jarvis style
+  - `run_briefing()`, `run_parallel()`, `escalation_summary()` all go through synthesis
+  - added `week_ahead()` — calendar + tasks for next 7 days, LLM-synthesised
+  - added `_agent_week()` sub-agent using `google_services.get_week_events()`
+  - `_WEEK_AGENTS = ["week", "tasks"]` registry entry
+- `google_services.py` — added `get_week_events(days=7) -> list[str]`
+  - pulls next N days from Google Calendar with formatted day/time strings
+- `router.py` — `_WEEK_TRIGGERS` fast-path
+  - "this week" / "week ahead" / "what's coming up" / "next 7 days" → `week_ahead()`
+- `config.py` — STT default upgraded from `base.en` to `large-v3-turbo`
+  - 8x faster than large-v3 at near-identical accuracy; ~1.6GB download on first run
+  - override via `JARVIS_FASTER_WHISPER_MODEL=small.en` for low-RAM machines
+
+Affected: jarvis_agents.py · google_services.py · router.py · config.py

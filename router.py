@@ -2188,6 +2188,15 @@ def route_stream(user_input: str) -> tuple:
         def _attention_gen():
             yield _jagents.escalation_summary()
         return _attention_gen(), "Jarvis"
+    _WEEK_TRIGGERS = (
+        "this week", "week ahead", "coming up this week", "what's this week",
+        "what do i have this week", "week overview", "weekly overview",
+        "what's coming up", "coming up next", "next seven days", "next 7 days",
+    )
+    if any(t in lower for t in _WEEK_TRIGGERS):
+        def _week_gen():
+            yield _jagents.week_ahead()
+        return _week_gen(), "Jarvis"
     # ── Proactive watcher status / control ──────────────────────────────────────
     _WATCHER_TRIGGERS = (
         "watcher status", "watcher running", "are you watching",
