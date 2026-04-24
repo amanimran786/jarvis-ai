@@ -30,6 +30,11 @@ from config import (
     DEFAULT_MODE,
     tts_runtime_config,
     stt_runtime_config,
+    LOCAL_QWEN3_FAST,
+    LOCAL_QWEN3_MID,
+    LOCAL_QWEN3_STRONG,
+    LOCAL_PHI4_MINI,
+    LOCAL_DEVSTRAL,
 )
 from brains.brain import ask_stream
 from brains.brain_gemini import ask_gemini_stream
@@ -45,6 +50,8 @@ import semantic_memory as _smem
 import memory as _mem
 import provider_router
 import telemetry
+import jarvis_core_brain as _core_brain
+import mem0_layer as _m0
 
 _current_mode = DEFAULT_MODE
 
@@ -303,52 +310,76 @@ def refresh_local_cache() -> None:
     _local_models_cached_at = 0.0
 
 
+def _has_model(name: str, available: list[str]) -> bool:
+    """True if a model whose name starts with `name` (before the colon) is in the list."""
+    prefix = name.split(":")[0]
+    return any(prefix in m for m in available)
+
+
 def _best_local(text: str) -> str:
-    """Pick the best available local model for the task."""
+    """Pick the best available local model for the task.
+
+    Priority order (highest → lowest):
+      1. Eval-promoted model (if not a coding task)
+      2. LOCAL_TUNED (jarvis-local) if PREFER_TUNED set
+      3. Coding tasks → Devstral > Qwen3-strong > Qwen2.5-coder
+      4. Deep reasoning → DeepSeek R1 (only for genuinely complex queries)
+      5. General tasks → Qwen3-strong > Qwen3-mid > Qwen3-fast > gemma4
+      6. Fast/simple → Phi4-mini > Qwen3-fast > gemma4
+      7. Fallback: first available model
+    """
     available = _cached_local_models()
     lower = text.lower()
     promoted = local_model_eval.promoted_model()
+    word_count = len(lower.split())
 
-    if promoted and any(promoted in m for m in available):
-        if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
-            return promoted
-
-    if LOCAL_PREFER_TUNED and LOCAL_TUNED and any(LOCAL_TUNED in m for m in available):
-        if not any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
-            return LOCAL_TUNED
-
-    if any(t in lower for t in ("code", "debug", "function", "script", "refactor", "build", "fix")):
-        if any(LOCAL_CODER in m for m in available):
-            return LOCAL_CODER
-
-    # Reasoning tasks — only use DeepSeek R1 for genuinely complex multi-step problems.
-    # Too many triggers here tanks UX: R1:14b takes 3-10 min on Mac vs gemma4's 10-30s.
-    # Reserve R1 for: deep analysis, architecture, step-by-step walkthroughs, long queries.
+    _CODE_TERMS = ("code", "debug", "function", "script", "refactor", "build", "fix",
+                   "implement", "class", "test", "pytest", "unittest", "diff", "patch")
     _DEEP_REASONING_TRIGGERS = (
         "step by step", "walk me through", "detailed analysis",
         "compare and contrast", "system design", "architecture decision",
         "evaluate tradeoffs", "research", "deep dive", "root cause",
         "investigate", "comprehensive", "in depth",
     )
-    word_count = len(lower.split())
-    uses_deep_trigger = any(t in lower for t in _DEEP_REASONING_TRIGGERS)
-    # Only use R1 if the query is explicitly requesting deep reasoning OR is a long complex question (25+ words)
-    if (uses_deep_trigger or word_count >= 25) and any(LOCAL_REASONING in m for m in available):
+
+    is_code_task = any(t in lower for t in _CODE_TERMS)
+    is_deep = any(t in lower for t in _DEEP_REASONING_TRIGGERS) or word_count >= 25
+
+    # 1. Promoted model (from eval loop) — skip for coding
+    if promoted and _has_model(promoted, available) and not is_code_task:
+        return promoted
+
+    # 2. Tuned model preference
+    if LOCAL_PREFER_TUNED and LOCAL_TUNED and _has_model(LOCAL_TUNED, available) and not is_code_task:
+        return LOCAL_TUNED
+
+    # 3. Coding tasks — Devstral first (Mistral's open coder), then Qwen3-strong, then qwen2.5-coder
+    if is_code_task:
+        for coder in (LOCAL_DEVSTRAL, LOCAL_QWEN3_STRONG, LOCAL_CODER_RECOMMENDED, LOCAL_CODER):
+            if coder and _has_model(coder, available):
+                return coder
+
+    # 4. Deep reasoning — DeepSeek R1 only for genuinely complex/long queries
+    #    (R1:14b takes 3-10 min on Mac — only use when the query earns it)
+    if is_deep and _has_model(LOCAL_REASONING, available):
         return LOCAL_REASONING
 
-    # Return first available — prefer fast default model over slow reasoning model
-    fallback_preferred = [promoted]
-    if LOCAL_PREFER_TUNED:
-        fallback_preferred.append(LOCAL_TUNED)
-    # Gemma4 first (10-30s), R1 only as last resort
-    fallback_preferred.extend([LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING])
+    # 5. General tasks — prefer Qwen3 over older gemma4
+    for general in (LOCAL_QWEN3_STRONG, LOCAL_QWEN3_MID):
+        if general and _has_model(general, available):
+            return general
 
-    for preferred in fallback_preferred:
-        if not preferred:
-            continue
-        if any(preferred.split(":")[0] in m for m in available):
-            return preferred
-    return available[0]
+    # 6. Fast/simple — phi4-mini > qwen3-fast > gemma4
+    for fast in (LOCAL_PHI4_MINI, LOCAL_QWEN3_FAST, LOCAL_DEFAULT):
+        if fast and _has_model(fast, available):
+            return fast
+
+    # 7. Absolute fallback
+    fallback = [LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING]
+    for m in fallback:
+        if m and _has_model(m, available):
+            return m
+    return available[0] if available else LOCAL_DEFAULT
 
 
 def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> str:
@@ -658,6 +689,8 @@ def smart_stream(
     Strategy: local → mini → haiku → sonnet → opus
     Only escalates when the task genuinely requires it.
     """
+    # ── Always-on identity snapshot (replaces per-query vault search for identity facts) ──
+    _brain_ctx = _core_brain.core_context()
     grounding_extra = (
         "Grounding rules:\n"
         "- Treat the current user message as primary truth.\n"
@@ -667,6 +700,8 @@ def smart_stream(
         "- Do not invent system specs, network details, permissions, account access, device state, or completed work.\n"
         "- If evidence is missing, say what you can verify next instead of presenting guesses as facts."
     )
+    if _brain_ctx:
+        grounding_extra = _brain_ctx + "\n\n" + grounding_extra
     runtime_voice_query = tool == "chat" and _is_runtime_voice_query(user_input)
     mode = _current_mode
     if runtime_voice_query:
@@ -706,12 +741,20 @@ def smart_stream(
         hits = _smem.retrieve(user_input, top_k=3)
         return hits, _smem.format_for_prompt(hits, max_chars=1200)
 
-    vault_extra = graph_extra = smem_ctx = ""
+    def _get_mem0():
+        """mem0 cross-session episodic memory — runs concurrently with vault/smem."""
+        if runtime_voice_query:
+            return ""
+        hits = _m0.search(user_input, top_k=5)
+        return _m0.format_for_prompt(hits, max_chars=600)
+
+    vault_extra = graph_extra = smem_ctx = mem0_extra = ""
     smem_hits: list[dict] = []
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="ctx") as _pool:
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx") as _pool:
         _fv = _pool.submit(_get_vault)
         _fg = _pool.submit(_get_graph)
         _fs = _pool.submit(_get_smem)
+        _fm = _pool.submit(_get_mem0)
         try:
             vault_extra = _fv.result(timeout=2.0) or ""
         except Exception:
@@ -724,6 +767,10 @@ def smart_stream(
             smem_hits, smem_ctx = _fs.result(timeout=4.0)
         except Exception:
             pass
+        try:
+            mem0_extra = _fm.result(timeout=4.0) or ""
+        except Exception:
+            pass
 
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
@@ -734,6 +781,9 @@ def smart_stream(
         system_extra = system_extra + ("\n\n" if system_extra else "") + semantic_hint
     if smem_ctx:
         system_extra = system_extra + ("\n\n" if system_extra else "") + smem_ctx
+    # mem0 cross-session episodic memory goes last — most dynamic, lowest trust rank
+    if mem0_extra:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + mem0_extra
 
     def _resilient_stream(primary_factory, fallback_factories):
         def _stream():
