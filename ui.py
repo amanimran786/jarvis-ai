@@ -35,7 +35,8 @@ from PyQt6.QtGui import (
 )
 from PyQt6 import sip
 
-from router import route_stream, set_timer_callback
+from router import route_stream, set_timer_callback, record_turn as _record_turn
+import jarvis_watcher as _jarvis_watcher
 from voice import speak, speak_stream, listen, wait_for_wake_word, trigger_wake_word as _voice_trigger_wake_word, request_stop as _voice_request_stop, clear_stop_request as _voice_clear_stop_request
 import memory as mem
 import briefing
@@ -1373,6 +1374,7 @@ class VoiceWorker(QThread):
                 stream, model = route_stream(user_input)
                 self.stream_start.emit(model)
                 response = speak_stream(stream, on_text=lambda t: self.stream_chunk.emit(t))
+                _record_turn(user_input, response)
                 context_stats = ctx.record_request_stats(model, source="voice_ui")
                 entry = evals.log_interaction(user_input, response, model, source="voice_ui", context=context_stats)
                 evals.maybe_log_automatic_failure(entry)
@@ -1426,6 +1428,7 @@ class TextWorker(QThread):
                 chunks.append(chunk)
                 self.stream_chunk.emit("".join(chunks))
             response = "".join(chunks)
+            _record_turn(self.user_input, response)
             context_stats = ctx.record_request_stats(model, source="text_ui")
             entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
             evals.maybe_log_automatic_failure(entry)
@@ -4156,6 +4159,9 @@ def run():
         or os.getenv("JARVIS_UI_SHELL", "").lower() == "classic"
         or default_classic
     )
+    # Wire proactive watcher to the UI speak path (background TTS)
+    _jarvis_watcher.set_speak_callback(speak)
+
     window = JarvisWindow() if use_classic else OrbShellWindow()
     if runtime_icon is not None and not runtime_icon.isNull():
         window.setWindowIcon(runtime_icon)

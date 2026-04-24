@@ -11,7 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from config import LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED
+from config import (
+    LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED,
+    LOCAL_QWEN3_FAST, LOCAL_QWEN3_MID, LOCAL_QWEN3_STRONG, LOCAL_DEVSTRAL, LOCAL_PHI4_MINI,
+)
 from brains import brain_ollama
 from local_runtime import local_model_automation, local_model_eval, local_training
 
@@ -96,6 +99,71 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         context_window="32K family baseline",
         why="Fast installed coding baseline for edits, explanations, and smoke tasks.",
         caution="Not enough by itself for frontier-level long-horizon coding.",
+    ),
+    ModelCandidate(
+        id="devstral",
+        role="coding_agent",
+        label="Devstral (Mistral coder)",
+        ollama_tag=LOCAL_DEVSTRAL,
+        status="recommended",
+        priority="high",
+        pull_command=f"ollama pull {LOCAL_DEVSTRAL}",
+        disk_estimate="about 14GB",
+        context_window="128K",
+        why="Mistral's dedicated coding model — outperforms Qwen2.5-Coder on SWE-bench. Current preferred coder.",
+        caution="Requires ~14GB disk; confirm memory headroom before pulling.",
+    ),
+    ModelCandidate(
+        id="qwen3_4b",
+        role="fast_general",
+        label="Qwen3 4B",
+        ollama_tag=LOCAL_QWEN3_FAST,
+        status="recommended",
+        priority="high",
+        pull_command=f"ollama pull {LOCAL_QWEN3_FAST}",
+        disk_estimate="about 3GB",
+        context_window="128K",
+        why="Fastest Qwen3 tier; replaces phi4-mini for quick general queries. Hybrid reasoning.",
+        caution="Thinking mode adds latency — use fast path for simple queries.",
+    ),
+    ModelCandidate(
+        id="qwen3_8b",
+        role="general",
+        label="Qwen3 8B",
+        ollama_tag=LOCAL_QWEN3_MID,
+        status="recommended",
+        priority="high",
+        pull_command=f"ollama pull {LOCAL_QWEN3_MID}",
+        disk_estimate="about 5GB",
+        context_window="128K",
+        why="Mid-tier Qwen3; stronger than gemma4 at same size. Main daily-driver general model.",
+        caution="Pull after qwen3:4b to evaluate memory/latency before committing to 8B.",
+    ),
+    ModelCandidate(
+        id="qwen3_30b_a3b",
+        role="strong_general",
+        label="Qwen3 30B-A3B (MoE)",
+        ollama_tag=LOCAL_QWEN3_STRONG,
+        status="optional",
+        priority="medium",
+        pull_command=f"ollama pull {LOCAL_QWEN3_STRONG}",
+        disk_estimate="about 19GB",
+        context_window="128K",
+        why="MoE model — 30B parameters but only 3B active per token. Near-frontier quality at low compute cost.",
+        caution="19GB disk; validate latency on Mac before promoting over 8B for daily use.",
+    ),
+    ModelCandidate(
+        id="phi4_mini",
+        role="ultra_fast",
+        label="Phi-4 Mini",
+        ollama_tag=LOCAL_PHI4_MINI,
+        status="optional",
+        priority="medium",
+        pull_command=f"ollama pull {LOCAL_PHI4_MINI}",
+        disk_estimate="about 3GB",
+        context_window="128K",
+        why="Microsoft ultra-fast model; good fallback when Qwen3:4b is too slow.",
+        caution="Weaker on reasoning than Qwen3:4b; use for speed-critical paths only.",
     ),
     ModelCandidate(
         id="deepseek_r1_14b",

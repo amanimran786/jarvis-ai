@@ -31,6 +31,7 @@ import skills
 import vault
 import vault_capture
 import jarvis_agents as _jagents
+import jarvis_watcher as _jwatcher
 import mem0_layer as _m0
 import source_ingest
 import skill_factory
@@ -1837,6 +1838,29 @@ def route_stream(user_input: str) -> tuple:
         def _attention_gen():
             yield _jagents.escalation_summary()
         return _attention_gen(), "Jarvis"
+    # ── Proactive watcher status / control ──────────────────────────────────────
+    _WATCHER_TRIGGERS = (
+        "watcher status", "watcher running", "are you watching",
+        "proactive mode", "background alerts", "are you monitoring",
+        "notification status",
+    )
+    if any(t in lower for t in _WATCHER_TRIGGERS):
+        def _watcher_status_gen():
+            w = _jwatcher.status()
+            if w["running"]:
+                last = w.get("last_escalation") or "none yet"
+                yield (
+                    f"Proactive watcher is active — checking every {w['interval_sec'] // 60} minutes. "
+                    f"Quiet hours: {w['quiet_start_hour']}:00 – {w['quiet_end_hour']}:00. "
+                    f"{w['notified_count']} alerts sent this session. "
+                    f"Last: {last}"
+                )
+            elif not w["enabled"]:
+                yield "Proactive watcher is disabled. Set JARVIS_WATCHER_ENABLED=1 to enable it."
+            else:
+                yield "Proactive watcher is not running. It starts automatically at launch."
+        return _watcher_status_gen(), "Jarvis"
+
     if any(t in lower for t in _MEM0_STATUS_TRIGGERS):
         def _mem0_status_gen():
             s = _m0.status()

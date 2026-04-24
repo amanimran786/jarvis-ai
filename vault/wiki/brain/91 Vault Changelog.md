@@ -242,3 +242,25 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
   - added 10 regression tests
 
 Affected: [[10 Identity]] · [[20 Projects]] · [[30 Preferences]] · [[80 Jarvis Roadmap]]
+
+### Proactive watcher, mem0 full wiring, model fleet update
+
+- added `jarvis_watcher.py` — background watcher thread
+  - scans calendar (events starting within 15 min) and task hub (urgent/overdue open tasks) every 5 min
+  - delivers macOS banner notifications via osascript
+  - speaks proactive alerts via registered TTS callback when not in quiet hours (22:00–08:00)
+  - deduplicates alerts via `_notified_keys` set to prevent repeat notifications per session
+  - configurable via env vars: `JARVIS_WATCHER_INTERVAL_SEC`, `JARVIS_WATCHER_QUIET_START/END`, `JARVIS_WATCHER_ENABLED`
+  - wired into `main.py` and `ui.py` at startup; speak callback registered from voice path
+- completed mem0 wiring
+  - `record_turn()` wired into `main.py` headless loop (voice path)
+  - `record_turn()` wired into `ui.py` voice UI and text UI paths
+  - mem0 status verbal command handler completed in `router.py` (`_MEM0_STATUS_TRIGGERS`)
+  - watcher status verbal command handler added (`_WATCHER_TRIGGERS`)
+  - `/watcher` GET and `/watcher/notify` POST endpoints added to `api.py`
+- updated `local_runtime/model_fleet.py`
+  - added Devstral, Qwen3 4b/8b/30b-a3b, phi4-mini as `ModelCandidate` entries with pull commands
+  - imports new constants from `config.py` (`LOCAL_QWEN3_FAST/MID/STRONG`, `LOCAL_DEVSTRAL`, `LOCAL_PHI4_MINI`)
+- 17 new unit tests in `tests/test_jarvis_watcher.py` — all pass
+
+Affected: router.py · main.py · ui.py · api.py · local_runtime/model_fleet.py
