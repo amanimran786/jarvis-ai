@@ -270,6 +270,23 @@ class MessageIntentParsingTests(unittest.TestCase):
     def test_send_it_without_draft_is_not_a_recipient(self):
         self.assertEqual(self.router._parse_message_recipient_only("send it"), "")
 
+    def test_message_two_lowercase_words_is_contact_only_when_name_like(self):
+        self.assertIsNone(self.router._parse_message_compose("Message fiza imran"))
+        self.assertEqual(self.router._parse_message_recipient_only("Message fiza imran"), "fiza imran")
+
+    def test_send_last_response_request_extracts_recipient(self):
+        self.assertEqual(
+            self.router._parse_send_last_response_request("Send the last response to Fiza imran"),
+            "Fiza imran",
+        )
+
+    def test_mixed_case_two_word_contact_with_body_stays_together(self):
+        result = self.router._parse_message_compose("Message Fiza imran hi")
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Fiza imran")
+        self.assertEqual(body, "hi")
+
     def test_multiword_contact_with_and_introduce_delimiter(self):
         result = self.router._parse_message_compose(
             "Message Imran butt and introduce yourself jarvia, in text to imran butt"
