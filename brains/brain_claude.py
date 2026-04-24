@@ -1,9 +1,9 @@
 import anthropic
-import re
 from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
+from brains import _postprocess
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
@@ -27,14 +27,12 @@ def ask_claude(
 
 
 def _strip_markdown(text: str) -> str:
-    """Remove markdown artifacts because Jarvis responses are spoken aloud."""
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)
-    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.M)
-    text = re.sub(r'^\s*\d+[.)](?:\s+|$)', '', text, flags=re.M)
-    text = re.sub(r'```\w*\n?', '', text)
-    return text
+    """Backward-compatible wrapper around the shared brain postprocess.
+
+    Delegates to brains._postprocess.strip_markdown so cloud responses get
+    the same think-block + markdown cleanup as local Ollama responses.
+    """
+    return _postprocess.strip_markdown(text)
 
 
 def ask_claude_stream(

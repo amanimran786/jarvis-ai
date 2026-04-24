@@ -1764,6 +1764,14 @@ class JarvisWindow(QMainWindow):
         self.devices_btn.clicked.connect(self._toggle_device_panel)
         action_row.addWidget(self.devices_btn)
 
+        self.visibility_btn = QPushButton("UNDETECTABLE")
+        self.visibility_btn.setFixedHeight(28)
+        self.visibility_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.visibility_btn.setToolTip("Toggle whether Jarvis appears in screenshots and screen sharing")
+        self.visibility_btn.clicked.connect(self._toggle_visibility_mode)
+        action_row.addWidget(self.visibility_btn)
+        self._refresh_visibility_mode()
+
         self.compact_btn = QPushButton("▁")
         self.compact_btn.setFixedSize(28, 28)
         self.compact_btn.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
@@ -2109,6 +2117,55 @@ class JarvisWindow(QMainWindow):
         """)
         return btn
 
+    def _visibility_btn_css(self, color: str) -> str:
+        return f"""
+            QPushButton {{
+                background: transparent;
+                color: {color};
+                border: 1px solid {color};
+                border-radius: 3px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: {C_BLUE};
+                border-color: {C_CYAN};
+                color: {C_CYAN};
+            }}
+        """
+
+    def _refresh_visibility_mode(self):
+        btn = getattr(self, "visibility_btn", None)
+        if btn is None:
+            return
+        if stealth.is_enabled():
+            btn.setText("UNDETECTABLE")
+            btn.setToolTip("Jarvis is hidden from screenshots and screen sharing. Click for debugging capture.")
+            color = C_GREEN
+        else:
+            btn.setText("DETECTABLE")
+            btn.setToolTip("Jarvis can be captured for debugging. Click to hide from screen sharing.")
+            color = C_WARNING
+        if hasattr(self, "_action_btn_css"):
+            btn.setStyleSheet(self._action_btn_css(color))
+        else:
+            btn.setStyleSheet(self._visibility_btn_css(color))
+
+    def _apply_visibility_mode(self):
+        stealth.apply_current_mode(int(self.winId()))
+        overlay = getattr(self, "_overlay", None)
+        if overlay is not None:
+            try:
+                stealth.apply_current_mode(int(overlay.winId()))
+            except Exception:
+                pass
+        self._refresh_visibility_mode()
+
+    def _toggle_visibility_mode(self):
+        stealth.toggle_enabled()
+        self._apply_visibility_mode()
+        self._add_message(stealth.status_text(), "jarvis", "Visibility")
+
     def _set_device_panel_visible(self, visible: bool):
         if self._meeting_toolbar_mode and visible:
             self._add_message("Nearby Devices stays hidden while meeting toolbar mode is active.", "jarvis", "Hardware")
@@ -2293,7 +2350,7 @@ class JarvisWindow(QMainWindow):
         _connect_timer_timeout(self._orb_poll, "JarvisWindow._sync_orb_to_voice", self._sync_orb_to_voice)
         self._orb_poll.start(80)
 
-        _safe_single_shot(500, "JarvisWindow.apply_stealth", lambda: stealth.apply_stealth(int(self.winId())))
+        _safe_single_shot(500, "JarvisWindow.apply_visibility_mode", self._apply_visibility_mode)
 
         # Create overlay (hidden by default)
         self._overlay = _overlay_mod.get_overlay()
@@ -3558,6 +3615,9 @@ class OrbShellWindow(JarvisWindow):
         self.privacy_btn = self._hud_btn("🔇")
         self.privacy_btn.setToolTip("Toggle meeting-safe quiet mode")
         self.privacy_btn.clicked.connect(self._toggle_meeting_safe_mode)
+        self.visibility_btn = self._hud_btn("HIDE")
+        self.visibility_btn.setToolTip("Toggle whether Jarvis appears in screenshots and screen sharing")
+        self.visibility_btn.clicked.connect(self._toggle_visibility_mode)
         self.attach_btn = self._hud_btn("📎")
         self.attach_btn.setToolTip("Attach a file")
         self.attach_btn.clicked.connect(self._attach_file)
@@ -3569,10 +3629,12 @@ class OrbShellWindow(JarvisWindow):
         self._scan_btn.clicked.connect(self._hotkey_screen)
         action_row.addWidget(self.listen_btn)
         action_row.addWidget(self.privacy_btn)
+        action_row.addWidget(self.visibility_btn)
         action_row.addWidget(self.attach_btn)
         action_row.addWidget(self.flag_btn)
         action_row.addWidget(self._scan_btn)
         tray.addLayout(action_row)
+        self._refresh_visibility_mode()
 
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
@@ -3890,6 +3952,7 @@ end tell
             self.listen_btn.setText("🎧")
 
         meeting_line = f"Meeting: {meeting}" if meeting != "NONE" else "Meeting: no active call detected"
+        visibility = stealth.snapshot()
         if privacy.get("suppressing_audio"):
             privacy_line = "Privacy: quiet mode active for live call"
             self.privacy_btn.setStyleSheet(self._action_btn_css(C_GREEN))
@@ -3904,6 +3967,7 @@ end tell
             meeting_line,
             audio_line,
             privacy_line,
+            f"Visibility: {visibility.get('mode', 'undetectable')}",
             f"Screen scan: {scan_ready}",
         ]
         if hint_line:
@@ -4005,7 +4069,7 @@ end tell
 
     def showEvent(self, event):
         super().showEvent(event)
-        _safe_single_shot(120, "OrbShellWindow.apply_stealth", lambda: stealth.apply_stealth(int(self.winId())))
+        _safe_single_shot(120, "OrbShellWindow.apply_visibility_mode", self._apply_visibility_mode)
 
 
 class EnterLineEdit(QTextEdit):
