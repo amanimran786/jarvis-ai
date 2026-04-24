@@ -2247,6 +2247,31 @@ def route_stream(user_input: str) -> tuple:
                 )
         return _mem0_status_gen(), "Memory"
 
+    # ── mem0 search: "what do you remember about X" ──────────────────────────
+    _MEM0_SEARCH_PREFIXES = (
+        "what do you remember about",
+        "what do you know about",
+        "do you remember",
+        "recall anything about",
+        "what have i told you about",
+        "look up in memory",
+        "search your memory for",
+        "memory search",
+    )
+    for _prefix in _MEM0_SEARCH_PREFIXES:
+        if lower.startswith(_prefix):
+            _query = user_input[len(_prefix):].strip().strip("?.,!")
+            if _query:
+                def _mem0_search_gen(q=_query):
+                    hits = _m0.search(q, top_k=6)
+                    formatted = _m0.format_for_prompt(hits, max_chars=800)
+                    if formatted:
+                        yield f"Here's what I remember about {q}:\n\n{formatted}"
+                    else:
+                        yield f"I don't have anything stored about {q} yet."
+                return _mem0_search_gen(), "Memory"
+            break
+
     for trigger in _RESEARCH_AGENT_TRIGGERS:
         if trigger in lower:
             topic = lower[lower.index(trigger) + len(trigger):].strip().strip(".,!?")
@@ -2743,6 +2768,12 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
     _last_assistant_reply = assistant_reply.strip()
     turn = f"User: {user_input.strip()}\nJarvis: {assistant_reply.strip()}"
     _m0.add_async(turn)
+    # Background fact extraction — silently captures tasks/decisions/preferences
+    try:
+        import jarvis_extractor as _jex
+        _jex.extract_async(user_input, assistant_reply)
+    except Exception:
+        pass
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────

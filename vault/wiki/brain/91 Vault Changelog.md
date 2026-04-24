@@ -316,3 +316,25 @@ Affected: jarvis_agents.py · google_services.py · router.py · config.py
 - `tests/test_jarvis_watcher.py` — 6 new email urgency pattern tests (23 total, all pass)
 
 Affected: jarvis_agents.py · jarvis_watcher.py · google_services.py · router.py
+
+### Morning auto-brief, conversation fact extractor, mem0 search command
+
+- `jarvis_watcher.py` — morning auto-brief
+  - `_should_deliver_morning_brief()` — fires once per day inside an 8 AM ± 10-min window
+  - `_deliver_morning_brief()` — runs `jarvis_agents.run_briefing()`, sends notification, speaks TTS
+  - configurable via `JARVIS_MORNING_BRIEF_HOUR` env var (default 8)
+  - `status()` now reports `morning_brief_hour` and `morning_brief_sent` date
+- `jarvis_extractor.py` — new module: conversation fact extractor
+  - `extract_async(user, reply)` — fire-and-forget after every turn
+  - `extract(user, reply)` — synchronous; returns list of fact dicts
+  - LLM pass using fastest local model with structured JSON output
+  - routes facts to vault: tasks → [[90 Task Hub]], decisions → [[70 Jarvis Decision Log]], preferences → [[30 Preferences]]
+  - all writes also go to mem0 for cross-session retrieval
+  - wired into `record_turn()` in `router.py` — activates automatically after every response
+  - `/extract` POST endpoint in `api.py` for external triggering
+- `router.py` — mem0 search verbal command
+  - "what do you remember about X" / "recall anything about X" / "do you remember X" → searches mem0 and returns formatted results
+  - `_MEM0_SEARCH_PREFIXES` list covers natural phrasings
+- `tests/test_jarvis_extractor.py` — 13 new tests (86 total, all pass)
+
+Affected: jarvis_watcher.py · jarvis_extractor.py · router.py · api.py
