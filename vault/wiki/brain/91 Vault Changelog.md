@@ -35,6 +35,7 @@ Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision
 - added a UI response-generation guard so stale Open-Source worker replies cannot appear after newer deterministic Messages responses
 - made the Jarvis console default to high effort and route one-shot natural effort commands locally before hitting the model
 - verified the packaged app with safe live draft/cancel smoke tests against the running daemon; no confirmation sends were used
+- replaced unsafe self-introduction claims with permission-gated wording and taught the router to safely forward the last Jarvis response, reject overclaiming message bodies, and treat lower-case two-word names like "fiza imran" as contacts rather than body text
 
 ## 2026-04-15
 

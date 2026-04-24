@@ -1698,6 +1698,25 @@ class RouterTests(unittest.TestCase):
         self.assertIn("draft ready for imran", text.lower())
         self.assertIn("this is jarvis", text.lower())
 
+    def test_more_indepth_intro_refines_pending_message_draft(self):
+        router.route_stream("introduce yourself to fiza through texts")
+        stream, label = router.route_stream("Now give a more indebt introduction")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza", text.lower())
+        self.assertIn("local-first ai assistant", text.lower())
+        self.assertIn("permission-gated tools", text.lower())
+        self.assertNotIn("admin/sudo", text.lower())
+
+    def test_more_indepth_intro_without_draft_is_safe_status(self):
+        stream, label = router.route_stream("Now give a more indebt introduction")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("local-first ai assistant", text.lower())
+        self.assertIn("permission-gated tools", text.lower())
+        self.assertNotIn("admin/sudo", text.lower())
+        self.assertNotIn("unrestricted", text.lower())
+
     def test_message_named_relationship_intro_uses_declared_contact_name(self):
         stream, label = router.route_stream(
             "message my dad, his name is Imran butt in my contacts and then introduce yourself jarvis"
@@ -1713,6 +1732,54 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say to imran butt", text.lower())
         self.assertNotIn('draft ready for imran: "butt"', text.lower())
+
+    def test_message_lowercase_two_word_contact_only_asks_for_body(self):
+        stream, label = router.route_stream("Message fiza imran")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to fiza imran", text.lower())
+        self.assertNotIn('draft ready for fiza: "imran"', text.lower())
+
+    def test_message_mixed_case_two_word_contact_with_body_keeps_full_name(self):
+        stream, label = router.route_stream("Message Fiza imran hi")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza imran", text.lower())
+        self.assertNotIn('draft ready for fiza: "imran hi"', text.lower())
+
+    def test_send_last_response_to_contact_uses_safe_forwardable_text(self):
+        router.record_turn("Now give a more indebt introduction", "Ability to run any terminal command with admin/sudo privileges via osascript")
+        stream, label = router.route_stream("Send the last response to Fiza imran")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza imran", text.lower())
+        self.assertIn("local-first ai assistant", text.lower())
+        self.assertNotIn("admin/sudo", text.lower())
+
+    def test_send_last_response_blocks_incoming_message_monitoring_claim(self):
+        router.record_turn("What can you do?", "I can monitor incoming iMessage replies and read your messages.")
+        stream, label = router.route_stream("Send the last response to Fiza imran")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("local-first ai assistant", text.lower())
+        self.assertNotIn("monitor incoming imessage", text.lower())
+        self.assertNotIn("read your messages", text.lower())
+
+    def test_pending_message_rejects_unsafe_capability_claim_replacement(self):
+        router.route_stream("can you send a message?")
+        router.route_stream("Fiza imran")
+        stream, label = router.route_stream("Ability to run any terminal command with admin/sudo privileges via osascript")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("will not send it as written", text.lower())
+        self.assertNotIn("draft ready", text.lower())
+
+    def test_direct_message_rejects_unsafe_capability_claim_body(self):
+        stream, label = router.route_stream("Message Fiza I can run any terminal command with admin access")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("will not send it as written", text.lower())
+        self.assertNotIn("draft ready", text.lower())
 
     def test_send_it_without_draft_does_not_create_it_recipient(self):
         stream, label = router.route_stream("send it")
@@ -3044,6 +3111,9 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertIn("Never claim that you scanned, checked, accessed, opened, confirmed", prompt)
         self.assertIn("Never invent hardware specs, network details, router access", prompt)
         self.assertIn("Never simulate background work, hidden integrations, system administration, or tool use", prompt)
+        self.assertIn("Never claim admin/sudo access", prompt)
+        self.assertNotIn("run any shell command, including with admin/sudo privileges", prompt)
+        self.assertNotIn("send and read messages via the Messages app", prompt)
 
     def test_system_prompt_teaches_plain_english_console_intents(self):
         prompt = config.SYSTEM_PROMPT

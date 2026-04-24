@@ -698,6 +698,13 @@ _last_msg_recipient: str = ""
 _last_message_send_result: dict | None = None
 _pending_message_draft: dict | None = None
 _fuzzy_contact_suggestions: list[str] = []
+_last_assistant_reply: str = ""
+_JARVIS_INTRO_SHORT = "Hi, this is Jarvis, Aman's assistant."
+_JARVIS_INTRO_DETAILED = (
+    "Hi, I’m Jarvis, Aman’s local-first AI assistant. I help him with coding, research, writing, planning, and Mac workflows, "
+    "and I can draft messages or coordinate tasks when Aman explicitly confirms them. I do not act on private systems silently; "
+    "I work through permission-gated tools so Aman stays in control."
+)
 
 # ── Pending self-improvement (approval gate) ──────────────────────────────────
 # Uses a list so inner functions can mutate it without `global` keyword.
@@ -814,6 +821,72 @@ def _message_confirmation_prompt(recipient: str, body: str) -> str:
         f"Draft ready for {recipient}: \"{body}\". "
         f"Say confirm send to send it, or cancel message to stop."
     )
+
+
+def _unsafe_message_body_reason(body: str) -> str:
+    lower = (body or "").lower()
+    unsafe_markers = (
+        "admin/sudo",
+        "sudo privileges",
+        "administrator privileges",
+        "run any terminal command",
+        "run any shell command",
+        "direct access to aman's mac",
+        "direct access to the mac",
+        "full macos system control",
+        "unrestricted system control",
+        "incoming imessage monitoring",
+        "monitor incoming imessage",
+        "monitor incoming messages",
+        "read your messages",
+        "read incoming messages",
+        "read imessages",
+        "read messages via the messages app",
+        "self-learning: extracts knowledge from every conversation automatically",
+        "background knowledge feed: stays current",
+    )
+    if any(marker in lower for marker in unsafe_markers):
+        return "That draft overclaims Jarvis capabilities, so I will not send it as written."
+    return ""
+
+
+def _safe_forwardable_message_text(text: str) -> str:
+    if not text or _unsafe_message_body_reason(text):
+        return _JARVIS_INTRO_DETAILED
+    return _sanitize_message_body(text)
+
+
+def _unsafe_message_draft_reply(body: str, *, keep_current: bool = False) -> str:
+    reason = _unsafe_message_body_reason(body)
+    if not reason:
+        return ""
+    suffix = (
+        "I kept the current draft unchanged. Say cancel message to stop, or give me a safer replacement."
+        if keep_current
+        else "I have not drafted it. Give me a safer replacement, or say cancel message to stop."
+    )
+    return f"{reason} {suffix}"
+
+
+def _is_intro_detail_request(lower: str) -> bool:
+    text = re.sub(r"[^a-z0-9]+", " ", lower or "").strip()
+    return (
+        "introduction" in text
+        and any(term in text for term in ("more", "deeper", "detailed", "detail", "indepth", "in depth", "indebt"))
+    ) or bool(re.search(r"\b(?:more|deeper|detailed|indepth|indebt)\s+(?:jarvis\s+)?intro(?:duction)?\b", text))
+
+
+def _parse_send_last_response_request(text: str) -> str:
+    raw = _strip_message_modifiers(_strip_polite_prefix(text or "")).strip()
+    match = re.match(
+        r"^(?:send|text|message)\s+(?:the\s+)?last\s+(?:response|reply|answer|message)\s+to\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    recipient = _clean_relationship_recipient(match.group(1))
+    return recipient if recipient and _looks_like_contact_name(recipient) else ""
 
 
 def _is_message_confirm_query(lower: str) -> bool:
@@ -956,7 +1029,7 @@ def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
     patterns = (
         (
             r"^(?:introduce\s+(?:yourself(?:\s+jarvis)?|jarvis(?:\s+yourself)?|me))\s+(?:to\s+)?(.+?)(?:\s+(?:through|via|over|on|in|using)\s+(?:texts?|text\s+messages?|messages?|imessage|i\s*message|sms)\b|$|,)",
-            "Hi, this is Jarvis, Aman's assistant.",
+            _JARVIS_INTRO_SHORT,
         ),
         (
             r"^(?:say\s+hi|say\s+hello)\s+to\s+(.+?)(?:\s+(?:through|via|over|on|in)\s+(?:texts?|messages?|imessage|i\s*message|sms)\b|$|,)",
@@ -1058,11 +1131,15 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     if intro_name:
         recipient = _clean_relationship_recipient(intro_name.group(1))
         if recipient and _looks_like_contact_name(recipient):
-            return recipient, "Hi, this is Jarvis, Aman's assistant."
+            return recipient, _JARVIS_INTRO_SHORT
 
+    common_body_second_words = {"hi", "hello", "hey", "yo", "thanks", "thank", "ok", "okay", "yes", "no", "milk"}
     if payload and re.fullmatch(r"[A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+)", payload):
         tokens = payload.split()
-        if all(token[:1].isupper() for token in tokens if re.search(r"[A-Za-z]", token)):
+        if (
+            all(token[:1].isupper() for token in tokens if re.search(r"[A-Za-z]", token))
+            or tokens[1].lower() not in common_body_second_words
+        ):
             return None
 
     # Standard patterns: only allow single-word recipients to avoid ambiguity
@@ -1159,7 +1236,14 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         max_name_parts = min(2, len(parts) - 1)
         for name_parts in range(max_name_parts, 1, -1):
             recipient_tokens = parts[:name_parts]
-            if not all(token[:1].isupper() for token in recipient_tokens if re.search(r"[A-Za-z]", token)):
+            if not (
+                all(token[:1].isupper() for token in recipient_tokens if re.search(r"[A-Za-z]", token))
+                or (
+                    len(recipient_tokens) == 2
+                    and recipient_tokens[0][:1].isupper()
+                    and recipient_tokens[1].lower() not in common_body_second_words
+                )
+            ):
                 continue
             recipient = _clean_recipient(" ".join(recipient_tokens))
             body = _clean_body(" ".join(parts[name_parts:]))
@@ -1374,6 +1458,7 @@ def route_stream(user_input: str) -> tuple:
         or _parse_indirect_message_request(user_input)
     )
     contact_details_query = _parse_contact_details_query(user_input)
+    last_response_recipient = _parse_send_last_response_request(user_input)
     recipient_only = ""
     if not composed_message and any(term in lower for term in ("send", "message", "text")):
         recipient_only = _parse_message_recipient_only(user_input)
@@ -1401,6 +1486,14 @@ def route_stream(user_input: str) -> tuple:
     if _looks_like_message_status_query(lower):
         return _s(_last_message_status_text()), "Messages"
 
+    if last_response_recipient:
+        if not _last_assistant_reply:
+            return _s("I do not have a previous Jarvis response to send. Tell me the exact message content first."), "Messages"
+        body = _safe_forwardable_message_text(_last_assistant_reply)
+        _clear_message_state()
+        _set_pending_message_draft(last_response_recipient, body)
+        return _s(_message_confirmation_prompt(last_response_recipient, body)), "Messages"
+
     if (
         not composed_message
         and not recipient_only
@@ -1418,11 +1511,17 @@ def route_stream(user_input: str) -> tuple:
         body = _pending_message_draft["body"]
         resolved_address = (_pending_message_draft.get("resolved_address") or "").strip()
         recipient_correction = _parse_message_recipient_correction(user_input)
+        if _is_intro_detail_request(lower):
+            _set_pending_message_draft(recipient, _JARVIS_INTRO_DETAILED, resolved_address=resolved_address or None)
+            return _s(_message_confirmation_prompt(recipient, _JARVIS_INTRO_DETAILED)), "Messages"
         if contact_details_query:
             _clear_message_state()
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
         if composed_message:
             next_recipient, next_body = composed_message
+            unsafe_reply = _unsafe_message_draft_reply(next_body, keep_current=True)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
             _clear_message_state()
             _set_pending_message_draft(next_recipient, next_body)
             return _s(_message_confirmation_prompt(next_recipient, next_body)), "Messages"
@@ -1440,6 +1539,9 @@ def route_stream(user_input: str) -> tuple:
         if _awaiting_msg_recipient and _fuzzy_contact_suggestions:
             if composed_message:
                 next_recipient, next_body = composed_message
+                unsafe_reply = _unsafe_message_draft_reply(next_body, keep_current=True)
+                if unsafe_reply:
+                    return _s(unsafe_reply), "Messages"
                 _clear_pending_message_draft()
                 _clear_pending_recipient()
                 _fuzzy_contact_suggestions.clear()
@@ -1511,6 +1613,9 @@ def route_stream(user_input: str) -> tuple:
         }
         candidate_body = user_input.strip().strip("\"'.!?")
         if candidate_body and candidate_body.lower().strip() not in _META_BODY_BLOCKED:
+            unsafe_reply = _unsafe_message_draft_reply(candidate_body, keep_current=True)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
             _set_pending_message_draft(recipient, candidate_body)
             return _s(_message_confirmation_prompt(recipient, candidate_body)), "Messages"
         return _s(_message_confirmation_prompt(recipient, body)), "Messages"
@@ -1526,6 +1631,9 @@ def route_stream(user_input: str) -> tuple:
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
         if composed_message:
             recipient, body = composed_message
+            unsafe_reply = _unsafe_message_draft_reply(body)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
             _awaiting_msg_recipient = False
             _fuzzy_contact_suggestions.clear()
             _clear_pending_recipient()
@@ -1561,12 +1669,20 @@ def route_stream(user_input: str) -> tuple:
         recipient_correction = _parse_message_recipient_correction(user_input)
         if not lower:
             return _s(f"What would you like to say to {_pending_msg_recipient}?"), "Messages"
+        if _is_intro_detail_request(lower):
+            recipient = _pending_msg_recipient
+            _clear_pending_recipient()
+            _set_pending_message_draft(recipient, _JARVIS_INTRO_DETAILED)
+            return _s(_message_confirmation_prompt(recipient, _JARVIS_INTRO_DETAILED)), "Messages"
         if contact_details_query:
             _clear_pending_recipient()
             _fuzzy_contact_suggestions.clear()
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
         if composed_message:
             recipient, body = composed_message
+            unsafe_reply = _unsafe_message_draft_reply(body)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
             _clear_pending_recipient()
             _fuzzy_contact_suggestions.clear()
             _set_pending_message_draft(recipient, body)
@@ -1588,6 +1704,9 @@ def route_stream(user_input: str) -> tuple:
             return _s(f"Not yet. I still need the exact message content for {_pending_msg_recipient}."), "Messages"
         if lower in {"sms", "imessage", "i message", "message"}:
             return _s(f"Got it. What message should I send to {_pending_msg_recipient}?"), "Messages"
+        unsafe_reply = _unsafe_message_draft_reply(user_input)
+        if unsafe_reply:
+            return _s(unsafe_reply), "Messages"
         recipient = _pending_msg_recipient
         _clear_pending_recipient()
         _set_pending_message_draft(recipient, user_input)
@@ -1598,6 +1717,9 @@ def route_stream(user_input: str) -> tuple:
 
     if contact_details_query:
         return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
+
+    if _is_intro_detail_request(lower):
+        return _s(_JARVIS_INTRO_DETAILED), "Status"
 
     if (
         "teach" in lower
@@ -1638,6 +1760,9 @@ def route_stream(user_input: str) -> tuple:
     # Runtime self-knowledge
     if composed_message:
         recipient, body = composed_message
+        unsafe_reply = _unsafe_message_draft_reply(body)
+        if unsafe_reply:
+            return _s(unsafe_reply), "Messages"
         _clear_pending_recipient()
         _set_pending_message_draft(recipient, body)
         return _s(_message_confirmation_prompt(recipient, body)), "Messages"
@@ -2386,6 +2511,9 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                     recipient = m.group(1)
         recipient = _normalize_message_recipient(recipient)
         if recipient and body:
+            unsafe_reply = _unsafe_message_draft_reply(body)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
             _clear_pending_recipient()
             _set_pending_message_draft(recipient, body)
             return _s(_message_confirmation_prompt(recipient, body)), "Messages"
@@ -2590,8 +2718,10 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
     The text Jarvis stores is a compact "Q: ... A: ..." pair so mem0 can
     extract structured facts from it (preferences, decisions, context).
     """
+    global _last_assistant_reply
     if not user_input or not assistant_reply:
         return
+    _last_assistant_reply = assistant_reply.strip()
     turn = f"User: {user_input.strip()}\nJarvis: {assistant_reply.strip()}"
     _m0.add_async(turn)
 
