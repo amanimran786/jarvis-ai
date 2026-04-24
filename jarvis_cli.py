@@ -78,7 +78,7 @@ except Exception:
     Text = None
 
 
-_CONSOLE_STATE = {"effort": "medium", "pending_shell": ""}
+_CONSOLE_STATE = {"effort": "high", "pending_shell": ""}
 _OWNS_DAEMON = False
 _DAEMON_CLEANUP_REGISTERED = False
 _RICH_CONSOLE = Console() if Console else None
@@ -1539,7 +1539,14 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
         return 0
     if lower.startswith("switch to ") and lower.endswith(" mode"):
         return _set_mode(lower.removeprefix("switch to ").removesuffix(" mode").strip())
-    effort = _extract_after_prefix(normalized, (r"(?:set|use|switch to)\s+effort\s+(low|medium|high|xhigh)$",))
+    effort = _extract_after_prefix(
+        normalized,
+        (
+            r"(?:set|use|switch to|increase|raise|change|move)\s+(?:the\s+)?effort\s+(?:level\s+)?(?:to\s+)?(low|medium|high|xhigh)$",
+            r"(?:make|set)\s+(?:the\s+)?(?:console\s+)?effort\s+(low|medium|high|xhigh)$",
+            r"effort\s+(low|medium|high|xhigh)$",
+        ),
+    )
     if effort:
         return _set_effort(effort)
 
@@ -2128,6 +2135,9 @@ def main():
         return
 
     message = " ".join(sys.argv[1:])
+    natural_result = _handle_natural_console_intent(message)
+    if natural_result is not _NATURAL_INTENT_UNMATCHED:
+        sys.exit(0 if natural_result is None else int(natural_result or 0))
     try:
         _ensure_daemon_running(reason="jarvis_cli_oneshot")
         result = post("/chat", {"message": message, "source": "cli_chat", "meta": {"client": "jarvis_cli", "effort": _CONSOLE_STATE["effort"]}})

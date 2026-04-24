@@ -323,6 +323,17 @@ def _trace_ui_event(window, surface: str, event: str, text: str = "", **fields):
     print(line, file=sys.stderr, flush=True)
 
 
+_RESPONSE_ID_LOCK = threading.Lock()
+_RESPONSE_ID = 0
+
+
+def _next_response_id() -> int:
+    global _RESPONSE_ID
+    with _RESPONSE_ID_LOCK:
+        _RESPONSE_ID += 1
+        return _RESPONSE_ID
+
+
 def _device_refresh_snapshot(timeout: float = 1.2) -> dict:
     handled, value = _call_optional(
         _device_panel_mod,
@@ -1301,10 +1312,13 @@ class TelemetryPanel(QFrame):
 
 class VoiceWorker(QThread):
     message = pyqtSignal(str, str, str)
+    response_message = pyqtSignal(int, str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
     stream_start = pyqtSignal(str)   # model name — creates live bubble
     stream_chunk = pyqtSignal(str)   # accumulated text so far
+    response_stream_start = pyqtSignal(int, str)
+    response_stream_chunk = pyqtSignal(int, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1370,16 +1384,17 @@ class VoiceWorker(QThread):
                 return
 
             self.status.emit(f"{VOICE_STATUS_PREFIX}PROCESSING")
+            request_id = _next_response_id()
             try:
                 stream, model = route_stream(user_input)
-                self.stream_start.emit(model)
-                response = speak_stream(stream, on_text=lambda t: self.stream_chunk.emit(t))
+                self.response_stream_start.emit(request_id, model)
+                response = speak_stream(stream, on_text=lambda t, rid=request_id: self.response_stream_chunk.emit(rid, t))
                 _record_turn(user_input, response)
                 context_stats = ctx.record_request_stats(model, source="voice_ui")
                 entry = evals.log_interaction(user_input, response, model, source="voice_ui", context=context_stats)
                 evals.maybe_log_automatic_failure(entry)
                 self.interaction.emit(entry)
-                self.message.emit(response, "jarvis", model)
+                self.response_message.emit(request_id, response, "jarvis", model)
                 exchanges.append(f"Jarvis: {response}")
 
                 if model == "Self-Improve" and "analyzing" in response.lower():
@@ -1409,31 +1424,35 @@ class VoiceWorker(QThread):
 
 class TextWorker(QThread):
     message = pyqtSignal(str, str, str)
+    response_message = pyqtSignal(int, str, str, str)
     interaction = pyqtSignal(dict)
     status  = pyqtSignal(str)
     stream_start = pyqtSignal(str)   # model name — creates live bubble
     stream_chunk = pyqtSignal(str)   # accumulated text so far
+    response_stream_start = pyqtSignal(int, str)
+    response_stream_chunk = pyqtSignal(int, str)
 
-    def __init__(self, user_input: str, parent=None):
+    def __init__(self, user_input: str, parent=None, request_id: int | None = None):
         super().__init__(parent)
         self.user_input = user_input
+        self.request_id = request_id or _next_response_id()
 
     def run(self):
         self.status.emit("PROCESSING")
         try:
             stream, model = route_stream(self.user_input)
-            self.stream_start.emit(model)
+            self.response_stream_start.emit(self.request_id, model)
             chunks = []
             for chunk in stream:
                 chunks.append(chunk)
-                self.stream_chunk.emit("".join(chunks))
+                self.response_stream_chunk.emit(self.request_id, "".join(chunks))
             response = "".join(chunks)
             _record_turn(self.user_input, response)
             context_stats = ctx.record_request_stats(model, source="text_ui")
             entry = evals.log_interaction(self.user_input, response, model, source="text_ui", context=context_stats)
             evals.maybe_log_automatic_failure(entry)
             self.interaction.emit(entry)
-            self.message.emit(response, "jarvis", model)
+            self.response_message.emit(self.request_id, response, "jarvis", model)
             exchanges = [f"User: {self.user_input}", f"Jarvis: {response}"]
             threading.Thread(
                 target=learner.extract_and_learn,
@@ -1553,6 +1572,8 @@ class JarvisWindow(QMainWindow):
         self._workers = []
         self._last_jarvis_interaction = None
         self._streaming_bubble = None
+        self._active_response_id = 0
+        self._streaming_response_id = None
         self._auto_listen_suppressed_meeting = None
         self._auto_listen_engaged_meeting = None
         self._meeting_toolbar_mode = False
@@ -2380,10 +2401,11 @@ class JarvisWindow(QMainWindow):
     def _attach_voice_worker(self, worker: VoiceWorker) -> None:
         self.voice_worker = worker
         self.voice_worker.message.connect(self._add_message)
+        self.voice_worker.response_message.connect(self._add_scoped_message)
         self.voice_worker.interaction.connect(self._register_interaction)
         self.voice_worker.status.connect(self._set_status)
-        self.voice_worker.stream_start.connect(self._start_stream_bubble)
-        self.voice_worker.stream_chunk.connect(self._update_stream_bubble)
+        self.voice_worker.response_stream_start.connect(self._start_scoped_stream_bubble)
+        self.voice_worker.response_stream_chunk.connect(self._update_scoped_stream_bubble)
 
     def _ensure_voice_worker_running(self) -> bool:
         if not getattr(self, "_voice_runtime_ready", False):
@@ -2481,9 +2503,17 @@ class JarvisWindow(QMainWindow):
                 speak("Your clipboard is empty.")
                 return
             self._add_message(f"📋 Clipboard: {content[:100]}{'...' if len(content) > 100 else ''}", "user", "")
-            worker = TextWorker(f"The user just copied this text. Analyze it and respond helpfully:\n\n{content}")
+            request_id = self._begin_response_request()
+            worker = TextWorker(
+                f"The user just copied this text. Analyze it and respond helpfully:\n\n{content}",
+                request_id=request_id,
+            )
             worker.message.connect(self._add_message)
+            worker.response_message.connect(self._add_scoped_message)
             worker.status.connect(self._set_status)
+            worker.response_stream_start.connect(self._start_scoped_stream_bubble)
+            worker.response_stream_chunk.connect(self._update_scoped_stream_bubble)
+            worker.finished.connect(lambda w=worker: self._workers.remove(w) if w in self._workers else None)
             worker.start()
             self._workers.append(worker)
         except Exception as e:
@@ -3065,12 +3095,42 @@ class JarvisWindow(QMainWindow):
         if self._meeting_toolbar_mode:
             self._update_meeting_toolbar_layout()
 
-    def _start_stream_bubble(self, model: str):
+    def _begin_response_request(self) -> int:
+        request_id = _next_response_id()
+        self._active_response_id = request_id
+        self._streaming_response_id = None
+        if self._streaming_bubble is not None:
+            self._streaming_bubble = None
+        return request_id
+
+    def _is_stale_response(self, request_id: int | None) -> bool:
+        return request_id is not None and request_id < getattr(self, "_active_response_id", 0)
+
+    def _start_scoped_stream_bubble(self, request_id: int, model: str):
+        if self._is_stale_response(request_id):
+            return
+        self._active_response_id = request_id
+        self._start_stream_bubble(model, request_id=request_id)
+
+    def _update_scoped_stream_bubble(self, request_id: int, text: str):
+        if self._is_stale_response(request_id):
+            return
+        self._update_stream_bubble(text, request_id=request_id)
+
+    def _add_scoped_message(self, request_id: int, text: str, sender: str, model: str):
+        if self._is_stale_response(request_id):
+            return
+        self._add_message(text, sender, model, request_id=request_id)
+
+    def _start_stream_bubble(self, model: str, request_id: int | None = None):
         """Create a live bubble that will be updated as text streams in."""
+        if self._is_stale_response(request_id):
+            return
         bubble = MessageBubble("▌", "jarvis", model)
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
         self._streaming_bubble = bubble
+        self._streaming_response_id = request_id
         _safe_single_shot(
             50,
             "JarvisWindow._scroll_stream_start",
@@ -3079,8 +3139,12 @@ class JarvisWindow(QMainWindow):
             ),
         )
 
-    def _update_stream_bubble(self, text: str):
+    def _update_stream_bubble(self, text: str, request_id: int | None = None):
         """Update the live bubble with the latest accumulated text."""
+        if self._is_stale_response(request_id):
+            return
+        if request_id is not None and self._streaming_response_id not in {None, request_id}:
+            return
         if self._streaming_bubble is not None:
             self._streaming_bubble.set_text(text)
             _safe_single_shot(
@@ -3091,12 +3155,17 @@ class JarvisWindow(QMainWindow):
                 ),
             )
 
-    def _add_message(self, text: str, sender: str, model: str):
+    def _add_message(self, text: str, sender: str, model: str, request_id: int | None = None):
+        if self._is_stale_response(request_id):
+            return
         # If a streaming bubble already has this text, finalize it instead of
         # creating a duplicate bubble.
         if sender == "jarvis" and self._streaming_bubble is not None:
+            if request_id is not None and self._streaming_response_id not in {None, request_id}:
+                return
             self._streaming_bubble.set_text(text)
             self._streaming_bubble = None
+            self._streaming_response_id = None
             self._show_toolbar_message(text, sender, model)
             _safe_single_shot(
                 50,
@@ -3218,12 +3287,15 @@ class JarvisWindow(QMainWindow):
         if self._handle_memory(text):
             return
 
-        worker = TextWorker(text)
+        request_id = self._begin_response_request()
+        worker = TextWorker(text, request_id=request_id)
         worker.message.connect(self._add_message)
+        worker.response_message.connect(self._add_scoped_message)
         worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
-        worker.stream_start.connect(self._start_stream_bubble)
-        worker.stream_chunk.connect(self._update_stream_bubble)
+        worker.response_stream_start.connect(self._start_scoped_stream_bubble)
+        worker.response_stream_chunk.connect(self._update_scoped_stream_bubble)
+        worker.finished.connect(lambda w=worker: self._workers.remove(w) if w in self._workers else None)
         worker.start()
         self._workers.append(worker)
 
@@ -3238,10 +3310,15 @@ class JarvisWindow(QMainWindow):
         filename = os.path.basename(path)
         self._add_message(f"📎 {filename}", "user", "")
         prompt = f"The user shared a file called '{filename}'. Here is its content:\n\n{content}\n\nAcknowledge it and ask what they want to do with it."
-        worker = TextWorker(prompt)
+        request_id = self._begin_response_request()
+        worker = TextWorker(prompt, request_id=request_id)
         worker.message.connect(self._add_message)
+        worker.response_message.connect(self._add_scoped_message)
         worker.interaction.connect(self._register_interaction)
         worker.status.connect(self._set_status)
+        worker.response_stream_start.connect(self._start_scoped_stream_bubble)
+        worker.response_stream_chunk.connect(self._update_scoped_stream_bubble)
+        worker.finished.connect(lambda w=worker: self._workers.remove(w) if w in self._workers else None)
         worker.start()
         self._workers.append(worker)
 
@@ -3354,6 +3431,8 @@ class OrbShellWindow(JarvisWindow):
         self._workers = []
         self._last_jarvis_interaction = None
         self._streaming_bubble = None
+        self._active_response_id = 0
+        self._streaming_response_id = None
         self._session_started = datetime.now()
         self._drag_pos = None
         self._tray_locked = False
@@ -3889,7 +3968,28 @@ end tell
             if not self._tray_locked:
                 self._collapse_timer.start(1400)
 
-    def _add_message(self, text: str, sender: str, model: str):
+    def _start_stream_bubble(self, model: str, request_id: int | None = None):
+        if self._is_stale_response(request_id):
+            return
+        self._streaming_response_id = request_id
+        self.suggest_label.setPlainText("▌")
+        self.transcript_label.setText(f"[{model}] Generating response." if model else "Generating response.")
+        self._set_tray_visible(True)
+
+    def _update_stream_bubble(self, text: str, request_id: int | None = None):
+        if self._is_stale_response(request_id):
+            return
+        if request_id is not None and self._streaming_response_id not in {None, request_id}:
+            return
+        self.suggest_label.setPlainText(text)
+        self.suggest_label.moveCursor(QTextCursor.MoveOperation.Start)
+        self._set_tray_visible(True)
+
+    def _add_message(self, text: str, sender: str, model: str, request_id: int | None = None):
+        if self._is_stale_response(request_id):
+            return
+        if request_id is not None and self._streaming_response_id == request_id:
+            self._streaming_response_id = None
         prefix = "YOU" if sender == "user" else "JARVIS"
         snippet = text.strip().replace("\n", " ")
         if len(snippet) > 220:
