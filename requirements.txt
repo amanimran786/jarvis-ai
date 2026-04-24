@@ -24,3 +24,6 @@ prompt_toolkit
 # self_improve uses stdlib only (difflib, shutil, subprocess)
 cryptography
 kokoro-onnx  # Local TTS — free, no API
+# ── Memory and retrieval (2026-04) ────────────────────────────────────────────
+mem0ai          # Cross-session episodic memory (Ollama-backed, local Qdrant)
+qdrant-client   # Vector store for mem0 (embedded local, no server needed)

@@ -30,6 +30,8 @@ import evals
 import skills
 import vault
 import vault_capture
+import jarvis_agents as _jagents
+import mem0_layer as _m0
 import source_ingest
 import skill_factory
 from local_runtime import local_training
@@ -1805,6 +1807,62 @@ def route_stream(user_input: str) -> tuple:
             f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
         ), "Tasks"
 
+    # ── Iron Man Jarvis: proactive briefings and parallel agents ────────────────
+    # "brief me" / "morning briefing" / "give me an update" / "what's my status"
+    _BRIEFING_TRIGGERS = (
+        "brief me", "briefing", "morning brief", "morning update",
+        "what's my status", "what is my status", "give me an update",
+        "what do i have today", "what's on today", "daily brief",
+        "status update", "rundown", "run me through",
+    )
+    _ATTENTION_TRIGGERS = (
+        "what needs my attention", "what requires my attention",
+        "anything urgent", "anything important", "what's urgent",
+        "what's blocking", "escalations", "priority items",
+        "what should i focus on", "what do i need to handle",
+    )
+    _MEM0_STATUS_TRIGGERS = (
+        "mem0 status", "memory status", "how many memories", "what do you remember",
+        "episodic memory", "what have you learned", "memory count",
+    )
+    _RESEARCH_AGENT_TRIGGERS = (
+        "run agents on", "research agent", "parallel research",
+        "agents on", "have agents look at", "agents find",
+    )
+    if any(t in lower for t in _BRIEFING_TRIGGERS):
+        def _briefing_gen():
+            yield _jagents.run_briefing()
+        return _briefing_gen(), "Jarvis"
+    if any(t in lower for t in _ATTENTION_TRIGGERS):
+        def _attention_gen():
+            yield _jagents.escalation_summary()
+        return _attention_gen(), "Jarvis"
+    if any(t in lower for t in _MEM0_STATUS_TRIGGERS):
+        def _mem0_status_gen():
+            s = _m0.status()
+            if s["available"]:
+                count = s.get("count", "unknown")
+                yield (
+                    f"Episodic memory is active. {count} memories stored locally at {s['store']}. "
+                    f"Every conversation is being recorded and will surface as context in future sessions."
+                )
+            else:
+                yield (
+                    "Episodic memory is not yet initialized. "
+                    "Start Ollama and it will activate automatically on the next conversation turn. "
+                    "Run: ollama serve"
+                )
+        return _mem0_status_gen(), "Memory"
+
+    for trigger in _RESEARCH_AGENT_TRIGGERS:
+        if trigger in lower:
+            topic = lower[lower.index(trigger) + len(trigger):].strip().strip(".,!?")
+            if topic:
+                def _research_gen(t=topic):
+                    yield _jagents.research_and_brief(t)
+                return _research_gen(), "Jarvis"
+            break
+
     # ── Vault capture fast-path (write-back to Obsidian brain notes) ──────────
     # Handles: "add task X", "save to vault: ...", "update changelog: ...",
     #          "project update: ...", "append to [[Note]] under Heading: ...",
@@ -2271,6 +2329,22 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
     return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
+
+
+def record_turn(user_input: str, assistant_reply: str) -> None:
+    """
+    Fire-and-forget mem0 write after a completed conversation turn.
+
+    Call this from the UI / voice layer once the full assistant reply is
+    collected.  It runs in a background thread so it never blocks the UX.
+
+    The text Jarvis stores is a compact "Q: ... A: ..." pair so mem0 can
+    extract structured facts from it (preferences, decisions, context).
+    """
+    if not user_input or not assistant_reply:
+        return
+    turn = f"User: {user_input.strip()}\nJarvis: {assistant_reply.strip()}"
+    _m0.add_async(turn)
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────

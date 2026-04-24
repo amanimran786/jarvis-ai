@@ -32,10 +32,11 @@ Jarvis is trying to become your own private, open-source-first desktop intellige
 If you are new to this repo, read these sections in order:
 
 1. `What Is Jarvis?`
-2. `How Jarvis Works`
-3. `Current State`
-4. `Roadmap`
-5. `Repo Map`
+2. `What's New (April 2026)`
+3. `How Jarvis Works`
+4. `Current State`
+5. `Roadmap`
+6. `Repo Map`
 
 ## What Is Jarvis?
 
@@ -77,6 +78,16 @@ Jarvis is trying to invert that:
 - grounded in your files, tools, and environment
 - honest about what it knows and what it does not know
 
+## What's New (April 2026)
+
+Five major systems landed this month:
+
+1. **Always-On Brain Core** — Loads your identity, projects, preferences, and roadmap from vault notes as a permanent system prefix. Every model call knows who you are and what Jarvis is for.
+2. **Parallel Agent Layer** — ThreadPoolExecutor fan-out to specialized sub-agents for calendar, tasks, vault, code, and research. Commands: "brief me", "what's my status", "what needs my attention".
+3. **mem0 Cross-Session Memory** — Ollama-embedded local Qdrant vector store. Persists conversation facts across sessions. Degrades silently when Ollama unavailable.
+4. **Qwen3 Model Fleet** — Qwen3 8b (general), Qwen3 30b-a3b (near-GPT4), Devstral (coder), phi4-mini (fast). Join Deepseek R1 for reasoning work.
+5. **4-Tier Memory System** — Vault (Obsidian brain) + graph context + semantic TF-IDF/embed + mem0 episodic. Parallel context sources in smart_stream.
+
 ## Jarvis In One Diagram
 
 ```mermaid
@@ -84,8 +95,10 @@ flowchart LR
     User["You"] --> UI["Desktop UI / CLI"]
     UI --> API["Local API"]
     API --> Router["Router + Orchestrator"]
+    Router --> Brain["Brain Core<br/>Identity + Preferences"]
+    Router --> Memory["Memory + Vault<br/>+ Graph + Semantic + mem0"]
+    Router --> Agents["Parallel Agents<br/>Calendar / Tasks / Code"]
     Router --> Skills["Skills"]
-    Router --> Memory["Memory + Vault + Graph Context"]
     Router --> Tools["Tools + Connectors"]
     Router --> Models["Local Models"]
     Router --> Tasks["Managed Task Runtime"]
@@ -97,11 +110,13 @@ flowchart LR
 Every request follows roughly this path:
 
 1. You ask Jarvis something.
-2. Jarvis decides what kind of request it is.
-3. Jarvis loads the right skills and context.
-4. Jarvis chooses the right model and tools.
-5. Jarvis answers, acts, or starts a managed task.
-6. Jarvis can store useful memory for later.
+2. Jarvis loads your identity from Brain Core.
+3. Jarvis decides what kind of request it is.
+4. Jarvis loads the right skills and context (4-tier memory system).
+5. Jarvis chooses the right model and tools.
+6. Jarvis can dispatch parallel agents if useful.
+7. Jarvis answers, acts, or starts a managed task.
+8. Jarvis stores useful memory for future sessions.
 
 ## The Main Systems
 
@@ -161,15 +176,63 @@ Main files:
 - [semantic_memory.py](semantic_memory.py)
 - [vault.py](vault.py)
 - [graph_context.py](graph_context.py)
+- [mem0_layer.py](mem0_layer.py)
 
 What it does:
 
 - stores facts and preferences
 - searches local markdown knowledge
 - grounds repo questions in generated graph artifacts
-- gives Jarvis durable context across sessions
+- persists episodic memory across sessions via mem0
+- gives Jarvis 4-tier parallel context across sessions
 
-### 5. Skills, Connectors, and Plugins
+### 5. Always-On Brain Core
+
+This is your identity snapshot baked into every model call.
+
+Main file:
+
+- [jarvis_core_brain.py](jarvis_core_brain.py)
+
+What it does:
+
+- loads Identity, Projects, Preferences, and Roadmap notes from vault at startup
+- prepends a ~1400-char system context to every model call
+- plays the same role for Jarvis that CLAUDE.md plays for Claude Code
+- ensures every response knows who Aman is and what matters to you
+
+### 6. Parallel Agent Layer
+
+This is how Jarvis can multitask intelligently.
+
+Main file:
+
+- [jarvis_agents.py](jarvis_agents.py)
+
+What it does:
+
+- dispatches specialized sub-agents to calendar, tasks, vault, code, and research in parallel
+- responds to meta-commands: "brief me", "morning briefing", "what's my status", "what needs my attention", "run agents on X"
+- uses ThreadPoolExecutor to avoid blocking
+- escalates complex queries to the main model when needed
+
+### 7. mem0 Cross-Session Memory
+
+This is episodic memory that persists across sessions.
+
+Main file:
+
+- [mem0_layer.py](mem0_layer.py)
+
+What it does:
+
+- Ollama-embedded, local Qdrant vector store at `~/.mem0/jarvis/`
+- fourth parallel context source in smart_stream
+- stores conversation facts and observations
+- retrieves relevant past context automatically
+- degrades silently if Ollama becomes unavailable
+
+### 8. Skills, Connectors, and Plugins
 
 This is Jarvis's extensibility layer.
 
@@ -187,7 +250,7 @@ What each one means:
 - `Connectors`: integrations into real capabilities like browser, terminal, vault, and Google Workspace
 - `Plugins`: bundles of skills, connectors, and agents that feel like complete features
 
-### 6. Managed Task Runtime
+### 9. Managed Task Runtime
 
 This is the part that lets Jarvis act more like an operator than a chatbot.
 
@@ -204,7 +267,7 @@ What it does:
 - streams task output
 - prepares isolated code workspaces for code tasks
 
-### 7. Voice, Meetings, Vision, and Device Awareness
+### 10. Voice, Meetings, Vision, and Device Awareness
 
 This is the multimodal layer.
 
@@ -225,14 +288,32 @@ What it does:
 - browser control
 - nearby device awareness
 
+## Current State
+
+Jarvis as of April 2026:
+
+**Voice** — Kokoro TTS with macOS `say` fallback. Faster-whisper STT (upgrade path: large-v3-turbo).
+
+**Memory** — 4-tier parallel: vault (Obsidian brain) + graph context + semantic TF-IDF/embed + mem0 episodic.
+
+**Agents** — Parallel fan-out to calendar, tasks, vault, code, research with escalation detection.
+
+**Brain** — Always-on identity snapshot from vault brain notes in every model call.
+
+**Models** — Qwen3 fleet (4b/8b/30b-a3b), Devstral coder, Deepseek R1 reasoning, phi4-mini lightweight.
+
+**Capability Overview** — Answer questions, explain concepts, plan work, read code, debug problems, remember facts/preferences/projects, ground answers in repo structure and vault, retrieve episodic memory across sessions, control browser/terminal, use skills and tools, create and manage tasks.
+
 ## Current Capability Overview
 
 | Area | What Jarvis can do now |
 |---|---|
 | Chat | Answer questions, explain concepts, plan work, and reason about technical topics |
 | Coding | Read the repo, explain code, debug problems, review code, and run managed coding tasks |
-| Voice | Use local STT and local TTS in the main path |
-| Memory | Remember facts, preferences, projects, and recent conversation summaries |
+| Voice | Use local STT (faster-whisper) and local TTS (Kokoro → say fallback) in main path |
+| Memory | 4-tier: vault, graph context, semantic embed, and mem0 episodic persistence |
+| Brain | Always-on identity snapshot from vault notes in every model call |
+| Agents | Parallel fan-out to calendar, tasks, vault, code, research with escalation |
 | Repo grounding | Use Graphify and vault-based context instead of pure guesswork |
 | Browser + system | Read pages, click controls, open apps, change settings, and take screenshots |
 | Managed runtime | Inspect agents, create tasks, stream task output, and isolate code-task workspaces |
@@ -242,13 +323,15 @@ What it does:
 
 Jarvis is configured around a local-first stack:
 
-- default local chat: `gemma4:e4b`
-- deeper local reasoning model: `deepseek-r1:14b`
-- local coding model: `qwen2.5-coder:7b`
-- local STT: `faster-whisper`
-- local TTS: macOS `say`
-- local embeddings model available: `nomic-embed-text`
-- local vision model available: `llava:7b`
+- **default local chat**: `qwen3:8b` (strong general-purpose)
+- **near-GPT4 quality**: `qwen3:30b-a3b`
+- **deeper reasoning**: `deepseek-r1:14b`
+- **local coding**: `devstral`
+- **fast lightweight**: `phi4-mini`
+- **local STT**: `faster-whisper` (upgrade path: `large-v3-turbo`)
+- **local TTS**: Kokoro with macOS `say` fallback
+- **local embeddings**: `nomic-embed-text`
+- **local vision**: `llava:7b`
 
 You can inspect the live runtime stack with:
 
@@ -306,7 +389,7 @@ Make Jarvis answer from memory, repo structure, and real observations instead of
 Main work:
 
 - improve [semantic_memory.py](semantic_memory.py)
-- unify memory, vault, and graph grounding
+- unify memory, vault, graph, and mem0 grounding
 - add stronger retrieval and reranking
 
 ### Phase 4: Better Tools and Actions
@@ -356,6 +439,9 @@ If the repo feels big, this is the shortest useful map:
 | [api.py](api.py) | Local API surface |
 | [router.py](router.py) | Main request routing |
 | [model_router.py](model_router.py) | Model choice and mode policy |
+| [jarvis_core_brain.py](jarvis_core_brain.py) | Always-on identity snapshot |
+| [jarvis_agents.py](jarvis_agents.py) | Parallel agent dispatcher |
+| [mem0_layer.py](mem0_layer.py) | Cross-session episodic memory |
 | [memory.py](memory.py) | Stored facts and profile memory |
 | [semantic_memory.py](semantic_memory.py) | Retrieval over memory data |
 | [vault.py](vault.py) | Local markdown knowledge vault |
@@ -426,6 +512,12 @@ Memory and vault:
 - `GET /vault`
 - `POST /vault/build`
 
+mem0 endpoints:
+
+- `GET /mem0/status`
+- `POST /mem0/add`
+- `GET /mem0/search`
+
 ## CLI Examples
 
 If `~/.local/bin` is on your `PATH`, use Jarvis like a console-native assistant:
@@ -449,6 +541,8 @@ The `jarvis` wrapper resolves the project venv before starting the daemon, so lo
 ./venv/bin/python jarvis_cli.py "explain optimistic locking like I'm 10"
 ./venv/bin/python jarvis_cli.py --task "summarize the current repo architecture"
 ./venv/bin/python jarvis_cli.py --task-code "refactor the auth middleware"
+./venv/bin/python jarvis_cli.py "brief me"
+./venv/bin/python jarvis_cli.py "what needs my attention"
 ```
 
 ## Quick Start
@@ -473,11 +567,13 @@ brew services start ollama
 ### 3. Pull the recommended local models
 
 ```bash
-ollama pull gemma4:e4b
-ollama pull deepseek-r1:14b
-ollama pull qwen2.5-coder:7b
-ollama pull nomic-embed-text
-ollama pull llava:7b
+ollama pull qwen3:8b              # strong general-purpose (recommended)
+ollama pull qwen3:30b-a3b         # near-GPT4 quality on Mac
+ollama pull deepseek-r1:14b       # reasoning and complex tasks
+ollama pull devstral              # Mistral open coder
+ollama pull phi4-mini             # fast lightweight responses
+ollama pull nomic-embed-text      # embeddings for semantic search
+ollama pull llava:7b              # vision model
 ```
 
 ### 4. (Optional) Install local OSINT tools
@@ -537,6 +633,8 @@ Jarvis is:
 - a tool layer
 - a desktop app
 - an extension surface
+- an always-on brain core
+- a parallel agent dispatcher
 - and a roadmap toward a real local AI assistant
 
 The model is just one part inside that machine.

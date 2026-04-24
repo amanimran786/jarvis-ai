@@ -5,8 +5,8 @@ status: active
 source: repo
 confidence: high
 created: 2026-04-15
-updated: 2026-04-19
-version: 5
+updated: 2026-04-23
+version: 6
 tags:
   - vault
   - changelog
@@ -217,3 +217,28 @@ Affected: [[90 Task Hub]] · [[70 Jarvis Decision Log]] · [[60 Interview Story 
 - added [[96 Learning Loop]] as the canonical capture, distill, retrieve, grade, and promote policy
 - added `vault/sessions/lessons.md` as an append-only, indexed candidate lesson lane
 - added `vault/templates/session-lesson-template.md` so future lesson captures stay structured and review-gated
+
+## 2026-04-23
+
+### Iron Man Jarvis foundation
+
+- added `jarvis_core_brain.py` as the always-on identity snapshot module
+  - loads `10 Identity.md`, `20 Projects.md`, `30 Preferences.md`, `80 Jarvis Roadmap.md` at import time
+  - caches a compact (~1 800-char) combined snapshot with 5-minute TTL refresh
+  - injected as the first layer of `system_extra` in `model_router.smart_stream()`
+  - gives every local and cloud model the same always-on Aman identity and Jarvis north star that CLAUDE.md gives Codex
+- added `jarvis_agents.py` as the parallel task dispatcher
+  - calendar, tasks, vault, code, and research sub-agents run concurrently via ThreadPoolExecutor
+  - `run_briefing()` → fan-out to calendar + tasks + vault, merge with escalation tags
+  - `escalation_summary()` → only surface items flagged as urgent/overdue/blocked
+  - `research_and_brief(topic)` → research + vault agents on a specific question
+- wired Iron Man Jarvis fast-path into `router.py`
+  - "brief me" / "morning briefing" / "give me an update" / "what's my status" → `run_briefing()`
+  - "what needs my attention" / "anything urgent" / "what's blocking" → `escalation_summary()`
+  - "run agents on X" / "research agent X" / "parallel research X" → `research_and_brief(X)`
+- fixed pending message draft cancel/confirm bugs
+  - added bare "cancel", "abort", "nevermind", "stop", "discard", "nvm" to `_is_message_cancel_query`
+  - added `_META_BODY_BLOCKED` guard to body-replacement fallback so meta-commands never become message bodies
+  - added 10 regression tests
+
+Affected: [[10 Identity]] · [[20 Projects]] · [[30 Preferences]] · [[80 Jarvis Roadmap]]

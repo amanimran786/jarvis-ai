@@ -185,6 +185,28 @@ LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen3-code
 # Falls back to gemma4 if not available.
 LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", "deepseek-r1:14b")
 
+# ── Qwen3 model fleet (2026-04) ───────────────────────────────────────────────
+# Qwen3 outperforms prior models at each size class.  Pull the ones that fit:
+#   ollama pull qwen3:4b              (~2.5GB, fast Jarvis chat)
+#   ollama pull qwen3:8b              (~5GB, strong general purpose)
+#   ollama pull qwen3:30b-a3b         (~20GB MoE, best quality/speed on Mac)
+#   ollama pull qwen3:30b-a3b-q4_K_M  (quantized, slightly smaller)
+LOCAL_QWEN3_FAST   = os.getenv("LOCAL_QWEN3_FAST", "qwen3:4b")     # fast-path chat
+LOCAL_QWEN3_MID    = os.getenv("LOCAL_QWEN3_MID", "qwen3:8b")      # balanced
+LOCAL_QWEN3_STRONG = os.getenv("LOCAL_QWEN3_STRONG", "qwen3:30b-a3b")  # near-GPT4
+
+# Phi-4-mini — great for fast, instruction-following responses
+LOCAL_PHI4_MINI    = os.getenv("LOCAL_PHI4_MINI", "phi4-mini")     # ollama pull phi4-mini
+
+# Devstral — Mistral's open coder (ollama pull devstral)
+LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
+
+# Whisper model for STT — turbo is 8x faster than v3 with near-identical accuracy
+# Set in .env: JARVIS_WHISPER_MODEL=large-v3-turbo
+# (requires faster-whisper >= 1.0 and the turbo checkpoint)
+LOCAL_WHISPER_MODEL = os.getenv("JARVIS_WHISPER_MODEL",
+                                os.getenv("LOCAL_STT_MODEL", "base.en"))
+
 # Free-first provider routing policy.
 # Local/free inference remains default; paid providers stay enabled as fallback.
 FREE_FIRST_ENABLED = _env_flag("JARVIS_FREE_FIRST_ENABLED", True)
@@ -240,6 +262,11 @@ LOCAL_STT_ENABLED = "faster-whisper" in STT_BACKENDS
 OPENAI_STT_FALLBACK_ENABLED = "openai" in STT_BACKENDS
 STT_LANGUAGE = os.getenv("JARVIS_STT_LANGUAGE", "").strip().lower() or None
 
+# STT model: whisper-large-v3-turbo is 8x faster than v3 with near-identical accuracy.
+# Set in .env: JARVIS_FASTER_WHISPER_MODEL=large-v3-turbo
+# Sizes: tiny.en (~40MB), base.en (~150MB), small.en (~490MB),
+#        medium.en (~1.5GB), large-v3-turbo (~1.6GB, recommended)
+# Requires: pip install faster-whisper>=1.0  and Hugging Face model pull on first run.
 FASTER_WHISPER_MODEL = os.getenv("JARVIS_FASTER_WHISPER_MODEL", "base.en").strip() or "base.en"
 FASTER_WHISPER_DEVICE = os.getenv("JARVIS_FASTER_WHISPER_DEVICE", "auto").strip().lower() or "auto"
 FASTER_WHISPER_COMPUTE_TYPE = os.getenv("JARVIS_FASTER_WHISPER_COMPUTE_TYPE", "int8").strip().lower() or "int8"
