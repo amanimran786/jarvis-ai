@@ -3064,6 +3064,15 @@ class JarvisCliEndpointTests(unittest.TestCase):
         self.assertEqual(result, 0)
         fleet_mock.assert_called_once_with()
 
+    def test_natural_effort_command_sets_effort(self):
+        import jarvis_cli
+
+        with patch.dict(jarvis_cli._CONSOLE_STATE, {"effort": "medium", "pending_shell": ""}, clear=True):
+            result = jarvis_cli._handle_console_command("increase effort to high")
+            self.assertEqual(jarvis_cli._CONSOLE_STATE["effort"], "high")
+
+        self.assertEqual(result, 0)
+
     def test_natural_training_status_command_prints_training_status(self):
         import jarvis_cli
 

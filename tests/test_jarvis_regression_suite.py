@@ -1460,6 +1460,15 @@ class RouterTests(unittest.TestCase):
         self.assertIn('draft ready for dad: "get milk"', text.lower())
         send_mock.assert_not_called()
 
+    def test_message_dad_and_ask_him_to_strips_instruction_words(self):
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+            stream, label = router.route_stream("message dad and ask him to bring chocalte milk")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for dad: "bring chocalte milk"', text.lower())
+        self.assertNotIn('"him to bring', text.lower())
+        send_mock.assert_not_called()
+
     def test_new_message_compose_replaces_existing_draft(self):
         router.route_stream("message Dad old reminder")
         stream, label = router.route_stream("send a message to mom telling her bring milk")
@@ -1674,6 +1683,43 @@ class RouterTests(unittest.TestCase):
         self.assertIn("draft ready for fiza", text.lower())
         self.assertIn("jarvis", text.lower())
         self.assertNotIn("that to", text.lower())
+
+    def test_indirect_introduce_self_to_dad_stays_in_messages_router(self):
+        stream, label = router.route_stream("Now introduce yourself to dad via text")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for dad", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+
+    def test_indirect_introduce_self_to_named_dad_uses_contact_name(self):
+        stream, label = router.route_stream("Introduce yourself Jarvis to my dad Imran via text message")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for imran", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+
+    def test_message_named_relationship_intro_uses_declared_contact_name(self):
+        stream, label = router.route_stream(
+            "message my dad, his name is Imran butt in my contacts and then introduce yourself jarvis"
+        )
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for imran butt", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+
+    def test_message_two_word_contact_only_asks_for_body(self):
+        stream, label = router.route_stream("message Imran Butt")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say to imran butt", text.lower())
+        self.assertNotIn('draft ready for imran: "butt"', text.lower())
+
+    def test_send_it_without_draft_does_not_create_it_recipient(self):
+        stream, label = router.route_stream("send it")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("no draft is ready", text.lower())
+        self.assertNotIn("what would you like to say to it", text.lower())
 
     def test_recursive_draft_text_is_sanitized_before_redrafting(self):
         stream, label = router.route_stream(
@@ -2977,6 +3023,19 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         self.assertEqual(fake._peek_label.text(), "SUGGESTION: Use that confident answer.")
         self.assertEqual(fake._top_chip.text(), "SMART LISTEN ACTIVE")
         fake._set_tray_visible.assert_called_once_with(True)
+
+    def test_scoped_ui_message_ignores_stale_worker_response(self):
+        added = []
+        fake = SimpleNamespace(
+            _active_response_id=2,
+            _is_stale_response=lambda request_id: request_id is not None and request_id < 2,
+            _add_message=lambda text, sender, model, request_id=None: added.append((request_id, text, sender, model)),
+        )
+
+        ui.JarvisWindow._add_scoped_message(fake, 1, "stale model answer", "jarvis", "Open-Source")
+        ui.JarvisWindow._add_scoped_message(fake, 2, "fresh message draft", "jarvis", "Messages")
+
+        self.assertEqual(added, [(2, "fresh message draft", "jarvis", "Messages")])
 
 
 class MeetingListenerTests(unittest.TestCase):

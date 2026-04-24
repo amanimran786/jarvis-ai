@@ -218,6 +218,58 @@ class MessageIntentParsingTests(unittest.TestCase):
         self.assertEqual(recipient, "Imran")
         self.assertEqual(body, "where is he at right now")
 
+    def test_message_dad_and_ask_him_to_preserves_user_spelling(self):
+        result = self.router._parse_message_compose(
+            "message dad and ask him to bring chocalte milk"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "bring chocalte milk")
+
+    def test_message_dad_ask_him_to_strips_instruction_scaffolding(self):
+        result = self.router._parse_message_compose(
+            "message dad ask him to bring chocalte milk"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "bring chocalte milk")
+
+    def test_message_dad_and_ask_him_without_to_strips_pronoun(self):
+        result = self.router._parse_message_compose(
+            "message dad and ask him where the milk is"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "where the milk is")
+
+    def test_indirect_introduce_self_to_relationship_alias(self):
+        result = self.router._parse_indirect_message_request(
+            "Introduce yourself Jarvis to my dad Imran via text message"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Imran")
+        self.assertEqual(body, "Hi, this is Jarvis, Aman's assistant.")
+
+    def test_message_named_relationship_intro_uses_declared_contact_name(self):
+        result = self.router._parse_message_compose(
+            "message my dad, his name is Imran butt in my contacts and then introduce yourself jarvis"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Imran butt")
+        self.assertEqual(body, "Hi, this is Jarvis, Aman's assistant.")
+
+    def test_message_two_word_contact_only_does_not_split_name_as_body(self):
+        self.assertIsNone(self.router._parse_message_compose("message Imran Butt"))
+        self.assertEqual(self.router._parse_message_recipient_only("message Imran Butt"), "Imran Butt")
+
+    def test_send_it_without_draft_is_not_a_recipient(self):
+        self.assertEqual(self.router._parse_message_recipient_only("send it"), "")
+
     def test_multiword_contact_with_and_introduce_delimiter(self):
         result = self.router._parse_message_compose(
             "Message Imran butt and introduce yourself jarvia, in text to imran butt"

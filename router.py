@@ -899,6 +899,7 @@ def _parse_message_recipient_correction(text: str) -> str:
 
 def _looks_like_message_rephrase(lower: str) -> bool:
     text = (lower or "").strip()
+    compact = re.sub(r"[^a-z]+", " ", text).strip()
     return any(
         phrase in text for phrase in (
             "that's not what i want",
@@ -912,7 +913,7 @@ def _looks_like_message_rephrase(lower: str) -> bool:
             "start over",
             "try again",
         )
-    ) or text in {"no", "nope"}
+    ) or text in {"no", "nope"} or bool(re.fullmatch(r"(?:omg+\s+)?no+", compact))
 
 
 def _parse_message_replacement_compose(text: str) -> tuple[str, str] | None:
@@ -932,12 +933,29 @@ def _parse_message_replacement_compose(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _clean_relationship_recipient(raw: str) -> str:
+    candidate = (raw or "").strip().strip(",;:.")
+    candidate = re.sub(
+        r"\b(?:through|via|over|on|in|using)\s+(?:texts?|text\s+messages?|messages?|imessage|i\s*message|sms)\b.*$",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    ).strip()
+    candidate = re.sub(r"\s+(?:is|as|aka)\s+my\s+(?:dad|father|mom|mother|parent|brother|sister)\b.*$", "", candidate, flags=re.IGNORECASE).strip()
+    candidate = re.sub(r"\b(?:aka|also known as)\s+(?:dad|father|mom|mother|parent|brother|sister)\b.*$", "", candidate, flags=re.IGNORECASE).strip()
+    candidate = re.sub(r"^(?:my\s+)?(?:contact\s+)", "", candidate, flags=re.IGNORECASE).strip()
+    candidate = re.sub(r"^(?:my\s+)?(?:dad|father|mom|mother|parent|brother|sister)\s+(?=[A-Z0-9])", "", candidate, flags=re.IGNORECASE).strip()
+    return _normalize_contact_phrase(candidate)
+
+
 def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
     """Handle intent-first phrasing like: introduce yourself to Fiza through texts."""
     raw = _strip_message_modifiers(_strip_polite_prefix(text or ""))
+    raw = re.sub(r"^(?:now\s+)?(?:jarvis[, ]+)?", "", raw, flags=re.IGNORECASE).strip()
+    raw = re.sub(r"\s+(?:text\s+)?message$", "", raw, flags=re.IGNORECASE).strip()
     patterns = (
         (
-            r"^(?:introduce\s+yourself|introduce\s+me)\s+to\s+(.+?)(?:\s+(?:through|via|over|on|in)\s+(?:texts?|messages?|imessage|i\s*message|sms)\b|$|,)",
+            r"^(?:introduce\s+(?:yourself(?:\s+jarvis)?|jarvis(?:\s+yourself)?|me))\s+(?:to\s+)?(.+?)(?:\s+(?:through|via|over|on|in|using)\s+(?:texts?|text\s+messages?|messages?|imessage|i\s*message|sms)\b|$|,)",
             "Hi, this is Jarvis, Aman's assistant.",
         ),
         (
@@ -949,7 +967,7 @@ def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
         match = re.match(pattern, raw, flags=re.IGNORECASE)
         if not match:
             continue
-        recipient = _normalize_contact_phrase(match.group(1).strip().strip(",;:"))
+        recipient = _clean_relationship_recipient(match.group(1))
         if recipient and _looks_like_contact_name(recipient):
             return recipient, body
     return None
@@ -1029,6 +1047,24 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     if payload.lower().startswith("to "):
         payload = payload[3:].strip()
 
+    intro_name = re.match(
+        r"^(?:my\s+)?(?:dad|father|mom|mother|parent|brother|sister)\s*,?\s+"
+        r"(?:his|her|their)\s+name\s+is\s+(.+?)"
+        r"(?:\s+in\s+(?:my\s+)?contacts?)?"
+        r"(?:\s+and\s+(?:then\s+)?(?:introduce\s+(?:yourself|jarvis)|say\s+hi|say\s+hello).*)?$",
+        payload,
+        flags=re.IGNORECASE,
+    ) if payload else None
+    if intro_name:
+        recipient = _clean_relationship_recipient(intro_name.group(1))
+        if recipient and _looks_like_contact_name(recipient):
+            return recipient, "Hi, this is Jarvis, Aman's assistant."
+
+    if payload and re.fullmatch(r"[A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+)", payload):
+        tokens = payload.split()
+        if all(token[:1].isupper() for token in tokens if re.search(r"[A-Za-z]", token)):
+            return None
+
     # Standard patterns: only allow single-word recipients to avoid ambiguity
     message_patterns = [
         r"^(?:message|text)\s+([A-Za-z0-9@\.]+)\s+(.+)$",
@@ -1041,7 +1077,7 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     # "...Sarah that the package arrived" → body should be "the package arrived".
     # "...dad to get chocolate milk" → body should be "get chocolate milk".
     _BODY_LEADIN = re.compile(
-        r"^(?:but\s+ask\s+(?:him|her|them)|ask\s+(?:him|her|them)|and\s+|telling\s+(?:him|her|them)|saying|that|to)\s+",
+        r"^(?:but\s+ask\s+(?:him|her|them)(?:\s+to)?|and\s+ask\s+(?:him|her|them)(?:\s+to)?|ask\s+(?:him|her|them)(?:\s+to)?|and\s+tell\s+(?:him|her|them)(?:\s+to)?|tell\s+(?:him|her|them)(?:\s+to)?|and\s+remind\s+(?:him|her|them)\s+to|remind\s+(?:him|her|them)\s+to|and\s+|telling\s+(?:him|her|them)|saying|that|to)\s+",
         flags=re.IGNORECASE,
     )
 
@@ -1213,6 +1249,8 @@ def _parse_message_recipient_only(text: str) -> str:
     lower = raw.lower()
     if _looks_like_non_recipient_command(lower):
         return ""
+    if lower.strip(" .!?") in {"send it", "send that", "send now", "yes send", "confirm send", "go ahead and send"}:
+        return ""
     if re.match(r"^(?:send\s+(?:it|that)\s+to\s+.+\s+instead|use\s+.+\s+instead)$", raw, flags=re.IGNORECASE):
         return ""
 
@@ -1229,6 +1267,11 @@ def _parse_message_recipient_only(text: str) -> str:
     if m:
         candidate = _normalize_contact_phrase(m.group(1))
         candidate = re.split(r"\s+(?:saying|says|that)\s+", candidate, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+        return candidate if _looks_like_contact_name(candidate) else ""
+
+    m = re.match(r"^(?:message|text)\s+(.+)$", raw, flags=re.IGNORECASE)
+    if m:
+        candidate = _clean_relationship_recipient(m.group(1))
         return candidate if _looks_like_contact_name(candidate) else ""
 
     number_phrase = re.search(
@@ -1364,7 +1407,7 @@ def route_stream(user_input: str) -> tuple:
         and
         not _has_pending_message_draft()
         and (
-            lower.strip() in {"confirm", "send", "confirm send"}
+            lower.strip() in {"confirm", "send", "confirm send", "yes", "yep", "yup", "ok", "okay", "sure", "do it"}
             or any(phrase in lower for phrase in ("send it", "send now", "yes send", "go ahead and send", "approve send"))
         )
     ):
@@ -1454,6 +1497,10 @@ def route_stream(user_input: str) -> tuple:
             _fuzzy_contact_suggestions.clear()
             _set_pending_recipient(recipient_only)
             return _s(f"What would you like to say to {recipient_only}?"), "Messages"
+        if "wrong contact" in lower or "wrong person" in lower:
+            _clear_message_state()
+            _set_awaiting_recipient()
+            return _s("Okay — let's redo the recipient. Who would you like to message?"), "Messages"
         # Non-matching text while a draft is pending: treat it as a body replacement
         # rather than repeating the stale draft endlessly.
         # Guard: meta-commands that weren't caught above must not become message bodies.
@@ -1530,6 +1577,11 @@ def route_stream(user_input: str) -> tuple:
         if recipient_only:
             _set_pending_recipient(recipient_only)
             return _s(f"What would you like to say to {recipient_only}?"), "Messages"
+        if "wrong contact" in lower or "wrong person" in lower:
+            _clear_pending_recipient()
+            _fuzzy_contact_suggestions.clear()
+            _set_awaiting_recipient()
+            return _s("Okay — let's redo the recipient. Who would you like to message?"), "Messages"
         if _looks_like_message_rephrase(lower):
             return _s(f"Okay — what should I say to {_pending_msg_recipient}?"), "Messages"
         if _looks_like_message_status_query(lower):
@@ -1546,6 +1598,17 @@ def route_stream(user_input: str) -> tuple:
 
     if contact_details_query:
         return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
+
+    if (
+        "teach" in lower
+        and "respond to" in lower
+        and any(term in lower for term in ("when she replies", "when he replies", "when they reply", "when fiza replies"))
+    ):
+        return _s(
+            "I can draft and send outgoing Messages after your confirmation, but I do not yet monitor incoming iMessage replies. "
+            "To teach this safely, add a rule like: remember that when Fiza replies, ask me before drafting a response. "
+            "Next build step is an explicit Messages inbox listener with a permission gate."
+        ), "Messages"
 
     # ── Wake-word / greeting acknowledgement ─────────────────────────────────
     if lower in {

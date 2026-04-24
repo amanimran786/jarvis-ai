@@ -5,7 +5,7 @@ status: active
 source: repo
 confidence: high
 created: 2026-04-15
-updated: 2026-04-23
+updated: 2026-04-24
 version: 6
 tags:
   - vault
@@ -25,6 +25,16 @@ related:
 Purpose: preserve note-level provenance for major brain upgrades so Jarvis can compound knowledge without losing change history.
 
 Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]]
+
+## 2026-04-24
+
+### Messages router hardening
+
+- fixed spoken message bodies like "message dad and ask him to bring chocalte milk" so the draft body becomes "bring chocalte milk" instead of "him to bring..."
+- expanded deterministic Messages handling for "introduce yourself to dad", named relationship contacts, two-word contact-only prompts, and "send it" without an active draft
+- added a UI response-generation guard so stale Open-Source worker replies cannot appear after newer deterministic Messages responses
+- made the Jarvis console default to high effort and route one-shot natural effort commands locally before hitting the model
+- verified the packaged app with safe live draft/cancel smoke tests against the running daemon; no confirmation sends were used
 
 ## 2026-04-15
 
