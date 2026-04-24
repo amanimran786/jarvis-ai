@@ -32,6 +32,8 @@ import vault
 import vault_capture
 import jarvis_agents as _jagents
 import jarvis_watcher as _jwatcher
+import jarvis_health as _jhealth
+import jarvis_executor as _jexec
 import mem0_layer as _m0
 import source_ingest
 import skill_factory
@@ -2157,6 +2159,39 @@ def route_stream(user_input: str) -> tuple:
         return _s(
             f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
         ), "Tasks"
+
+    # ── Health check fast-path ────────────────────────────────────────────────
+    _HEALTH_TRIGGERS = (
+        "health check", "system health", "system status", "are you working",
+        "are all systems", "diagnostic", "self check", "self-check",
+        "what's broken", "anything down", "check your systems",
+        "run diagnostics", "status check",
+    )
+    if any(t in lower for t in _HEALTH_TRIGGERS):
+        def _health_gen():
+            yield _jhealth.spoken_summary(force=True)
+        return _health_gen(), "Jarvis"
+
+    # ── Multi-step executor fast-path ─────────────────────────────────────────
+    # "message dad and also add a task to call him tomorrow"
+    # "do X and then Y", "take care of X and Y", "handle X then Y"
+    _EXEC_EXPLICIT_TRIGGERS = (
+        "take care of", "handle this:", "execute this:", "do this for me:",
+        "carry out:", "go ahead and", "do the following:",
+    )
+    _exec_explicit = any(t in lower for t in _EXEC_EXPLICIT_TRIGGERS)
+    _exec_compound = _jexec.is_multi_step(user_input)
+    if _exec_explicit or _exec_compound:
+        # Strip trigger phrases so the executor gets a clean goal string
+        _exec_goal = user_input
+        for _trigger in _EXEC_EXPLICIT_TRIGGERS:
+            if _trigger in lower:
+                _exec_goal = user_input[lower.index(_trigger) + len(_trigger):].strip()
+                break
+        if _exec_goal:
+            def _exec_gen(goal=_exec_goal):
+                yield _jexec.run(goal)
+            return _exec_gen(), "Jarvis"
 
     # ── Iron Man Jarvis: proactive briefings and parallel agents ────────────────
     # "brief me" / "morning briefing" / "give me an update" / "what's my status"
