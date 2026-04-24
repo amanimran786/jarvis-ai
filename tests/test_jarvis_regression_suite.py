@@ -1303,6 +1303,7 @@ class RouterTests(unittest.TestCase):
         router._clear_pending_message_draft()
         router._awaiting_msg_recipient = False
         router._last_msg_recipient = ""
+        router._last_message_send_result = None
         router._fuzzy_contact_suggestions.clear()
 
     def test_open_source_mode_switch_fast_path(self):
@@ -1621,6 +1622,68 @@ class RouterTests(unittest.TestCase):
         text = "".join(stream)
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say to chunky", text.lower())
+
+    def test_generic_message_request_enters_guarded_message_flow(self):
+        stream, label = router.route_stream("Hey Jarvis, can you send a message for me?")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("who would you like to message", text.lower())
+        self.assertTrue(router._awaiting_msg_recipient)
+
+    def test_content_only_after_generic_message_request_does_not_claim_sent(self):
+        router.route_stream("Hey Jarvis, can you send a message for me?")
+        stream, label = router.route_stream("I'm like, can you drive us up? We can go home because it's late.")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("contact name", text.lower())
+        self.assertNotIn("sent", text.lower())
+        self.assertFalse(router._has_pending_message_draft())
+
+    def test_message_status_without_send_does_not_hallucinate(self):
+        stream, label = router.route_stream("Who did you send it to?")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("have not sent", text.lower())
+
+    def test_message_status_reports_pending_draft_not_sent(self):
+        router.route_stream("text dad get milk")
+        stream, label = router.route_stream("Who did you send it to?")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("not yet", text.lower())
+        self.assertIn("draft ready for dad", text.lower())
+
+    def test_present_tense_message_status_reports_pending_recipient(self):
+        router.route_stream("message to Imran but ask him where is he at right now")
+        stream, label = router.route_stream("Who are you sending it to?")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for imran", text.lower())
+        self.assertIn("where is he at right now", text.lower())
+
+    def test_confirm_without_draft_does_not_fall_to_model(self):
+        stream, label = router.route_stream("confirm")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("no draft is ready", text.lower())
+
+    def test_indirect_introduce_self_to_contact_uses_contact_not_previous_draft(self):
+        stream, label = router.route_stream("introduce yourself to fiza through texts, and respond back to her when she replies to you")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza", text.lower())
+        self.assertIn("jarvis", text.lower())
+        self.assertNotIn("that to", text.lower())
+
+    def test_recursive_draft_text_is_sanitized_before_redrafting(self):
+        stream, label = router.route_stream(
+            'Message fiza : Draft ready for that to: "I am Jarvis, your personal AI assistant." Say confirm send to send it, or cancel message to stop.'
+        )
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza", text.lower())
+        self.assertIn("i am jarvis", text.lower())
+        self.assertNotIn("draft ready for that", text.lower())
 
     def test_message_request_extracts_phone_number_from_number_phrase(self):
         stream, label = router.route_stream("now message this number 5107071879")
