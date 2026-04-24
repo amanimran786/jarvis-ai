@@ -67,6 +67,7 @@ if os.path.isdir(_pyqt6_plugins):
 
 import evals
 import jarvis_daemon
+import jarvis_watcher
 import runtime_state
 
 
@@ -188,8 +189,9 @@ def _run_headless():
     import memory as mem
     import tools
     from local_runtime import local_stt
-    from router import route_stream, set_timer_callback
+    from router import route_stream, set_timer_callback, record_turn as _record_turn
     from voice import speak, speak_stream, listen, wait_for_wake_word
+    jarvis_watcher.set_speak_callback(speak)
 
     END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
     QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -251,7 +253,8 @@ def _run_headless():
             try:
                 stream, model = route_stream(user_input)
                 print(f"[{model}]")
-                speak_stream(stream)
+                reply = speak_stream(stream)
+                _record_turn(user_input, reply)
             except Exception:
                 traceback.print_exc()
                 speak("Sorry, something went wrong.")
@@ -406,6 +409,7 @@ def _run():
     api_port = _resolve_api_port()
 
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
+    jarvis_watcher.start()
     _start_deferred_startup_tasks()
 
     if "--console" in sys.argv:

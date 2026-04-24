@@ -34,7 +34,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
-from router import route_stream
+from router import route_stream, record_turn as _record_turn
 import memory as mem
 import model_router
 import hardware as hw
@@ -570,6 +570,8 @@ def chat(req: ChatRequest):
                     semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
                 except Exception:
                     pass
+                # mem0 cross-session episodic memory — fire-and-forget
+                _record_turn(req.message, response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
         return StreamingResponse(generate(), media_type="text/event-stream")
@@ -592,6 +594,8 @@ def chat(req: ChatRequest):
             semantic_memory.log_conversation_turn(req.message, response, model=model, source=source)
         except Exception:
             pass
+        # mem0 cross-session episodic memory — fire-and-forget
+        _record_turn(req.message, response)
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
 
 
@@ -1430,6 +1434,43 @@ def get_memory():
 @app.get("/memory/status")
 def get_memory_status():
     return {"ok": True, "status": mem.memory_status()}
+
+
+@app.get("/memory/mem0")
+def get_mem0_status():
+    """Status and memory count for the mem0 cross-session episodic layer."""
+    import mem0_layer as _m0
+    return {"ok": True, "mem0": _m0.status()}
+
+
+@app.post("/memory/mem0/search")
+def search_mem0(req: dict):
+    """Search mem0 episodic memory for relevant context."""
+    import mem0_layer as _m0
+    query = (req or {}).get("query", "")
+    top_k = int((req or {}).get("top_k", 5))
+    hits = _m0.search(query, top_k=top_k)
+    return {"ok": True, "results": hits, "formatted": _m0.format_for_prompt(hits)}
+
+
+@app.get("/watcher")
+def get_watcher_status():
+    """Status of the proactive background watcher."""
+    import jarvis_watcher as _jw
+    return {"ok": True, "watcher": _jw.status()}
+
+
+@app.post("/watcher/notify")
+def watcher_notify(req: dict):
+    """Send a one-shot macOS notification via the watcher."""
+    import jarvis_watcher as _jw
+    title = (req or {}).get("title", "Jarvis")
+    body  = (req or {}).get("body", "")
+    subtitle = (req or {}).get("subtitle", "")
+    if not body:
+        return {"ok": False, "error": "body is required"}
+    _jw.notify(title, body, subtitle=subtitle)
+    return {"ok": True}
 
 
 @app.post("/memory/consolidate")
