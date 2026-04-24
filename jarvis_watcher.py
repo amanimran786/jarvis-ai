@@ -149,6 +149,35 @@ def _check_calendar() -> list[tuple[str, str]]:
     return alerts
 
 
+# ── Email scan ────────────────────────────────────────────────────────────────
+
+_EMAIL_URGENT_PATTERNS = re.compile(
+    r"(urgent|action required|immediate|asap|time.sensitive|critical|response needed|"
+    r"deadline|overdue|important|attention|please respond|follow.up required)",
+    re.I,
+)
+
+
+def _check_emails() -> list[tuple[str, str]]:
+    """Return list of (key, message) for unread emails with urgency signals."""
+    alerts: list[tuple[str, str]] = []
+    try:
+        import google_services as gs
+        if not hasattr(gs, "get_unread_email_subjects"):
+            return alerts
+        emails = gs.get_unread_email_subjects(max_results=10)
+        for e in emails:
+            combined = e.get("subject", "") + " " + e.get("snippet", "")
+            if _EMAIL_URGENT_PATTERNS.search(combined):
+                key = f"email:{e['sender'][:30]}:{e['subject'][:50]}"
+                if key not in _notified_keys:
+                    msg = f"Urgent email from {e['sender']}: {e['subject']}"
+                    alerts.append((key, msg))
+    except Exception:
+        pass
+    return alerts
+
+
 # ── Task scan ─────────────────────────────────────────────────────────────────
 
 _URGENT_PATTERNS = re.compile(
@@ -233,6 +262,7 @@ def _watcher_loop() -> None:
         try:
             alerts.extend(_check_calendar())
             alerts.extend(_check_tasks())
+            alerts.extend(_check_emails())
         except Exception:
             pass
 

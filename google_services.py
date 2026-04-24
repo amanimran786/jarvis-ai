@@ -199,6 +199,63 @@ def get_unread_emails(max_results: int = 5) -> str:
     return f"You have {len(messages)} unread emails. " + ". ".join(summaries) + "."
 
 
+def get_unread_email_subjects(max_results: int = 10) -> list[dict]:
+    """Return a list of dicts with 'sender', 'subject', 'snippet' for unread inbox messages."""
+    try:
+        result = _gmail().users().messages().list(
+            userId="me",
+            labelIds=["INBOX", "UNREAD"],
+            maxResults=max_results,
+        ).execute()
+        messages = result.get("messages", [])
+        out: list[dict] = []
+        for msg in messages:
+            detail = _gmail().users().messages().get(
+                userId="me", id=msg["id"], format="metadata",
+                metadataHeaders=["From", "Subject"],
+            ).execute()
+            headers = {h["name"]: h["value"] for h in detail["payload"]["headers"]}
+            out.append({
+                "sender":  headers.get("From", "Unknown").split("<")[0].strip(),
+                "subject": headers.get("Subject", "No subject"),
+                "snippet": detail.get("snippet", "")[:120],
+            })
+        return out
+    except Exception:
+        return []
+
+
+def get_next_event() -> dict | None:
+    """Return the next upcoming calendar event as a dict, or None if nothing is scheduled."""
+    try:
+        now = datetime.now(timezone.utc)
+        result = _calendar().events().list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            maxResults=5,
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+        events = result.get("items", [])
+        if not events:
+            return None
+        e = events[0]
+        start_str = e["start"].get("dateTime", e["start"].get("date", ""))
+        attendees = [
+            a.get("displayName") or a.get("email", "")
+            for a in e.get("attendees", [])
+        ]
+        return {
+            "title":     e.get("summary", "Untitled"),
+            "start":     start_str,
+            "location":  e.get("location", ""),
+            "attendees": attendees,
+            "description": e.get("description", ""),
+        }
+    except Exception:
+        return None
+
+
 def send_email(to: str, subject: str, body: str) -> str:
     message = email_lib.mime.text.MIMEText(body)
     message["to"] = to
