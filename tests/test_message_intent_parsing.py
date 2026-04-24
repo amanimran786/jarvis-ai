@@ -313,6 +313,119 @@ class MessageIntentParsingTests(unittest.TestCase):
         self.assertEqual(recipient, "bob")
         self.assertEqual(body, "don't forget tomorrow")
 
+    # ── Screenshot regression tests (live UI bugs) ───────────────────────────
+
+    def test_jarvis_wake_prefix_text_dad_to_get_chocolate_milk(self):
+        """Jarvis, can you text my dad to get chocolate milk?
+        -> recipient='dad', body='get chocolate milk'
+        Bug: wake + polite prefix caused 'dad to get' to be parsed as recipient.
+        """
+        result = self.router._parse_message_compose(
+            "Jarvis, can you text my dad to get chocolate milk?"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "get chocolate milk")
+
+    def test_can_you_text_dad_to_get_chocolate_milk(self):
+        """can you text dad to get chocolate milk
+        -> recipient='dad', body='get chocolate milk'
+        """
+        result = self.router._parse_message_compose(
+            "can you text dad to get chocolate milk"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "get chocolate milk")
+
+    def test_please_text_my_dad_to_get_chocolate_milk(self):
+        """please text my dad to get chocolate milk
+        -> recipient='dad', body='get chocolate milk'
+        """
+        result = self.router._parse_message_compose(
+            "please text my dad to get chocolate milk"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "dad")
+        self.assertEqual(body, "get chocolate milk")
+
+    def test_strip_polite_prefix_can_you(self):
+        """_strip_polite_prefix removes 'can you '."""
+        result = self.router._strip_polite_prefix("can you text dad hello")
+        self.assertEqual(result, "text dad hello")
+
+    def test_strip_polite_prefix_jarvis_can_you(self):
+        """_strip_polite_prefix removes 'Jarvis, can you '."""
+        result = self.router._strip_polite_prefix("Jarvis, can you text dad hello")
+        self.assertEqual(result, "text dad hello")
+
+    def test_strip_polite_prefix_please(self):
+        """_strip_polite_prefix removes 'please '."""
+        result = self.router._strip_polite_prefix("please text mom hi")
+        self.assertEqual(result, "text mom hi")
+
+    def test_strip_polite_prefix_could_you(self):
+        """_strip_polite_prefix removes 'could you '."""
+        result = self.router._strip_polite_prefix("could you message Alex hello")
+        self.assertEqual(result, "message Alex hello")
+
+    def test_bare_confirm_is_message_confirm_query(self):
+        """Bare 'confirm' should be recognized as a confirm query."""
+        self.assertTrue(self.router._is_message_confirm_query("confirm"))
+
+    def test_bare_yes_is_message_confirm_query(self):
+        """Bare 'yes' should be recognized as a confirm query."""
+        self.assertTrue(self.router._is_message_confirm_query("yes"))
+
+    def test_bare_ok_is_message_confirm_query(self):
+        """Bare 'ok' should be recognized as a confirm query."""
+        self.assertTrue(self.router._is_message_confirm_query("ok"))
+
+    def test_confirm_send_still_works(self):
+        """Explicit 'confirm send' still works."""
+        self.assertTrue(self.router._is_message_confirm_query("confirm send"))
+
+    # ── Cancel query tests ───────────────────────────────────────────────────
+
+    def test_bare_cancel_is_message_cancel_query(self):
+        """Bare 'cancel' should be recognized as a cancel query (screenshot bug)."""
+        self.assertTrue(self.router._is_message_cancel_query("cancel"))
+
+    def test_bare_abort_is_message_cancel_query(self):
+        """Bare 'abort' should be recognized as a cancel query."""
+        self.assertTrue(self.router._is_message_cancel_query("abort"))
+
+    def test_bare_nevermind_is_message_cancel_query(self):
+        """Bare 'nevermind' should be recognized as a cancel query."""
+        self.assertTrue(self.router._is_message_cancel_query("nevermind"))
+
+    def test_bare_stop_is_message_cancel_query(self):
+        """Bare 'stop' should be recognized as a cancel query."""
+        self.assertTrue(self.router._is_message_cancel_query("stop"))
+
+    def test_cancel_message_phrase_still_works(self):
+        """Multi-word 'cancel message' still works."""
+        self.assertTrue(self.router._is_message_cancel_query("cancel message"))
+
+    def test_dont_send_still_works(self):
+        """Multi-word \"don't send\" still works."""
+        self.assertTrue(self.router._is_message_cancel_query("don't send"))
+
+    def test_forget_it_is_message_cancel_query(self):
+        """'forget it' should be recognized as a cancel query."""
+        self.assertTrue(self.router._is_message_cancel_query("forget it"))
+
+    def test_cancel_does_not_match_confirm_query(self):
+        """'cancel' must NOT be recognized as a confirm query."""
+        self.assertFalse(self.router._is_message_confirm_query("cancel"))
+
+    def test_confirm_does_not_match_cancel_query(self):
+        """'confirm' must NOT be recognized as a cancel query."""
+        self.assertFalse(self.router._is_message_cancel_query("confirm"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -74,6 +74,24 @@ def _s(text: str):
     return iter([text])
 
 
+# Compiled once — matches wake words and polite lead-ins at the start of a message.
+_POLITE_PREFIX_RE = re.compile(
+    r"^(?:(?:jarvis|hey\s+jarvis|ok\s+jarvis|okay\s+jarvis)\s*[,!]?\s*)?"
+    r"(?:(?:can\s+you|could\s+you|would\s+you|please|can\s+u)\s+)*",
+    flags=re.IGNORECASE,
+)
+
+
+def _strip_polite_prefix(text: str) -> str:
+    """Strip wake-word and polite/filler prefixes before message parsing.
+
+    'Jarvis, can you text dad' -> 'text dad'
+    'please text mom hi'       -> 'text mom hi'
+    'can you message Alex'     -> 'message Alex'
+    """
+    return _POLITE_PREFIX_RE.sub("", (text or "").strip()).strip()
+
+
 def _strip_message_modifiers(text: str) -> str:
     """Remove channel hints and scope hints that clutter message recipient/body parsing.
 
@@ -779,6 +797,11 @@ def _message_confirmation_prompt(recipient: str, body: str) -> str:
 
 
 def _is_message_confirm_query(lower: str) -> bool:
+    # Bare confirmations are only safe to accept when _has_pending_message_draft()
+    # is already True — callers must enforce that guard.
+    bare_confirm = lower.strip() in {"confirm", "yes", "yep", "yup", "ok", "okay", "sure", "do it", "send"}
+    if bare_confirm:
+        return True
     return any(
         phrase in lower for phrase in (
             "confirm send",
@@ -792,14 +815,22 @@ def _is_message_confirm_query(lower: str) -> bool:
 
 
 def _is_message_cancel_query(lower: str) -> bool:
+    # Bare single-word cancels — safe because callers guard on pending message state.
+    _bare = lower.strip()
+    if _bare in {"cancel", "abort", "nevermind", "stop", "discard", "nvm"}:
+        return True
     return any(
         phrase in lower for phrase in (
             "cancel message",
+            "cancel send",
             "don't send",
             "do not send",
             "never mind",
             "cancel it",
             "stop message",
+            "forget it",
+            "ignore it",
+            "don't bother",
         )
     )
 
@@ -900,7 +931,8 @@ def _looks_like_message_status_query(lower: str) -> bool:
 
 
 def _parse_message_compose(text: str) -> tuple[str, str] | None:
-    # Strip channel and scope modifiers before parsing
+    # Strip wake/polite prefixes first, then channel/scope modifiers
+    text = _strip_polite_prefix(text)
     cleaned_text = _strip_message_modifiers(text.strip())
     prefix_match = re.match(
         r"^(?:message|text)\s+(.+)$|^(?:send (?:a )?(?:text\s+message|message|text) to|send to)\s+(.+)$",
@@ -936,7 +968,7 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     if match:
         recipient = _normalize_contact_phrase(match.group(1))
         leadin = match.group(2).strip()
-        body = f"{leadin} {match.group(3).strip()}".strip().strip("\"'")
+        body = f"{leadin} {match.group(3).strip()}".strip().strip("\"'?!.")
         body = _BODY_LEADIN.sub("", body, count=1).strip()
         if recipient and any(tok.lower() in _SENTENCE_WORDS for tok in recipient.split()):
             return None
@@ -1257,6 +1289,18 @@ def route_stream(user_input: str) -> tuple:
             _fuzzy_contact_suggestions.clear()
             _set_pending_recipient(recipient_only)
             return _s(f"What would you like to say to {recipient_only}?"), "Messages"
+        # Non-matching text while a draft is pending: treat it as a body replacement
+        # rather than repeating the stale draft endlessly.
+        # Guard: meta-commands that weren't caught above must not become message bodies.
+        _META_BODY_BLOCKED = {
+            "cancel", "abort", "stop", "discard", "nvm", "nevermind",
+            "confirm", "send", "yes", "yeah", "yep", "yup", "no", "nope",
+            "ok", "okay", "sure", "do it", "forget it", "ignore it",
+        }
+        candidate_body = user_input.strip().strip("\"'.!?")
+        if candidate_body and candidate_body.lower().strip() not in _META_BODY_BLOCKED:
+            _set_pending_message_draft(recipient, candidate_body)
+            return _s(_message_confirmation_prompt(recipient, candidate_body)), "Messages"
         return _s(_message_confirmation_prompt(recipient, body)), "Messages"
 
     if _awaiting_msg_recipient:
@@ -2015,11 +2059,24 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     if tool == "message":
         recipient = params.get("recipient", params.get("to", ""))
         body      = params.get("message",   params.get("body", params.get("text", "")))
-        # Try to pull recipient from raw input if orchestrator missed it
+        # Try to pull recipient from raw input if orchestrator missed it.
+        # Use the polite-stripped version and parse properly before falling
+        # back to the limited regex — this avoids "dad to get" greedy captures.
         if not recipient:
-            m = re.search(r"(?:text|message|send to)\s+([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,3})", user_input, flags=re.IGNORECASE)
-            if m:
-                recipient = m.group(1)
+            _stripped_for_orch = _strip_polite_prefix(user_input)
+            _compose_fallback = _parse_message_compose(_stripped_for_orch)
+            if _compose_fallback:
+                recipient, body = _compose_fallback
+            else:
+                # Last-resort regex: only 1-2 words, stop before "to" keyword
+                m = re.search(
+                    r"(?:text|message|send to)\s+(?:my\s+)?([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+)?)"
+                    r"(?=\s+(?:to\b|\"|$)|\s+[A-Z]|\s*$)",
+                    _stripped_for_orch,
+                    flags=re.IGNORECASE,
+                )
+                if m:
+                    recipient = m.group(1)
         recipient = _normalize_message_recipient(recipient)
         if recipient and body:
             _clear_pending_recipient()
