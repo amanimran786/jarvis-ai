@@ -165,5 +165,29 @@ class SpeakCallbackTests(unittest.TestCase):
         self.assertIn("Test urgent message", spoken[0])
 
 
+class EmailUrgencyPatternTests(unittest.TestCase):
+    def test_urgent_subject_triggers(self):
+        import re
+        pat = jw._EMAIL_URGENT_PATTERNS
+        self.assertTrue(pat.search("URGENT: Please respond by EOD"))
+
+    def test_action_required_triggers(self):
+        self.assertTrue(jw._EMAIL_URGENT_PATTERNS.search("Action Required: Contract renewal"))
+
+    def test_deadline_triggers(self):
+        self.assertTrue(jw._EMAIL_URGENT_PATTERNS.search("Deadline tomorrow for submission"))
+
+    def test_normal_email_no_trigger(self):
+        self.assertFalse(jw._EMAIL_URGENT_PATTERNS.search("Newsletter: Top stories this week"))
+
+    def test_follow_up_required_triggers(self):
+        self.assertTrue(jw._EMAIL_URGENT_PATTERNS.search("Follow-up required on your request"))
+
+    def test_check_emails_returns_list(self):
+        """_check_emails should return a list (empty when Google services unavailable)."""
+        result = jw._check_emails()
+        self.assertIsInstance(result, list)
+
+
 if __name__ == "__main__":
     unittest.main()
