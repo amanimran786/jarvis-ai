@@ -132,6 +132,35 @@ def get_todays_events() -> str:
     return "Here are your events today: " + ". ".join(lines) + "."
 
 
+def get_week_events(days: int = 7) -> list[str]:
+    """Return a list of event strings for the next `days` days (default 7)."""
+    now = datetime.now(timezone.utc)
+    start = now.replace(hour=0, minute=0, second=0).isoformat()
+    end_dt = now + timedelta(days=days)
+    end = end_dt.replace(hour=23, minute=59, second=59).isoformat()
+
+    result = _calendar().events().list(
+        calendarId="primary",
+        timeMin=start,
+        timeMax=end,
+        singleEvents=True,
+        orderBy="startTime",
+        maxResults=30,
+    ).execute()
+
+    events = result.get("items", [])
+    lines: list[str] = []
+    for e in events:
+        start_str = e["start"].get("dateTime", e["start"].get("date", ""))
+        if "T" in start_str:
+            dt = datetime.fromisoformat(start_str)
+            day_str = dt.strftime("%a %-d %b %-I:%M %p")
+        else:
+            day_str = start_str  # all-day event
+        lines.append(f"{day_str} — {e.get('summary', 'No title')}")
+    return lines
+
+
 def create_event(title: str, start_dt: datetime, duration_minutes: int = 60) -> str:
     end_dt = start_dt + timedelta(minutes=duration_minutes)
     event = {

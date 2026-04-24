@@ -262,12 +262,14 @@ LOCAL_STT_ENABLED = "faster-whisper" in STT_BACKENDS
 OPENAI_STT_FALLBACK_ENABLED = "openai" in STT_BACKENDS
 STT_LANGUAGE = os.getenv("JARVIS_STT_LANGUAGE", "").strip().lower() or None
 
-# STT model: whisper-large-v3-turbo is 8x faster than v3 with near-identical accuracy.
-# Set in .env: JARVIS_FASTER_WHISPER_MODEL=large-v3-turbo
+# STT model: large-v3-turbo is the new default — same ~1.6GB as medium but 8x faster
+# than full large-v3 with near-identical accuracy. Downloads automatically from HuggingFace
+# on first use (requires internet access for initial pull only).
+# Fallback: set JARVIS_FASTER_WHISPER_MODEL=small.en for low-RAM machines.
 # Sizes: tiny.en (~40MB), base.en (~150MB), small.en (~490MB),
-#        medium.en (~1.5GB), large-v3-turbo (~1.6GB, recommended)
-# Requires: pip install faster-whisper>=1.0  and Hugging Face model pull on first run.
-FASTER_WHISPER_MODEL = os.getenv("JARVIS_FASTER_WHISPER_MODEL", "base.en").strip() or "base.en"
+#        medium.en (~1.5GB), large-v3-turbo (~1.6GB), large-v3 (~3GB)
+# Requires: pip install faster-whisper>=1.1
+FASTER_WHISPER_MODEL = os.getenv("JARVIS_FASTER_WHISPER_MODEL", "large-v3-turbo").strip() or "large-v3-turbo"
 FASTER_WHISPER_DEVICE = os.getenv("JARVIS_FASTER_WHISPER_DEVICE", "auto").strip().lower() or "auto"
 FASTER_WHISPER_COMPUTE_TYPE = os.getenv("JARVIS_FASTER_WHISPER_COMPUTE_TYPE", "int8").strip().lower() or "int8"
 FASTER_WHISPER_CPU_THREADS = _env_int("JARVIS_FASTER_WHISPER_CPU_THREADS", 4)
