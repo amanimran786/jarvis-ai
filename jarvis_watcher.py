@@ -246,6 +246,38 @@ def _deliver_alerts(alerts: list[tuple[str, str]]) -> None:
             pass
 
 
+# ── Morning brief ─────────────────────────────────────────────────────────────
+
+_MORNING_BRIEF_HOUR  = _int_env("JARVIS_MORNING_BRIEF_HOUR", 8)    # 8 AM default
+_MORNING_BRIEF_WINDOW = 10                                           # fire within 10-min window
+_morning_brief_date: datetime.date | None = None                    # tracks last delivery date
+
+
+def _should_deliver_morning_brief() -> bool:
+    """Return True once per day inside the configured morning window."""
+    global _morning_brief_date
+    now = datetime.datetime.now()
+    today = now.date()
+    if _morning_brief_date == today:
+        return False
+    if now.hour == _MORNING_BRIEF_HOUR and now.minute < _MORNING_BRIEF_WINDOW:
+        return True
+    return False
+
+
+def _deliver_morning_brief() -> None:
+    global _morning_brief_date
+    _morning_brief_date = datetime.datetime.now().date()
+    try:
+        import jarvis_agents as _ja
+        brief = _ja.run_briefing()
+        notify("Jarvis — Morning Brief", "Your daily briefing is ready.")
+        if _speak_cb is not None and not _is_quiet_hours():
+            _speak_cb(brief)
+    except Exception:
+        pass
+
+
 # ── Watcher loop ──────────────────────────────────────────────────────────────
 
 def _watcher_loop() -> None:
@@ -257,6 +289,13 @@ def _watcher_loop() -> None:
         with _lock:
             _last_run = time.monotonic()
             _run_count += 1
+
+        # Morning brief fires once per day at the configured hour
+        try:
+            if _should_deliver_morning_brief():
+                _deliver_morning_brief()
+        except Exception:
+            pass
 
         alerts: list[tuple[str, str]] = []
         try:
@@ -300,12 +339,14 @@ def stop() -> None:
 def status() -> dict:
     """Return current watcher state."""
     return {
-        "enabled":          _ENABLED,
-        "running":          bool(_thread and _thread.is_alive()),
-        "interval_sec":     _INTERVAL_SEC,
-        "quiet_start_hour": _QUIET_START_H,
-        "quiet_end_hour":   _QUIET_END_H,
-        "run_count":        _run_count,
-        "last_escalation":  _last_escalation,
-        "notified_count":   len(_notified_keys),
+        "enabled":               _ENABLED,
+        "running":               bool(_thread and _thread.is_alive()),
+        "interval_sec":          _INTERVAL_SEC,
+        "quiet_start_hour":      _QUIET_START_H,
+        "quiet_end_hour":        _QUIET_END_H,
+        "run_count":             _run_count,
+        "last_escalation":       _last_escalation,
+        "notified_count":        len(_notified_keys),
+        "morning_brief_hour":    _MORNING_BRIEF_HOUR,
+        "morning_brief_sent":    _morning_brief_date.isoformat() if _morning_brief_date else None,
     }
