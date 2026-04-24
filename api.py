@@ -1473,6 +1473,38 @@ def watcher_notify(req: dict):
     return {"ok": True}
 
 
+@app.get("/health")
+def get_health():
+    """Full system health snapshot — all components."""
+    import jarvis_health as _jh
+    statuses = _jh.check_all(force=True)
+    return {
+        "ok": True,
+        "components": dict(statuses),
+        "degraded": _jh.degraded(),
+        "summary": _jh.health_summary(force=False),
+    }
+
+
+@app.post("/execute")
+def execute_task(req: dict):
+    """Execute a multi-step goal and return the synthesised result."""
+    import jarvis_executor as _je
+    goal = (req or {}).get("goal", "")
+    if not goal:
+        return {"ok": False, "error": "goal is required"}
+    steps = _je.parse_steps(goal)
+    results = _je.execute_steps(steps)
+    summary = _je.synthesise_results(goal, results)
+    return {
+        "ok": True,
+        "goal": goal,
+        "steps": steps,
+        "results": [dict(r) for r in results],
+        "summary": summary,
+    }
+
+
 @app.post("/extract")
 def extract_facts(req: dict):
     """Run fact extraction on a conversation turn and write to vault/mem0."""

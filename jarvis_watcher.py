@@ -305,6 +305,18 @@ def _watcher_loop() -> None:
         except Exception:
             pass
 
+        # Health monitor — surface newly degraded components (once per session)
+        try:
+            import jarvis_health as _jh
+            bad = _jh.degraded()
+            for component in bad:
+                key = f"health:{component}"
+                if key not in _notified_keys:
+                    _notified_keys.add(key)
+                    notify("Jarvis — System Alert", f"{component.title()} is degraded. Say 'health check' for details.")
+        except Exception:
+            pass
+
         if alerts:
             try:
                 _deliver_alerts(alerts)
