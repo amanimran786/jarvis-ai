@@ -695,6 +695,7 @@ def _self_review_text(area: str | None = None) -> str:
 _pending_msg_recipient: str = ""
 _awaiting_msg_recipient: bool = False
 _last_msg_recipient: str = ""
+_last_message_send_result: dict | None = None
 _pending_message_draft: dict | None = None
 _fuzzy_contact_suggestions: list[str] = []
 
@@ -723,11 +724,26 @@ def _clear_pending_recipient():
     _awaiting_msg_recipient = False
 
 
+def _sanitize_message_body(body: str) -> str:
+    cleaned = (body or "").strip().strip("\"'")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    quoted = re.search(r"\bdraft ready for .+?:\s*\"([^\"]+)\"", cleaned, flags=re.IGNORECASE)
+    if quoted:
+        cleaned = quoted.group(1).strip()
+    cleaned = re.sub(
+        r"\s*say confirm send to send it,?\s+or cancel message to stop\.?\s*$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned
+
+
 def _set_pending_message_draft(recipient: str, body: str, resolved_address: str | None = None):
     global _pending_message_draft, _last_msg_recipient
     _pending_message_draft = {
         "recipient": recipient.strip(),
-        "body": body.strip(),
+        "body": _sanitize_message_body(body),
     }
     if resolved_address:
         _pending_message_draft["resolved_address"] = resolved_address.strip()
@@ -793,6 +809,7 @@ def _message_contact_resolution_prompt() -> str:
 
 
 def _message_confirmation_prompt(recipient: str, body: str) -> str:
+    body = _sanitize_message_body(body)
     return (
         f"Draft ready for {recipient}: \"{body}\". "
         f"Say confirm send to send it, or cancel message to stop."
@@ -819,21 +836,14 @@ def _is_message_confirm_query(lower: str) -> bool:
 
 def _is_message_cancel_query(lower: str) -> bool:
     # Bare single-word cancels — safe because callers guard on pending message state.
-    _bare = lower.strip()
+    _bare = _strip_polite_prefix(lower).strip()
     if _bare in {"cancel", "abort", "nevermind", "stop", "discard", "nvm"}:
         return True
-    return any(
-        phrase in lower for phrase in (
-            "cancel message",
-            "cancel send",
-            "don't send",
-            "do not send",
-            "never mind",
-            "cancel it",
-            "stop message",
-            "forget it",
-            "ignore it",
-            "don't bother",
+    return bool(
+        re.match(
+            r"^(?:cancel\s+(?:the\s+)?(?:message|send|draft|it)|don't\s+send|do\s+not\s+send|never\s+mind|stop\s+(?:the\s+)?message|forget\s+it|ignore\s+it|don't\s+bother)\b",
+            _bare,
+            flags=re.IGNORECASE,
         )
     )
 
@@ -922,6 +932,29 @@ def _parse_message_replacement_compose(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
+    """Handle intent-first phrasing like: introduce yourself to Fiza through texts."""
+    raw = _strip_message_modifiers(_strip_polite_prefix(text or ""))
+    patterns = (
+        (
+            r"^(?:introduce\s+yourself|introduce\s+me)\s+to\s+(.+?)(?:\s+(?:through|via|over|on|in)\s+(?:texts?|messages?|imessage|i\s*message|sms)\b|$|,)",
+            "Hi, this is Jarvis, Aman's assistant.",
+        ),
+        (
+            r"^(?:say\s+hi|say\s+hello)\s+to\s+(.+?)(?:\s+(?:through|via|over|on|in)\s+(?:texts?|messages?|imessage|i\s*message|sms)\b|$|,)",
+            "Hi.",
+        ),
+    )
+    for pattern, body in patterns:
+        match = re.match(pattern, raw, flags=re.IGNORECASE)
+        if not match:
+            continue
+        recipient = _normalize_contact_phrase(match.group(1).strip().strip(",;:"))
+        if recipient and _looks_like_contact_name(recipient):
+            return recipient, body
+    return None
+
+
 def _looks_like_message_status_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -929,8 +962,58 @@ def _looks_like_message_status_query(lower: str) -> bool:
             "did you send",
             "was it sent",
             "have you sent",
+            "who did you send it to",
+            "who did you send that to",
+            "who are you sending it to",
+            "who are you sending that to",
+            "who is this going to",
+            "who is it going to",
+            "where did you send it",
+            "what did you send",
+            "what message did you send",
         )
     )
+
+
+def _is_generic_message_request(text: str) -> bool:
+    cleaned = _strip_polite_prefix(text)
+    lower = cleaned.lower().strip().strip("?.!")
+    return bool(
+        lower in {
+            "message",
+            "text",
+            "send a message",
+            "send message",
+            "send a text",
+            "send text",
+            "send a text message",
+            "send text message",
+        }
+        or re.match(
+            r"^(?:help me\s+)?send\s+(?:a\s+)?(?:text\s+)?message\s+(?:for me|for us|for someone)$",
+            lower,
+        )
+        or re.match(
+            r"^(?:help me\s+)?(?:text|message)\s+(?:someone|somebody)$",
+            lower,
+        )
+    )
+
+
+def _last_message_status_text() -> str:
+    if _has_pending_message_draft():
+        recipient = (_pending_message_draft or {}).get("recipient", "the recipient")
+        body = (_pending_message_draft or {}).get("body", "")
+        return f"Not yet. I have a draft ready for {recipient}: \"{body}\". Say confirm send to send it, or cancel message to stop."
+    if _pending_msg_recipient:
+        return f"Not yet. I still need the exact message content for {_pending_msg_recipient}."
+    if _awaiting_msg_recipient or _fuzzy_contact_suggestions:
+        return "Not yet. I still need the recipient before I can draft or send anything."
+    if _last_message_send_result:
+        recipient = _last_message_send_result.get("recipient", "the recipient")
+        body = _last_message_send_result.get("body", "")
+        return f"The last confirmed send was to {recipient}: \"{body}\"."
+    return "I have not sent a message in this session."
 
 
 def _parse_message_compose(text: str) -> tuple[str, str] | None:
@@ -943,6 +1026,8 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         flags=re.IGNORECASE,
     )
     payload = next((group for group in prefix_match.groups() if group), "") if prefix_match else ""
+    if payload.lower().startswith("to "):
+        payload = payload[3:].strip()
 
     # Standard patterns: only allow single-word recipients to avoid ambiguity
     message_patterns = [
@@ -956,9 +1041,61 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     # "...Sarah that the package arrived" → body should be "the package arrived".
     # "...dad to get chocolate milk" → body should be "get chocolate milk".
     _BODY_LEADIN = re.compile(
-        r"^(?:telling\s+(?:him|her|them)|saying|that|to)\s+",
+        r"^(?:but\s+ask\s+(?:him|her|them)|ask\s+(?:him|her|them)|and\s+|telling\s+(?:him|her|them)|saying|that|to)\s+",
         flags=re.IGNORECASE,
     )
+
+    _SPOKEN_BODY_DELIMITER = re.compile(
+        r"\s+(but\s+ask\s+(?:him|her|them)|ask\s+(?:him|her|them)|and\s+(?:ask|tell|introduce|say|send|let|check|see|find|remind|text|message)|telling(?:\s+(?:him|her|them))?|saying|that|to)\s+",
+        flags=re.IGNORECASE,
+    )
+
+    def _clean_recipient(raw_recipient: str) -> str:
+        return _normalize_contact_phrase((raw_recipient or "").strip().strip(",;:"))
+
+    def _clean_body(raw_body: str) -> str:
+        body = (raw_body or "").strip().strip("\"'")
+        body = re.sub(
+            r",?\s+in\s+(?:a\s+)?(?:text|message|imessage|i\s*message|sms)\s+to\s+.+$",
+            "",
+            body,
+            flags=re.IGNORECASE,
+        ).strip()
+        body = re.sub(
+            r",?\s+(?:through|via|using|on|over)\s+(?:the\s+)?(?:messages\s+app|messages|imessage|i\s*message|sms|text)\s+to\s+.+$",
+            "",
+            body,
+            flags=re.IGNORECASE,
+        ).strip()
+        body = _BODY_LEADIN.sub("", body, count=1).strip()
+        body = re.sub(
+            r"^(?:and\s+)?(?:introduce\s+yourself|introduce|say|tell|ask|text|message)\s+",
+            "",
+            body,
+            flags=re.IGNORECASE,
+        ).strip()
+        if body.endswith("?") and not re.match(r"^(?:who|what|where|when|why|how|which|can|could|would|is|are|do|does|did|should)\b", body, flags=re.IGNORECASE):
+            body = body[:-1].rstrip()
+        return body
+
+    if payload:
+        explicit_delimiter = re.match(
+            r"^(.+?)\s*(?:(?:,\s*(?:to|saying|telling(?:\s+(?:him|her|them))?|that))|:)\s+(.+)$",
+            payload,
+            flags=re.IGNORECASE,
+        )
+        if explicit_delimiter:
+            recipient = _clean_recipient(explicit_delimiter.group(1))
+            body = _clean_body(explicit_delimiter.group(2))
+            if recipient and body and _looks_like_contact_name(recipient):
+                return recipient, body
+
+        delimiter = _SPOKEN_BODY_DELIMITER.search(payload)
+        if delimiter:
+            recipient = _clean_recipient(payload[:delimiter.start()])
+            body = _clean_body(payload[delimiter.start():])
+            if recipient and body and _looks_like_contact_name(recipient):
+                return recipient, body
 
     # Explicit spoken lead-ins without a comma, including multi-word contacts.
     match = re.match(
@@ -969,10 +1106,9 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         flags=re.IGNORECASE,
     )
     if match:
-        recipient = _normalize_contact_phrase(match.group(1))
+        recipient = _clean_recipient(match.group(1))
         leadin = match.group(2).strip()
-        body = f"{leadin} {match.group(3).strip()}".strip().strip("\"'?!.")
-        body = _BODY_LEADIN.sub("", body, count=1).strip()
+        body = _clean_body(f"{leadin} {match.group(3).strip()}")
         if recipient and any(tok.lower() in _SENTENCE_WORDS for tok in recipient.split()):
             return None
         if recipient and _looks_like_contact_name(recipient) and body:
@@ -989,8 +1125,8 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
             recipient_tokens = parts[:name_parts]
             if not all(token[:1].isupper() for token in recipient_tokens if re.search(r"[A-Za-z]", token)):
                 continue
-            recipient = _normalize_contact_phrase(" ".join(recipient_tokens))
-            body = " ".join(parts[name_parts:]).strip().strip("\"'")
+            recipient = _clean_recipient(" ".join(recipient_tokens))
+            body = _clean_body(" ".join(parts[name_parts:]))
             if recipient and body and _looks_like_contact_name(recipient):
                 return recipient, body
 
@@ -999,10 +1135,8 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         match = re.match(pattern, cleaned_text, flags=re.IGNORECASE)
         if not match:
             continue
-        recipient = _normalize_contact_phrase(match.group(1))
-        body = match.group(2).strip().strip("\"'")
-        # Strip a leading verb-ish lead-in from the body (no comma case).
-        body = _BODY_LEADIN.sub("", body, count=1).strip()
+        recipient = _clean_recipient(match.group(1))
+        body = _clean_body(match.group(2))
         # Reject recipients that are common English words, not names
         if recipient and any(tok.lower() in _SENTENCE_WORDS for tok in recipient.split()):
             continue
@@ -1015,8 +1149,8 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     body_delimiter_pattern = r"^(?:(?:message|text)\s+|(?:send (?:a )?(?:message|text) to|send to)\s+)([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,1})\s*\b(?:,\s*(?:to|saying|telling(?:\s+(?:him|her|them))?|that)|:)\s+(.+)$"
     match = re.match(body_delimiter_pattern, cleaned_text, flags=re.IGNORECASE)
     if match:
-        recipient = _normalize_contact_phrase(match.group(1))
-        body = match.group(2).strip().strip("\"'")
+        recipient = _clean_recipient(match.group(1))
+        body = _clean_body(match.group(2))
         # Reject recipients that are common English words or contain blocked modifiers
         if recipient and any(tok.lower() in _SENTENCE_WORDS for tok in recipient.split()):
             return None
@@ -1184,26 +1318,32 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
-    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _pending_message_draft, _fuzzy_contact_suggestions
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
     lower = user_input.lower().strip()
     if lower:
         mem.track_topic(lower)
-    composed_message = _parse_message_compose(user_input) or _parse_message_replacement_compose(user_input)
+    composed_message = (
+        _parse_message_compose(user_input)
+        or _parse_message_replacement_compose(user_input)
+        or _parse_indirect_message_request(user_input)
+    )
     contact_details_query = _parse_contact_details_query(user_input)
     recipient_only = ""
     if not composed_message and any(term in lower for term in ("send", "message", "text")):
         recipient_only = _parse_message_recipient_only(user_input)
 
     # ── 0. Pending message state ──────────────────────────────────────────────
-    if _is_message_cancel_query(lower) and (
-        _has_pending_message_draft()
-        or _pending_msg_recipient
-        or _awaiting_msg_recipient
-        or _fuzzy_contact_suggestions
-    ):
+    if _is_message_cancel_query(lower):
+        if not (
+            _has_pending_message_draft()
+            or _pending_msg_recipient
+            or _awaiting_msg_recipient
+            or _fuzzy_contact_suggestions
+        ):
+            return _s("No active message draft."), "Messages"
         had_draft = _has_pending_message_draft()
         previous = (
             (_pending_message_draft or {}).get("recipient")
@@ -1214,6 +1354,21 @@ def route_stream(user_input: str) -> tuple:
         if had_draft:
             return _s(f"Canceled the draft to {previous}."), "Messages"
         return _s(f"Canceled the message flow for {previous}."), "Messages"
+
+    if _looks_like_message_status_query(lower):
+        return _s(_last_message_status_text()), "Messages"
+
+    if (
+        not composed_message
+        and not recipient_only
+        and
+        not _has_pending_message_draft()
+        and (
+            lower.strip() in {"confirm", "send", "confirm send"}
+            or any(phrase in lower for phrase in ("send it", "send now", "yes send", "go ahead and send", "approve send"))
+        )
+    ):
+        return _s("No draft is ready to send yet. Tell me the recipient and message first."), "Messages"
 
     if _has_pending_message_draft():
         recipient = _pending_message_draft["recipient"]
@@ -1237,6 +1392,8 @@ def route_stream(user_input: str) -> tuple:
             _clear_message_state()
             _set_awaiting_recipient()
             return _s("Okay — let's redo it. Who would you like to message?"), "Messages"
+        if _looks_like_message_status_query(lower):
+            return _s(_last_message_status_text()), "Messages"
         if _awaiting_msg_recipient and _fuzzy_contact_suggestions:
             if composed_message:
                 next_recipient, next_body = composed_message
@@ -1280,6 +1437,11 @@ def route_stream(user_input: str) -> tuple:
                 if suggestions:
                     _set_message_contact_resolution(suggestions)
             elif lower_result.startswith("sent to "):
+                _last_message_send_result = {
+                    "recipient": recipient,
+                    "body": body,
+                    "result": send_result,
+                }
                 _clear_pending_message_draft()
                 _clear_pending_recipient()
                 _fuzzy_contact_suggestions.clear()
@@ -1432,7 +1594,7 @@ def route_stream(user_input: str) -> tuple:
         return _s(_constraint_bypass_reply()), "Status"
     if _is_capability_boundary_query(lower):
         return _s(_capability_boundary_reply()), "Status"
-    if lower in {"message", "text", "send a message", "send message", "send a text", "send text"}:
+    if _is_generic_message_request(user_input):
         _set_awaiting_recipient()
         return _s("Who would you like to message?"), "Messages"
     # Explicit specialized-agent requests should always win over later fast paths.

@@ -209,6 +209,24 @@ class MessageIntentParsingTests(unittest.TestCase):
         self.assertEqual(recipient, "Sarah")
         self.assertEqual(body, "the package arrived")
 
+    def test_message_to_name_but_ask_him_delimiter(self):
+        result = self.router._parse_message_compose(
+            "message to Imran but ask him where is he at right now"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Imran")
+        self.assertEqual(body, "where is he at right now")
+
+    def test_multiword_contact_with_and_introduce_delimiter(self):
+        result = self.router._parse_message_compose(
+            "Message Imran butt and introduce yourself jarvia, in text to imran butt"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Imran butt")
+        self.assertEqual(body, "jarvia")
+
     def test_backward_compat_space_delimited(self):
         """text Alex hello there
         -> recipient='Alex', body='hello there'
