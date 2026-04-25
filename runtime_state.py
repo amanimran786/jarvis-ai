@@ -124,12 +124,12 @@ def runtime_meta_path() -> Path:
     return app_data_dir() / ".jarvis_runtime.json"
 
 
-def write_api_endpoint(host: str, port: int, *, pid: int | None = None) -> None:
+def write_api_endpoint(host: str, port: int, *, pid: int | None = None, token: str | None = None) -> None:
     metadata = {
         "host": host,
         "port": int(port),
         "pid": int(pid or os.getpid()),
-        "token": os.getenv("JARVIS_API_TOKEN", "").strip(),
+        "token": (token if token is not None else os.getenv("JARVIS_API_TOKEN", "")).strip(),
         "written_at": datetime.now(timezone.utc).isoformat(),
     }
     path = runtime_meta_path()
