@@ -569,12 +569,17 @@ brew services start ollama
 ```bash
 ollama pull qwen3:8b              # strong general-purpose (recommended)
 ollama pull qwen3:30b-a3b         # near-GPT4 quality on Mac
+ollama pull gemma4:31b            # Gemma 4 workstation eval candidate
+ollama pull gemma4:26b            # Gemma 4 MoE eval candidate
+ollama pull qwen3.6:35b           # Qwen3.6 local eval candidate
 ollama pull deepseek-r1:14b       # reasoning and complex tasks
 ollama pull devstral              # Mistral open coder
 ollama pull phi4-mini             # fast lightweight responses
 ollama pull nomic-embed-text      # embeddings for semantic search
 ollama pull llava:7b              # vision model
 ```
+
+Cloud/heavy candidates are intentionally not part of the default pull list: `deepseek-v4-flash:cloud` is Ollama Cloud, not local weights, and `llama4:maverick` is roughly 245GB in Ollama. Use `/model-fleet` before pulling or promoting either one.
 
 ### 4. (Optional) Install local OSINT tools
 

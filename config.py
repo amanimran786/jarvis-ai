@@ -201,6 +201,14 @@ LOCAL_PHI4_MINI    = os.getenv("LOCAL_PHI4_MINI", "phi4-mini")     # ollama pull
 # Devstral — Mistral's open coder (ollama pull devstral)
 LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
 
+# Newer verified model candidates. These are not defaults; /model-fleet surfaces
+# them for explicit pull/eval/promotion only.
+LOCAL_GEMMA4_STRONG = os.getenv("LOCAL_GEMMA4_STRONG", "gemma4:31b")
+LOCAL_GEMMA4_MOE    = os.getenv("LOCAL_GEMMA4_MOE", "gemma4:26b")
+LOCAL_QWEN3_6       = os.getenv("LOCAL_QWEN3_6", "qwen3.6:35b")
+LOCAL_DEEPSEEK_V4_FLASH = os.getenv("LOCAL_DEEPSEEK_V4_FLASH", "deepseek-v4-flash:cloud")
+LOCAL_LLAMA4_MAVERICK   = os.getenv("LOCAL_LLAMA4_MAVERICK", "llama4:maverick")
+
 # Whisper model for STT — turbo is 8x faster than v3 with near-identical accuracy
 # Set in .env: JARVIS_WHISPER_MODEL=large-v3-turbo
 # (requires faster-whisper >= 1.0 and the turbo checkpoint)
