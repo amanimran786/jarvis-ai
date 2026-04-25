@@ -338,3 +338,55 @@ Affected: jarvis_agents.py · jarvis_watcher.py · google_services.py · router.
 - `tests/test_jarvis_extractor.py` — 13 new tests (86 total, all pass)
 
 Affected: jarvis_watcher.py · jarvis_extractor.py · router.py · api.py
+
+## 2026-04-24 — Major Agentic Capability Sprint
+
+### New Modules
+- **jarvis_health.py** — concurrent component health checker (ollama/stt/tts/google/mem0/vault/watcher), 60s TTL cache, `spoken_summary()` for voice, `degraded()` list for watcher integration
+- **jarvis_executor.py** — multi-step task executor: heuristic split → execute via route_stream → LLM synthesis; `is_multi_step()` used by router for compound requests
+- **jarvis_extractor.py** — fire-and-forget fact extraction (tasks/decisions/preferences/entities) from every conversation turn → vault + mem0
+
+### Router Fast-Paths Added
+All route directly to local code, bypass cloud orchestrator:
+- "health check" / "system status" → `jarvis_health.spoken_summary()`
+- "message X and also do Y" → `jarvis_executor.run()`
+- "what's on my screen" / "analyze my screen" → `camera.screenshot_and_describe()` [Vision label]
+- "what should I work on" / "what's my priority" → `jarvis_agents.focus_advisor()` [Jarvis label]
+- "create daily note" / "today's note" → `jarvis_agents.write_daily_note()` [Vault label]
+- watcher status trigger updated with EOD hour
+
+### Watcher Enhancements
+- Email urgency scanning via `_EMAIL_URGENT_PATTERNS` regex
+- Morning brief now auto-creates daily note in vault/daily/YYYY-MM-DD.md
+- End-of-day summary at JARVIS_EOD_HOUR (default 18:00, configurable)
+- Health monitoring: macOS notifications when components degrade
+- `status()` exposes eod_hour, eod_sent, morning_brief_hour, morning_brief_sent
+
+### New Agent Capabilities
+- `focus_advisor()` — calendar + tasks + vault → ranked spoken priority recommendation
+- `write_daily_note()` — creates vault/daily/YYYY-MM-DD.md with calendar, tasks, focus sections
+- `week_ahead()`, `meeting_prep()`, `escalation_summary()` — all using parallel ThreadPoolExecutor dispatch
+
+### API Endpoints Added
+- GET /health, POST /execute, POST /extract
+- GET /memory/mem0, POST /memory/mem0/search
+- GET /watcher, POST /watcher/notify
+- GET /daily-note, POST /daily-note
+
+### Vault
+- vault/templates/daily-note-template.md added
+- vault/daily/ directory created by first morning brief
+
+### Tests
+- test_jarvis_health.py: 10 tests
+- test_jarvis_executor.py: 19 tests (mock router/model_router to avoid PyQt6/PortAudio in CI)
+- test_jarvis_watcher.py: 28 tests including EOD timing tests
+- test_jarvis_extractor.py: 13 tests
+- test_jarvis_new_fastpaths.py: 9 tests (2 skip cleanly in CI)
+- Total new test suite: 77 passing, 2 skipped
+
+### Runtime State (2026-04-24)
+- STT: large-v3-turbo (upgraded from base.en — 8x faster, same accuracy)
+- Models added: Qwen3 4b/8b/30b-a3b MoE, Devstral, phi4-mini
+- Memory: mem0 + Qdrant (local) for cross-session episodic; fact extractor for vault
+- Proactive layer: watcher (5min interval), morning brief (8am), EOD summary (6pm)
