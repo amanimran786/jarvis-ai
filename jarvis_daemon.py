@@ -122,8 +122,9 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
             os.chmod(port_file, 0o600)
         except OSError:
             pass
-        os.environ["JARVIS_API_TOKEN"] = api.get_api_token()
-        runtime_state.write_api_endpoint(actual_host, actual_port)
+        api_token = api.get_api_token()
+        os.environ["JARVIS_API_TOKEN"] = api_token
+        runtime_state.write_api_endpoint(actual_host, actual_port, token=api_token)
         if actual_host in {"0.0.0.0", "::"}:
             try:
                 import hardware as _hw

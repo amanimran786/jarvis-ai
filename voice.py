@@ -39,6 +39,11 @@ _kokoro_disabled_reason = ""
 _PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
 _BLACKHOLE_SKIP = ["blackhole", "loopback", "virtual"]
 _VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
+_MIC_OPEN_RETRY_SECONDS = 5.0
+_MIC_SKIP_LOGGED: set[str] = set()
+_MIC_OPEN_LOCK = threading.Lock()
+_mic_failure_cooldown_until = 0.0
+_mic_last_failure_detail = ""
 
 
 def _debug_log(*args, **kwargs) -> None:
@@ -72,6 +77,28 @@ def _get_microphone() -> sr.Microphone:
     return sr.Microphone()
 
 
+def _input_capable_device_indexes() -> set[int] | None:
+    """Return input-capable PyAudio device indexes, or None when unavailable."""
+    audio = None
+    try:
+        audio = sr.Microphone.get_pyaudio().PyAudio()
+        count = audio.get_device_count()
+        indexes: set[int] = set()
+        for index in range(count):
+            info = audio.get_device_info_by_index(index) or {}
+            if int(info.get("maxInputChannels") or 0) > 0:
+                indexes.add(index)
+        return indexes
+    except Exception:
+        return None
+    finally:
+        try:
+            if audio is not None:
+                audio.terminate()
+        except Exception:
+            pass
+
+
 def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
     """Return microphone candidates ordered by preference.
 
@@ -92,9 +119,24 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
         names = sr.Microphone.list_microphone_names() or []
     except Exception:
         names = []
+    input_indexes = _input_capable_device_indexes()
+    def _is_candidate_input(index: int | None, label: str) -> bool:
+        if index is None:
+            return True
+        if input_indexes is None:
+            return True
+        if index in input_indexes:
+            return True
+        skip_key = f"{index}:{label}"
+        if skip_key not in _MIC_SKIP_LOGGED:
+            _MIC_SKIP_LOGGED.add(skip_key)
+            _debug_log(f"[Mic] Skipping {label}: no input channels")
+        return False
 
     def _append(index: int | None, label: str) -> None:
         if index in seen:
+            return
+        if not _is_candidate_input(index, label):
             return
         seen.add(index)
         candidates.append((label, sr.Microphone(device_index=index)))
@@ -129,37 +171,47 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 @contextmanager
 def _open_microphone_source():
     """Open a live microphone stream, skipping candidates that fail to provide one."""
+    global _mic_failure_cooldown_until, _mic_last_failure_detail
     last_error: Exception | None = None
+    with _MIC_OPEN_LOCK:
+        now = _time.monotonic()
+        if now < _mic_failure_cooldown_until:
+            detail = _mic_last_failure_detail or "microphone retry cooldown active"
+            raise RuntimeError(f"Microphone retry cooldown active. {detail}")
 
-    for label, microphone in _microphone_candidates():
-        source = None
-        try:
-            source = microphone.__enter__()
-            if getattr(source, "stream", None) is None:
-                raise RuntimeError(f"{label} opened without a live input stream")
-            _debug_log(f"[Mic] Using input device: {label}")
+        for label, microphone in _microphone_candidates():
+            source = None
             try:
-                yield source
-            finally:
-                microphone.__exit__(None, None, None)
-            return
-        except Exception as exc:
-            last_error = exc
-            _debug_log(f"[Mic] Failed to open {label}: {exc}")
-            try:
-                if source is not None:
-                    stream = getattr(source, "stream", None)
-                    audio = getattr(source, "audio", None)
-                    if stream is not None:
-                        stream.close()
-                    if audio is not None:
-                        audio.terminate()
-                    source.stream = None
-            except Exception:
-                pass
+                source = microphone.__enter__()
+                if getattr(source, "stream", None) is None:
+                    raise RuntimeError(f"{label} opened without a live input stream")
+                _debug_log(f"[Mic] Using input device: {label}")
+                _mic_failure_cooldown_until = 0.0
+                _mic_last_failure_detail = ""
+                try:
+                    yield source
+                finally:
+                    microphone.__exit__(None, None, None)
+                return
+            except Exception as exc:
+                last_error = exc
+                _debug_log(f"[Mic] Failed to open {label}: {exc}")
+                try:
+                    if source is not None:
+                        stream = getattr(source, "stream", None)
+                        audio = getattr(source, "audio", None)
+                        if stream is not None:
+                            stream.close()
+                        if audio is not None:
+                            audio.terminate()
+                        source.stream = None
+                except Exception:
+                    pass
 
-    detail = str(last_error) if last_error is not None else "No microphone devices are available."
-    raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
+        detail = str(last_error) if last_error is not None else "No microphone devices are available."
+        _mic_last_failure_detail = detail
+        _mic_failure_cooldown_until = _time.monotonic() + _MIC_OPEN_RETRY_SECONDS
+        raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
 
 
 def _capture_audio_window(source, *, duration: float, reason: str):
@@ -602,21 +654,34 @@ def wait_for_wake_word() -> None:
         try:
             with _open_microphone_source() as source:
                 _ensure_calibrated(source)
-                audio = _capture_audio_window(
-                    source,
-                    duration=WAKE_WORD_WINDOW_SECONDS,
-                    reason="wake word",
-                )
+                while True:
+                    if _stop_requested.is_set():
+                        return
+                    if _manual_wake_trigger.is_set():
+                        _manual_wake_trigger.clear()
+                        _debug_log("\n[Wake word manually triggered]")
+                        return
+                    _done_speaking.wait(timeout=10)
+                    if _stop_requested.is_set():
+                        return
+                    if _manual_wake_trigger.is_set():
+                        _manual_wake_trigger.clear()
+                        _debug_log("\n[Wake word manually triggered]")
+                        return
+                    audio = _capture_audio_window(
+                        source,
+                        duration=WAKE_WORD_WINDOW_SECONDS,
+                        reason="wake word",
+                    )
+                    text = _transcribe_wake_audio(audio)
+                    if _wake_word_match(text or ""):
+                        _debug_log(f"\n[Wake word detected: '{text}']")
+                        return
+                    _debug_log(".", end="", flush=True)
         except RuntimeError as exc:
             _debug_log(f"[Mic] {exc}")
-            _time.sleep(0.5)
+            _time.sleep(_MIC_OPEN_RETRY_SECONDS)
             continue
-
-        text = _transcribe_wake_audio(audio)
-        if _wake_word_match(text or ""):
-            _debug_log(f"\n[Wake word detected: '{text}']")
-            return
-        _debug_log(".", end="", flush=True)
 
 
 def tts_engine() -> str:

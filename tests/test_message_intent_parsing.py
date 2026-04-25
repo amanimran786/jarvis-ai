@@ -155,6 +155,24 @@ class MessageIntentParsingTests(unittest.TestCase):
         self.assertEqual(recipient, "mom")
         self.assertEqual(body, "I'll be late")
 
+    def test_imessage_number_with_saying_colon_delimiter(self):
+        result = self.router._parse_message_compose(
+            "Send an iMessage to +15107530762 saying: Beta test only, do not send yet"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "+15107530762")
+        self.assertEqual(body, "Beta test only, do not send yet")
+
+    def test_imessage_name_with_saying_colon_delimiter(self):
+        result = self.router._parse_message_compose(
+            "Send an iMessage to Farhan Butt saying: Beta test only"
+        )
+        self.assertIsNotNone(result)
+        recipient, body = result
+        self.assertEqual(recipient, "Farhan Butt")
+        self.assertEqual(body, "Beta test only")
+
     def test_text_on_imessage_with_colon_delimiter(self):
         """text Alex on iMessage: meeting moved to 3pm
         -> recipient='Alex', body='meeting moved to 3pm'
@@ -345,6 +363,29 @@ class MessageIntentParsingTests(unittest.TestCase):
         recipient, body = result
         self.assertEqual(recipient, "Aman Imran")
         self.assertEqual(body, "Hello")
+
+    def test_message_multiword_contact_question_is_recipient_only(self):
+        result = self.router._parse_message_compose(
+            "can you message Aman Imran?"
+        )
+        self.assertIsNone(result)
+
+    def test_message_recipient_only_strips_polite_prefix_and_question_mark(self):
+        result = self.router._parse_message_recipient_only(
+            "can you message Aman Imran?"
+        )
+        self.assertEqual(result, "Aman Imran")
+
+    def test_message_recipient_only_keeps_multiword_contact_without_body(self):
+        self.assertIsNone(self.router._parse_message_compose("message Imran Butt"))
+        result = self.router._parse_message_recipient_only("message Imran Butt")
+        self.assertEqual(result, "Imran Butt")
+
+    def test_send_message_recipient_only_strips_trailing_question_mark(self):
+        result = self.router._parse_message_recipient_only(
+            "send a message to Aman Imran?"
+        )
+        self.assertEqual(result, "Aman Imran")
 
     def test_negative_open_contacts_list(self):
         """open my contacts list

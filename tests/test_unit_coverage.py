@@ -2707,6 +2707,20 @@ class MainStartupGuardTests(unittest.TestCase):
 
 
 class RuntimeEndpointDiscoveryTests(unittest.TestCase):
+    def test_write_api_endpoint_accepts_explicit_token(self):
+        import runtime_state
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / ".jarvis_runtime.json"
+            with patch("runtime_state.runtime_meta_path", return_value=path), \
+                 patch.dict(os.environ, {"JARVIS_API_TOKEN": "env-token"}):
+                runtime_state.write_api_endpoint("127.0.0.1", 8765, pid=123, token="api-token")
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["token"], "api-token")
+
     def test_read_api_endpoint_preserves_token(self):
         import runtime_state
 
