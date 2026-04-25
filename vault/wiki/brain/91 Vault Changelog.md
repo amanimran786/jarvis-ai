@@ -37,6 +37,7 @@ Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision
 - verified the packaged app with safe live draft/cancel smoke tests against the running daemon; no confirmation sends were used
 - replaced unsafe self-introduction claims with permission-gated wording and taught the router to safely forward the last Jarvis response, reject overclaiming message bodies, and treat lower-case two-word names like "fiza imran" as contacts rather than body text
 - added verified Gemma 4, Qwen3.6, DeepSeek V4 Flash, and Llama 4 Maverick model-fleet candidates with local-first cautions, including strict tag matching so one Gemma tag does not falsely mark another tag installed
+- installed `gemma4:26b`, `gemma4:31b`, and `qwen3.6:35b` locally; promoted them only into coding/deep-reasoning eval lanes so normal Jarvis chat stays on the configured fast default
 
 ## 2026-04-15
 
