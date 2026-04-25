@@ -78,6 +78,8 @@ hiddenimports = sorted(set(
     + collect_submodules("kokoro_onnx")
     + collect_submodules("phonemizer")
     + collect_submodules("espeakng_loader")
+    + collect_submodules("mem0")
+    + collect_submodules("qdrant_client")
     + [
         "numpy.typing",
         "numpy._typing",
