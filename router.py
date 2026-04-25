@@ -1239,6 +1239,11 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
             body,
             flags=re.IGNORECASE,
         ).strip()
+        # If stripping "ask" leaves an indirect-speech fragment ("if he is X",
+        # "whether she can Y"), the body is not a real message — fall through
+        # to the orchestrator so it can compose a proper direct question.
+        if re.match(r"^(?:if|whether)\s+", body, flags=re.IGNORECASE):
+            return ""
         if body.endswith("?") and not re.match(r"^(?:who|what|where|when|why|how|which|can|could|would|is|are|do|does|did|should)\b", body, flags=re.IGNORECASE):
             body = body[:-1].rstrip()
         return body
