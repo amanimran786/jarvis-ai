@@ -14,6 +14,8 @@ from typing import Any
 from config import (
     LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED,
     LOCAL_QWEN3_FAST, LOCAL_QWEN3_MID, LOCAL_QWEN3_STRONG, LOCAL_DEVSTRAL, LOCAL_PHI4_MINI,
+    LOCAL_GEMMA4_STRONG, LOCAL_GEMMA4_MOE, LOCAL_QWEN3_6, LOCAL_DEEPSEEK_V4_FLASH,
+    LOCAL_LLAMA4_MAVERICK,
 )
 from brains import brain_ollama
 from local_runtime import local_model_automation, local_model_eval, local_training
@@ -178,6 +180,71 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         why="Installed local reasoning model for multi-step thinking.",
         caution="Can be slow; keep timeouts and context caps explicit.",
     ),
+    ModelCandidate(
+        id="gemma4_31b",
+        role="strong_general",
+        label="Gemma 4 31B",
+        ollama_tag=LOCAL_GEMMA4_STRONG,
+        status="recommended_eval",
+        priority="medium",
+        pull_command=f"ollama pull {LOCAL_GEMMA4_STRONG}",
+        disk_estimate="about 20GB",
+        context_window="256K listed by Ollama",
+        why="Verified Ollama workstation model; strong local reasoning, coding, multimodal, and agentic candidate without changing defaults.",
+        caution="Evaluate latency and memory on this Mac before promoting over gemma4:e4b or qwen3:8b.",
+    ),
+    ModelCandidate(
+        id="gemma4_26b_moe",
+        role="balanced_general",
+        label="Gemma 4 26B MoE",
+        ollama_tag=LOCAL_GEMMA4_MOE,
+        status="optional_eval",
+        priority="medium",
+        pull_command=f"ollama pull {LOCAL_GEMMA4_MOE}",
+        disk_estimate="about 18GB",
+        context_window="256K listed by Ollama",
+        why="Verified Ollama MoE candidate with lower active-parameter cost than a dense workstation model.",
+        caution="Treat as an eval candidate; do not promote until Jarvis latency and tool-use tests pass.",
+    ),
+    ModelCandidate(
+        id="qwen3_6_35b",
+        role="coding_agent",
+        label="Qwen3.6 35B",
+        ollama_tag=LOCAL_QWEN3_6,
+        status="optional_eval",
+        priority="medium",
+        pull_command=f"ollama pull {LOCAL_QWEN3_6}",
+        disk_estimate="large local model",
+        context_window="verify with Ollama model card before promotion",
+        why="Newer Qwen-family open-weight coding/general candidate visible in Ollama; useful for local agentic coding evals.",
+        caution="Do not assume claimed 1M context locally; measure context, latency, and memory before changing router defaults.",
+    ),
+    ModelCandidate(
+        id="deepseek_v4_flash_cloud",
+        role="cloud_optional_reasoning",
+        label="DeepSeek V4 Flash via Ollama Cloud",
+        ollama_tag=LOCAL_DEEPSEEK_V4_FLASH,
+        status="cloud_optional",
+        priority="low",
+        pull_command=f"ollama run {LOCAL_DEEPSEEK_V4_FLASH}",
+        disk_estimate="cloud model, no local weights",
+        context_window="1M listed by DeepSeek/Ollama",
+        why="Verified new DeepSeek V4 Flash option for agentic coding/reasoning experiments through Ollama Cloud.",
+        caution="Not 100% local and may involve cloud cost/data transfer; never use as a Jarvis default in open-source/local-first mode.",
+    ),
+    ModelCandidate(
+        id="llama4_maverick_heavy",
+        role="heavy_multimodal",
+        label="Llama 4 Maverick",
+        ollama_tag=LOCAL_LLAMA4_MAVERICK,
+        status="heavy_optional",
+        priority="low",
+        pull_command=f"ollama pull {LOCAL_LLAMA4_MAVERICK}",
+        disk_estimate="about 245GB in Ollama",
+        context_window="128K listed by Ollama",
+        why="Verified Ollama model card; multimodal 400B MoE candidate for specialized experiments.",
+        caution="Too large for normal Jarvis pulls on this Mac; only pull intentionally after checking disk and memory.",
+    ),
 )
 
 
@@ -278,8 +345,11 @@ def _installed_models() -> list[str]:
 
 
 def _is_installed(tag: str, installed: list[str]) -> bool:
-    base = tag.split(":", 1)[0]
-    return any(model == tag or model.startswith(base + ":") for model in installed)
+    if not tag:
+        return False
+    if ":" in tag:
+        return any(model == tag for model in installed)
+    return any(model == tag or model.startswith(tag + ":") for model in installed)
 
 
 def _candidate_dict(candidate: ModelCandidate, installed: list[str]) -> dict[str, Any]:
@@ -374,6 +444,26 @@ def fleet_status() -> dict[str, Any]:
                 "label": "Google Gemma LoRA",
                 "url": "https://ai.google.dev/gemma/docs/core/lora_tuning",
                 "claim": "Google documents Gemma LoRA fine-tuning in Colab.",
+            },
+            {
+                "label": "Google Gemma 4",
+                "url": "https://developers.googleblog.com/bring-state-of-the-art-agentic-skills-to-the-edge-with-gemma-4/",
+                "claim": "Google announced Gemma 4 under Apache 2.0 with on-device agentic capabilities.",
+            },
+            {
+                "label": "Ollama Gemma 4",
+                "url": "https://ollama.com/library/gemma4",
+                "claim": "Ollama lists Gemma 4 edge and workstation tags including e4b, 26b, and 31b.",
+            },
+            {
+                "label": "DeepSeek V4 API",
+                "url": "https://api-docs.deepseek.com/updates",
+                "claim": "DeepSeek lists V4-Pro and V4-Flash model names as of 2026-04-24.",
+            },
+            {
+                "label": "Ollama DeepSeek V4 Flash",
+                "url": "https://ollama.com/library/deepseek-v4-flash",
+                "claim": "Ollama exposes deepseek-v4-flash:cloud; it is cloud, not local weights.",
             },
             {
                 "label": "Unsloth notebooks",
