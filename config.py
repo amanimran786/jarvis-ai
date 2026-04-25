@@ -205,7 +205,8 @@ LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
 # them for explicit pull/eval/promotion only.
 LOCAL_GEMMA4_STRONG = os.getenv("LOCAL_GEMMA4_STRONG", "gemma4:31b")
 LOCAL_GEMMA4_MOE    = os.getenv("LOCAL_GEMMA4_MOE", "gemma4:26b")
-LOCAL_QWEN3_6       = os.getenv("LOCAL_QWEN3_6", "qwen3.6:35b")
+LOCAL_QWEN3_6       = os.getenv("LOCAL_QWEN3_6", "qwen3.6:35b-a3b")   # MoE: 35B total, 3B active — better on Mac
+LOCAL_GLM51_CLOUD   = os.getenv("LOCAL_GLM51_CLOUD", "glm-5.1:cloud")   # cloud-only; local weights not available
 LOCAL_DEEPSEEK_V4_FLASH = os.getenv("LOCAL_DEEPSEEK_V4_FLASH", "deepseek-v4-flash:cloud")
 LOCAL_LLAMA4_MAVERICK   = os.getenv("LOCAL_LLAMA4_MAVERICK", "llama4:maverick")
 
