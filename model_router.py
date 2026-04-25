@@ -27,6 +27,7 @@ from config import (
     LOCAL_REASONING,
     LOCAL_TUNED,
     LOCAL_PREFER_TUNED,
+    LOCAL_CODER_RECOMMENDED,
     DEFAULT_MODE,
     tts_runtime_config,
     stt_runtime_config,
@@ -35,6 +36,9 @@ from config import (
     LOCAL_QWEN3_STRONG,
     LOCAL_PHI4_MINI,
     LOCAL_DEVSTRAL,
+    LOCAL_GEMMA4_STRONG,
+    LOCAL_GEMMA4_MOE,
+    LOCAL_QWEN3_6,
 )
 from brains.brain import ask_stream
 from brains.brain_gemini import ask_gemini_stream
@@ -322,9 +326,9 @@ def _best_local(text: str) -> str:
     Priority order (highest → lowest):
       1. Eval-promoted model (if not a coding task)
       2. LOCAL_TUNED (jarvis-local) if PREFER_TUNED set
-      3. Coding tasks → Devstral > Qwen3-strong > Qwen2.5-coder
-      4. Deep reasoning → DeepSeek R1 (only for genuinely complex queries)
-      5. General tasks → Qwen3-strong > Qwen3-mid > Qwen3-fast > gemma4
+      3. Coding tasks → Devstral > Qwen3.6 > Qwen3-coder > Qwen2.5-coder
+      4. Deep reasoning → DeepSeek R1 > Gemma4 workstation/Qwen3.6 eval lanes
+      5. General tasks → Qwen3-strong > Qwen3-mid, not heavyweight eval models
       6. Fast/simple → Phi4-mini > Qwen3-fast > gemma4
       7. Fallback: first available model
     """
@@ -353,18 +357,27 @@ def _best_local(text: str) -> str:
     if LOCAL_PREFER_TUNED and LOCAL_TUNED and _has_model(LOCAL_TUNED, available) and not is_code_task:
         return LOCAL_TUNED
 
-    # 3. Coding tasks — Devstral first (Mistral's open coder), then Qwen3-strong, then qwen2.5-coder
+    # 3. Coding tasks — use heavyweight eval models here, where latency is worth it.
     if is_code_task:
-        for coder in (LOCAL_DEVSTRAL, LOCAL_QWEN3_STRONG, LOCAL_CODER_RECOMMENDED, LOCAL_CODER):
+        for coder in (
+            LOCAL_DEVSTRAL,
+            LOCAL_QWEN3_6,
+            LOCAL_CODER_RECOMMENDED,
+            LOCAL_QWEN3_STRONG,
+            LOCAL_CODER,
+        ):
             if coder and _has_model(coder, available):
                 return coder
 
-    # 4. Deep reasoning — DeepSeek R1 only for genuinely complex/long queries
-    #    (R1:14b takes 3-10 min on Mac — only use when the query earns it)
-    if is_deep and _has_model(LOCAL_REASONING, available):
-        return LOCAL_REASONING
+    # 4. Deep reasoning — only use the big local models when the query earns it.
+    #    Keep everyday chat off these lanes so Jarvis does not feel sluggish.
+    if is_deep:
+        for deep in (LOCAL_REASONING, LOCAL_GEMMA4_STRONG, LOCAL_QWEN3_6, LOCAL_GEMMA4_MOE):
+            if deep and _has_model(deep, available):
+                return deep
 
-    # 5. General tasks — prefer Qwen3 over older gemma4
+    # 5. General tasks — prefer mid-size Qwen lanes if installed.
+    #    Do not promote Gemma4 26B/31B here; those are eval/deep lanes.
     for general in (LOCAL_QWEN3_STRONG, LOCAL_QWEN3_MID):
         if general and _has_model(general, available):
             return general
