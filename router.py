@@ -129,6 +129,56 @@ def _parse_timer(text: str):
     return seconds, f"{amount} {unit}{'s' if amount > 1 else ''}"
 
 
+def _parse_calendar_reminder(text: str):
+    """Parse natural 'remind me to X at Y' / 'schedule X at Y' into (title, dt) or None.
+
+    Returns (event_title: str, start_dt: datetime) or None if not parseable.
+    Only handles same-day HH:MM AM/PM patterns — complex scheduling falls to orchestrator.
+    """
+    import datetime
+
+    # Extract the clock time
+    time_match = re.search(
+        r"\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", text, re.IGNORECASE
+    )
+    if not time_match:
+        return None
+
+    hour   = int(time_match.group(1))
+    minute = int(time_match.group(2) or 0)
+    ampm   = (time_match.group(3) or "").lower()
+
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    elif not ampm and hour < 7:
+        # Ambiguous — assume PM for afternoon sanity (e.g., "at 3" → 3 PM)
+        hour += 12
+
+    # Extract the event title — text between the verb and "at"
+    title_match = re.search(
+        r"(?:remind\s+me\s+to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment)\s+(?:for|with|to)?|"
+        r"create\s+(?:a\s+)?(?:meeting|event|calendar\s+event)\s+(?:for|with)?|"
+        r"book\s+(?:a\s+)?(?:meeting|call|slot)\s+(?:for|with)?)\s+(.+?)\s+at\s+\d",
+        text, re.IGNORECASE,
+    )
+    if not title_match:
+        return None
+
+    title = title_match.group(1).strip().strip(".,;")
+    if not title or len(title) < 3:
+        return None
+
+    now = datetime.datetime.now()
+    start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # If the time has already passed today, schedule for tomorrow
+    if start_dt <= now:
+        start_dt += datetime.timedelta(days=1)
+
+    return title, start_dt
+
+
 def _parse_app(text: str):
     match = re.search(r"\b(?:open|launch|start)\b\s+(?:up\s+)?(?:the\s+)?(?:my\s+)?(.+)", text, re.IGNORECASE)
     return match.group(1).strip() if match else None
@@ -1990,6 +2040,25 @@ def route_stream(user_input: str) -> tuple:
                 tools.set_timer(seconds, label, _on_timer_done)
             return _s(f"Timer set for {label}."), "Timer"
         return _s("I didn't catch the duration."), "Timer"
+
+    # Calendar reminder / event creation fast-path
+    # "remind me to call dad at 3pm", "schedule standup with fiza at 10am",
+    # "add a meeting for client review at 2pm"
+    _CAL_REMINDER_PREFIXES = (
+        "remind me to", "schedule ", "add a meeting",
+        "create a calendar event", "create a meeting", "book a meeting", "book a call",
+    )
+    if any(lower.startswith(p) or p in lower for p in _CAL_REMINDER_PREFIXES):
+        _cal_parsed = _parse_calendar_reminder(lower)
+        if _cal_parsed:
+            _evt_title, _evt_dt = _cal_parsed
+            def _cal_create_gen(title=_evt_title, dt=_evt_dt):
+                try:
+                    result = gs.create_event(title, dt)
+                    yield result
+                except Exception as e:
+                    yield f"Couldn't create the calendar event: {e}"
+            return _cal_create_gen(), "Calendar"
 
     # Volume / mute
     if "mute" in lower and "unmute" not in lower:
