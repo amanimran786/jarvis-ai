@@ -4003,13 +4003,19 @@ class StealthVisibilityTests(unittest.TestCase):
 
 class LocalTrainingTests(unittest.TestCase):
     def test_model_fleet_marks_installed_and_keeps_colab_bounded(self):
-        with patch("local_runtime.model_fleet.brain_ollama.list_local_models", return_value=["qwen2.5-coder:7b", "deepseek-r1:14b"]):
+        with patch("local_runtime.model_fleet.brain_ollama.list_local_models", return_value=["qwen2.5-coder:7b", "deepseek-r1:14b", "gemma4:e4b"]):
             status = model_fleet.fleet_status()
 
         candidates = {item["id"]: item for item in status["candidates"]}
         lanes = {item["id"]: item for item in status["training_lanes"]}
         self.assertTrue(candidates["qwen2_5_coder_7b"]["installed"])
         self.assertFalse(candidates["qwen3_coder_30b"]["installed"])
+        self.assertEqual(candidates["gemma4_31b"]["ollama_tag"], "gemma4:31b")
+        self.assertFalse(candidates["gemma4_31b"]["installed"])
+        self.assertFalse(candidates["gemma4_26b_moe"]["installed"])
+        self.assertEqual(candidates["deepseek_v4_flash_cloud"]["status"], "cloud_optional")
+        self.assertIn("not 100% local", candidates["deepseek_v4_flash_cloud"]["caution"].lower())
+        self.assertEqual(candidates["llama4_maverick_heavy"]["priority"], "low")
         self.assertEqual(status["policy"]["download_all_models"], "no")
         self.assertEqual(lanes["preference_pairs"]["status"], "ready")
         self.assertEqual(lanes["jarvis_colab_dpo"]["status"], "ready")
