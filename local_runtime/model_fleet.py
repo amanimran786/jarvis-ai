@@ -15,7 +15,7 @@ from config import (
     LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED,
     LOCAL_QWEN3_FAST, LOCAL_QWEN3_MID, LOCAL_QWEN3_STRONG, LOCAL_DEVSTRAL, LOCAL_PHI4_MINI,
     LOCAL_GEMMA4_STRONG, LOCAL_GEMMA4_MOE, LOCAL_QWEN3_6, LOCAL_DEEPSEEK_V4_FLASH,
-    LOCAL_LLAMA4_MAVERICK,
+    LOCAL_LLAMA4_MAVERICK, LOCAL_GLM51_CLOUD,
 )
 from brains import brain_ollama
 from local_runtime import local_model_automation, local_model_eval, local_training
@@ -207,17 +207,17 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         caution="Treat as an eval candidate; do not promote until Jarvis latency and tool-use tests pass.",
     ),
     ModelCandidate(
-        id="qwen3_6_35b",
+        id="qwen3_6_35b_moe",
         role="coding_agent",
-        label="Qwen3.6 35B",
+        label="Qwen3.6 35B-A3B (MoE)",
         ollama_tag=LOCAL_QWEN3_6,
         status="optional_eval",
         priority="medium",
         pull_command=f"ollama pull {LOCAL_QWEN3_6}",
-        disk_estimate="large local model",
-        context_window="verify with Ollama model card before promotion",
-        why="Newer Qwen-family open-weight coding/general candidate visible in Ollama; useful for local agentic coding evals.",
-        caution="Do not assume claimed 1M context locally; measure context, latency, and memory before changing router defaults.",
+        disk_estimate="about 24GB",
+        context_window="256K confirmed by Ollama library",
+        why="MoE with 35B total params but only 3B active per token — much lower memory bandwidth than a dense 35B. Released 2026-04-15. Strong agentic coding candidate.",
+        caution="Pull and eval latency before promoting. The 1M context claim is upstream marketing; use 256K locally. Do not change router defaults without passing Jarvis tool-use tests.",
     ),
     ModelCandidate(
         id="deepseek_v4_flash_cloud",
@@ -231,6 +231,19 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         context_window="1M listed by DeepSeek/Ollama",
         why="Verified new DeepSeek V4 Flash option for agentic coding/reasoning experiments through Ollama Cloud.",
         caution="Not 100% local and may involve cloud cost/data transfer; never use as a Jarvis default in open-source/local-first mode.",
+    ),
+    ModelCandidate(
+        id="glm_5_1_cloud",
+        role="cloud_optional_coding",
+        label="GLM-5.1 via Ollama Cloud",
+        ollama_tag=LOCAL_GLM51_CLOUD,
+        status="cloud_optional",
+        priority="low",
+        pull_command=f"ollama run {LOCAL_GLM51_CLOUD}",
+        disk_estimate="cloud model, no local weights (local weights not available)",
+        context_window="verify with Zhipu API; not a local model",
+        why="Zhipu AI flagship (MIT license). Claims #1 on SWE-Bench Pro for agentic coding. Cloud-only via Ollama until local weights ship.",
+        caution="Not local — routes to Zhipu cloud. Never use as Jarvis default in open-source/local-first mode. Re-evaluate when local weights become available.",
     ),
     ModelCandidate(
         id="llama4_maverick_heavy",
