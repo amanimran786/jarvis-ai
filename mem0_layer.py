@@ -53,6 +53,7 @@ _HOME = Path.home()
 _MEM0_DIR = _HOME / ".mem0" / "jarvis"
 _QDRANT_PATH = str(_MEM0_DIR / "qdrant")
 _HISTORY_PATH = str(_MEM0_DIR / "history.db")
+_COLLECTION_NAME = "jarvis_nomic_768_v2"
 
 _MEM0_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -65,6 +66,7 @@ _memory_instance: Any = None
 _init_lock = threading.Lock()
 _init_attempted = False
 _available = False   # set True only after successful init
+_last_error = ""
 
 
 def _build_config() -> dict:
@@ -96,7 +98,8 @@ def _build_config() -> dict:
         "vector_store": {
             "provider": "qdrant",
             "config": {
-                "collection_name": "jarvis",
+                "collection_name": _COLLECTION_NAME,
+                "embedding_model_dims": 768,
                 "path": _QDRANT_PATH,
             },
         },
@@ -107,7 +110,7 @@ def _build_config() -> dict:
 
 def _get_instance() -> Any | None:
     """Return the mem0 Memory singleton, initialising on first call."""
-    global _memory_instance, _init_attempted, _available
+    global _memory_instance, _init_attempted, _available, _last_error
     if _init_attempted:
         return _memory_instance
     with _init_lock:
@@ -118,10 +121,12 @@ def _get_instance() -> Any | None:
             from mem0 import Memory
             _memory_instance = Memory.from_config(_build_config())
             _available = True
+            _last_error = ""
         except Exception as e:
             # Ollama not running, qdrant not installed, etc. — degrade silently.
             _memory_instance = None
             _available = False
+            _last_error = str(e)
     return _memory_instance
 
 
@@ -143,12 +148,18 @@ def add(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = None) -
     if not text or not text.strip():
         return False
     m = _get_instance()
+    global _last_error
     if m is None:
         return False
     try:
-        m.add(text.strip(), user_id=user_id, metadata=metadata or {})
+        try:
+            m.add(text.strip(), user_id=user_id, metadata=metadata or {}, infer=False)
+        except TypeError:
+            m.add(text.strip(), user_id=user_id, metadata=metadata or {})
+        _last_error = ""
         return True
-    except Exception:
+    except Exception as exc:
+        _last_error = str(exc)
         return False
 
 
@@ -172,36 +183,48 @@ def search(query: str, user_id: str = _DEFAULT_USER, top_k: int = 5) -> list[dic
     Returns a list of dicts with at least {"memory": str, "score": float}.
     Returns [] on any error or when unavailable.
     """
+    global _last_error
     if not query or not query.strip():
         return []
     m = _get_instance()
     if m is None:
         return []
     try:
-        results = m.search(query.strip(), user_id=user_id, limit=top_k)
+        try:
+            results = m.search(query.strip(), top_k=top_k, filters={"user_id": user_id})
+        except TypeError:
+            results = m.search(query.strip(), user_id=user_id, limit=top_k)
+        _last_error = ""
         # mem0 returns {"results": [...]} in v1.1
         if isinstance(results, dict):
             return results.get("results", [])
         if isinstance(results, list):
             return results
         return []
-    except Exception:
+    except Exception as exc:
+        _last_error = str(exc)
         return []
 
 
 def get_all(user_id: str = _DEFAULT_USER) -> list[dict]:
     """Return all stored memories for a user (use sparingly — can be large)."""
+    global _last_error
     m = _get_instance()
     if m is None:
         return []
     try:
-        results = m.get_all(user_id=user_id)
+        try:
+            results = m.get_all(filters={"user_id": user_id}, top_k=1000)
+        except TypeError:
+            results = m.get_all(user_id=user_id)
+        _last_error = ""
         if isinstance(results, dict):
             return results.get("results", [])
         if isinstance(results, list):
             return results
         return []
-    except Exception:
+    except Exception as exc:
+        _last_error = str(exc)
         return []
 
 
@@ -249,9 +272,12 @@ def status() -> dict:
     avail = is_available()
     info: dict = {
         "available": avail,
+        "collection": _COLLECTION_NAME,
         "store": _QDRANT_PATH if avail else "not initialized",
         "history_db": _HISTORY_PATH if avail else "not initialized",
     }
+    if _last_error:
+        info["last_error"] = _last_error
     if avail:
         try:
             all_mems = get_all()

@@ -176,8 +176,10 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
+    exclude_binaries=False,
     name="Jarvis",
     debug=False,
     bootloader_ignore_signals=False,
@@ -193,20 +195,8 @@ exe = EXE(
     entitlements_file=None,
 )
 
-ensure_collect_destination_dirs()
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name="Jarvis",
-)
-
 app = BUNDLE(
-    coll,
+    exe,
     name="Jarvis.app",
     icon=str(ICON) if ICON.is_file() else None,
     bundle_identifier="com.truthseeker.jarvis",

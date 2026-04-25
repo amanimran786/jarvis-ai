@@ -30,7 +30,7 @@ def get_weather() -> str:
 
 # ── Web search ────────────────────────────────────────────────────────────────
 
-def web_search(query: str, max_results: int = 3) -> str:
+def web_search(query: str, max_results: int = 5) -> str:
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))

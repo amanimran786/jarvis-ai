@@ -8,6 +8,8 @@ import voice
 class VoiceTtsRegressionTests(unittest.TestCase):
     def tearDown(self):
         voice._kokoro_disabled_reason = ""
+        voice._mic_failure_cooldown_until = 0.0
+        voice._mic_last_failure_detail = ""
 
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -164,15 +166,67 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         self.assertIn("bad-audio", closed)
         self.assertIn("good-stream-close", closed)
 
-    def test_microphone_candidates_try_system_default_before_named_preferences(self):
-        with patch("voice.sr.Microphone.list_microphone_names", return_value=["Amans iPhone 14 Plus Microphone", "MacBook Pro Microphone"]), \
-             patch("voice.sr.Microphone", side_effect=lambda device_index=None: SimpleNamespace(device_index=device_index)):
+    def test_open_microphone_source_cools_down_after_all_candidates_fail(self):
+        class _BadMic:
+            def __enter__(self):
+                return SimpleNamespace(stream=None, audio=SimpleNamespace(terminate=lambda: None))
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        with patch("voice._microphone_candidates", return_value=[("Bad Mic", _BadMic())]):
+            with self.assertRaises(RuntimeError):
+                with voice._open_microphone_source():
+                    pass
+
+        with patch("voice._microphone_candidates", side_effect=AssertionError("cooldown should skip device opens")):
+            with self.assertRaisesRegex(RuntimeError, "cooldown active"):
+                with voice._open_microphone_source():
+                    pass
+
+    def test_microphone_candidates_prefer_real_inputs_and_skip_output_only_devices(self):
+        names = [
+            "MacBook Pro Speakers",
+            "MacBook Pro Microphone",
+            "BlackHole 2ch",
+            "Microsoft Teams Audio",
+        ]
+
+        class _FakeMicrophone:
+            def __init__(self, device_index=None):
+                self.device_index = device_index
+
+            @staticmethod
+            def list_microphone_names():
+                return names
+
+        with patch("voice._input_capable_device_indexes", return_value={1, 3}), \
+             patch("voice.sr.Microphone", _FakeMicrophone):
             candidates = voice._microphone_candidates()
 
         labels = [label for label, _ in candidates]
         indexes = [mic.device_index for _, mic in candidates]
-        self.assertEqual(labels[0], "Default input device")
-        self.assertEqual(indexes[0], None)
+        self.assertEqual(labels, ["MacBook Pro Microphone", "Microsoft Teams Audio", "Default input device"])
+        self.assertEqual(indexes, [1, 3, None])
+
+    def test_wait_for_wake_word_backs_off_after_microphone_open_failure(self):
+        voice._stop_requested.clear()
+        voice._done_speaking.set()
+        voice._manual_wake_trigger.clear()
+
+        def _stop_after_sleep(seconds):
+            self.assertEqual(seconds, voice._MIC_OPEN_RETRY_SECONDS)
+            voice._stop_requested.set()
+
+        try:
+            with patch("voice._open_microphone_source", side_effect=RuntimeError("AUHAL unavailable")), \
+                 patch("voice._debug_log"), \
+                 patch("voice._time.sleep", side_effect=_stop_after_sleep) as sleep_mock:
+                voice.wait_for_wake_word()
+        finally:
+            voice._stop_requested.clear()
+
+        sleep_mock.assert_called_once()
 
     def test_capture_audio_window_records_fixed_window(self):
         source = object()

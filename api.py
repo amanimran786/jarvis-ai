@@ -1641,6 +1641,11 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     _host = host or "127.0.0.1"
     _port = _find_free_port(port, host=_host)
     _API_TOKEN = os.getenv("JARVIS_API_TOKEN", "").strip() or secrets.token_urlsafe(24)
+    os.environ["JARVIS_API_TOKEN"] = _API_TOKEN
+    try:
+        runtime_state.write_api_endpoint(_host, _port, token=_API_TOKEN)
+    except Exception:
+        pass
 
     def _run():
         uvicorn.run(app, host=_host, port=_port, log_level="warning")
