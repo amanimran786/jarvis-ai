@@ -10,6 +10,7 @@ Usage:
   python jarvis_cli.py --doctor
   python jarvis_cli.py --permissions
   python jarvis_cli.py --skills
+  python jarvis_cli.py --skill-audit
   python jarvis_cli.py --skills-export-preview
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
@@ -104,6 +105,7 @@ _SLASH_COMMANDS = (
     "/deny",
     "/memory",
     "/skills",
+    "/skill-audit",
     "/skills-export-preview",
     "/connectors",
     "/plugins",
@@ -942,6 +944,12 @@ def _print_skills_export_preview() -> None:
     print(skill_export.format_preview())
 
 
+def _print_skill_audit() -> None:
+    import skill_audit
+
+    print(skill_audit.format_audit())
+
+
 def _print_cli_advances() -> None:
     note = os.path.join(
         os.path.dirname(__file__),
@@ -1264,6 +1272,7 @@ def _console_help() -> str:
             "  /deny <task_id>       Deny a managed task waiting for approval",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
+            "  /skill-audit          Diagnose local skill package quality",
             "  /skills-export-preview  Preview .agents/skills compatibility export",
             "  /connectors           List connectors",
             "  /plugins              List plugins",
@@ -1663,6 +1672,9 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if any(term in lower for term in ("show skills", "list skills")):
         _print_skills()
         return 0
+    if any(term in lower for term in ("skill audit", "audit skills", "check skills", "skill diagnostics")):
+        _print_skill_audit()
+        return 0
     if any(term in lower for term in ("skills export preview", "skill export preview", "agents skills preview", ".agents skills preview")):
         _print_skills_export_preview()
         return 0
@@ -1858,6 +1870,9 @@ def _handle_console_command(line: str) -> int | None:
     if command == "skills":
         _print_skills()
         return 0
+    if command in {"skill-audit", "skills-audit", "audit-skills"}:
+        _print_skill_audit()
+        return 0
     if command in {"skills-export-preview", "skill-export-preview", "agents-skills-preview"}:
         _print_skills_export_preview()
         return 0
@@ -1997,6 +2012,10 @@ def main():
 
     if flag == "--skills":
         _print_skills()
+        return
+
+    if flag in {"--skill-audit", "--skills-audit", "--audit-skills"}:
+        _print_skill_audit()
         return
 
     if flag in {"--skills-export-preview", "--skill-export-preview", "--agents-skills-preview"}:
