@@ -26,6 +26,15 @@ Purpose: preserve note-level provenance for major brain upgrades so Jarvis can c
 
 Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision Log]], [[80 Jarvis Roadmap]]
 
+## 2026-04-26
+
+### Messaging and email state-machine stabilization
+
+- fixed Messages draft handling so inline reply commands like `reply to Aman Imran saying sounds good` replace stale pending drafts instead of becoming message bodies
+- verified the packaged Jarvis app against the live daemon with draft-only Aman Imran smoke tests; no confirmation sends were used
+- added a recipient-only email flow so `email Aman Imran` asks for the email body instead of reading the inbox or blocking on Contacts lookup
+- kept email sends gated behind explicit confirmation, matching the Messages draft/send contract
+
 ## 2026-04-24
 
 ### Messages router hardening

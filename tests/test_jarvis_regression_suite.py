@@ -1353,6 +1353,37 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual(router._pending_email_draft["to"], "beta@example.com")
                 self.assertEqual(router._pending_email_draft["body"], "Ship it")
 
+    def test_email_recipient_only_asks_for_body_without_reading_inbox(self):
+        with patch("router._resolve_email_recipient", return_value=("aman@example.com", "")), \
+             patch("router.gs.get_unread_emails", side_effect=AssertionError("should not read inbox")):
+            stream, label = router.route_stream("email Aman Imran")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("what would you like the email to say to aman imran", text.lower())
+        self.assertTrue(router._has_pending_email_recipient())
+
+    def test_email_recipient_only_next_turn_creates_confirmation_draft(self):
+        with patch("router._resolve_email_recipient", return_value=("aman@example.com", "")):
+            router.route_stream("send an email to Aman Imran")
+            stream, label = router.route_stream("quick beta smoke only")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("email draft ready for aman imran", text.lower())
+        self.assertIn('body: "quick beta smoke only"', text.lower())
+        self.assertTrue(router._has_pending_email_draft())
+        self.assertEqual(router._pending_email_draft["to"], "aman@example.com")
+
+    def test_email_read_query_still_reads_inbox(self):
+        with patch("router.gs.get_unread_emails", return_value="No unread email.") as inbox_mock:
+            stream, label = router.route_stream("check email")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Status")
+        self.assertIn("no unread email", text.lower())
+        inbox_mock.assert_called_once()
+
     def test_google_auth_files_are_outside_repo_and_excluded_from_bundle(self):
         repo_root = Path(__file__).resolve().parents[1]
         app_data = runtime_state.app_data_dir().resolve()
