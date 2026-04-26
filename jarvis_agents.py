@@ -185,6 +185,16 @@ def _agent_research(context: str = "") -> dict:
                 "result": f"Research error: {e}", "escalate": False}
 
 
+def _agent_weather(context: str = "") -> dict:
+    """Fetch current weather for the briefing."""
+    try:
+        import tools
+        result = tools.get_weather()
+        return {"agent": "weather", "status": "ok", "result": f"Weather: {result}", "escalate": False}
+    except Exception as e:
+        return {"agent": "weather", "status": "error", "result": f"Weather: unavailable ({e})", "escalate": False}
+
+
 def _agent_email(context: str = "") -> dict:
     """Scan unread emails for urgency signals."""
     try:
@@ -291,10 +301,11 @@ _AGENTS: dict[str, Callable[[str], dict]] = {
     "code":         _agent_code,
     "research":     _agent_research,
     "email":        _agent_email,
+    "weather":      _agent_weather,
     "meeting_prep": _agent_meeting_prep,
 }
 
-_BRIEFING_AGENTS      = ["calendar", "tasks", "vault", "email"]
+_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email"]
 _WEEK_AGENTS          = ["week", "tasks"]
 _MEETING_PREP_AGENTS  = ["meeting_prep"]
 
