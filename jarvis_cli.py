@@ -13,6 +13,7 @@ Usage:
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
   python jarvis_cli.py --context-budget
+  python jarvis_cli.py --cli-advances
   python jarvis_cli.py --code-status
   python jarvis_cli.py --verify-plan
   python jarvis_cli.py --agent-patterns
@@ -107,6 +108,7 @@ _SLASH_COMMANDS = (
     "/vault",
     "/context-budget",
     "/tokens",
+    "/cli-advances",
     "/cloud-leaks",
     "/teacher-capture",
     "/eval-delta",
@@ -932,6 +934,34 @@ def _print_agent_patterns(category: str = "") -> None:
         print(f"  seams: {seams}")
 
 
+def _print_cli_advances() -> None:
+    note = os.path.join(
+        os.path.dirname(__file__),
+        "vault",
+        "wiki",
+        "brain",
+        "98 CLI Agent Advances.md",
+    )
+    lines = [
+        "CLI Agent Advances",
+        "Top patterns Jarvis should adapt:",
+        "  1. Portable skills with provenance: gh skill style preview, pinning, source repo, and tree SHA.",
+        "  2. Attachable backends: one daemon, many terminal/web/mobile clients, with explicit auth gates.",
+        "  3. Session continuity: /sessions, /resume <id>, /fork <id> for long-running work.",
+        "  4. Mission control: active tasks, approvals, dirty git files, context budget, packaged-app identity.",
+        "  5. Skill audit: frontmatter, trigger specificity, negative triggers, provenance, eval examples.",
+        "",
+        "Jarvis already has: daemon-backed console, prompt_toolkit history/autocomplete, Rich banner,",
+        "managed tasks, permission gates, skills/plugins/connectors, context budget, and coder workbench.",
+        "",
+        "Next implementation seam: add .agents/skills export preview before any installer/importer writes.",
+        f"Vault note: {note}",
+        "",
+        "Sources: GitHub gh skill, OpenCode CLI attach/resume, Claude Code architecture analysis, Skilldex.",
+    ]
+    print("\n".join(lines))
+
+
 def _print_capability_parity() -> None:
     payload = get("/capability-parity")
     print(payload.get("goal") or "Capability parity")
@@ -1231,6 +1261,7 @@ def _console_help() -> str:
             "  /vault                Show vault status",
             "  /context-budget       Show local coding/token discipline",
             "  /tokens               Alias for /context-budget",
+            "  /cli-advances         Show CLI-agent research and Jarvis upgrade backlog",
             "  /code-status          Show repo-grounded coding workbench state",
             "  /verify-plan          Show verification commands for current diff",
             "  /run-verify-plan      Run required verification commands for current diff",
@@ -1573,6 +1604,9 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if any(term in lower for term in ("context budget", "token budget", "save context", "stop burning tokens")):
         _print_context_budget()
         return 0
+    if any(term in lower for term in ("cli advances", "terminal agent advances", "agent cli advances", "latest cli patterns", "cli research")):
+        _print_cli_advances()
+        return 0
     if any(term in lower for term in ("production readiness", "production ready", "free readiness", "operational ready")):
         _print_production_readiness()
         return 0
@@ -1731,6 +1765,9 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command in {"context-budget", "tokens"}:
         _print_context_budget()
+        return 0
+    if command in {"cli-advances", "terminal-advances", "cli-research"}:
+        _print_cli_advances()
         return 0
     if command in {"code-status", "coder-status", "workbench"}:
         _print_code_status()
@@ -1973,6 +2010,10 @@ def main():
 
     if flag in {"--context-budget", "--tokens"}:
         _print_context_budget()
+        return
+
+    if flag in {"--cli-advances", "--terminal-advances", "--cli-research"}:
+        _print_cli_advances()
         return
 
     if flag in {"--cloud-leaks", "--cloud-audit", "--leaks"}:

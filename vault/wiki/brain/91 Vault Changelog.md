@@ -35,6 +35,11 @@ Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision
 - added a recipient-only email flow so `email Aman Imran` asks for the email body instead of reading the inbox or blocking on Contacts lookup
 - kept email sends gated behind explicit confirmation, matching the Messages draft/send contract
 
+### CLI agent advances intake
+
+- added [[98 CLI Agent Advances]] to capture current CLI-agent patterns from `gh skill`, OpenCode attachable backends, Claude Code architecture analysis, and Skilldex
+- added `jarvis --cli-advances` and console `/cli-advances` so Jarvis can report the local-first CLI upgrade backlog without opening the full vault note
+
 ## 2026-04-24
 
 ### Messages router hardening
