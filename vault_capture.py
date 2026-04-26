@@ -312,7 +312,10 @@ _BRAIN_SAVE_RE = re.compile(
     r"\b(?:save|add|capture|write)\s+(?:this\s+)?to\s+(?:the\s+)?(?:vault|brain|obsidian)\b"
     r"|\b(?:save|capture)\s+(?:this\s+)?(?:as\s+a?\s+)?(?:brain\s+)?note\b"
     r"|\bvault\s+this\b"
-    r"|\badd\s+to\s+brain\b",
+    r"|\badd\s+to\s+brain\b"
+    r"|\bnote\s+this\b"
+    r"|\bremember\s+this\b"
+    r"|\bsave\s+(?:to\s+)?notes?\s*:",
     re.IGNORECASE,
 )
 _PROJECT_UPDATE_RE = re.compile(

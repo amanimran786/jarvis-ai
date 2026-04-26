@@ -1,4 +1,5 @@
 import unittest
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -174,6 +175,57 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         self.assertIn("bad-audio", closed)
         self.assertIn("good-stream-close", closed)
+
+    def test_open_microphone_source_suppresses_native_stderr_during_probe(self):
+        calls = []
+
+        class _Guard:
+            def __enter__(self):
+                calls.append("enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                calls.append("exit")
+
+        class _GoodMic:
+            def __enter__(self):
+                return SimpleNamespace(stream=SimpleNamespace(close=lambda: None), audio=SimpleNamespace(terminate=lambda: None))
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        with patch("voice._microphone_candidates", return_value=[("Good Mic", _GoodMic())]), \
+             patch("voice._suppress_native_audio_stderr", return_value=_Guard()):
+            with voice._open_microphone_source() as source:
+                self.assertIsNotNone(source.stream)
+
+        self.assertEqual(calls, ["enter", "exit"])
+
+    def test_native_audio_suppression_covers_stdout_and_stderr(self):
+        with TemporaryDirectory() as tmp:
+            stdout_path = Path(tmp) / "stdout.log"
+            stderr_path = Path(tmp) / "stderr.log"
+            saved_stdout = os.dup(1)
+            saved_stderr = os.dup(2)
+            stdout_fd = os.open(stdout_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            try:
+                os.dup2(stdout_fd, 1)
+                os.dup2(stderr_fd, 2)
+                with voice._suppress_native_audio_stderr():
+                    os.write(1, b"hidden stdout\n")
+                    os.write(2, b"hidden stderr\n")
+                os.write(1, b"visible stdout\n")
+                os.write(2, b"visible stderr\n")
+            finally:
+                os.dup2(saved_stdout, 1)
+                os.dup2(saved_stderr, 2)
+                os.close(saved_stdout)
+                os.close(saved_stderr)
+                os.close(stdout_fd)
+                os.close(stderr_fd)
+
+            self.assertEqual(stdout_path.read_text(), "visible stdout\n")
+            self.assertEqual(stderr_path.read_text(), "visible stderr\n")
 
     def test_open_microphone_source_cools_down_after_all_candidates_fail(self):
         class _BadMic:
