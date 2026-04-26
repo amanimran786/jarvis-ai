@@ -757,6 +757,7 @@ _last_msg_recipient: str = ""
 _last_message_send_result: dict | None = None
 _pending_message_draft: dict | None = None
 _pending_email_draft: dict | None = None
+_pending_email_recipient: dict | None = None
 _fuzzy_contact_suggestions: list[str] = []
 _pending_resolved_address: str = ""  # pre-resolved address set alongside pending recipient
 _last_assistant_reply: str = ""
@@ -863,8 +864,9 @@ def _sanitize_email_text(text: str) -> str:
 
 
 def _clear_pending_email_draft():
-    global _pending_email_draft
+    global _pending_email_draft, _pending_email_recipient
     _pending_email_draft = None
+    _pending_email_recipient = None
 
 
 def _has_pending_email_draft() -> bool:
@@ -872,6 +874,13 @@ def _has_pending_email_draft() -> bool:
         _pending_email_draft
         and _pending_email_draft.get("to")
         and _pending_email_draft.get("body")
+    )
+
+
+def _has_pending_email_recipient() -> bool:
+    return bool(
+        _pending_email_recipient
+        and _pending_email_recipient.get("recipient")
     )
 
 
@@ -910,6 +919,15 @@ def _set_pending_email_draft(recipient: str, to_address: str, subject: str, body
     }
 
 
+def _set_pending_email_recipient(recipient: str, to_address: str = "", subject: str = "Message from Aman"):
+    global _pending_email_recipient
+    _pending_email_recipient = {
+        "recipient": recipient.strip(),
+        "to": to_address.strip(),
+        "subject": _sanitize_email_text(subject) or "Message from Aman",
+    }
+
+
 def _email_confirmation_prompt() -> str:
     draft = _pending_email_draft or {}
     recipient = draft.get("recipient") or draft.get("to") or "recipient"
@@ -921,6 +939,10 @@ def _email_confirmation_prompt() -> str:
         f"Email draft ready for {recipient_display}: subject \"{subject}\". "
         f"Body: \"{body}\". Say confirm send to send it, or cancel to stop."
     )
+
+
+def _direct_email_or_empty(recipient: str) -> str:
+    return _extract_email_address(recipient or "")
 
 
 def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
@@ -982,6 +1004,31 @@ def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
     if not recipient or not body:
         return None
     return recipient, subject or "Message from Aman", body
+
+
+def _parse_email_recipient_only(text: str) -> str:
+    raw = _strip_polite_prefix(text or "").strip()
+    if not raw:
+        return ""
+    if re.search(r"\b(?:inbox|unread|read|check|show|list)\b", raw, flags=re.IGNORECASE):
+        return ""
+    patterns = (
+        r"^(?:send\s+(?:an?\s+)?email\s+to|email|(?:write|draft|compose)\s+(?:an?\s+)?email\s+(?:to|for))\s+(.+)$",
+        r"^send\s+(.+?)\s+(?:an?\s+)?email\s*$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, raw, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = _normalize_contact_phrase(match.group(1))
+        candidate = re.split(
+            r"\s+(?:subject|body|message|saying|say|that|with)\b",
+            candidate,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip()
+        return candidate if (candidate and (_extract_email_address(candidate) or _looks_like_contact_name(candidate))) else ""
+    return ""
 
 
 def _is_email_cancel_query(lower: str) -> bool:
@@ -1672,12 +1719,17 @@ def _dispatch_single_intent(query: str) -> str | None:
             return gs.get_todays_events()
         except Exception:
             return "Calendar is unavailable. You may need to re-authorize Google access."
-    if hint == "email":
+    if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
         except Exception:
             return "Email is unavailable. You may need to re-authorize Google access."
     return None
+
+
+def _looks_like_email_read_query(query: str) -> bool:
+    lower = (query or "").lower()
+    return bool(re.search(r"\b(?:inbox|unread|read|check|show|list)\b", lower))
 
 
 def _extract_weather_location(query: str) -> str:
@@ -1938,6 +1990,7 @@ def route_stream(user_input: str) -> tuple:
         or _parse_indirect_message_request(user_input)
     )
     composed_email = _parse_email_compose(user_input)
+    email_recipient_only = "" if composed_email else _parse_email_recipient_only(user_input)
     contact_details_query = _parse_contact_details_query(user_input)
     last_response_recipient = _parse_send_last_response_request(user_input)
     recipient_only = ""
@@ -1945,10 +1998,10 @@ def route_stream(user_input: str) -> tuple:
         recipient_only = _parse_message_recipient_only(user_input)
 
     # ── 0. Pending email state ────────────────────────────────────────────────
-    if _is_email_cancel_query(lower) and (_has_pending_email_draft() or "email" in lower):
-        if not _has_pending_email_draft():
+    if _is_email_cancel_query(lower) and (_has_pending_email_draft() or _has_pending_email_recipient() or "email" in lower):
+        if not (_has_pending_email_draft() or _has_pending_email_recipient()):
             return _s("No active email draft."), "Gmail"
-        previous = (_pending_email_draft or {}).get("recipient", "email")
+        previous = (_pending_email_draft or _pending_email_recipient or {}).get("recipient", "email")
         _clear_pending_email_draft()
         return _s(f"Canceled the email draft to {previous}."), "Gmail"
 
@@ -1993,6 +2046,38 @@ def route_stream(user_input: str) -> tuple:
             return interrupt_route
         return _s(_email_confirmation_prompt()), "Gmail"
 
+    if _has_pending_email_recipient():
+        draft = _pending_email_recipient or {}
+        if _is_message_confirm_query(lower):
+            return _s(f"What would you like the email to say to {draft.get('recipient', 'that recipient')}?"), "Gmail"
+        if composed_email:
+            recipient, subject, body = composed_email
+            to_address, error = _resolve_email_recipient(recipient)
+            if error:
+                return _s(error), "Gmail"
+            _set_pending_email_draft(recipient, to_address, subject, body)
+            return _s(_email_confirmation_prompt()), "Gmail"
+        if email_recipient_only:
+            to_address = _direct_email_or_empty(email_recipient_only)
+            _set_pending_email_recipient(email_recipient_only, to_address)
+            return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
+        interrupt_route = _pending_draft_interrupt_route(user_input, lower)
+        if interrupt_route is not None:
+            return interrupt_route
+        body = _sanitize_email_text(user_input)
+        if not body or body.lower() in {"yes", "yeah", "yep", "confirm", "send", "send it"}:
+            return _s(f"What would you like the email to say to {draft.get('recipient', 'that recipient')}?"), "Gmail"
+        _set_pending_email_draft(
+            draft.get("recipient", ""),
+            draft.get("to", "") or _resolve_email_recipient(draft.get("recipient", ""))[0],
+            draft.get("subject", "Message from Aman"),
+            body,
+        )
+        if not (_pending_email_draft or {}).get("to"):
+            _clear_pending_email_draft()
+            return _s(f"I need an email address for {draft.get('recipient', 'that recipient')}. Use an address like name@example.com."), "Gmail"
+        return _s(_email_confirmation_prompt()), "Gmail"
+
     if composed_email:
         recipient, subject, body = composed_email
         to_address, error = _resolve_email_recipient(recipient)
@@ -2001,6 +2086,12 @@ def route_stream(user_input: str) -> tuple:
         _clear_message_state()
         _set_pending_email_draft(recipient, to_address, subject, body)
         return _s(_email_confirmation_prompt()), "Gmail"
+
+    if email_recipient_only:
+        _clear_message_state()
+        to_address = _direct_email_or_empty(email_recipient_only)
+        _set_pending_email_recipient(email_recipient_only, to_address)
+        return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
 
     # ── 0. Pending message state ──────────────────────────────────────────────
     if _is_message_cancel_query(lower):
