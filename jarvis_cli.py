@@ -10,6 +10,7 @@ Usage:
   python jarvis_cli.py --doctor
   python jarvis_cli.py --permissions
   python jarvis_cli.py --skills
+  python jarvis_cli.py --skills-export-preview
   python jarvis_cli.py --connectors
   python jarvis_cli.py --plugins
   python jarvis_cli.py --context-budget
@@ -103,6 +104,7 @@ _SLASH_COMMANDS = (
     "/deny",
     "/memory",
     "/skills",
+    "/skills-export-preview",
     "/connectors",
     "/plugins",
     "/vault",
@@ -934,6 +936,12 @@ def _print_agent_patterns(category: str = "") -> None:
         print(f"  seams: {seams}")
 
 
+def _print_skills_export_preview() -> None:
+    import skill_export
+
+    print(skill_export.format_preview())
+
+
 def _print_cli_advances() -> None:
     note = os.path.join(
         os.path.dirname(__file__),
@@ -1256,6 +1264,7 @@ def _console_help() -> str:
             "  /deny <task_id>       Deny a managed task waiting for approval",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
+            "  /skills-export-preview  Preview .agents/skills compatibility export",
             "  /connectors           List connectors",
             "  /plugins              List plugins",
             "  /vault                Show vault status",
@@ -1654,6 +1663,9 @@ def _handle_natural_console_intent(text: str) -> int | None | object:
     if any(term in lower for term in ("show skills", "list skills")):
         _print_skills()
         return 0
+    if any(term in lower for term in ("skills export preview", "skill export preview", "agents skills preview", ".agents skills preview")):
+        _print_skills_export_preview()
+        return 0
     if any(term in lower for term in ("show connectors", "list connectors")):
         _print_connectors()
         return 0
@@ -1846,6 +1858,9 @@ def _handle_console_command(line: str) -> int | None:
     if command == "skills":
         _print_skills()
         return 0
+    if command in {"skills-export-preview", "skill-export-preview", "agents-skills-preview"}:
+        _print_skills_export_preview()
+        return 0
     if command == "connectors":
         _print_connectors()
         return 0
@@ -1982,6 +1997,10 @@ def main():
 
     if flag == "--skills":
         _print_skills()
+        return
+
+    if flag in {"--skills-export-preview", "--skill-export-preview", "--agents-skills-preview"}:
+        _print_skills_export_preview()
         return
 
     if flag == "--skill":

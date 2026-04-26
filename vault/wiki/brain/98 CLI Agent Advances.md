@@ -93,8 +93,8 @@ Reject: public registry dependence for core Jarvis behavior.
 
 ## Priority Backlog
 
-1. Add `/cli-advances` as a console surface that explains this backlog and current Jarvis status.
-2. Add `.agents/skills` export preview with no writes by default.
+1. Add `/cli-advances` as a console surface that explains this backlog and current Jarvis status. Status: done.
+2. Add `.agents/skills` export preview with no writes by default. Status: done through `jarvis --skills-export-preview`.
 3. Add `/sessions`, `/resume`, and `/fork` for terminal continuity.
 4. Add `/mission-control` with daemon, tasks, approvals, dirty git state, context budget, and packaged-app identity.
 5. Add `--skill-audit` for local skill diagnostics.
