@@ -2064,6 +2064,16 @@ def route_stream(user_input: str) -> tuple:
             _clear_message_state()
             _set_pending_message_draft(next_recipient, next_body)
             return _s(_message_confirmation_prompt(next_recipient, next_body)), "Messages"
+        reply_compose = _parse_reply_compose(user_input)
+        if reply_compose:
+            next_recipient, next_body = reply_compose
+            unsafe_reply = _unsafe_message_draft_reply(next_body, keep_current=True)
+            if unsafe_reply:
+                return _s(unsafe_reply), "Messages"
+            _clear_message_state()
+            resolved = _eager_resolve_contact(next_recipient)
+            _set_pending_message_draft(next_recipient, next_body, resolved_address=resolved)
+            return _s(f"Draft reply to {next_recipient}: \"{next_body}\". Say confirm send to send it, or edit it first."), "Messages"
         if recipient_correction:
             _fuzzy_contact_suggestions.clear()
             _awaiting_msg_recipient = False
