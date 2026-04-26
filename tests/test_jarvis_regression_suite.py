@@ -2062,6 +2062,19 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(router._pending_message_draft["body"], "sounds good")
         smart_mock.assert_not_called()
 
+    def test_inline_reply_compose_replaces_pending_draft(self):
+        router.route_stream("message Aman Imran get milk")
+        with patch("router._eager_resolve_contact", return_value=None), \
+             patch("router.smart_stream") as smart_mock:
+            stream, label = router.route_stream("reply to Aman Imran saying sounds good")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft reply to aman imran: "sounds good"', text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
+        self.assertEqual(router._pending_message_draft["body"], "sounds good")
+        smart_mock.assert_not_called()
+
     def test_plain_said_prompt_does_not_become_incoming_message_relay(self):
         with patch("router.smart_stream", return_value=(iter(["SQL answer."]), "Open-Source")):
             stream, label = router.route_stream("Aman said write a SQL query")
