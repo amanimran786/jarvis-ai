@@ -40,6 +40,7 @@ Linked notes: [[03 Brain Schema]], [[04 Capture Workflow]], [[70 Jarvis Decision
 - added [[98 CLI Agent Advances]] to capture current CLI-agent patterns from `gh skill`, OpenCode attachable backends, Claude Code architecture analysis, and Skilldex
 - added `jarvis --cli-advances` and console `/cli-advances` so Jarvis can report the local-first CLI upgrade backlog without opening the full vault note
 - added `jarvis --skills-export-preview` and console `/skills-export-preview` for a no-write `.agents/skills` compatibility preview with provenance, target paths, and warnings
+- added `jarvis --skill-audit` and console `/skill-audit` to diagnose local skill package quality before any real agent-skill export
 
 ## 2026-04-24
 

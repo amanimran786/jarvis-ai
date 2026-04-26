@@ -97,7 +97,7 @@ Reject: public registry dependence for core Jarvis behavior.
 2. Add `.agents/skills` export preview with no writes by default. Status: done through `jarvis --skills-export-preview`.
 3. Add `/sessions`, `/resume`, and `/fork` for terminal continuity.
 4. Add `/mission-control` with daemon, tasks, approvals, dirty git state, context budget, and packaged-app identity.
-5. Add `--skill-audit` for local skill diagnostics.
+5. Add `--skill-audit` for local skill diagnostics. Status: done through `jarvis --skill-audit`.
 6. Add a terminal transcript export command for debugging and sharing Jarvis failures.
 
 ## Sources
