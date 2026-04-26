@@ -139,12 +139,11 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         action = (params.get("action", "read") or "read").strip().lower()
         if action == "read":
             return True, gs.get_unread_emails(max_results=5)
-        to = params.get("to", "").strip()
-        if not to:
-            return False, "No recipient specified."
-        subject = params.get("subject", "Jarvis Report")
-        body = params.get("body", step_results.get(max(step_results.keys(), default=0), ""))
-        return True, gs.send_email(to, subject, body)
+        return (
+            False,
+            "Email sending requires an explicit router confirmation draft. "
+            "Ask Jarvis to draft the email, then confirm send.",
+        )
 
     if tool == "calendar":
         import google_services as gs

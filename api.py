@@ -620,6 +620,14 @@ def eval_summary(hours: int = 24 * 7):
 
 @app.get("/status")
 def status(refresh: bool = False):
+    state = runtime_state.get_state()
+    if state.status != "ONLINE" or not state.api_running:
+        runtime_state.mark_started(
+            host=get_host(),
+            port=get_port(),
+            thread_name=state.api_thread_name or "JarvisAPI",
+            reason=state.boot_reason or "status_probe",
+        )
     call_assist = runtime_state.refresh_call_assist(force_refresh=refresh)
     try:
         from brains import brain_ollama

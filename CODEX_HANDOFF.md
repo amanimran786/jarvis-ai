@@ -77,3 +77,60 @@ python3 -m pytest tests/test_jarvis_regression_suite.py -q -k 'test_message_mult
 python3 -m pytest tests/test_jarvis_regression_suite.py -q -k 'email_compose or email_confirm or pending_email or time_query_bypasses_pending_email'
 python3 -m pytest tests/test_mem0_layer.py tests/test_voice_tts_regression.py -q
 ```
+
+## Claude Code parallel track — 2026-04-25
+
+**Taking ownership of (do not touch):**
+1. `briefing.py` — morning/on-demand status briefing (weather + calendar + unread email + memory summary)
+2. `router.py` lines for `email_compose` flow — send email via Google, parallel to iMessage flow
+3. `tools.py` — `web_search` summarization pass using gemma4:e4b (no LLM timeout risk)
+4. `google_services.py` — `send_email()` wiring + `get_unread_emails()` improvements
+
+**Leave for Codex:**
+- `voice.py`, `messages.py`, `messages_thread.py`, `mem0_layer.py`, `local_runtime/`
+- Any STT/TTS/audio fixes
+- iMessage FDA flow
+
+## Codex parallel track — 2026-04-25 18:05 PT
+
+Applied and verified:
+- Weather now accepts requested locations: `tools.get_weather(location="")`; router fast-path and orchestrator weather pass parsed `location/city/place`.
+- Timer fast-path now accepts `set a 5 minute timer`, not only `set a timer for 5 minutes`.
+- Pending email drafts now accept bare `cancel`, `stop`, `nevermind`, and `no`; these clear the draft and never call `send_email`.
+- Email compose now accepts conservative spoken forms: `write an email to ... saying ...`, `draft an email for ... saying ...`, and `send ... an email saying ...`.
+- Google OAuth files moved out of repo/app bundle path: `google_services.py` uses `~/Library/Application Support/Jarvis/{credentials.json,token.json}` and migrates legacy repo-root files if needed.
+- `Jarvis.spec` excludes `.env`, `credentials.json`, and `token.json` from bundled datas.
+- Normal voice wake-word mic selection skips meeting/virtual devices such as `Microsoft Teams Audio`, `ZoomAudio`, `BlackHole`, `Loopback`, and aggregate/multi-output devices. Smart Listen keeps its separate meeting-audio policy.
+- Voice regression tests now point `.jarvis_voice.log` at a temp path so tests do not pollute production Application Support logs.
+
+Verification:
+```bash
+./venv/bin/python -m unittest tests.test_mem0_layer tests.test_voice_tts_regression \
+  tests.test_jarvis_regression_suite.RouterTests.test_local_beta_fast_path \
+  tests.test_jarvis_regression_suite.RouterTests.test_engineering_beta_fast_path \
+  tests.test_jarvis_regression_suite.RouterTests.test_google_auth_files_are_outside_repo_and_excluded_from_bundle \
+  tests.test_jarvis_regression_suite.RouterTests.test_email_compose_accepts_common_spoken_forms \
+  tests.test_jarvis_regression_suite.RouterTests.test_bare_cancel_clears_pending_email_draft_without_sending \
+  tests.test_jarvis_regression_suite.RouterTests.test_set_numeric_timer_phrase_uses_fast_path \
+  tests.test_jarvis_regression_suite.RouterTests.test_weather_query_passes_requested_location \
+  tests.test_jarvis_regression_suite.RouterTests.test_weather_tool_uses_orchestrator_location_param \
+  tests.test_jarvis_regression_suite.RouterTests.test_reply_to_thread_command_wins_over_pending_relay_recipient \
+  tests.test_jarvis_regression_suite.RouterTests.test_short_incoming_relay_stays_on_fast_path \
+  tests.test_jarvis_regression_suite.RouterTests.test_search_query_bypasses_pending_email_draft \
+  tests.test_message_intent_parsing tests.test_messages_contacts tests.test_jarvis_health -v
+git diff --check
+PYINSTALLER_CONFIG_DIR=/tmp/pyinstaller-jarvis-codex-auth scripts/install_jarvis_app.sh --applications-only
+```
+
+Packaged app verification on side port 8774 passed:
+- `/status` online, open-source, local available.
+- `write an email to beta@example.com saying Ship it` stages a Gmail draft.
+- `cancel` cancels the draft.
+- `set a 5 minute timer` returns `Timer set for 5 minutes.`
+- `what is the weather in San Jose today?` returns San Jose weather.
+- `find /Users/truthseeker/Applications/Jarvis.app -name token.json -o -name credentials.json -o -name .env` returned no bundled secrets.
+- Latest side run selected `MacBook Pro Microphone` without AUHAL noise. Earlier side run reproduced `PaMacCore (AUHAL)` errors before recovering, so CoreAudio/PyAudio instability is improved by filtering virtual devices but not proven fully eliminated.
+
+Current live runtime:
+- Claude/source runtime is still on `127.0.0.1:8765` as `/Users/truthseeker/jarvis-ai/venv/bin/python main.py --no-ui`.
+- Codex side-port packaged verifier on `8774` was stopped after verification.

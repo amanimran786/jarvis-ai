@@ -347,6 +347,21 @@ def lookup_contact(name: str) -> str | None:
     return None
 
 
+def lookup_contact_email(name: str) -> str | None:
+    """
+    Look up a contact's email address by name.
+    Returns the email string on an unambiguous match, or None.
+    Prefers email handles over phone — opposite priority from lookup_contact.
+    """
+    rows = _collect_contact_rows(name)
+    email_rows = [r for r in rows if r["kind"] == "email" and r.get("value")]
+    if not email_rows:
+        return None
+    if len({r["name"] for r in email_rows}) == 1:
+        return _normalize_contact_address(email_rows[0]["value"])
+    return None
+
+
 def describe_contact_handles(name: str) -> str:
     rows = _collect_contact_rows(name)
     if not rows:

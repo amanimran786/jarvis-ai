@@ -130,6 +130,12 @@ def _parse_timer(text: str):
     return seconds, f"{amount} {unit}{'s' if amount > 1 else ''}"
 
 
+def _is_timer_request(lower: str) -> bool:
+    return any(p in lower for p in ("set a timer", "timer for", "remind me in")) or bool(
+        re.search(r"\b(?:set|start|create)\s+(?:a\s+)?\d+\s*(?:second|minute|hour)s?\s+timer\b", lower)
+    )
+
+
 def _parse_calendar_reminder(text: str):
     """Parse natural 'remind me to X at Y' / 'schedule X at Y' into (title, dt) or None.
 
@@ -752,6 +758,7 @@ _last_message_send_result: dict | None = None
 _pending_message_draft: dict | None = None
 _pending_email_draft: dict | None = None
 _fuzzy_contact_suggestions: list[str] = []
+_pending_resolved_address: str = ""  # pre-resolved address set alongside pending recipient
 _last_assistant_reply: str = ""
 _JARVIS_INTRO_SHORT = "Hi, this is Jarvis, Aman's assistant."
 _JARVIS_INTRO_DETAILED = (
@@ -765,10 +772,11 @@ _JARVIS_INTRO_DETAILED = (
 _pending_improvements: list = [None]
 
 
-def _set_pending_recipient(name: str):
-    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient
+def _set_pending_recipient(name: str, resolved_address: str = ""):
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _pending_resolved_address
     _pending_msg_recipient = name.strip()
     _awaiting_msg_recipient = False
+    _pending_resolved_address = resolved_address.strip() if resolved_address else ""
     if _pending_msg_recipient:
         _last_msg_recipient = _pending_msg_recipient
 
@@ -780,14 +788,17 @@ def _set_awaiting_recipient():
 
 
 def _clear_pending_recipient():
-    global _pending_msg_recipient, _awaiting_msg_recipient
+    global _pending_msg_recipient, _awaiting_msg_recipient, _pending_resolved_address
     _pending_msg_recipient = ""
     _awaiting_msg_recipient = False
+    _pending_resolved_address = ""
 
 
 def _sanitize_message_body(body: str) -> str:
     cleaned = (body or "").strip().strip("\"'")
+    # Strip leading "say: " or bare "say " when used as a command prefix
     cleaned = re.sub(r"^say\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^say\s+(?=\S)", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"\s+", " ", cleaned)
     quoted = re.search(r"\bdraft ready for .+?:\s*\"([^\"]+)\"", cleaned, flags=re.IGNORECASE)
     if quoted:
@@ -805,6 +816,15 @@ def _eager_resolve_contact(recipient: str) -> str | None:
     """Return resolved phone/email for a name recipient if unambiguous, else None."""
     if re.search(r"[\d@\+]", recipient):
         return None
+    # Check thread history first — if we've messaged someone with this name (or first name),
+    # prefer that known address over a potentially wrong Contacts lookup.
+    name_lower = recipient.strip().lower()
+    for thread in msg_thread.list_threads():
+        stored_name = (thread.get("contact") or "").strip().lower()
+        if stored_name == name_lower or stored_name.startswith(name_lower + " ") or stored_name.split()[0] == name_lower:
+            addr = thread.get("address", "")
+            if addr and re.search(r"[\d@]", addr):
+                return addr
     found = msg.lookup_contact(recipient)
     if found and not found.startswith("__"):
         return found
@@ -866,6 +886,10 @@ def _resolve_email_recipient(recipient: str) -> tuple[str, str]:
     direct = _extract_email_address(recipient)
     if direct:
         return direct, ""
+    # Email-specific lookup — avoids returning phone numbers for contacts that have both
+    email_found = msg.lookup_contact_email(recipient)
+    if email_found:
+        return email_found, ""
     found = msg.lookup_contact(recipient)
     if found and "@" in found:
         return found, ""
@@ -895,17 +919,30 @@ def _email_confirmation_prompt() -> str:
     recipient_display = f"{recipient} ({to_address})" if to_address and to_address != recipient else recipient
     return (
         f"Email draft ready for {recipient_display}: subject \"{subject}\". "
-        f"Body: \"{body}\". Say confirm send to send it, or cancel email to stop."
+        f"Body: \"{body}\". Say confirm send to send it, or cancel to stop."
     )
 
 
 def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
     raw = _strip_polite_prefix(text or "").strip()
-    match = re.match(r"^(?:send\s+(?:an?\s+)?email\s+to|email)\s+(.+)$", raw, flags=re.IGNORECASE)
-    if not match:
+
+    recipient_prefix = ""
+    match = re.match(
+        r"^(?:send\s+(?:an?\s+)?email\s+to|email|(?:write|draft|compose)\s+(?:an?\s+)?email\s+(?:to|for))\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        payload = match.group(1).strip()
+    else:
+        match = re.match(r"^send\s+(.+?)\s+(?:an?\s+)?email\s+(.+)$", raw, flags=re.IGNORECASE)
+        if not match:
+            return None
+        recipient_prefix = match.group(1).strip()
+        payload = f"{recipient_prefix} {match.group(2).strip()}"
+    if not payload:
         return None
-    payload = match.group(1).strip()
-    if not payload or re.search(r"\b(?:inbox|unread|read|check|show|list)\b", payload, flags=re.IGNORECASE):
+    if re.search(r"\b(?:inbox|unread|read|check|show|list)\b", payload, flags=re.IGNORECASE):
         return None
 
     delimiter = re.search(
@@ -914,7 +951,7 @@ def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
         flags=re.IGNORECASE,
     )
     if delimiter:
-        recipient = payload[:delimiter.start()].strip().strip(",;:")
+        recipient = (recipient_prefix or payload[:delimiter.start()]).strip().strip(",;:")
         remainder = payload[delimiter.start():].strip()
     elif ":" in payload:
         recipient, remainder = [part.strip() for part in payload.split(":", 1)]
@@ -949,9 +986,17 @@ def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
 
 def _is_email_cancel_query(lower: str) -> bool:
     text = _strip_polite_prefix(lower or "").strip()
+    if text in {"cancel", "abort", "nevermind", "never mind", "stop", "discard", "nvm", "no", "nope"}:
+        return True
     if text in {"cancel email", "cancel the email", "cancel draft", "cancel the draft", "discard email"}:
         return True
-    return bool(re.match(r"^(?:don't|do not)\s+send\s+(?:the\s+)?email\b", text, flags=re.IGNORECASE))
+    return bool(
+        re.match(
+            r"^(?:(?:don't|do not)\s+send\s+(?:the\s+)?email|forget\s+it|ignore\s+it|don't\s+bother)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _is_contact_selection(lower: str) -> str | None:
@@ -1316,7 +1361,10 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         if recipient and _looks_like_contact_name(recipient):
             return recipient, _JARVIS_INTRO_SHORT
 
-    common_body_second_words = {"hi", "hello", "hey", "yo", "thanks", "thank", "ok", "okay", "yes", "no", "milk"}
+    common_body_second_words = {
+        "hi", "hello", "hey", "yo", "thanks", "thank", "ok", "okay", "yes", "no",
+        "milk", "get", "bring", "buy", "pick", "remind", "ask", "tell", "introduce",
+    }
     contact_only_payload = payload.strip().rstrip(" .!?") if payload else ""
     if contact_only_payload and re.fullmatch(r"[A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+)", contact_only_payload):
         tokens = contact_only_payload.split()
@@ -1585,7 +1633,20 @@ _TOOL_HINT_PATTERNS = [
     ("email",    r"\b(email|inbox|unread|emails?)\b"),
 ]
 
-_SEARCH_TRIGGERS = ("search the web for", "search google for", "search for", "look up", "google ")
+_SEARCH_TRIGGERS = (
+    "search the web for",
+    "search web for",
+    "web search for",
+    "search the internet for",
+    "search internet for",
+    "search online for",
+    "search google for",
+    "look on github for",
+    "look through github for",
+    "search for",
+    "look up",
+    "google ",
+)
 
 
 def _tool_hint(text: str) -> str | None:
@@ -1603,7 +1664,7 @@ def _dispatch_single_intent(query: str) -> str | None:
         return f"It's {datetime.now().strftime('%-I:%M %p')}."
     if hint == "weather":
         try:
-            return tools.get_weather()
+            return tools.get_weather(_extract_weather_location(query))
         except Exception:
             return "Weather is unavailable right now."
     if hint == "calendar":
@@ -1619,13 +1680,39 @@ def _dispatch_single_intent(query: str) -> str | None:
     return None
 
 
+def _extract_weather_location(query: str) -> str:
+    text = (query or "").strip()
+    if not text:
+        return ""
+
+    patterns = (
+        r"\b(?:weather|forecast|temperature)\s+(?:today\s+|right\s+now\s+|currently\s+)?(?:in|for|at)\s+(.+)$",
+        r"\b(?:weather|forecast)\s+(.+)$",
+        r"\b(?:hot|cold)\s+(?:outside\s+)?(?:in|for|at)\s+(.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        location = match.group(1).strip(" .?!,")
+        location = re.sub(
+            r"\b(?:today|tonight|tomorrow|right now|currently|current|please)$",
+            "",
+            location,
+            flags=re.IGNORECASE,
+        ).strip(" .?!,")
+        if location and location.lower() not in {"today", "tonight", "tomorrow", "outside", "right now"}:
+            return location
+    return ""
+
+
 def _extract_search_query(query: str) -> str:
     text = (query or "").strip()
     lower_text = text.lower()
     if not any(lower_text.startswith(p) or (" " + p) in lower_text for p in _SEARCH_TRIGGERS):
         return ""
     return re.sub(
-        r"(?:search(?:\s+the\s+web)?\s+for|search\s+google\s+for|look\s+up|google)\s+",
+        r"(?:search(?:\s+(?:the\s+)?(?:web|internet|online))?\s+for|web\s+search\s+for|search\s+google\s+for|look\s+(?:on|through)\s+github\s+for|look\s+up|google)\s+",
         "",
         text,
         count=1,
@@ -1656,6 +1743,104 @@ def _is_incoming_message_relay(text: str) -> re.Match | None:
         r"^(.+?)\s+said\s+(?:to\s+reply|to\s+text\s+back|to\s+message\s+back)\s*[:,-]?\s+(.+)$",
         stripped,
         flags=re.IGNORECASE,
+    )
+
+
+def _parse_reply_to_contact(text: str) -> str:
+    match = re.match(
+        r"^(?:reply\s+to|respond\s+to|write\s+back\s+to)\s+(.+?)(?:'s\s+message|'s\s+text)?$",
+        (text or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    contact = match.group(1).strip()
+    return contact if _looks_like_contact_name(contact) else ""
+
+
+def _parse_reply_compose(text: str) -> tuple[str, str] | None:
+    raw = _strip_message_modifiers(_strip_polite_prefix(text or "")).strip()
+    match = re.match(
+        r"^(?:reply|respond|write\s+back)\s+(?:to\s+)?(.+?)\s+"
+        r"(?:saying|with|that|tell(?:ing)?(?:\s+(?:him|her|them))?|ask(?:ing)?(?:\s+(?:him|her|them))?)\s+(.+)$",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+    recipient = _clean_relationship_recipient(match.group(1))
+    body = _sanitize_message_body(match.group(2))
+    if recipient and body and _looks_like_contact_name(recipient):
+        return recipient, body
+    return None
+
+
+def _parse_bare_pending_contact_switch(text: str) -> str:
+    raw = _strip_message_modifiers(_strip_polite_prefix(text or "")).strip().strip(" .!?")
+    if not raw:
+        return ""
+    lower = raw.lower()
+    if lower in {
+        "cancel", "abort", "stop", "discard", "nvm", "nevermind", "never mind",
+        "confirm", "send", "yes", "yeah", "yep", "yup", "no", "nope",
+        "ok", "okay", "sure", "do it", "wrong contact", "wrong person",
+    }:
+        return ""
+    if _looks_like_standalone_question(lower) or re.search(
+        r"\b(?:say|saying|tell|telling|ask|asking|bring|get|buy|pick|remind|introduce|hello|hi|hey|thanks)\b",
+        lower,
+    ):
+        return ""
+    candidate = _clean_relationship_recipient(raw)
+    tokens = [tok for tok in re.split(r"\s+", candidate) if tok]
+    if not candidate or not _looks_like_contact_name(candidate):
+        return ""
+    if lower in _RELATIONSHIP_CONTACTS:
+        return candidate
+    if len(tokens) >= 2:
+        return candidate
+    return ""
+
+
+def _reply_to_thread_response(contact: str) -> str:
+    history = msg_thread.format_thread_for_prompt(contact, last_n=6)
+    _set_pending_recipient(contact)
+    if history:
+        return (
+            f"Here's your conversation with {contact}:\n{history}\n\n"
+            f"What would you like to say back?"
+        )
+    return f"No prior conversation recorded with {contact}. What would you like to say?"
+
+
+def _start_local_beta_background(*, suite: str = "all", build_training_pack: bool = False) -> str:
+    label = "engineering beta" if suite == "engineering" else "local beta"
+    try:
+        local_beta._ensure_dirs()
+    except Exception:
+        pass
+
+    def _run():
+        try:
+            local_beta.run_beta_suite(suite=suite, build_training_pack=build_training_pack)
+        except Exception as exc:
+            try:
+                evals.log_failure(
+                    issue=f"{label} background run failed: {exc}",
+                    expected="Background beta suite should complete and write a run artifact.",
+                    user_input=f"run {label}",
+                    response=str(exc),
+                    model="Local Model",
+                    source="local_beta_background",
+                )
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=False, name=f"jarvis-{label.replace(' ', '-')}-runner").start()
+    training_note = " and training pack" if build_training_pack else ""
+    return (
+        f"Started the {label}{training_note} run in the background. "
+        "Say local model status to check the latest beta results."
     )
 
 
@@ -1706,6 +1891,21 @@ def _pending_draft_interrupt_route(user_input: str, lower: str) -> tuple | None:
     if _looks_like_standalone_question(lower):
         return smart_stream(user_input)
     return None
+
+
+_MAX_MEM0_REPLY_CHARS = 900
+
+
+def _mem0_turn_text(user_input: str, assistant_reply: str) -> str:
+    """Compact tool-heavy turns before writing them to episodic memory."""
+    user = user_input.strip()
+    reply = assistant_reply.strip()
+    search_query = _extract_search_query(user)
+    if search_query:
+        return f"User searched the web for: {search_query}"
+    if len(reply) > _MAX_MEM0_REPLY_CHARS:
+        reply = reply[:_MAX_MEM0_REPLY_CHARS].rstrip() + "..."
+    return f"User: {user}\nJarvis: {reply}"
 
 
 def _detect_multi_intent(lower: str) -> list[str] | None:
@@ -1869,6 +2069,15 @@ def route_stream(user_input: str) -> tuple:
             _awaiting_msg_recipient = False
             _set_pending_message_draft(recipient_correction, body)
             return _s(_message_confirmation_prompt(recipient_correction, body)), "Messages"
+        search_query = _extract_search_query(user_input)
+        if search_query:
+            return _s(tools.web_search(search_query)), "Search"
+        bare_contact_switch = _parse_bare_pending_contact_switch(user_input)
+        if bare_contact_switch:
+            _fuzzy_contact_suggestions.clear()
+            _awaiting_msg_recipient = False
+            _set_pending_message_draft(bare_contact_switch, body)
+            return _s(_message_confirmation_prompt(bare_contact_switch, body)), "Messages"
         if _looks_like_message_rephrase(lower):
             _clear_message_state()
             _set_awaiting_recipient()
@@ -2010,8 +2219,12 @@ def route_stream(user_input: str) -> tuple:
 
     if _pending_msg_recipient:
         recipient_correction = _parse_message_recipient_correction(user_input)
+        reply_to_contact = _parse_reply_to_contact(user_input)
         if not lower:
             return _s(f"What would you like to say to {_pending_msg_recipient}?"), "Messages"
+        if reply_to_contact:
+            _clear_pending_recipient()
+            return _s(_reply_to_thread_response(reply_to_contact)), "Messages"
         if _is_intro_detail_request(lower):
             recipient = _pending_msg_recipient
             _clear_pending_recipient()
@@ -2053,8 +2266,9 @@ def route_stream(user_input: str) -> tuple:
         if unsafe_reply:
             return _s(unsafe_reply), "Messages"
         recipient = _pending_msg_recipient
+        pre_resolved = _pending_resolved_address
         _clear_pending_recipient()
-        resolved = _eager_resolve_contact(recipient)
+        resolved = pre_resolved or _eager_resolve_contact(recipient)
         _set_pending_message_draft(recipient, user_input, resolved_address=resolved)
         return _s(_message_confirmation_prompt(recipient, user_input)), "Messages"
 
@@ -2083,7 +2297,7 @@ def route_stream(user_input: str) -> tuple:
     if _incoming_match:
         _in_contact = _incoming_match.group(1).strip()
         _in_body = _incoming_match.group(2).strip()
-        if _looks_like_contact_name(_in_contact) and len(_in_body) > 2:
+        if _looks_like_contact_name(_in_contact) and len(_in_body) >= 2:
             msg_thread.record_incoming(_in_contact, _in_body)
             reply_body = _draft_reply_from_relay_body(_in_body)
             if reply_body:
@@ -2093,28 +2307,27 @@ def route_stream(user_input: str) -> tuple:
                 resolved = _eager_resolve_contact(_in_contact)
                 _set_pending_message_draft(_in_contact, reply_body, resolved_address=resolved)
                 return _s(f"Draft reply to {_in_contact}: \"{reply_body}\". Say confirm send to send it, or edit it first."), "Messages"
-            _set_pending_recipient(_in_contact)
+            resolved = _eager_resolve_contact(_in_contact)
+            _set_pending_recipient(_in_contact, resolved_address=resolved or "")
+            if resolved:
+                masked = msg._mask_contact_handle(resolved) if hasattr(msg, "_mask_contact_handle") else resolved
+                return _s(f"Noted {_in_contact}'s reply: \"{_in_body}\". What would you like to say back? (will send to {masked})"), "Messages"
             return _s(f"Noted {_in_contact}'s reply: \"{_in_body}\". What would you like to say back?"), "Messages"
 
+    _reply_compose = _parse_reply_compose(user_input)
+    if _reply_compose:
+        recipient, body = _reply_compose
+        unsafe_reply = _unsafe_message_draft_reply(body)
+        if unsafe_reply:
+            return _s(unsafe_reply), "Messages"
+        resolved = _eager_resolve_contact(recipient)
+        _set_pending_message_draft(recipient, body, resolved_address=resolved)
+        return _s(f"Draft reply to {recipient}: \"{body}\". Say confirm send to send it, or edit it first."), "Messages"
+
     # ── Reply-to: "reply to Farhan" / "respond to Farhan's message" ──────────
-    _reply_to_match = re.match(
-        r"^(?:reply\s+to|respond\s+to|write\s+back\s+to)\s+(.+?)(?:'s\s+message|'s\s+text)?$",
-        user_input.strip(),
-        flags=re.IGNORECASE,
-    )
-    if _reply_to_match:
-        _rt_contact = _reply_to_match.group(1).strip()
-        if _looks_like_contact_name(_rt_contact):
-            history = msg_thread.format_thread_for_prompt(_rt_contact, last_n=6)
-            if history:
-                _set_pending_recipient(_rt_contact)
-                return _s(
-                    f"Here's your conversation with {_rt_contact}:\n{history}\n\n"
-                    f"What would you like to say back?"
-                ), "Messages"
-            else:
-                _set_pending_recipient(_rt_contact)
-                return _s(f"No prior conversation recorded with {_rt_contact}. What would you like to say?"), "Messages"
+    _rt_contact = _parse_reply_to_contact(user_input)
+    if _rt_contact:
+        return _s(_reply_to_thread_response(_rt_contact)), "Messages"
 
     # ── Wake-word / greeting acknowledgement ─────────────────────────────────
     if lower in {
@@ -2371,7 +2584,7 @@ def route_stream(user_input: str) -> tuple:
         return _s(f"Memory consolidation complete: {result}"), "Status"
 
     # Timer
-    if any(p in lower for p in ("set a timer", "timer for", "remind me in")):
+    if _is_timer_request(lower):
         parsed = _parse_timer(lower)
         if parsed:
             seconds, label = parsed
@@ -2503,13 +2716,13 @@ def route_stream(user_input: str) -> tuple:
         if any(p in lower for p in ("local eval status", "local model status")):
             return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
         if any(p in lower for p in ("beta test jarvis", "run local beta", "beta test local model")):
-            return _s(local_beta.result_text(local_beta.run_beta_suite())), "Local Model"
+            return _s(_start_local_beta_background()), "Local Model"
         if any(p in lower for p in ("beta test engineering", "run engineering beta")):
-            return _s(local_beta.result_text(local_beta.run_beta_suite(suite="engineering"))), "Local Model"
+            return _s(_start_local_beta_background(suite="engineering")), "Local Model"
         if "coach local model" in lower:
-            return _s(local_beta.result_text(local_beta.run_beta_suite(build_training_pack=True))), "Local Model"
+            return _s(_start_local_beta_background(build_training_pack=True)), "Local Model"
         if "coach engineering model" in lower:
-            return _s(local_beta.result_text(local_beta.run_beta_suite(build_training_pack=True, suite="engineering"))), "Local Model"
+            return _s(_start_local_beta_background(suite="engineering", build_training_pack=True)), "Local Model"
         if any(p in lower for p in ("automate local model", "local model autopilot", "local model cycle")):
             return _s(local_model_automation.result_text(local_model_automation.run_cycle())), "Local Model"
         if any(p in lower for p in ("benchmark local model", "benchmark local models", "compare local models", "local model benchmark")):
@@ -3105,7 +3318,13 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
     # ── Weather ───────────────────────────────────────────────────────────────
     if tool == "weather":
-        return _s(tools.get_weather()), "Weather"
+        location = (
+            params.get("location")
+            or params.get("city")
+            or params.get("place")
+            or _extract_weather_location(user_input)
+        )
+        return _s(tools.get_weather(location)), "Weather"
 
     # ── Notes ─────────────────────────────────────────────────────────────────
     if tool == "notes":
@@ -3279,14 +3498,14 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
     Call this from the UI / voice layer once the full assistant reply is
     collected.  It runs in a background thread so it never blocks the UX.
 
-    The text Jarvis stores is a compact "Q: ... A: ..." pair so mem0 can
-    extract structured facts from it (preferences, decisions, context).
+    The text Jarvis stores is compacted first so mem0 can extract useful
+    context without preserving full tool dumps such as web-search result pages.
     """
     global _last_assistant_reply
     if not user_input or not assistant_reply:
         return
     _last_assistant_reply = assistant_reply.strip()
-    turn = f"User: {user_input.strip()}\nJarvis: {assistant_reply.strip()}"
+    turn = _mem0_turn_text(user_input, assistant_reply)
     _m0.add_async(turn)
     # Background fact extraction — silently captures tasks/decisions/preferences
     try:

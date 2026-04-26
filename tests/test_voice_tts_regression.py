@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -6,7 +8,14 @@ import voice
 
 
 class VoiceTtsRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self._voice_log_tmp = TemporaryDirectory()
+        self._previous_voice_log_path = voice._VOICE_LOG_PATH
+        voice._VOICE_LOG_PATH = Path(self._voice_log_tmp.name) / ".jarvis_voice.log"
+
     def tearDown(self):
+        voice._VOICE_LOG_PATH = self._previous_voice_log_path
+        self._voice_log_tmp.cleanup()
         voice._kokoro_disabled_reason = ""
         voice._mic_failure_cooldown_until = 0.0
         voice._mic_last_failure_detail = ""
@@ -206,8 +215,8 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         labels = [label for label, _ in candidates]
         indexes = [mic.device_index for _, mic in candidates]
-        self.assertEqual(labels, ["MacBook Pro Microphone", "Microsoft Teams Audio", "Default input device"])
-        self.assertEqual(indexes, [1, 3, None])
+        self.assertEqual(labels, ["MacBook Pro Microphone", "Default input device"])
+        self.assertEqual(indexes, [1, None])
 
     def test_wait_for_wake_word_backs_off_after_microphone_open_failure(self):
         voice._stop_requested.clear()

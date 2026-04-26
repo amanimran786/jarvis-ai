@@ -76,6 +76,19 @@ class ExecutionEngineContractTests(unittest.TestCase):
             payload = json.loads(next(trace_dir.glob("*.json")).read_text(encoding="utf-8"))
             self.assertEqual(payload["attempts"], 2)
 
+    def test_email_tool_send_is_confirmation_gated(self):
+        step = task_planner.TaskStep(
+            number=1,
+            description="send email",
+            tool="email",
+            params={"action": "send", "to": "beta@example.com", "subject": "Beta", "body": "Ship it"},
+        )
+        with patch("google_services.send_email") as send_mock:
+            ok, result = execution_engine._execute_tool_call("email", step.params, step, {})
+        self.assertFalse(ok)
+        self.assertIn("confirmation draft", result.lower())
+        send_mock.assert_not_called()
+
 
 class TaskPlannerSanitizerTests(unittest.TestCase):
     def test_plan_task_downgrades_unknown_tools_to_chat(self):

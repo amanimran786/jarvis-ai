@@ -29,6 +29,11 @@ EXCLUDE_EXTS = {
     ".pyo",
     ".spec",
 }
+EXCLUDE_FILES = {
+    ".env",
+    "credentials.json",
+    "token.json",
+}
 
 
 def iter_datas():
@@ -38,6 +43,8 @@ def iter_datas():
         if any(part in EXCLUDE_DIRS for part in rel.parts):
             continue
         if not path.is_file():
+            continue
+        if path.name in EXCLUDE_FILES:
             continue
         if path.suffix in EXCLUDE_EXTS:
             continue
@@ -178,10 +185,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
-    exclude_binaries=False,
+    exclude_binaries=True,
     name="Jarvis",
     debug=False,
     bootloader_ignore_signals=False,
@@ -197,8 +202,20 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+ensure_collect_destination_dirs()
+
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="Jarvis",
+)
+
+app = BUNDLE(
+    coll,
     name="Jarvis.app",
     icon=str(ICON) if ICON.is_file() else None,
     bundle_identifier="com.truthseeker.jarvis",

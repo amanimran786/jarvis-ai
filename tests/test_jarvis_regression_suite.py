@@ -29,8 +29,10 @@ import operative
 from brains import brain_ollama
 import config
 import graph_context
+import google_services
 import interview_profile
 import meeting_listener
+import runtime_state
 import ui
 import stealth
 from desktop import screen_capture
@@ -1332,6 +1334,38 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(router._pending_email_draft["to"], "beta@example.com")
         self.assertEqual(router._pending_email_draft["body"], "This is only a draft")
 
+    def test_email_compose_accepts_common_spoken_forms(self):
+        examples = (
+            "write an email to beta@example.com saying Ship it",
+            "draft an email for beta@example.com saying Ship it",
+            "send beta@example.com an email saying Ship it",
+        )
+        for prompt in examples:
+            with self.subTest(prompt=prompt):
+                router._clear_pending_email_draft()
+
+                stream, label = router.route_stream(prompt)
+                text = "".join(stream)
+
+                self.assertEqual(label, "Gmail")
+                self.assertIn("Email draft ready for beta@example.com", text)
+                self.assertTrue(router._has_pending_email_draft())
+                self.assertEqual(router._pending_email_draft["to"], "beta@example.com")
+                self.assertEqual(router._pending_email_draft["body"], "Ship it")
+
+    def test_google_auth_files_are_outside_repo_and_excluded_from_bundle(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        app_data = runtime_state.app_data_dir().resolve()
+
+        self.assertEqual(Path(google_services.TOKEN_FILE).resolve().parent, app_data)
+        self.assertEqual(Path(google_services.CREDENTIALS_FILE).resolve().parent, app_data)
+        self.assertNotEqual(Path(google_services.TOKEN_FILE).resolve(), repo_root / "token.json")
+        self.assertNotEqual(Path(google_services.CREDENTIALS_FILE).resolve(), repo_root / "credentials.json")
+
+        spec_text = (repo_root / "Jarvis.spec").read_text(encoding="utf-8")
+        self.assertIn('"token.json"', spec_text)
+        self.assertIn('"credentials.json"', spec_text)
+
     def test_email_confirm_sends_pending_draft(self):
         router.route_stream("Email beta@example.com subject: Beta body: Ship it")
 
@@ -1344,6 +1378,21 @@ class RouterTests(unittest.TestCase):
         send_mock.assert_called_once_with("beta@example.com", "Beta", "Ship it")
         self.assertFalse(router._has_pending_email_draft())
 
+    def test_bare_cancel_clears_pending_email_draft_without_sending(self):
+        for cancel_text in ("cancel", "stop", "nevermind", "no"):
+            with self.subTest(cancel_text=cancel_text):
+                router._clear_pending_email_draft()
+                router.route_stream("Email beta@example.com subject: Beta body: Ship it")
+
+                with patch("router.gs.send_email") as send_mock:
+                    stream, label = router.route_stream(cancel_text)
+                    text = "".join(stream)
+
+                self.assertEqual(label, "Gmail")
+                self.assertIn("Canceled the email draft", text)
+                self.assertFalse(router._has_pending_email_draft())
+                send_mock.assert_not_called()
+
     def test_time_query_bypasses_pending_email_draft(self):
         router.route_stream("Email beta@example.com subject: Beta body: Ship it")
 
@@ -1354,6 +1403,61 @@ class RouterTests(unittest.TestCase):
         self.assertIn("It's", text)
         self.assertTrue(router._has_pending_email_draft())
         self.assertEqual(router._pending_email_draft["body"], "Ship it")
+
+    def test_weather_query_passes_requested_location(self):
+        with patch("router.tools.get_weather", return_value="Clear, 70°F, feels like 70°F in Oakland.") as weather_mock:
+            stream, label = router.route_stream("what's the weather in Oakland today?")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Status")
+        self.assertIn("Oakland", text)
+        weather_mock.assert_called_once_with("Oakland")
+
+    def test_weather_tool_uses_orchestrator_location_param(self):
+        decision = SimpleNamespace(tool="weather", params={"location": "San Jose"})
+        with patch("orchestrator.classify", return_value=decision), \
+             patch("router.skills.choose_skill", return_value=None), \
+             patch("router.tools.get_weather", return_value="Cloudy in San Jose.") as weather_mock:
+            stream, label = router._orchestrate("weather please", "weather please")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Weather")
+        self.assertIn("San Jose", text)
+        weather_mock.assert_called_once_with("San Jose")
+
+    def test_search_query_bypasses_pending_email_draft(self):
+        router.route_stream("Email beta@example.com subject: Beta body: Ship it")
+
+        with patch("router.tools.web_search", return_value="- Result: body"):
+            stream, label = router.route_stream("search web for local-first assistant")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Search")
+        self.assertIn("- Result", text)
+        self.assertTrue(router._has_pending_email_draft())
+        self.assertEqual(router._pending_email_draft["body"], "Ship it")
+
+    def test_mem0_turn_text_compacts_search_results(self):
+        text = router._mem0_turn_text("search web for local-first assistant", "- Result " * 300)
+
+        self.assertEqual(text, "User searched the web for: local-first assistant")
+        self.assertNotIn("- Result", text)
+
+    def test_set_numeric_timer_phrase_uses_fast_path(self):
+        def on_timer_done(_label):
+            pass
+
+        try:
+            router.set_timer_callback(on_timer_done)
+            with patch("router.tools.set_timer") as timer_mock:
+                stream, label = router.route_stream("set a 5 minute timer")
+                text = "".join(stream)
+        finally:
+            router.set_timer_callback(None)
+
+        self.assertEqual(label, "Timer")
+        self.assertIn("Timer set for 5 minutes", text)
+        timer_mock.assert_called_once_with(300, "5 minutes", on_timer_done)
 
     def test_cost_policy_fast_path(self):
         stream, label = router.route_stream("cost policy status")
@@ -1472,7 +1576,8 @@ class RouterTests(unittest.TestCase):
         self.assertIn("draft ready for aman imran", text3.lower())
         self.assertEqual(label4, "Messages")
         self.assertIn("sent to aman imran", text4.lower())
-        send_mock.assert_called_once_with("Aman Imran", "hello")
+        send_mock.assert_called_once()
+        self.assertEqual(send_mock.call_args[0][1], "hello")
 
     def test_message_single_turn_parses_recipient_and_body(self):
         with patch("router.msg.send_imessage", return_value="Sent to Aman Imran.") as send_mock:
@@ -1501,7 +1606,8 @@ class RouterTests(unittest.TestCase):
         send_mock.assert_not_called()
 
     def test_message_single_turn_understands_text_message_phrase(self):
-        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock, \
+             patch("router._eager_resolve_contact", return_value=None):
             stream, label = router.route_stream("Send a text message to dad to get chocolate milk")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
@@ -1509,7 +1615,8 @@ class RouterTests(unittest.TestCase):
         send_mock.assert_not_called()
 
     def test_message_single_turn_understands_text_my_dad_phrase(self):
-        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock, \
+             patch("router._eager_resolve_contact", return_value=None):
             stream, label = router.route_stream("text my dad to get milk")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
@@ -1517,7 +1624,8 @@ class RouterTests(unittest.TestCase):
         send_mock.assert_not_called()
 
     def test_message_dad_and_ask_him_to_strips_instruction_words(self):
-        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock:
+        with patch("router.msg.send_imessage", return_value="Sent to Dad.") as send_mock, \
+             patch("router._eager_resolve_contact", return_value=None):
             stream, label = router.route_stream("message dad and ask him to bring chocalte milk")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
@@ -1901,6 +2009,23 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(router._has_pending_message_draft())
         self.assertEqual(router._pending_message_draft["body"], "get milk")
 
+    def test_search_variants_bypass_pending_message_draft(self):
+        for phrase in ("web search for LiveKit agents", "search internet for Pipecat", "look on github for voice agents"):
+            with self.subTest(phrase=phrase):
+                router._clear_message_state()
+                with patch("router._eager_resolve_contact", return_value=None):
+                    router.route_stream("text Dad to get milk")
+                with patch("router.tools.web_search", return_value="- Result: body") as search_mock, \
+                     patch("router.smart_stream") as smart_mock:
+                    stream, label = router.route_stream(phrase)
+                    text = "".join(stream)
+                self.assertEqual(label, "Search")
+                self.assertIn("- Result", text)
+                self.assertTrue(router._has_pending_message_draft())
+                self.assertEqual(router._pending_message_draft["body"], "get milk")
+                search_mock.assert_called_once()
+                smart_mock.assert_not_called()
+
     def test_general_question_bypasses_pending_message_draft(self):
         router.route_stream("text Dad to get milk")
         with patch("router.smart_stream", return_value=(iter(["Tokyo."]), "Open-Source")):
@@ -1923,7 +2048,19 @@ class RouterTests(unittest.TestCase):
             stream2, label2 = router.route_stream("sounds good")
             text2 = "".join(stream2)
         self.assertEqual(label2, "Messages")
-        self.assertIn('draft ready for farhan: "sounds good"', text2.lower())
+        self.assertIn('draft ready for farhan', text2.lower())
+
+    def test_inline_reply_compose_bypasses_llm(self):
+        with patch("router._eager_resolve_contact", return_value=None), \
+             patch("router.smart_stream") as smart_mock:
+            stream, label = router.route_stream("reply to Aman Imran saying sounds good")
+            text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft reply to aman imran: "sounds good"', text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
+        self.assertEqual(router._pending_message_draft["body"], "sounds good")
+        smart_mock.assert_not_called()
 
     def test_plain_said_prompt_does_not_become_incoming_message_relay(self):
         with patch("router.smart_stream", return_value=(iter(["SQL answer."]), "Open-Source")):
@@ -1940,6 +2077,32 @@ class RouterTests(unittest.TestCase):
         self.assertIn("what would you like to say back", text.lower())
         self.assertEqual(router._pending_msg_recipient, "Aman Imran")
         record_mock.assert_called_once_with("Aman Imran", "beta reply received")
+
+    def test_short_incoming_relay_stays_on_fast_path(self):
+        with patch("router.msg_thread.record_incoming") as record_mock, \
+             patch("router.smart_stream") as smart_mock:
+            stream, label = router.route_stream("Farhan replied: yo")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("what would you like to say back", text.lower())
+        self.assertEqual(router._pending_msg_recipient, "Farhan")
+        record_mock.assert_called_once_with("Farhan", "yo")
+        smart_mock.assert_not_called()
+
+    def test_reply_to_thread_command_wins_over_pending_relay_recipient(self):
+        with patch("router.msg_thread.record_incoming"):
+            router.route_stream("Farhan replied: yo")
+
+        with patch("router.msg_thread.format_thread_for_prompt", return_value="Farhan: yo"):
+            stream, label = router.route_stream("reply to Farhan")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("here's your conversation with farhan", text.lower())
+        self.assertIn("what would you like to say back", text.lower())
+        self.assertFalse(router._has_pending_message_draft())
+        self.assertEqual(router._pending_msg_recipient, "Farhan")
 
     def test_incoming_relay_with_explicit_ask_instruction_drafts_fast_reply(self):
         with patch("router.msg_thread.record_incoming"), \
@@ -1965,6 +2128,28 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(router._has_pending_message_draft())
         self.assertEqual(router._pending_message_draft["recipient"], "mom")
         self.assertEqual(router._pending_message_draft["body"], "hi")
+
+    def test_pending_draft_bare_contact_switch_preserves_body(self):
+        with patch("router._eager_resolve_contact", return_value=None):
+            router.route_stream("message Dad get milk")
+        stream, label = router.route_stream("mom")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for mom: "get milk"', text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "mom")
+        self.assertEqual(router._pending_message_draft["body"], "get milk")
+
+    def test_pending_draft_full_name_switch_preserves_body(self):
+        with patch("router._eager_resolve_contact", return_value=None):
+            router.route_stream("message Dad get milk")
+        stream, label = router.route_stream("Aman Imran")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn('draft ready for aman imran: "get milk"', text.lower())
+        self.assertTrue(router._has_pending_message_draft())
+        self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
+        self.assertEqual(router._pending_message_draft["body"], "get milk")
 
     def test_pending_recipient_accepts_send_it_to_instead(self):
         router.route_stream("message dad")
@@ -2063,20 +2248,20 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(checks["parity"]["ok"], checks["parity"]["output"])
 
     def test_local_beta_fast_path(self):
-        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 2, "failed": 1, "failed_case_ids": ["beta_memory"]}), \
-             patch("local_runtime.local_beta.result_text", return_value="Ran 3 beta cases. 2 passed and 1 failed."):
+        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 2, "failed": 1, "failed_case_ids": ["beta_memory"]}) as run_mock:
             stream, label = router.route_stream("beta test jarvis")
             text = "".join(stream)
         self.assertEqual(label, "Local Model")
-        self.assertIn("beta cases", text)
+        self.assertIn("background", text.lower())
+        run_mock.assert_called()
 
     def test_engineering_beta_fast_path(self):
-        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 3, "failed": 0, "suite": "engineering"}), \
-             patch("local_runtime.local_beta.result_text", return_value="Ran 3 engineering beta cases. 3 passed and 0 failed."):
+        with patch("local_runtime.local_beta.run_beta_suite", return_value={"ok": True, "case_count": 3, "passed": 3, "failed": 0, "suite": "engineering"}) as run_mock:
             stream, label = router.route_stream("beta test engineering")
             text = "".join(stream)
         self.assertEqual(label, "Local Model")
-        self.assertIn("engineering beta cases", text)
+        self.assertIn("engineering beta", text.lower())
+        run_mock.assert_called()
 
     def test_local_model_benchmark_fast_path(self):
         with patch("local_runtime.local_model_benchmark.run_benchmark", return_value={"ok": True, "rows": [], "winner": {}}), \

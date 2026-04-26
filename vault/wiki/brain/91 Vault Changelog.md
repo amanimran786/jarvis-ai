@@ -392,3 +392,20 @@ All route directly to local code, bypass cloud orchestrator:
 - Models added: Qwen3 4b/8b/30b-a3b MoE, Devstral, phi4-mini
 - Memory: mem0 + Qdrant (local) for cross-session episodic; fact extractor for vault
 - Proactive layer: watcher (5min interval), morning brief (8am), EOD summary (6pm)
+
+## 2026-04-26 — Messaging Stabilization + Assistant Research Backlog
+
+### Messaging
+- `router.py` now preserves draft body when the user corrects only the contact with a bare relationship/name, e.g. pending `Dad: get milk` + `mom` → `mom: get milk`.
+- `message Dad get milk` no longer treats `Dad get` as the contact.
+- Inline reply commands route deterministically: `reply to Aman Imran saying sounds good` creates a confirmation-gated draft without LLM drift.
+- Search variants like `web search for`, `search internet for`, and `look on github for` bypass pending message drafts instead of overwriting them.
+
+### Safety
+- `execution_engine.py` blocks autonomous email sends from agent tool calls. Email sending must go through router confirmation.
+
+### Briefing
+- `briefing.build_briefing()` accepts both legacy fact lists and the newer string memory-summary path, keeping `main.py` startup briefing compatible.
+
+### Research
+- Added [[97 Assistant Tech Research Backlog]] covering iMessage MCP patterns, LiveKit Agents, Pipecat, FastRTC, Dograh, OpenClaw gateway patterns, Gmail MCP, and a staged call-answering architecture.

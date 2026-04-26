@@ -2,12 +2,14 @@ import os
 import base64
 import email as email_lib
 import email.mime.text
+import shutil
 from datetime import datetime, timedelta, timezone
 import re
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import runtime_state
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -16,11 +18,32 @@ SCOPES = [
 ]
 
 BASE_DIR = os.path.dirname(__file__)
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
-TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+LEGACY_CREDENTIALS_FILE = os.path.join(BASE_DIR, "credentials.json")
+LEGACY_TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
+CREDENTIALS_FILE = os.getenv("JARVIS_GOOGLE_CREDENTIALS_FILE", "").strip() or str(runtime_state.app_data_dir() / "credentials.json")
+TOKEN_FILE = os.getenv("JARVIS_GOOGLE_TOKEN_FILE", "").strip() or str(runtime_state.app_data_dir() / "token.json")
+
+
+def _copy_legacy_auth_file(src: str, dst: str) -> None:
+    if not src or not dst or os.path.abspath(src) == os.path.abspath(dst):
+        return
+    if os.path.exists(dst) or not os.path.exists(src):
+        return
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    shutil.copy2(src, dst)
+    try:
+        os.chmod(dst, 0o600)
+    except OSError:
+        pass
+
+
+def _ensure_auth_files() -> None:
+    _copy_legacy_auth_file(LEGACY_CREDENTIALS_FILE, CREDENTIALS_FILE)
+    _copy_legacy_auth_file(LEGACY_TOKEN_FILE, TOKEN_FILE)
 
 
 def _get_creds() -> Credentials:
+    _ensure_auth_files()
     creds = None
     if os.path.exists(TOKEN_FILE):
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
@@ -28,10 +51,19 @@ def _get_creds() -> Credentials:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            if not os.path.exists(CREDENTIALS_FILE):
+                raise FileNotFoundError(
+                    f"Google OAuth credentials not found. Put credentials.json at {CREDENTIALS_FILE}."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
+        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
         with open(TOKEN_FILE, "w") as f:
             f.write(creds.to_json())
+        try:
+            os.chmod(TOKEN_FILE, 0o600)
+        except OSError:
+            pass
     return creds
 
 

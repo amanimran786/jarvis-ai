@@ -1,4 +1,5 @@
 import json
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,16 @@ from local_runtime import local_training
 from tests.jarvis_golden_cases import GOLDEN_CASES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ROOT = REPO_ROOT / "training" / "beta"
+
+
+def _beta_root() -> Path:
+    override = os.getenv("JARVIS_BETA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / "Library" / "Application Support" / "Jarvis" / "training" / "beta"
+
+
+ROOT = _beta_root()
 RUNS_DIR = ROOT / "runs"
 
 
@@ -216,6 +226,7 @@ def status() -> dict:
     runs = sorted(RUNS_DIR.glob("beta_*.json"))
     latest = json.loads(runs[-1].read_text(encoding="utf-8")) if runs else None
     return {
+        "root": str(ROOT),
         "runs": len(runs),
         "latest_run": str(runs[-1]) if runs else "",
         "latest_passed": latest.get("passed", 0) if latest else 0,
