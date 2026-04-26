@@ -35,9 +35,18 @@ MANUAL_PROMPT_WINDOW_SECONDS = 8.0
 WAKE_WORD_WINDOW_SECONDS = 3.0
 _kokoro_disabled_reason = ""
 
-# Preferred real microphones — avoid BlackHole (loopback bus, no physical mic)
+# Preferred real microphones — keep meeting/loopback devices out of normal voice.
 _PREFERRED_MICS = ["MacBook Pro Microphone", "AirPods Pro", "iPhone Microphone", "Built-in Microphone"]
-_BLACKHOLE_SKIP = ["blackhole", "loopback", "virtual"]
+_VOICE_DEVICE_SKIP = [
+    "blackhole",
+    "loopback",
+    "virtual",
+    "microsoft teams audio",
+    "zoom audio",
+    "zoomaudio",
+    "aggregate",
+    "multi-output",
+]
 _VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
 _MIC_OPEN_RETRY_SECONDS = 5.0
 _MIC_SKIP_LOGGED: set[str] = set()
@@ -70,7 +79,7 @@ def _get_microphone() -> sr.Microphone:
                 if preferred.lower() in name.lower():
                     return sr.Microphone(device_index=i)
         for i, name in enumerate(names):
-            if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
+            if not any(skip in name.lower() for skip in _VOICE_DEVICE_SKIP):
                 return sr.Microphone(device_index=i)
     except Exception:
         pass
@@ -106,7 +115,7 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
       1. Exact or substring match against _PREFERRED_MICS (highest priority first).
       2. Fuzzy word match: any single significant word from a preferred name appears
          in the device name (handles e.g. "AirPods" matching "AirPods Pro Mic").
-      3. Any real non-virtual device not in _BLACKHOLE_SKIP.
+      3. Any real non-virtual, non-meeting device not in _VOICE_DEVICE_SKIP.
       4. macOS default input device as last resort.
 
     This ensures the Default input device is only used when nothing better exists,
@@ -159,7 +168,7 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 
     # Tier 3: any real non-virtual device
     for i, name in enumerate(names):
-        if not any(skip in name.lower() for skip in _BLACKHOLE_SKIP):
+        if not any(skip in name.lower() for skip in _VOICE_DEVICE_SKIP):
             _append(i, name)
 
     # Tier 4: macOS default input (last resort — may be a loopback or virtual device)

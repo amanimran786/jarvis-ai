@@ -165,13 +165,16 @@ def add(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = None) -
 
 def add_async(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = None) -> None:
     """Fire-and-forget async wrapper — won't block the response stream."""
-    threading.Thread(
-        target=add,
-        args=(text, user_id),
-        kwargs={"metadata": metadata},
-        daemon=True,
-        name="mem0-write",
-    ).start()
+    try:
+        threading.Thread(
+            target=add,
+            args=(text, user_id),
+            kwargs={"metadata": metadata},
+            daemon=True,
+            name="mem0-write",
+        ).start()
+    except RuntimeError:
+        pass
 
 
 # ── Read path ──────────────────────────────────────────────────────────────────

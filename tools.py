@@ -2,6 +2,7 @@ import os
 import subprocess
 import threading
 import time
+import urllib.parse
 import urllib.request
 import json
 from datetime import datetime
@@ -11,10 +12,12 @@ from desktop.screen_capture import capture_screenshot
 
 # ── Weather ───────────────────────────────────────────────────────────────────
 
-def get_weather() -> str:
-    """Get current weather using wttr.in — auto-detects location by IP, no API key needed."""
+def get_weather(location: str = "") -> str:
+    """Get current weather using wttr.in. Defaults to IP auto-detect when no location is given."""
     try:
-        url = "https://wttr.in/?format=j1"
+        place = (location or "").strip()
+        encoded_place = urllib.parse.quote(place, safe="")
+        url = f"https://wttr.in/{encoded_place}?format=j1" if encoded_place else "https://wttr.in/?format=j1"
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = json.loads(resp.read())
         current = data["current_condition"][0]
