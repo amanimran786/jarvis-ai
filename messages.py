@@ -5,6 +5,8 @@ Looks up contacts by name from the Contacts app.
 
 import subprocess
 import re
+import sqlite3
+from pathlib import Path
 
 _AMBIGUOUS_CONTACT = "__AMBIGUOUS_CONTACT__"
 _FUZZY_MATCHES = "__FUZZY_MATCHES__"
@@ -14,6 +16,42 @@ _CONTACT_WITHOUT_HANDLE = "__CONTACT_WITHOUT_HANDLE__"
 _last_fuzzy_matches: list[str] = []
 _last_contact_choices: list[dict[str, str]] = []
 _last_applescript_error = ""
+MESSAGES_CHAT_DB = Path.home() / "Library" / "Messages" / "chat.db"
+
+
+def messages_history_access_status(db_path: Path | None = None) -> dict[str, str | bool]:
+    path = Path(db_path or MESSAGES_CHAT_DB).expanduser()
+    if not path.exists():
+        return {
+            "ok": False,
+            "path": str(path),
+            "reason": "Messages chat.db was not found at the expected path.",
+        }
+    uri = f"file:{path}?mode=ro"
+    try:
+        conn = sqlite3.connect(uri, uri=True, timeout=1)
+        try:
+            conn.execute("select count(*) from sqlite_master").fetchone()
+        finally:
+            conn.close()
+        return {"ok": True, "path": str(path), "reason": ""}
+    except sqlite3.Error as exc:
+        return {"ok": False, "path": str(path), "reason": str(exc)}
+
+
+def messages_history_permission_text(db_path: Path | None = None) -> str:
+    status = messages_history_access_status(db_path)
+    if status["ok"]:
+        return (
+            "Messages history access is available. Jarvis can read the local iMessage database "
+            "when native history import is enabled."
+        )
+    return (
+        "Jarvis cannot read local iMessage history yet. Grant Full Disk Access to "
+        "Jarvis.app and the terminal app that launches Jarvis in System Settings > "
+        "Privacy & Security > Full Disk Access, then restart Jarvis. "
+        f"Database: {status['path']}. Reason: {status['reason']}"
+    )
 
 
 def _normalize_contact_label(label: str) -> str:

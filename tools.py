@@ -105,3 +105,39 @@ def lock_screen() -> str:
         "-suspend"
     ], check=True)
     return "Locking screen."
+
+
+# ── Battery ───────────────────────────────────────────────────────────────────
+
+def get_battery() -> str:
+    """Return battery percentage and charging status."""
+    try:
+        out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=3)
+        import re
+        pct_match = re.search(r"(\d+)%", out)
+        charging = "charging" in out.lower() or "ac power" in out.lower()
+        if pct_match:
+            pct = int(pct_match.group(1))
+            status = "charging" if charging else "on battery"
+            return f"Battery at {pct}%, {status}."
+        return "Battery status unavailable."
+    except Exception as e:
+        return f"Battery check failed: {e}"
+
+
+# ── Math eval ─────────────────────────────────────────────────────────────────
+
+def eval_math(expr: str) -> str:
+    """Safely evaluate a numeric expression. Only allows digits and math operators."""
+    import re
+    clean = expr.strip()
+    if not re.fullmatch(r"[\d\s\+\-\*\/\.\(\)\%\^]+", clean):
+        return ""
+    try:
+        clean = clean.replace("^", "**")
+        result = eval(clean, {"__builtins__": {}})  # noqa: S307
+        if isinstance(result, float) and result == int(result):
+            return str(int(result))
+        return str(round(result, 6)).rstrip("0").rstrip(".")
+    except Exception:
+        return ""

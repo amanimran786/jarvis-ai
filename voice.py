@@ -55,6 +55,46 @@ _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
 
 
+@contextmanager
+def _suppress_native_audio_stderr():
+    """Suppress PortAudio/CoreAudio stdio noise during device probing.
+
+    PyAudio can print AUHAL errors directly to fd 1/2 before raising or returning
+    an unusable stream. Jarvis logs the actionable failure through _debug_log, so
+    keep native stderr quiet unless low-level audio debugging is explicitly on.
+    """
+    if os.getenv("JARVIS_AUDIO_DEBUG", "").lower() in {"1", "true", "yes"}:
+        yield
+        return
+
+    saved_fds = []
+    devnull_fd = None
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        for fd in (1, 2):
+            saved_fds.append((fd, os.dup(fd)))
+            os.dup2(devnull_fd, fd)
+    except OSError:
+        pass
+    try:
+        yield
+    finally:
+        for fd, saved_fd in reversed(saved_fds):
+            try:
+                os.dup2(saved_fd, fd)
+            except OSError:
+                pass
+            try:
+                os.close(saved_fd)
+            except OSError:
+                pass
+        if devnull_fd is not None:
+            try:
+                os.close(devnull_fd)
+            except OSError:
+                pass
+
+
 def _debug_log(*args, **kwargs) -> None:
     """Best-effort logging that stays safe inside windowed macOS app bundles."""
     try:
@@ -191,7 +231,8 @@ def _open_microphone_source():
         for label, microphone in _microphone_candidates():
             source = None
             try:
-                source = microphone.__enter__()
+                with _suppress_native_audio_stderr():
+                    source = microphone.__enter__()
                 if getattr(source, "stream", None) is None:
                     raise RuntimeError(f"{label} opened without a live input stream")
                 _debug_log(f"[Mic] Using input device: {label}")

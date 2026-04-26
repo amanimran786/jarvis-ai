@@ -1496,6 +1496,14 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(label, "Status")
         self.assertIn("cost policy", text.lower())
 
+    def test_messages_history_permission_fast_path(self):
+        with patch("router.msg.messages_history_permission_text", return_value="Grant Full Disk Access to Jarvis.app."):
+            stream, label = router.route_stream("messages history permission")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("Full Disk Access", text)
+
     def test_context_budget_fast_path(self):
         stream, label = router.route_stream("stop burning tokens and show the context budget")
         text = "".join(stream)
@@ -2114,16 +2122,19 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(text, "SQL answer.")
 
     def test_incoming_relay_without_instruction_records_and_asks_for_reply(self):
-        with patch("router.msg_thread.record_incoming") as record_mock:
+        with patch("router.msg_thread.record_incoming") as record_mock, \
+             patch("router._llm_suggest_reply", return_value="") as suggest_mock:
             stream, label = router.route_stream("Aman Imran replied: beta reply received")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
         self.assertIn("what would you like to say back", text.lower())
         self.assertEqual(router._pending_msg_recipient, "Aman Imran")
         record_mock.assert_called_once_with("Aman Imran", "beta reply received")
+        suggest_mock.assert_not_called()
 
     def test_short_incoming_relay_stays_on_fast_path(self):
         with patch("router.msg_thread.record_incoming") as record_mock, \
+             patch("router._llm_suggest_reply", return_value="") as suggest_mock, \
              patch("router.smart_stream") as smart_mock:
             stream, label = router.route_stream("Farhan replied: yo")
             text = "".join(stream)
@@ -2132,13 +2143,45 @@ class RouterTests(unittest.TestCase):
         self.assertIn("what would you like to say back", text.lower())
         self.assertEqual(router._pending_msg_recipient, "Farhan")
         record_mock.assert_called_once_with("Farhan", "yo")
+        suggest_mock.assert_not_called()
         smart_mock.assert_not_called()
 
+    def test_timer_query_bypasses_pending_relay_recipient(self):
+        def on_timer_done(_label):
+            pass
+
+        try:
+            router.set_timer_callback(on_timer_done)
+            router.route_stream("Farhan replied: yo")
+            with patch("router.tools.set_timer") as timer_mock:
+                stream, label = router.route_stream("set a 5 minute timer")
+                text = "".join(stream)
+        finally:
+            router.set_timer_callback(None)
+
+        self.assertEqual(label, "Timer")
+        self.assertIn("Timer set for 5 minutes", text)
+        timer_mock.assert_called_once_with(300, "5 minutes", on_timer_done)
+        self.assertEqual(router._pending_msg_recipient, "Farhan")
+
+    def test_messages_history_permission_bypasses_pending_relay_recipient(self):
+        router.route_stream("Farhan replied: yo")
+
+        with patch("router.msg.messages_history_permission_text", return_value="Grant Full Disk Access to Jarvis.app."):
+            stream, label = router.route_stream("messages history permission")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("Full Disk Access", text)
+        self.assertEqual(router._pending_msg_recipient, "Farhan")
+
     def test_reply_to_thread_command_wins_over_pending_relay_recipient(self):
-        with patch("router.msg_thread.record_incoming"):
+        with patch("router.msg_thread.record_incoming"), \
+             patch("router._llm_suggest_reply", return_value=""):
             router.route_stream("Farhan replied: yo")
 
-        with patch("router.msg_thread.format_thread_for_prompt", return_value="Farhan: yo"):
+        with patch("router.msg_thread.format_thread_for_prompt", return_value="Farhan: yo"), \
+             patch("router._llm_suggest_reply", return_value=""):
             stream, label = router.route_stream("reply to Farhan")
             text = "".join(stream)
 
@@ -2157,7 +2200,8 @@ class RouterTests(unittest.TestCase):
             )
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn('draft reply to aman imran: "do you want another smoke test?"', text.lower())
+        self.assertIn('draft reply to aman imran', text.lower())
+        self.assertIn('"do you want another smoke test?"', text.lower())
         self.assertTrue(router._has_pending_message_draft())
         self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
         self.assertEqual(router._pending_message_draft["body"], "Do you want another smoke test?")

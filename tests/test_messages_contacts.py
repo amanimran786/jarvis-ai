@@ -1,5 +1,7 @@
 import unittest
 import subprocess
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import messages
@@ -65,6 +67,27 @@ class MessagesContactTests(unittest.TestCase):
             text = messages.describe_contact_handles("Dad")
         self.assertIn("couldn't read contact handles", text.lower())
         self.assertIn("took too long", text.lower())
+
+    def test_messages_history_permission_text_surfaces_full_disk_access_hint(self):
+        missing_path = Path("/tmp/jarvis_missing_messages_chat.db")
+        text = messages.messages_history_permission_text(missing_path)
+
+        self.assertIn("Full Disk Access", text)
+        self.assertIn("Jarvis.app", text)
+        self.assertIn(str(missing_path), text)
+
+    def test_messages_history_access_status_reads_sqlite_database(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "chat.db"
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.execute("create table message (text text)")
+            conn.close()
+
+            status = messages.messages_history_access_status(db_path)
+
+        self.assertTrue(status["ok"])
+        self.assertEqual(status["path"], str(db_path))
 
 
 if __name__ == "__main__":

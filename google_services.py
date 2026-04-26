@@ -257,6 +257,32 @@ def get_unread_email_subjects(max_results: int = 10) -> list[dict]:
         return []
 
 
+def search_emails(query: str, max_results: int = 5) -> str:
+    """Search Gmail with a Gmail query string (e.g. 'from:boss subject:standup')."""
+    try:
+        result = _gmail().users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max_results,
+        ).execute()
+        messages = result.get("messages", [])
+        if not messages:
+            return f"No emails found matching: {query}"
+        summaries = []
+        for msg in messages:
+            detail = _gmail().users().messages().get(
+                userId="me", id=msg["id"], format="metadata",
+                metadataHeaders=["From", "Subject", "Date"],
+            ).execute()
+            headers = {h["name"]: h["value"] for h in detail["payload"]["headers"]}
+            sender = headers.get("From", "Unknown").split("<")[0].strip()
+            subject = headers.get("Subject", "(no subject)")
+            summaries.append(f"From {sender}: {subject}")
+        return f"Found {len(messages)} email(s). " + ". ".join(summaries) + "."
+    except Exception as e:
+        return f"Email search unavailable: {e}"
+
+
 def get_next_event() -> dict | None:
     """Return the next upcoming calendar event as a dict, or None if nothing is scheduled."""
     try:
