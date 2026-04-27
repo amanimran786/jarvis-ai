@@ -2324,7 +2324,14 @@ _INTERRUPT_BRIEFING_TRIGGERS = (
 )
 
 def _is_task_list_query(lower: str) -> bool:
-    """Detect 'what are my tasks / what do I have to do / show my task list'."""
+    """Detect read-only task list queries ('what are my tasks', 'show task list').
+
+    Must NOT match action-oriented task phrases like 'queue background vault task',
+    'submit task', 'run task', 'create task'.
+    """
+    # Bail out on action words that aren't reads
+    if re.search(r"\b(?:queue|submit|run|create|add|assign|complete|finish|done|start)\b.*\btask\b", lower, re.IGNORECASE):
+        return False
     return bool(re.search(
         r"\b(?:what(?:'s| is| are)?)\b.{0,20}\b(?:tasks?|todos?|to.?do(?:s|es)?)\b"
         r"|\b(?:show|list|check|get)\b.{0,15}\b(?:my\s+)?(?:tasks?|todos?|to.?do\s+list)\b"
