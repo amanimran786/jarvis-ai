@@ -361,20 +361,124 @@ def _agent_board(context: str = "") -> dict:
         return {"agent": "board", "status": "ok", "result": "", "escalate": False}
 
 
+# ── Vault Brain Agents ────────────────────────────────────────────────────────
+
+
+def _agent_brain_sync(context: str = "") -> dict:
+    """Sync vault index and surface stale/missing notes for attention."""
+    try:
+        import vault
+        import datetime
+        refresh = vault.refresh_index()
+        stat = vault.status()
+        doc_count = stat.get("doc_count", 0)
+        changelog = vault.VAULT_ROOT / "wiki" / "brain" / "91 Vault Changelog.md"
+        last_entry = ""
+        if changelog.exists():
+            lines = changelog.read_text(encoding="utf-8").splitlines()
+            for line in reversed(lines):
+                if line.startswith("## "):
+                    last_entry = line.strip("# ").strip()
+                    break
+        today = datetime.date.today().isoformat()
+        result = (
+            f"Brain sync: {doc_count} docs indexed. "
+            f"Last changelog entry: {last_entry or 'unknown'}. "
+            f"Index refreshed at {today}."
+        )
+        if doc_count == 0:
+            result = "Brain sync: vault index is empty — run 'refresh the vault index' to rebuild."
+        return {"agent": "brain_sync", "status": "ok", "result": result, "escalate": doc_count == 0}
+    except Exception as e:
+        return {"agent": "brain_sync", "status": "error", "result": f"Brain sync error: {e}", "escalate": False}
+
+
+def _agent_task_extractor(context: str = "") -> dict:
+    """Scan vault task hub and agent inbox for open items and surface them."""
+    try:
+        import vault
+        import re
+        open_tasks: list[str] = []
+        for note_name in ("90 Task Hub.md", "92 Agent Inbox.md"):
+            note_path = vault.VAULT_ROOT / "wiki" / "brain" / note_name
+            if not note_path.exists():
+                continue
+            text = note_path.read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if re.match(r"\s*-\s+\[\s*\]\s+.+", line):
+                    task = re.sub(r"\s*-\s+\[\s*\]\s+", "", line).strip()
+                    task = re.sub(r"\[\[([^\]]+)\]\]", r"\1", task)  # strip wiki links
+                    task = re.sub(r"📅\s*\d{4}-\d{2}-\d{2}", "", task).strip()
+                    task = re.sub(r"#\w+", "", task).strip()
+                    if task:
+                        open_tasks.append(task)
+        if not open_tasks:
+            result = "No open tasks in vault task hub or agent inbox."
+        else:
+            top = open_tasks[:8]
+            result = "Open vault tasks:\n" + "\n".join(f"  • {t}" for t in top)
+            if len(open_tasks) > 8:
+                result += f"\n  … and {len(open_tasks) - 8} more."
+        return {"agent": "task_extractor", "status": "ok", "result": result,
+                "escalate": len(open_tasks) > 5}
+    except Exception as e:
+        return {"agent": "task_extractor", "status": "error",
+                "result": f"Task extraction error: {e}", "escalate": False}
+
+
+def _agent_daily_note(context: str = "") -> dict:
+    """Ensure today's daily note exists in the vault, creating it if needed."""
+    try:
+        import datetime
+        import vault
+        today = datetime.date.today().isoformat()
+        daily_dir = vault.VAULT_ROOT / "daily"
+        daily_dir.mkdir(parents=True, exist_ok=True)
+        note_path = daily_dir / f"{today}.md"
+        if note_path.exists():
+            return {"agent": "daily_note", "status": "ok",
+                    "result": f"Daily note exists: {today}.", "escalate": False}
+        # Pull calendar and tasks for the note body
+        cal = _agent_calendar()
+        tasks = _agent_task_extractor()
+        cal_text = cal.get("result", "_No events._")
+        task_text = tasks.get("result", "_No tasks._")
+        frontmatter = (
+            f"---\ntype: daily-note\ndate: {today}\ntags: [daily, brain]\n---\n\n"
+        )
+        body = (
+            f"# {today}\n\n"
+            f"## Focus\n\n_Set your #1 priority for today._\n\n"
+            f"## Calendar\n\n{cal_text}\n\n"
+            f"## Open Tasks\n\n{task_text}\n\n"
+            f"## Notes\n\n\n"
+            f"## End of Day\n\n\n"
+        )
+        note_path.write_text(frontmatter + body, encoding="utf-8")
+        return {"agent": "daily_note", "status": "ok",
+                "result": f"Created daily note for {today}.", "escalate": False}
+    except Exception as e:
+        return {"agent": "daily_note", "status": "error",
+                "result": f"Daily note error: {e}", "escalate": False}
+
+
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 _AGENTS: dict[str, Callable[[str], dict]] = {
-    "calendar":     _agent_calendar,
-    "week":         _agent_week,
-    "tasks":        _agent_tasks,
-    "vault":        _agent_vault,
-    "code":         _agent_code,
-    "research":     _agent_research,
-    "email":        _agent_email,
-    "email_urgent": _agent_email_urgent,
-    "weather":      _agent_weather,
-    "meeting_prep": _agent_meeting_prep,
-    "board":        _agent_board,
+    "calendar":        _agent_calendar,
+    "week":            _agent_week,
+    "tasks":           _agent_tasks,
+    "vault":           _agent_vault,
+    "code":            _agent_code,
+    "research":        _agent_research,
+    "email":           _agent_email,
+    "email_urgent":    _agent_email_urgent,
+    "weather":         _agent_weather,
+    "meeting_prep":    _agent_meeting_prep,
+    "board":           _agent_board,
+    "brain_sync":      _agent_brain_sync,
+    "task_extractor":  _agent_task_extractor,
+    "daily_note":      _agent_daily_note,
 }
 
 _BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email", "board"]
@@ -476,6 +580,12 @@ _SYNTH_ESCALATION_SYSTEM = (
     "You are Jarvis. Convert the following raw escalation data into 1-3 spoken sentences "
     "that tell Aman exactly what needs his attention right now. "
     "Be direct. No bullet points. Under 60 words."
+)
+
+_EMAIL_DIGEST_SYSTEM = (
+    "You are Jarvis. Summarise the user's unread emails as exactly 3 bullet points. "
+    "Each bullet: sender name + one short phrase describing what the email is about. "
+    "Max 15 words per bullet. Start each bullet with '•'. No preamble, no trailing text."
 )
 
 
@@ -581,6 +691,26 @@ def meeting_prep() -> str:
             "No bullet points. Under 100 words. Sound like JARVIS from Iron Man."
         ),
     )
+
+
+def email_digest() -> str:
+    """3-bullet summary of today's unread emails, synthesised locally."""
+    try:
+        gs = _safe_import("google_services")
+        if not gs or not hasattr(gs, "get_unread_email_subjects"):
+            return "Email is not connected. You may need to re-authorize Google access."
+        emails = gs.get_unread_email_subjects(max_results=5)
+        if not emails:
+            return "No unread emails."
+        lines = [
+            f"From {e['sender']}: {e['subject']}. {e['snippet']}"
+            for e in emails[:5]
+        ]
+        raw = f"Unread emails ({len(emails)}):\n" + "\n".join(f"  {l}" for l in lines)
+        result = _synthesise(raw, system=_EMAIL_DIGEST_SYSTEM)
+        return result if result.strip() else raw
+    except Exception as e:
+        return f"Email digest unavailable: {e}"
 
 
 def research_and_brief(topic: str) -> str:

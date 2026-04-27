@@ -2424,6 +2424,26 @@ def _pending_draft_interrupt_route(user_input: str, lower: str) -> tuple | None:
             brief = _jagents.run_briefing()
             yield f"{greeting}\n\n{brief}"
         return _greeting_brief_gen_i(), "Jarvis"
+    # Calendar reminders always escape draft context
+    _reminder_interrupt_prefixes = (
+        "remind me to", "remind me at", "set a reminder", "set reminder",
+        "schedule ", "add a meeting", "add a reminder",
+        "create a calendar event", "create a meeting", "book a meeting", "book a call",
+    )
+    if any(lower.startswith(p) or p in lower for p in _reminder_interrupt_prefixes):
+        _ri_parsed = _parse_calendar_reminder(lower)
+        if _ri_parsed:
+            _ri_title, _ri_dt = _ri_parsed
+            def _ri_cal_gen(title=_ri_title, dt=_ri_dt):
+                try:
+                    result = gs.create_event(title, dt)
+                    yield result
+                except Exception:
+                    try:
+                        yield _schedule_osascript_alarm(title, dt)
+                    except Exception as e2:
+                        yield f"Couldn't set the reminder: {e2}"
+            return _ri_cal_gen(), "Calendar"
     # App launch always escapes draft context
     if re.match(r"^(?:open|launch|start)\b", lower):
         _app_candidate = _parse_app(user_input) or ""
@@ -3048,6 +3068,23 @@ def route_stream(user_input: str) -> tuple:
         except Exception:
             return _s("Task hub unavailable."), "Tasks"
 
+    # ── Vault notes listing fast-path ─────────────────────────────────────────
+    if re.search(
+        r"\b(?:what\s+notes?|list\s+(?:my\s+)?notes?|show\s+(?:my\s+)?notes?|notes?\s+(?:in|from)\s+(?:my\s+)?vault)\b",
+        lower,
+    ):
+        try:
+            _vstat = vault.status()
+            _doc_count = _vstat.get("doc_count", 0)
+            _files = _vstat.get("indexed_files", [])[:10]
+            if _files:
+                _titles = [os.path.splitext(os.path.basename(f))[0] for f in _files]
+                _note_list = "\n".join(f"  • {t}" for t in _titles)
+                return _s(f"Vault has {_doc_count} notes. Sample:\n{_note_list}"), "Vault"
+            return _s(f"Vault has {_doc_count} indexed notes."), "Vault"
+        except Exception:
+            return _s("Vault is unavailable right now."), "Vault"
+
     # ── Catch-up / "what did I miss" fast-path ────────────────────────────────
     if _is_catchup_query(lower):
         def _catchup_gen():
@@ -3271,7 +3308,11 @@ def route_stream(user_input: str) -> tuple:
         "steal system prompt",
     )):
         return _s(security_roe.summary_text("prompt_leakage")), "Status"
-    if any(p in lower for p in (
+    _is_action_request = any(lower.startswith(p) for p in (
+        "remind me", "schedule ", "add a meeting", "book a", "create a meeting",
+        "set a reminder", "email ", "send ", "message ", "text ",
+    ))
+    if not _is_action_request and any(p in lower for p in (
         "external agent pattern",
         "agent pattern intake",
         "what can we use from",
@@ -3793,6 +3834,32 @@ def route_stream(user_input: str) -> tuple:
                 yield f"Daily note creation failed: {e}"
         return _daily_note_gen(), "Vault"
 
+    # ── Brain sync fast-path ──────────────────────────────────────────────────
+    _BRAIN_SYNC_TRIGGERS = (
+        "sync the brain", "sync my brain", "brain sync", "sync vault",
+        "refresh the brain", "refresh brain", "update the brain",
+        "check brain health", "vault health",
+    )
+    if any(t in lower for t in _BRAIN_SYNC_TRIGGERS):
+        try:
+            result = _jagents._agent_brain_sync()
+            return _s(result.get("result", "Brain sync complete.")), "Vault"
+        except Exception as e:
+            return _s(f"Brain sync failed: {e}"), "Vault"
+
+    # ── Vault task extraction fast-path ───────────────────────────────────────
+    _VAULT_TASK_TRIGGERS = (
+        "vault tasks", "vault backlog", "brain tasks", "what's in my backlog",
+        "agent inbox", "what's in the agent inbox", "show the agent inbox",
+        "open tasks in vault", "vault open tasks",
+    )
+    if any(t in lower for t in _VAULT_TASK_TRIGGERS):
+        try:
+            result = _jagents._agent_task_extractor()
+            return _s(result.get("result", "No open vault tasks.")), "Vault"
+        except Exception as e:
+            return _s(f"Task extraction failed: {e}"), "Vault"
+
     _WATCHER_TRIGGERS = (
         "watcher status", "watcher running", "are you watching",
         "proactive mode", "background alerts", "are you monitoring",
@@ -3821,17 +3888,25 @@ def route_stream(user_input: str) -> tuple:
     if any(t in lower for t in _MEM0_STATUS_TRIGGERS):
         def _mem0_status_gen():
             s = _m0.status()
-            if s["available"]:
-                count = s.get("count", "unknown")
-                yield (
-                    f"Episodic memory is active. {count} memories stored locally at {s['store']}. "
-                    f"Every conversation is being recorded and will surface as context in future sessions."
-                )
-            else:
+            if not s["available"]:
                 yield (
                     "Episodic memory is not yet initialized. "
-                    "Start Ollama and it will activate automatically on the next conversation turn. "
-                    "Run: ollama serve"
+                    "Start Ollama and it will activate automatically. Run: ollama serve"
+                )
+                return
+            count = s.get("count", 0)
+            # Surface actual memories when the query is personal ("about me")
+            if "about me" in lower or "about myself" in lower or "what have you learned" in lower:
+                hits = _m0.search("Aman projects preferences background", top_k=8)
+                formatted = _m0.format_for_prompt(hits, max_chars=900)
+                if formatted:
+                    yield f"Here's what I know about you ({count} total memories):\n\n{formatted}"
+                else:
+                    yield f"{count} memories stored. I haven't learned much about you yet — keep talking to me."
+            else:
+                yield (
+                    f"Episodic memory is active — {count} memories stored locally. "
+                    f"Every session is recorded. Ask 'what do you remember about me' for a summary."
                 )
         return _mem0_status_gen(), "Memory"
 
