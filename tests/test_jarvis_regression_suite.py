@@ -2156,7 +2156,8 @@ class RouterTests(unittest.TestCase):
 
         try:
             router.set_timer_callback(on_timer_done)
-            router.route_stream("Farhan replied: yo")
+            with patch("router._suggest_reply_from_context", return_value=None):
+                router.route_stream("Farhan replied: yo")
             with patch("router.tools.set_timer") as timer_mock:
                 stream, label = router.route_stream("set a 5 minute timer")
                 text = "".join(stream)
@@ -2617,9 +2618,15 @@ class ApiSurfaceTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.client.close()
 
+    def setUp(self):
+        import task_runtime as _tr
+        _tr.reset_for_tests()
+
     def tearDown(self):
         api._API_TOKEN = ""
         api._CHAT_LOCK_TIMEOUT_SECONDS = 3.0
+        import task_runtime as _tr
+        _tr.reset_for_tests()
 
     def test_status_endpoint_exposes_cost_policy(self):
         response = self.client.get("/status")
@@ -5485,6 +5492,46 @@ class ReminderFastPathTests(unittest.TestCase):
             text = self._consume(stream)
         self.assertEqual(label, "Calendar")
         mock_osa.assert_called_once()
+
+
+class TaskListFastPathTests(unittest.TestCase):
+    """Task list fast-path routes to [Tasks] and returns vault task hub content."""
+
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._clear_message_state()
+
+    def _consume(self, stream) -> str:
+        return "".join(chunk for chunk in stream if isinstance(chunk, str))
+
+    FAKE_TASKS = "Open tasks:\n  • Fix the voice bug\n  • Write unit tests"
+
+    def test_what_are_my_tasks(self):
+        with patch("jarvis_agents._agent_tasks", return_value={"agent": "tasks", "status": "ok", "result": self.FAKE_TASKS}):
+            stream, label = router.route_stream("what are my tasks?")
+        self.assertEqual(label, "Tasks")
+
+    def test_any_open_tasks(self):
+        with patch("jarvis_agents._agent_tasks", return_value={"agent": "tasks", "status": "ok", "result": self.FAKE_TASKS}):
+            stream, label = router.route_stream("any open tasks?")
+            text = self._consume(stream)
+        self.assertEqual(label, "Tasks")
+        self.assertIn("voice bug", text)
+
+    def test_show_task_list(self):
+        with patch("jarvis_agents._agent_tasks", return_value={"agent": "tasks", "status": "ok", "result": self.FAKE_TASKS}):
+            stream, label = router.route_stream("show my task list")
+        self.assertEqual(label, "Tasks")
+
+    def test_regex_coverage(self):
+        cases = [
+            "what are my tasks?", "show my task list", "any open tasks?",
+            "my todos", "list my tasks", "what do I have to do today?",
+        ]
+        for q in cases:
+            self.assertTrue(router._is_task_list_query(q.lower()), f"not matched: {q!r}")
 
 
 class AlertsEndpointTests(unittest.TestCase):
