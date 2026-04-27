@@ -357,7 +357,7 @@ _AGENTS: dict[str, Callable[[str], dict]] = {
     "meeting_prep": _agent_meeting_prep,
 }
 
-_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email", "email_urgent"]
+_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email"]
 _WEEK_AGENTS          = ["week", "tasks"]
 _MEETING_PREP_AGENTS  = ["meeting_prep"]
 
