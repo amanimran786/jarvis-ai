@@ -247,10 +247,13 @@ def get_unread_email_subjects(max_results: int = 10) -> list[dict]:
                 metadataHeaders=["From", "Subject"],
             ).execute()
             headers = {h["name"]: h["value"] for h in detail["payload"]["headers"]}
+            raw_from = headers.get("From", "Unknown")
+            m_addr = re.search(r"<([^>]+)>", raw_from)
             out.append({
-                "sender":  headers.get("From", "Unknown").split("<")[0].strip(),
-                "subject": headers.get("Subject", "No subject"),
-                "snippet": detail.get("snippet", "")[:120],
+                "sender":       raw_from.split("<")[0].strip() or raw_from,
+                "from_address": m_addr.group(1) if m_addr else raw_from,
+                "subject":      headers.get("Subject", "No subject"),
+                "snippet":      detail.get("snippet", "")[:120],
             })
         return out
     except Exception:
