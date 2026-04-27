@@ -91,11 +91,11 @@ def get_issue(issue_id: str) -> dict:
 
 
 def update_issue(issue_id: str, **kwargs) -> dict:
-    return _req("PATCH", f"/api/issues/{issue_id}", kwargs)
+    return _req("PUT", f"/api/issues/{issue_id}", kwargs)
 
 
 def assign_issue(issue_id: str, agent_id: str) -> dict:
-    return _req("PATCH", f"/api/issues/{issue_id}", {"assignee_id": agent_id})
+    return _req("PUT", f"/api/issues/{issue_id}", {"assignee_id": agent_id})
 
 
 def status_summary() -> str:
