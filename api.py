@@ -1503,6 +1503,17 @@ def get_watcher_status():
     return {"ok": True, "watcher": _jw.status()}
 
 
+@app.get("/alerts")
+def get_alerts():
+    """Return pending proactive alerts (calendar + urgent email) without delivering them."""
+    import jarvis_watcher as _jw
+    cal   = _jw._check_calendar()
+    email = _jw._check_emails()
+    all_alerts = [{"type": "calendar", "message": m} for _, m in cal] + \
+                 [{"type": "email",    "message": m} for _, m in email]
+    return {"ok": True, "alerts": all_alerts, "count": len(all_alerts)}
+
+
 @app.post("/watcher/notify")
 def watcher_notify(req: dict):
     """Send a one-shot macOS notification via the watcher."""
