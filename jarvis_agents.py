@@ -66,6 +66,8 @@ _MAX_WORKERS   = 5
 _ESCALATION_KEYWORDS = (
     "urgent", "overdue", "blocked", "action required", "attention needed",
     "deadline today", "failed", "error", "unread", "high priority",
+    "asap", "critical", "time sensitive", "time-sensitive", "by eod",
+    "by today", "immediately", "deadline",
 )
 
 
@@ -82,8 +84,10 @@ def _agent_calendar(context: str = "") -> dict:
         gs = _safe_import("google_services")
         if gs and hasattr(gs, "get_todays_events"):
             events = gs.get_todays_events()
-            if events:
+            if isinstance(events, list) and events:
                 result = "Calendar today:\n" + "\n".join(f"  • {e}" for e in events[:8])
+            elif isinstance(events, str) and events.strip():
+                result = f"Calendar today: {events.strip()}"
             else:
                 result = "Calendar: no events today."
         else:
@@ -110,7 +114,27 @@ def _agent_tasks(context: str = "") -> dict:
                 # Filter to open tasks only
                 lines = [l for l in result.splitlines() if "- [ ]" in l]
                 if lines:
-                    result = "Open tasks:\n" + "\n".join(f"  {l.strip()}" for l in lines[:10])
+                    import re as _re
+                    cleaned: list[str] = []
+                    for raw_line in lines[:10]:
+                        s = raw_line.strip()
+                        # Handle outer list bullet wrapping a backtick-quoted task:
+                        # e.g. "- `- [ ] Task text`"  →  extract inner content
+                        m = _re.match(r"^-\s*`(.+)`\s*$", s)
+                        if m:
+                            s = m.group(1).strip()
+                        # Strip leading "- [ ] " checkbox syntax
+                        s = _re.sub(r"^-\s*\[\s*\]\s*", "", s)
+                        # Strip Obsidian date tags e.g. 📅 2026-04-16
+                        s = _re.sub(r"📅\s*\d{4}-\d{2}-\d{2}", "", s)
+                        # Strip hashtag tokens e.g. #jarvis #voice
+                        s = _re.sub(r"#\w+", "", s)
+                        # Replace [[wikilinks]] with just the inner text
+                        s = _re.sub(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]", r"\1", s)
+                        s = s.strip()
+                        if s:
+                            cleaned.append(f"• {s}")
+                    result = "Open tasks:\n" + "\n".join(f"  {c}" for c in cleaned)
                 else:
                     result = "Tasks: no open tasks found in task hub."
         else:
@@ -130,7 +154,7 @@ def _agent_vault(context: str = "") -> dict:
         if ctx and ctx.strip():
             result = "Brain context:\n" + ctx[:600]
         else:
-            result = "Brain: no recent vault context found."
+            result = ""
         return {"agent": "vault", "status": "ok", "result": result,
                 "escalate": _needs_escalation(result)}
     except Exception as e:
@@ -223,6 +247,33 @@ def _agent_email(context: str = "") -> dict:
                 "result": f"Email error: {e}", "escalate": False}
 
 
+def _agent_email_urgent(context: str = "") -> dict:
+    """Surface only urgent/time-sensitive unread emails."""
+    try:
+        gs = _safe_import("google_services")
+        if not gs or not hasattr(gs, "get_unread_email_subjects"):
+            return {"agent": "email_urgent", "status": "error",
+                    "result": "Email not connected.", "escalate": False}
+        emails = gs.get_unread_email_subjects(max_results=10)
+        if not emails:
+            return {"agent": "email_urgent", "status": "ok",
+                    "result": "", "escalate": False}
+        urgent = [
+            e for e in emails
+            if _needs_escalation(e["subject"] + " " + e["snippet"])
+        ]
+        if urgent:
+            lines = [f"From {e['sender']}: {e['subject']}" for e in urgent[:3]]
+            result = "Urgent emails:\n" + "\n".join(f"  ⚠ {l}" for l in lines)
+            return {"agent": "email_urgent", "status": "ok",
+                    "result": result, "escalate": True}
+        return {"agent": "email_urgent", "status": "ok",
+                "result": "", "escalate": False}
+    except Exception as e:
+        return {"agent": "email_urgent", "status": "error",
+                "result": f"Email urgency check failed: {e}", "escalate": False}
+
+
 def _agent_meeting_prep(context: str = "") -> dict:
     """Pull the next meeting details and any vault context about attendees/topic."""
     try:
@@ -301,13 +352,26 @@ _AGENTS: dict[str, Callable[[str], dict]] = {
     "code":         _agent_code,
     "research":     _agent_research,
     "email":        _agent_email,
+    "email_urgent": _agent_email_urgent,
     "weather":      _agent_weather,
     "meeting_prep": _agent_meeting_prep,
 }
 
-_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email"]
+_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email", "email_urgent"]
 _WEEK_AGENTS          = ["week", "tasks"]
 _MEETING_PREP_AGENTS  = ["meeting_prep"]
+
+
+# ── Pre-warm synthesis model on import ────────────────────────────────────────
+
+def _prewarm_synthesis_model():
+    try:
+        from brains.brain_ollama import ask_local
+        ask_local("ping", model="jarvis-local", system_extra="Reply: ok")
+    except Exception:
+        pass
+
+threading.Thread(target=_prewarm_synthesis_model, daemon=True).start()
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
@@ -427,7 +491,7 @@ def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        t.join(timeout=8.0)
+        t.join(timeout=15.0)
         if result_holder and result_holder[0]:
             return result_holder[0]
     except Exception:

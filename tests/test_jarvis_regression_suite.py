@@ -1,6 +1,6 @@
 import unittest
 import json
-from unittest.mock import call, patch
+from unittest.mock import call, patch, MagicMock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -33,6 +33,7 @@ import google_services
 import interview_profile
 import meeting_listener
 import runtime_state
+import tools
 import ui
 import stealth
 from desktop import screen_capture
@@ -1688,7 +1689,8 @@ class RouterTests(unittest.TestCase):
         self.assertIn('draft ready for dad: "get milk"', text.lower())
 
     def test_message_requires_confirmation_before_sending(self):
-        with patch("router.msg.send_imessage", return_value="Sent to Harry Singh.") as send_mock:
+        with patch("router.msg.send_imessage", return_value="Sent to Harry Singh.") as send_mock, \
+             patch("router._eager_resolve_contact", return_value=None):
             stream1, label1 = router.route_stream("message Harry Singh What's the difference between git merge and git rebase?")
             text1 = "".join(stream1)
             stream2, label2 = router.route_stream("confirm send")
@@ -2612,6 +2614,7 @@ class ApiSurfaceTests(unittest.TestCase):
 
     def tearDown(self):
         api._API_TOKEN = ""
+        api._CHAT_LOCK_TIMEOUT_SECONDS = 3.0
 
     def test_status_endpoint_exposes_cost_policy(self):
         response = self.client.get("/status")
@@ -3225,6 +3228,32 @@ class ApiSurfaceTests(unittest.TestCase):
         api._API_TOKEN = "test-token"
         response = self.client.get("/memory/status", headers={"Authorization": "Bearer test-token"})
         self.assertEqual(response.status_code, 200)
+
+    def test_chat_returns_busy_instead_of_hanging_when_lock_is_held(self):
+        api._CHAT_LOCK_TIMEOUT_SECONDS = 0.01
+        api._CHAT_LOCK.acquire()
+        try:
+            with patch("api.route_stream", side_effect=AssertionError("chat should not route while busy")):
+                response = self.client.post("/chat", json={"message": "what time is it?"})
+        finally:
+            api._CHAT_LOCK.release()
+
+        self.assertEqual(response.status_code, 409)
+        payload = response.json()
+        self.assertEqual(payload["error"], "chat_busy")
+        self.assertIn("Try again shortly", payload["response"])
+
+    def test_streaming_chat_returns_busy_instead_of_hanging_when_lock_is_held(self):
+        api._CHAT_LOCK_TIMEOUT_SECONDS = 0.01
+        api._CHAT_LOCK.acquire()
+        try:
+            with patch("api.route_stream", side_effect=AssertionError("chat should not route while busy")):
+                response = self.client.post("/chat", json={"message": "what time is it?", "stream": True})
+        finally:
+            api._CHAT_LOCK.release()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"], "chat_busy")
 
 
 class BenchmarkCoverageTests(unittest.TestCase):
@@ -5127,6 +5156,167 @@ class UnderstandingQualitySmokeTests(unittest.TestCase):
         self.assertEqual(window.transcript_label.text(), "Live suggestion ready.")
         self.assertTrue(window.tray_visible)
         self.assertIn("SUGGESTION:", window._peek_label.text())
+
+
+class InboxReadFastPathTests(unittest.TestCase):
+    """Fast-path routing for iMessage inbox-read queries."""
+
+    def _consume(self, stream) -> str:
+        return "".join(stream)
+
+    def test_new_messages_from_contact_routes_fast(self):
+        """'any new messages from Aman' should hit the Messages label without going to LLM."""
+        with patch("messages.read_recent_thread", return_value="[Aman] hey") as mock_read:
+            stream, label = router.route_stream("any new messages from Aman")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("Aman", text)
+        mock_read.assert_called_once()
+        args = mock_read.call_args[0]
+        self.assertIn("Aman", args[0])
+
+    def test_did_contact_reply_routes_fast(self):
+        """'did Aman reply?' should hit the Messages label without going to LLM."""
+        with patch("messages.read_recent_thread", return_value="[Aman] yeah what's up") as mock_read:
+            stream, label = router.route_stream("did Aman reply?")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("Aman", text)
+        mock_read.assert_called_once()
+        args = mock_read.call_args[0]
+        self.assertIn("Aman", args[0])
+
+
+class WebSearchSummaryTests(unittest.TestCase):
+    """Fast-path routing and result integrity for web search queries."""
+
+    def _consume(self, stream) -> str:
+        return "".join(stream)
+
+    def test_web_search_routes_to_search_label(self):
+        """'search the web for AI news' should hit the Search label."""
+        with patch("tools.web_search", return_value="AI is advancing rapidly.") as mock_search:
+            stream, label = router.route_stream("search the web for AI news")
+            self._consume(stream)
+        self.assertEqual(label, "Search")
+        mock_search.assert_called_once()
+
+    def test_web_search_returns_non_empty(self):
+        """web_search with summarise=False should return a non-empty string."""
+        with patch("ddgs.DDGS") as mock_ddgs_cls:
+            mock_ddgs = mock_ddgs_cls.return_value.__enter__.return_value
+            mock_ddgs.text.return_value = [
+                {"title": "AI News", "body": "Artificial intelligence continues to evolve rapidly in 2026."}
+            ]
+            result = tools.web_search("latest AI news 2026", summarise=False)
+        self.assertIsInstance(result, str)
+        self.assertGreater(len(result), 0)
+        self.assertNotIn("Search failed", result)
+
+
+class CatchupFastPathTests(unittest.TestCase):
+    """Fast-path routing for catch-up / 'what did I miss' queries."""
+
+    def _consume(self, stream) -> str:
+        return "".join(stream)
+
+    def test_what_did_i_miss_routes_to_jarvis(self):
+        """'what did i miss' should hit the Jarvis label and include missed content."""
+        with patch("jarvis_agents.run_briefing", return_value="You missed 3 emails and a calendar update."):
+            stream, label = router.route_stream("what did i miss")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Jarvis")
+        self.assertIn("missed", text)
+
+    def test_catch_me_up_routes_to_jarvis(self):
+        """'catch me up' should hit the Jarvis label and include missed content."""
+        with patch("jarvis_agents.run_briefing", return_value="Here is your catch-up summary."):
+            stream, label = router.route_stream("catch me up")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Jarvis")
+        self.assertIn("missed", text)
+
+
+class EmailUrgencyAgentTests(unittest.TestCase):
+    """Regression tests for _agent_email_urgent urgency detection."""
+
+    def _get_agent(self):
+        import importlib
+        agents = importlib.import_module("jarvis_agents")
+        return agents._agent_email_urgent
+
+    def test_urgent_email_escalates(self):
+        """Email with urgent subject should set escalate=True and include ⚠ in result."""
+        fake_emails = [
+            {"subject": "URGENT: sign the contract", "snippet": "please respond", "sender": "boss@example.com"},
+            {"subject": "Weekly update", "snippet": "nothing special", "sender": "team@example.com"},
+        ]
+        with patch("jarvis_agents._safe_import") as mock_import:
+            mock_gs = MagicMock()
+            mock_gs.get_unread_email_subjects.return_value = fake_emails
+            mock_import.return_value = mock_gs
+            agent = self._get_agent()
+            result = agent()
+        self.assertTrue(result["escalate"], "escalate should be True when urgent email found")
+        self.assertIn("⚠", result["result"])
+        self.assertEqual(result["status"], "ok")
+
+    def test_no_urgent_email_returns_empty(self):
+        """Non-urgent emails should yield escalate=False and empty result string."""
+        fake_emails = [
+            {"subject": "Team lunch on Friday", "snippet": "let's grab food", "sender": "friend@example.com"},
+            {"subject": "Newsletter: April edition", "snippet": "read our latest", "sender": "news@example.com"},
+        ]
+        with patch("jarvis_agents._safe_import") as mock_import:
+            mock_gs = MagicMock()
+            mock_gs.get_unread_email_subjects.return_value = fake_emails
+            mock_import.return_value = mock_gs
+            agent = self._get_agent()
+            result = agent()
+        self.assertFalse(result["escalate"], "escalate should be False for non-urgent emails")
+        self.assertEqual(result["result"], "")
+        self.assertEqual(result["status"], "ok")
+
+
+class MeetingPrepFastPathTests(unittest.TestCase):
+    """Fast-path routing for meeting prep / next-meeting queries."""
+
+    def _consume(self, stream) -> str:
+        return "".join(stream)
+
+    def test_next_meeting_query_routes_to_calendar(self):
+        """'what's my next meeting' should fast-path to Calendar label."""
+        fake_event = {
+            "title": "Design Review",
+            "start": "2026-04-26T14:00:00-07:00",
+            "attendees": ["Alice", "Bob"],
+        }
+        with patch("google_services.get_next_event", return_value=fake_event):
+            stream, label = router.route_stream("what's my next meeting")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Calendar")
+        self.assertIn("Design Review", text)
+        self.assertIn("2:00 PM", text)
+
+    def test_meeting_prep_phrase_routes_to_calendar(self):
+        """'prep me for my next meeting' should fast-path to Calendar label."""
+        fake_event = {
+            "title": "Standup",
+            "start": "2026-04-26T09:30:00-07:00",
+            "attendees": [],
+        }
+        with patch("google_services.get_next_event", return_value=fake_event):
+            stream, label = router.route_stream("prep me for my next meeting")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Calendar")
+        self.assertIn("Standup", text)
+        self.assertIn("9:30 AM", text)
 
 
 if __name__ == "__main__":

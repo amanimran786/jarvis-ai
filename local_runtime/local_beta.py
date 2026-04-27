@@ -224,14 +224,24 @@ def run_beta_suite(
 def status() -> dict:
     _ensure_dirs()
     runs = sorted(RUNS_DIR.glob("beta_*.json"))
-    latest = json.loads(runs[-1].read_text(encoding="utf-8")) if runs else None
+    readable_runs = []
+    unreadable_runs = []
+    for run_path in runs:
+        try:
+            readable_runs.append((run_path, json.loads(run_path.read_text(encoding="utf-8"))))
+        except (OSError, json.JSONDecodeError) as exc:
+            unreadable_runs.append({"path": str(run_path), "error": str(exc)})
+    latest_run_path, latest = readable_runs[-1] if readable_runs else ("", None)
     return {
         "root": str(ROOT),
         "runs": len(runs),
-        "latest_run": str(runs[-1]) if runs else "",
+        "readable_runs": len(readable_runs),
+        "unreadable_runs": len(unreadable_runs),
+        "latest_run": str(latest_run_path) if latest_run_path else "",
         "latest_passed": latest.get("passed", 0) if latest else 0,
         "latest_failed": latest.get("failed", 0) if latest else 0,
         "latest_failed_case_ids": latest.get("failed_case_ids", []) if latest else [],
+        "latest_error": (latest.get("error", "") if latest else "") or (unreadable_runs[0]["error"] if unreadable_runs and not latest else ""),
     }
 
 
