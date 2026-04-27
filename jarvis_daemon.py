@@ -51,12 +51,20 @@ def _is_another_instance_running() -> bool:
         if not existing:
             return False
         pid = existing.get("pid")
-        if pid and pid != os.getpid():
-            base = existing.get("base_url", "")
-            if base:
-                with urllib.request.urlopen(f"{base}/status", timeout=1.5) as r:
-                    payload = json.load(r)
-                    return payload.get("status") == "online"
+        if not pid or pid == os.getpid():
+            return False
+        # Verify the PID is actually alive before making an HTTP call.
+        # This prevents a race where a freshly killed process's runtime.json
+        # is still on disk while the new process starts.
+        try:
+            os.kill(pid, 0)  # signal 0 = liveness check, no signal sent
+        except (ProcessLookupError, PermissionError):
+            return False  # process is dead or unreadable
+        base = existing.get("base_url", "")
+        if base:
+            with urllib.request.urlopen(f"{base}/status", timeout=1.5) as r:
+                payload = json.load(r)
+                return payload.get("status") == "online"
     except Exception:
         pass
     return False
