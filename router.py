@@ -311,6 +311,40 @@ def _is_skill_proposal_request(lower: str) -> bool:
     )
 
 
+def _is_user_identity_query(lower: str) -> bool:
+    """Detect 'who am I' — user asking for their own identity/profile."""
+    return bool(re.search(r"^who\s+am\s+i\b|^tell\s+me\s+who\s+i\s+am\b", lower.strip()))
+
+
+def _is_capabilities_query(lower: str) -> bool:
+    """Detect 'what can you do' / 'what are your capabilities'."""
+    return bool(re.search(
+        r"\bwhat\s+(?:can\s+you\s+do|do\s+you\s+do|are\s+your\s+(?:capabilities|features|skills|abilities))\b"
+        r"|\bhow\s+can\s+you\s+help\b"
+        r"|\bwhat\s+(?:are\s+)?you\s+capable\s+of\b",
+        lower,
+    ))
+
+
+def _capabilities_reply() -> str:
+    return (
+        "Here's what I can do:\n"
+        "• Calendar — check events, add meetings, set reminders\n"
+        "• Gmail — read inbox, email summary/digest, compose and send emails\n"
+        "• iMessage — compose and send messages, track conversation threads\n"
+        "• Tasks — show open items from your vault task hub\n"
+        "• Weather — current conditions for any location\n"
+        "• Web search — live search results\n"
+        "• Memory — remember facts, recall context across sessions\n"
+        "• Notes — read and write Obsidian vault notes\n"
+        "• System — open apps, control volume/brightness, take screenshots\n"
+        "• Reminders — 'remind me at 3pm to ...' → Calendar event\n"
+        "• Proactive alerts — calendar and urgent email notifications\n"
+        "• Voice — wake word detection, STT, TTS\n"
+        "Just ask naturally — I'll route to the right tool."
+    )
+
+
 def _is_model_status_query(lower: str) -> bool:
     return bool(re.search(r"\b(what model are you using|which model are you using|what model are you on|are you using ollama|are you local|are you cloud|are you open source|what mode are you in|which mode are you in)\b", lower))
 
@@ -3092,6 +3126,19 @@ def route_stream(user_input: str) -> tuple:
         return _s(set_mode(requested_mode)), "Status"
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
+    if _is_user_identity_query(lower):
+        import memory as _mem
+        facts = _mem.list_facts()
+        name_fact = next((f for f in facts if "aman" in f.lower() or "your name" in f.lower()), None)
+        name = "Aman Imran"
+        if name_fact:
+            import re as _re2
+            m = _re2.search(r"(?:name is|you are|you're|i am)\s+([A-Z][a-z]+(?: [A-Z][a-z]+)*)", name_fact, _re2.IGNORECASE)
+            if m:
+                name = m.group(1)
+        return _s(f"You're {name}. I'm Jarvis — your local AI assistant."), "Status"
+    if _is_capabilities_query(lower):
+        return _s(_capabilities_reply()), "Status"
     if _is_identity_override_query(lower):
         return _s(_identity_override_reply()), "Status"
     if _is_constraint_bypass_query(lower):
