@@ -996,6 +996,88 @@ def _parse_email_search_query(text: str) -> str | None:
     return None
 
 
+def _parse_message_read_query(text: str) -> str | None:
+    """Extract a contact name from iMessage inbox-read queries.
+
+    Matches phrases like:
+      "any new messages from Aman"
+      "did Aman reply"
+      "what did Aman say"
+      "read messages from Aman"
+      "check messages from Aman"
+      "has Aman texted"
+      "any texts from Aman"
+
+    Returns the contact name/identifier if matched, else None.
+    """
+    raw = _strip_polite_prefix(text or "").strip()
+    # Strip trailing punctuation before matching so "did Aman reply?" works
+    lower = raw.lower().rstrip("?.,!")
+    patterns = [
+        # "any new messages from X" / "any texts from X" / "any messages from X"
+        r"^(?:any\s+)?(?:new\s+)?(?:messages?|texts?|imessages?)\s+from\s+(.+)$",
+        # "did X reply" / "did X text" / "did X respond"
+        r"^did\s+(.+?)\s+(?:reply|text|respond|message|get back)(?:\s.*)?$",
+        # "what did X say" / "what did X text" / "what did X message"
+        r"^what\s+did\s+(.+?)\s+(?:say|text|message|write|send)(?:\s.*)?$",
+        # "read messages from X" / "read texts from X"
+        r"^read\s+(?:messages?|texts?)\s+from\s+(.+)$",
+        # "check messages from X" / "check texts from X"
+        r"^check\s+(?:messages?|texts?)\s+from\s+(.+)$",
+        # "has X texted" / "has X messaged" / "has X replied"
+        r"^has\s+(.+?)\s+(?:texted|messaged|replied|responded|written)(?:\s.*)?$",
+        # "show messages from X" / "show texts from X"
+        r"^show\s+(?:(?:me\s+)?(?:my\s+)?)?(?:messages?|texts?)\s+from\s+(.+)$",
+    ]
+    for pattern in patterns:
+        m = re.match(pattern, lower)
+        if m:
+            # Preserve original casing by slicing the raw string at the same offset
+            contact_lower = m.group(1).strip().strip("?.,!")
+            # Map back to original-case version
+            idx = lower.find(contact_lower)
+            if idx != -1:
+                return raw[idx: idx + len(contact_lower)].strip("?.,!")
+            return contact_lower
+    return None
+
+
+def _is_meeting_prep_query(lower: str) -> bool:
+    """Return True when the user is asking about their next meeting."""
+    patterns = [
+        r"\bmeeting in \d+\b",
+        r"\bprep (?:me )?for (?:my )?(?:next )?meeting\b",
+        r"\bwhat.s my next meeting\b",
+        r"\bnext meeting\b",
+        r"\bupcoming meeting\b",
+        r"\bmeeting prep\b",
+    ]
+    return any(re.search(p, lower) for p in patterns)
+
+
+def _format_next_event(event: dict) -> str:
+    """Format a get_next_event() dict into a short spoken prep string."""
+    from datetime import datetime
+    title = event.get("title", "Untitled")
+    start_raw = event.get("start", "")
+    attendees = event.get("attendees", [])
+    try:
+        dt = datetime.fromisoformat(start_raw)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+        time_str = dt.strftime("%-I:%M %p")
+    except Exception:
+        time_str = start_raw
+    parts = [f"Your next meeting is {title} at {time_str}."]
+    if attendees:
+        count = len(attendees)
+        names = ", ".join(attendees[:3])
+        if count > 3:
+            names += f", and {count - 3} others"
+        parts.append(f"{count} attendee{'s' if count != 1 else ''}: {names}.")
+    return " ".join(parts)
+
+
 def _parse_email_compose(text: str) -> tuple[str, str, str] | None:
     raw = _strip_polite_prefix(text or "").strip()
 
@@ -1727,7 +1809,7 @@ def _parse_contact_details_query(text: str) -> str:
 # ── Multi-intent helpers ──────────────────────────────────────────────────────
 
 _TOOL_HINT_PATTERNS = [
-    ("time",     r"\b(time|clock|what time|current time)\b"),
+    ("time",     r"\b(clock|what time|current time|what'?s the time|is the time|time now|time is it)\b"),
     ("weather",  r"\b(weather|forecast|temperature|hot|cold outside)\b"),
     ("calendar", r"\b(calendar|schedule|events?|meetings?|what do i have today|appointments?)\b"),
     ("email",    r"\b(email|inbox|unread|emails?)\b"),
@@ -1750,8 +1832,9 @@ _SEARCH_TRIGGERS = (
 
 
 def _tool_hint(text: str) -> str | None:
+    t = (text or "").lower()
     for hint, pattern in _TOOL_HINT_PATTERNS:
-        if re.search(pattern, text):
+        if re.search(pattern, t):
             return hint
     return None
 
@@ -2004,6 +2087,38 @@ def _should_try_llm_reply_suggestion(incoming_body: str) -> bool:
     return len(words) >= 4 and len((incoming_body or "").strip()) >= 18
 
 
+def _suggest_reply_from_context(contact: str, incoming: str) -> str | None:
+    """Generate a short suggested reply using thread context. Returns None if unavailable."""
+    try:
+        thread = msg_thread.get_thread(contact, last_n=5)
+        if not thread:
+            return None
+        history = "\n".join(
+            f"{'Aman' if m.get('direction') == 'out' else contact}: {m['body']}"
+            for m in thread[-4:]
+        )
+        from brains.brain_ollama import ask_local
+        result_holder: list[str] = []
+
+        def _run():
+            try:
+                r = ask_local(
+                    f"Conversation:\n{history}\n\n{contact}: {incoming}\n\nSuggest a short casual reply from Aman:",
+                    model="jarvis-local",
+                    system_extra="You are helping Aman draft a text message reply. Keep it casual and brief (1-2 sentences max). No quotes. Just the reply text."
+                )
+                result_holder.append(r.strip())
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=8.0)
+        return result_holder[0] if result_holder else None
+    except Exception:
+        return None
+
+
 def _draft_reply_from_relay_body(body: str) -> str:
     """Draft only when the relay contains an explicit reply instruction."""
     text = (body or "").strip()
@@ -2044,7 +2159,26 @@ _INTERRUPT_BRIEFING_TRIGGERS = (
     "brief me", "briefing", "morning brief", "morning update",
     "what's my status", "what is my status", "give me an update",
     "status update", "rundown", "what do i have today",
+    "what's going on", "give me a rundown", "rundown please",
 )
+
+_CATCHUP_TRIGGERS = {
+    "what did i miss", "catch me up", "fill me in", "what happened",
+    "anything urgent", "anything i missed", "what's new", "whats new",
+    "any updates", "quick update", "status check", "anything while i was away",
+    "what did i miss today",
+}
+
+
+def _is_catchup_query(lower: str) -> bool:
+    return lower.strip() in _CATCHUP_TRIGGERS or any(t in lower for t in _CATCHUP_TRIGGERS)
+
+_APP_LAUNCH_AMBIGUOUS = {
+    "calendar", "email", "mail", "gmail", "notifications", "settings", "preferences",
+    "system preferences", "system settings", "contacts", "photos", "messages",
+    "app store", "the app store", "facetime", "maps", "notes", "reminders",
+    "my email", "my calendar", "my contacts",
+}
 
 _MESSAGES_HISTORY_ACCESS_TRIGGERS = (
     "messages full disk access",
@@ -2064,9 +2198,56 @@ def _is_messages_history_access_query(lower: str) -> bool:
 
 def _pending_draft_interrupt_route(user_input: str, lower: str) -> tuple | None:
     """Route obvious standalone commands without overwriting a pending message draft."""
+    # Meeting fast-paths must be checked before _dispatch_single_intent because the
+    # calendar hint in _tool_hint matches "meeting" and would steal these queries.
+    if _is_meeting_captions_query(lower):
+        if any(term in lower for term in ("read", "show", "what are", "display", "copy")):
+            return _s(browser.read_meeting_captions()), "Browser"
+        return _s(browser.summarize_meeting_captions(user_input)), "Browser"
+    if _is_meeting_diagnostics_query(lower):
+        return _s(_meeting_diagnostics_reply()), "Meeting"
+    if _is_focus_meeting_query(lower):
+        return _s(browser.focus_meeting_tab()), "Browser"
+    meeting_safe = _meeting_safe_mode_requested(lower)
+    if meeting_safe == "on":
+        call_privacy.set_enabled(True)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "off":
+        call_privacy.set_enabled(False)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "status":
+        return _s(call_privacy.status_text()), "Meeting"
     fast = _dispatch_single_intent(user_input)
     if fast is not None:
         return _s(fast), "Status"
+    # Vault capture always escapes draft context
+    _early_cap_prefixes = ("note this", "remember this:", "save to notes:", "vault this")
+    if any(lower.startswith(p) or lower == p.rstrip(":") for p in _early_cap_prefixes):
+        _ecap = vault_capture.handle_capture(user_input)
+        if _ecap is not None:
+            return _s(_ecap), "Vault"
+    # Night/morning/greeting triggers always escape draft context
+    _all_greeting = {
+        "good morning", "morning", "morning jarvis", "good morning jarvis",
+        "mornin", "mornin jarvis", "good afternoon", "afternoon", "afternoon jarvis",
+        "good afternoon jarvis", "good evening", "evening jarvis", "good evening jarvis",
+    }
+    _all_night = {"good night", "good night jarvis", "night jarvis", "goodnight jarvis"}
+    if lower in _all_night:
+        return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
+    if lower in _all_greeting:
+        def _greeting_brief_gen_i():
+            from briefing import _greeting
+            from datetime import datetime
+            greeting = _greeting(datetime.now())
+            brief = _jagents.run_briefing()
+            yield f"{greeting}\n\n{brief}"
+        return _greeting_brief_gen_i(), "Jarvis"
+    # App launch always escapes draft context
+    if re.match(r"^(?:open|launch|start)\b", lower):
+        _app_candidate = _parse_app(user_input) or ""
+        if _app_candidate and _app_candidate.lower() not in _APP_LAUNCH_AMBIGUOUS:
+            return _s(tools.open_app(_app_candidate)), "App"
     if any(t in lower for t in _INTERRUPT_BRIEFING_TRIGGERS):
         def _briefing_gen():
             yield _jagents.run_briefing()
@@ -2240,6 +2421,11 @@ def route_stream(user_input: str) -> tuple:
         _set_pending_email_recipient(email_recipient_only, to_address)
         return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
 
+    # ── iMessage inbox read: "any new messages from X" / "did X reply" ─────────
+    _msg_read_contact = _parse_message_read_query(user_input)
+    if _msg_read_contact:
+        return _s(msg.read_recent_thread(_msg_read_contact)), "Messages"
+
     # ── Email search: "find emails from X" / "search email for Y" ────────────
     _email_search_q = _parse_email_search_query(user_input)
     if _email_search_q:
@@ -2289,8 +2475,8 @@ def route_stream(user_input: str) -> tuple:
     if (
         not composed_message
         and not recipient_only
-        and
-        not _has_pending_message_draft()
+        and not _has_pending_message_draft()
+        and not _pending_msg_recipient
         and (
             lower.strip() in {"confirm", "send", "confirm send", "yes", "yep", "yup", "ok", "okay", "sure", "do it"}
             or any(phrase in lower for phrase in ("send it", "send now", "yes send", "go ahead and send", "approve send"))
@@ -2562,6 +2748,16 @@ def route_stream(user_input: str) -> tuple:
             "Next build step is an explicit Messages inbox listener with a permission gate."
         ), "Messages"
 
+    # ── Meeting prep fast-path ────────────────────────────────────────────────
+    if _is_meeting_prep_query(lower):
+        try:
+            _next_ev = gs.get_next_event()
+            if _next_ev:
+                return _s(_format_next_event(_next_ev)), "Calendar"
+            return _s("No upcoming meetings in the next 24 hours."), "Calendar"
+        except Exception:
+            return _s("Calendar is unavailable. You may need to re-authorize Google access."), "Calendar"
+
     # ── Incoming message relay: "Farhan replied: hey man" ────────────────────
     _incoming_match = _is_incoming_message_relay(user_input)
     if _incoming_match:
@@ -2572,23 +2768,21 @@ def route_stream(user_input: str) -> tuple:
             resolved = _eager_resolve_contact(_in_contact)
             # Static draft first (explicit reply instruction in the body)
             reply_body = _draft_reply_from_relay_body(_in_body)
-            if not reply_body and _should_try_llm_reply_suggestion(_in_body):
-                # LLM-powered contextual suggestion from thread history
-                reply_body = _llm_suggest_reply(_in_contact, _in_body)
+            if not reply_body:
+                # Context-aware suggestion using thread history via local model
+                reply_body = _suggest_reply_from_context(_in_contact, _in_body)
             if reply_body:
                 unsafe_reply = _unsafe_message_draft_reply(reply_body)
                 if unsafe_reply:
                     return _s(unsafe_reply), "Messages"
                 _set_pending_message_draft(_in_contact, reply_body, resolved_address=resolved)
-                if resolved:
-                    masked = msg._mask_contact_handle(resolved) if hasattr(msg, "_mask_contact_handle") else resolved
-                    return _s(f"Draft reply to {_in_contact} ({masked}): \"{reply_body}\". Say confirm send or edit it."), "Messages"
-                return _s(f"Draft reply to {_in_contact}: \"{reply_body}\". Say confirm send or edit it."), "Messages"
+                return _s(
+                    f"Got it. {_in_contact} said: '{_in_body}'. "
+                    f"Suggested reply: '{reply_body}'. "
+                    f"Say confirm send or tell me what to say instead."
+                ), "Messages"
             _set_pending_recipient(_in_contact, resolved_address=resolved or "")
-            if resolved:
-                masked = msg._mask_contact_handle(resolved) if hasattr(msg, "_mask_contact_handle") else resolved
-                return _s(f"Noted {_in_contact}'s reply: \"{_in_body}\". What would you like to say back? (will send to {masked})"), "Messages"
-            return _s(f"Noted {_in_contact}'s reply: \"{_in_body}\". What would you like to say back?"), "Messages"
+            return _s(f"Got it — {_in_contact} replied: '{_in_body}'. What would you like to say back?"), "Messages"
 
     _reply_compose = _parse_reply_compose(user_input)
     if _reply_compose:
@@ -2637,6 +2831,13 @@ def route_stream(user_input: str) -> tuple:
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
 
+    # ── Catch-up / "what did I miss" fast-path ────────────────────────────────
+    if _is_catchup_query(lower):
+        def _catchup_gen():
+            brief = _jagents.run_briefing()
+            yield f"Here's what you missed:\n\n{brief}"
+        return _catchup_gen(), "Jarvis"
+
     # ── End-of-conversation acknowledgement ───────────────────────────────────
     if lower in {
         "that's all", "that's it", "that'll be all", "that's all for now",
@@ -2663,6 +2864,26 @@ def route_stream(user_input: str) -> tuple:
         texts = [_dispatch_single_intent(p) for p in multi_parts]
         if all(t is not None for t in texts):
             return _s(" ".join(texts)), "Multi"
+
+    # ── Meeting fast-paths (must run before _dispatch_single_intent to avoid
+    #    the calendar hint swallowing "meeting" queries as calendar events) ────
+    if _is_meeting_captions_query(lower):
+        if any(term in lower for term in ("read", "show", "what are", "display", "copy")):
+            return _s(browser.read_meeting_captions()), "Browser"
+        return _s(browser.summarize_meeting_captions(user_input)), "Browser"
+    if _is_meeting_diagnostics_query(lower):
+        return _s(_meeting_diagnostics_reply()), "Meeting"
+    if _is_focus_meeting_query(lower):
+        return _s(browser.focus_meeting_tab()), "Browser"
+    meeting_safe = _meeting_safe_mode_requested(lower)
+    if meeting_safe == "on":
+        call_privacy.set_enabled(True)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "off":
+        call_privacy.set_enabled(False)
+        return _s(call_privacy.status_text()), "Meeting"
+    if meeting_safe == "status":
+        return _s(call_privacy.status_text()), "Meeting"
 
     # ── Single-intent fast-path (time, weather, calendar, email) ─────────────
     if not composed_message and not recipient_only:
@@ -2968,14 +3189,27 @@ def route_stream(user_input: str) -> tuple:
         return _s(f"{pct}% of {int(of) if of == int(of) else of} is {result_str}."), "Math"
 
     # Unit conversion: temperature (°F↔°C), miles↔km, lbs↔kg
+    # Pattern 1: "[convert] 26.2 miles [to|in] km"
     _conv = re.match(
         r"^(?:convert|what(?:'s| is)|how (?:many|much))?\s*(\d+(?:\.\d+)?)\s*"
         r"(f(?:ahrenheit)?|c(?:elsius|entigrade)?|km?|miles?|kg|lbs?|pounds?|kilograms?)"
         r"\s*(?:to|in)\s*(f(?:ahrenheit)?|c(?:elsius|entigrade)?|km?|miles?|kg|lbs?|pounds?|kilograms?)$",
         lower.strip()
     )
+    # Pattern 2: "how many km in 26.2 miles" (dst first, then number + src)
+    _conv_rev = None
+    if not _conv:
+        _conv_rev = re.match(
+            r"^how (?:many|much)\s*(f(?:ahrenheit)?|c(?:elsius|entigrade)?|km?|miles?|kg|lbs?|pounds?|kilograms?)"
+            r"\s+(?:is|are|in|to)\s+(\d+(?:\.\d+)?)\s*"
+            r"(f(?:ahrenheit)?|c(?:elsius|entigrade)?|km?|miles?|kg|lbs?|pounds?|kilograms?)$",
+            lower.strip()
+        )
     if _conv:
         val, src, dst = float(_conv.group(1)), _conv.group(2).lower(), _conv.group(3).lower()
+    elif _conv_rev:
+        dst, val, src = _conv_rev.group(1).lower(), float(_conv_rev.group(2)), _conv_rev.group(3).lower()
+    if _conv or _conv_rev:
         def _normalize_unit(u):
             if u.startswith("f"): return "F"
             if u.startswith("c"): return "C"
@@ -3003,12 +3237,6 @@ def route_stream(user_input: str) -> tuple:
 
     # App launch fast-path: "open Spotify", "launch Terminal", "start Finder"
     # Skip terms that overlap with other routes (email, calendar, settings, etc.)
-    _APP_LAUNCH_AMBIGUOUS = {
-        "calendar", "email", "mail", "gmail", "notifications", "settings", "preferences",
-        "system preferences", "system settings", "contacts", "photos", "messages",
-        "app store", "the app store", "facetime", "maps", "notes", "reminders",
-        "my email", "my calendar", "my contacts",
-    }
     if re.match(r"^(?:open|launch|start)\b", lower) and not composed_message and not email_recipient_only:
         _app_candidate = _parse_app(user_input) or ""
         if _app_candidate and _app_candidate.lower() not in _APP_LAUNCH_AMBIGUOUS:

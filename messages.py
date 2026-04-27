@@ -430,6 +430,105 @@ def _format_name_list(names: list[str], conjunction: str = "or") -> str:
     return ", ".join(names[:-1]) + f", {conjunction} {names[-1]}"
 
 
+_CHAT_DB_SNAPSHOT = Path("/tmp/jarvis_chat_snapshot.db")
+
+_THREAD_READ_SQL = """
+SELECT
+    datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as sent_at,
+    CASE WHEN m.is_from_me = 1 THEN 'You' ELSE :contact_name END as sender,
+    m.text
+FROM message m
+JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+JOIN chat c ON cmj.chat_id = c.ROWID
+WHERE c.chat_identifier LIKE :phone_pattern
+  AND m.text IS NOT NULL
+ORDER BY m.date DESC
+LIMIT :n
+"""
+
+
+def _copy_chat_db_snapshot() -> bool:
+    """Copy chat.db to /tmp to avoid WAL-lock issues. Returns True on success."""
+    src = MESSAGES_CHAT_DB
+    try:
+        import shutil
+        if not src.exists():
+            return False
+        shutil.copy2(str(src), str(_CHAT_DB_SNAPSHOT))
+        return True
+    except Exception:
+        return False
+
+
+def _digits_only(text: str) -> str:
+    return re.sub(r"\D", "", text)
+
+
+def _read_thread_from_chat_db(contact_or_number: str, last_n: int) -> list[tuple[str, str]] | None:
+    """
+    Query the chat.db snapshot for a contact's thread.
+    Returns list of (sender, text) tuples oldest-first, or None if inaccessible.
+    """
+    if not _copy_chat_db_snapshot():
+        return None
+    digits = _digits_only(contact_or_number)
+    if not digits:
+        return None
+    # Match US-style +1XXXXXXXXXX or international +XXXXXXXXXX
+    phone_pattern = f"%{digits[-10:]}"
+    try:
+        conn = sqlite3.connect(str(_CHAT_DB_SNAPSHOT), timeout=2)
+        try:
+            rows = conn.execute(
+                _THREAD_READ_SQL,
+                {"contact_name": contact_or_number, "phone_pattern": phone_pattern, "n": last_n},
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            return None
+        # rows are DESC (newest first) — reverse for display
+        return [(row[1], row[2]) for row in reversed(rows)]
+    except Exception:
+        return None
+
+
+def read_recent_thread(contact_or_number: str, last_n: int = 5) -> str:
+    """
+    Return a formatted transcript of recent messages with a contact.
+
+    Tries chat.db (via a /tmp snapshot) first. Falls back to the Jarvis
+    thread store (messages_thread.get_thread) if chat.db is inaccessible
+    or the contact is stored only by name.
+
+    Format:
+        [You] hey, you around?
+        [Aman] yeah what's up
+
+    Returns "No recent messages with {contact}." if nothing is found.
+    """
+    import messages_thread as _mt
+
+    contact_label = contact_or_number.strip()
+
+    # --- attempt 1: chat.db via phone lookup ----------------------------------
+    db_rows = _read_thread_from_chat_db(contact_or_number, last_n)
+    if db_rows:
+        lines = [f"[{sender}] {text}" for sender, text in db_rows]
+        return "\n".join(lines)
+
+    # --- attempt 2: Jarvis thread store (name-keyed) --------------------------
+    thread_msgs = _mt.get_thread(contact_or_number, last_n)
+    if thread_msgs:
+        lines = []
+        for m in thread_msgs:
+            sender = "You" if m.get("direction") == "out" else contact_label
+            lines.append(f"[{sender}] {m.get('body', '')}")
+        return "\n".join(lines)
+
+    return f"No recent messages with {contact_label}."
+
+
 def send_imessage(recipient: str, message: str) -> str:
     """
     Send an iMessage. recipient can be a name, phone number, or email.

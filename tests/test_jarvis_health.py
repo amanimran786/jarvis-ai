@@ -22,17 +22,17 @@ import jarvis_health as jh
 
 
 class CheckAllStructureTests(unittest.TestCase):
+    def setUp(self):
+        jh._cache = {}
+        jh._cache_at = 0.0
+
     def test_returns_all_expected_keys(self):
         """check_all must include every registered component."""
         # Patch all checkers to return instantly to avoid real service calls
         fast_ok = {"name": "x", "ok": True, "detail": "ok", "degraded": False}
-        fast_bad = {"name": "x", "ok": False, "detail": "down", "degraded": True}
         patches = {name: (lambda n=name: {**fast_ok, "name": n})
                    for name in jh._CHECKERS}
-        with patch.dict(
-            {f"jarvis_health._check_{name}": fn for name, fn in patches.items()},
-            {},
-        ):
+        with patch.dict(jh._CHECKERS, patches, clear=True):
             # Force re-check ignoring cache
             result = jh.check_all(force=True)
         for key in ("ollama", "stt", "tts", "google", "mem0", "vault", "watcher"):
@@ -41,13 +41,33 @@ class CheckAllStructureTests(unittest.TestCase):
     def test_each_status_has_required_fields(self):
         fast_ok = {"name": "x", "ok": True, "detail": "ok", "degraded": False}
         # Patch every checker
-        for name in list(jh._CHECKERS):
-            jh._CHECKERS[name] = lambda n=name: {**fast_ok, "name": n}
-        result = jh.check_all(force=True)
+        with patch.dict(
+            jh._CHECKERS,
+            {name: (lambda n=name: {**fast_ok, "name": n}) for name in jh._CHECKERS},
+            clear=True,
+        ):
+            result = jh.check_all(force=True)
         for name, status in result.items():
             self.assertIn("ok", status)
             self.assertIn("detail", status)
             self.assertIn("degraded", status)
+
+    def test_slow_checker_is_reported_as_timed_out(self):
+        def fast():
+            return {"name": "fast", "ok": True, "detail": "ok", "degraded": False}
+
+        def slow():
+            time.sleep(0.2)
+            return {"name": "slow", "ok": True, "detail": "late", "degraded": False}
+
+        with patch.dict(jh._CHECKERS, {"fast": fast, "slow": slow}, clear=True), \
+             patch("jarvis_health._CHECK_TIMEOUT_SECONDS", 0.01):
+            result = jh.check_all(force=True)
+
+        self.assertTrue(result["fast"]["ok"])
+        self.assertFalse(result["slow"]["ok"])
+        self.assertTrue(result["slow"]["degraded"])
+        self.assertIn("timed out", result["slow"]["detail"].lower())
 
 
 class DegradedTests(unittest.TestCase):

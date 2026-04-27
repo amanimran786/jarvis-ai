@@ -10,6 +10,22 @@ from ddgs import DDGS
 from desktop.screen_capture import capture_screenshot
 
 
+# ── Web search helpers ────────────────────────────────────────────────────────
+
+def _summarise_for_voice(raw: str, query: str) -> str:
+    try:
+        from brains.brain_ollama import ask_local
+        prompt = f"Search results for: {query}\n\n{raw[:1500]}"
+        system = (
+            "You are Jarvis. Summarise these search results in 2-3 natural spoken sentences. "
+            "No markdown. No bullet points. Lead with the key finding."
+        )
+        result = ask_local(prompt, model="jarvis-local", system_extra=system)
+        return result.strip() if result and len(result) > 20 else raw
+    except Exception:
+        return raw
+
+
 # ── Weather ───────────────────────────────────────────────────────────────────
 
 def get_weather(location: str = "") -> str:
@@ -33,15 +49,28 @@ def get_weather(location: str = "") -> str:
 
 # ── Web search ────────────────────────────────────────────────────────────────
 
-def web_search(query: str, max_results: int = 5) -> str:
+def web_search(query: str, max_results: int = 5, summarise: bool = True) -> str:
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
         if not results:
             return "I couldn't find anything on that."
-        return "\n".join(f"- {r['title']}: {r['body']}" for r in results)
+        raw = "\n".join(f"- {r['title']}: {r['body']}" for r in results)
     except Exception as e:
         return f"Search failed: {e}"
+
+    if summarise and len(raw) > 300:
+        result_holder: list[str] = []
+
+        def _run():
+            result_holder.append(_summarise_for_voice(raw, query))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=8)
+        return result_holder[0] if result_holder else raw
+
+    return raw
 
 
 # ── App launcher ──────────────────────────────────────────────────────────────

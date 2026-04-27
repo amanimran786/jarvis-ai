@@ -175,6 +175,7 @@ _cache_lock = threading.Lock()
 _cache: dict[str, ComponentStatus] = {}
 _cache_at: float = 0.0
 _CACHE_TTL = 60.0   # re-check every 60 seconds max
+_CHECK_TIMEOUT_SECONDS = 10.0
 
 
 def check_all(force: bool = False) -> dict[str, ComponentStatus]:
@@ -188,17 +189,28 @@ def check_all(force: bool = False) -> dict[str, ComponentStatus]:
         if not force and _cache and (now - _cache_at) < _CACHE_TTL:
             return dict(_cache)
         results: dict[str, ComponentStatus] = {}
-        # Run checkers concurrently
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=len(_CHECKERS)) as pool:
-            futures = {pool.submit(fn): name for name, fn in _CHECKERS.items()}
-            for future in as_completed(futures, timeout=10.0):
+        # Run checkers concurrently.
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+        pool = ThreadPoolExecutor(max_workers=len(_CHECKERS))
+        futures = {pool.submit(fn): name for name, fn in _CHECKERS.items()}
+        try:
+            completed = as_completed(futures, timeout=_CHECK_TIMEOUT_SECONDS)
+            for future in completed:
                 name = futures[future]
                 try:
-                    results[name] = future.result(timeout=5.0)
+                    results[name] = future.result(timeout=0)
                 except Exception as e:
                     results[name] = {"name": name, "ok": False,
-                                     "detail": f"Check timed out: {e}", "degraded": True}
+                                     "detail": f"Check failed: {e}", "degraded": True}
+        except FuturesTimeoutError:
+            pass
+        finally:
+            for future, name in futures.items():
+                if name not in results:
+                    future.cancel()
+                    results[name] = {"name": name, "ok": False,
+                                     "detail": "Check timed out.", "degraded": True}
+            pool.shutdown(wait=False, cancel_futures=True)
         _cache = results
         _cache_at = time.monotonic()
     return dict(_cache)

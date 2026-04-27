@@ -100,6 +100,17 @@ _API_TOKEN = ""
 _PUBLIC_PATHS = {"/status", "/webhooks/trigger", "/webhooks/github"}
 
 
+def _default_chat_lock_timeout_seconds() -> float:
+    raw = os.getenv("JARVIS_CHAT_LOCK_TIMEOUT_SECONDS", "3.0")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 3.0
+
+
+_CHAT_LOCK_TIMEOUT_SECONDS = _default_chat_lock_timeout_seconds()
+
+
 def _host_without_port(host_header: str) -> str:
     host = (host_header or "").strip()
     if host.startswith("[") and "]" in host:
@@ -243,6 +254,20 @@ def _compact_json(value) -> str:
         return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     except Exception:
         return repr(value)
+
+
+def _acquire_chat_lock() -> bool:
+    timeout = max(0.0, float(_CHAT_LOCK_TIMEOUT_SECONDS))
+    return _CHAT_LOCK.acquire(timeout=timeout)
+
+
+def _chat_busy_payload() -> dict:
+    return {
+        "ok": False,
+        "error": "chat_busy",
+        "response": "Jarvis is still handling another request. Try again shortly.",
+        "model": "System",
+    }
 
 
 def _payload_meta(body: bytes, payload: dict) -> dict:
@@ -541,8 +566,11 @@ def chat(req: ChatRequest):
     source = (req.source or "api").strip() or "api"
     client_meta = req.meta or {}
     if req.stream:
+        if not _acquire_chat_lock():
+            return JSONResponse(status_code=409, content=_chat_busy_payload())
+
         def generate():
-            with _CHAT_LOCK:
+            try:
                 start_seq = usage_tracker.current_seq()
                 stream, model = route_stream(req.message)
                 chunks = []
@@ -574,9 +602,14 @@ def chat(req: ChatRequest):
                 _record_turn(req.message, response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
+            finally:
+                _CHAT_LOCK.release()
         return StreamingResponse(generate(), media_type="text/event-stream")
 
-    with _CHAT_LOCK:
+    if not _acquire_chat_lock():
+        return JSONResponse(status_code=409, content=_chat_busy_payload())
+
+    try:
         start_seq = usage_tracker.current_seq()
         stream, model = route_stream(req.message)
         response = "".join(stream)
@@ -597,6 +630,8 @@ def chat(req: ChatRequest):
         # mem0 cross-session episodic memory — fire-and-forget
         _record_turn(req.message, response)
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
+    finally:
+        _CHAT_LOCK.release()
 
 
 @app.post("/feedback")
