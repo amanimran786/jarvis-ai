@@ -342,6 +342,25 @@ def _agent_week(context: str = "") -> dict:
         return {"agent": "week", "status": "error", "result": f"Week calendar error: {e}", "escalate": False}
 
 
+def _agent_board(context: str = "") -> dict:
+    """Surface Multica board status (in-progress and blocked issues)."""
+    try:
+        import multica_tools as mt
+        issues = mt.list_issues(limit=30)
+        in_prog = [i for i in issues if i.get("status") == "in_progress"]
+        blocked = [i for i in issues if i.get("status") == "blocked"]
+        lines: list[str] = []
+        for i in in_prog:
+            assignee = (i.get("assignee") or {}).get("name", "")
+            lines.append(f"  {i['identifier']} [{assignee or 'unassigned'}] {i['title']}")
+        for i in blocked:
+            lines.append(f"  {i['identifier']} [BLOCKED] {i['title']}")
+        result = ("Board — in progress:\n" + "\n".join(lines)) if lines else ""
+        return {"agent": "board", "status": "ok", "result": result, "escalate": bool(blocked)}
+    except Exception:
+        return {"agent": "board", "status": "ok", "result": "", "escalate": False}
+
+
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 _AGENTS: dict[str, Callable[[str], dict]] = {
@@ -355,9 +374,10 @@ _AGENTS: dict[str, Callable[[str], dict]] = {
     "email_urgent": _agent_email_urgent,
     "weather":      _agent_weather,
     "meeting_prep": _agent_meeting_prep,
+    "board":        _agent_board,
 }
 
-_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email"]
+_BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email", "board"]
 _WEEK_AGENTS          = ["week", "tasks"]
 _MEETING_PREP_AGENTS  = ["meeting_prep"]
 
