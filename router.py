@@ -177,9 +177,23 @@ def _parse_calendar_reminder(text: str):
                 start_dt += datetime.timedelta(days=1)
             return title, start_dt
 
+    # "set a reminder at 3pm for the dentist" — time-first + for-phrase
+    set_reminder_match = re.search(
+        r"set\s+(?:a\s+)?reminder\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+for\s+(.+)",
+        text, re.IGNORECASE,
+    )
+    if set_reminder_match:
+        title = set_reminder_match.group(1).strip().strip(".,;")
+        if title and len(title) >= 2:
+            now = datetime.datetime.now()
+            start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if start_dt <= now:
+                start_dt += datetime.timedelta(days=1)
+            return title, start_dt
+
     # "remind me to TITLE at TIME" and other verb-first patterns
     title_match = re.search(
-        r"(?:remind\s+me\s+to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment)\s+(?:for|with|to)?|"
+        r"(?:remind\s+me\s+to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment|reminder)\s+(?:for|with|to)?|"
         r"create\s+(?:a\s+)?(?:meeting|event|calendar\s+event)\s+(?:for|with)?|"
         r"book\s+(?:a\s+)?(?:meeting|call|slot)\s+(?:for|with)?)\s+(.+?)\s+at\s+\d",
         text, re.IGNORECASE,
@@ -3273,7 +3287,8 @@ def route_stream(user_input: str) -> tuple:
     # "remind me to call dad at 3pm", "remind me at 3pm to call dad",
     # "schedule standup with fiza at 10am", "add a meeting for client review at 2pm"
     _CAL_REMINDER_PREFIXES = (
-        "remind me to", "remind me at", "schedule ", "add a meeting",
+        "remind me to", "remind me at", "set a reminder", "set reminder",
+        "schedule ", "add a meeting", "add a reminder",
         "create a calendar event", "create a meeting", "book a meeting", "book a call",
     )
     if any(lower.startswith(p) or p in lower for p in _CAL_REMINDER_PREFIXES):
