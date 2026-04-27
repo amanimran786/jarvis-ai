@@ -1166,6 +1166,37 @@ def _parse_email_recipient_only(text: str) -> str:
     return ""
 
 
+def _is_email_reply_query(lower: str) -> bool:
+    """Detect intent to reply to an existing email."""
+    return bool(re.search(
+        r"\b(?:reply|respond|write back|answer)\b.{0,30}\b(?:email|mail|message)\b"
+        r"|\b(?:reply|respond|write back|answer)\b\s+(?:to\s+)?(?:that|their|his|her|the)\b",
+        lower,
+        re.IGNORECASE,
+    ))
+
+
+def _find_email_to_reply(name_hint: str) -> tuple[str, str, str] | None:
+    """Look up unread emails and return (sender_name, from_address, re_subject) for best match.
+
+    name_hint may be empty — falls back to most recent email.
+    """
+    try:
+        emails = gs.get_unread_email_subjects(max_results=10)
+    except Exception:
+        return None
+    if not emails:
+        return None
+    if name_hint:
+        hint_lower = name_hint.lower()
+        for e in emails:
+            if hint_lower in e.get("sender", "").lower() or hint_lower in e.get("from_address", "").lower():
+                return e["sender"], e.get("from_address", ""), f"Re: {e['subject']}"
+    # fallback: most recent
+    e = emails[0]
+    return e["sender"], e.get("from_address", ""), f"Re: {e['subject']}"
+
+
 def _is_email_cancel_query(lower: str) -> bool:
     text = _strip_polite_prefix(lower or "").strip()
     if text in {"cancel", "abort", "nevermind", "never mind", "stop", "discard", "nvm", "no", "nope"}:
@@ -2420,6 +2451,26 @@ def route_stream(user_input: str) -> tuple:
         to_address = _direct_email_or_empty(email_recipient_only)
         _set_pending_email_recipient(email_recipient_only, to_address)
         return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
+
+    # ── Email reply fast-path: "reply to that email from X" ──────────────────
+    if _is_email_reply_query(lower) and not composed_email and not email_recipient_only:
+        # extract name hint from "reply to email from Sarah" / "respond to John's email"
+        _name_m = re.search(
+            r"(?:from|to|by|with)\s+([A-Za-z][A-Za-z '\-]{1,30})"
+            r"|([A-Za-z][A-Za-z '\-]{1,30})(?:'s|s')\s+email",
+            lower,
+        )
+        _reply_hint = (_name_m.group(1) or _name_m.group(2) or "").strip() if _name_m else ""
+        _reply_info = _find_email_to_reply(_reply_hint)
+        if _reply_info:
+            _r_name, _r_addr, _r_subject = _reply_info
+            _clear_message_state()
+            _set_pending_email_recipient(_r_name, _r_addr, _r_subject)
+            return _s(
+                f"Found email from {_r_name} — \"{_r_subject[4:]}\". "
+                f"What would you like to say back?"
+            ), "Gmail"
+        return _s("I couldn't find a recent email to reply to. Check your inbox."), "Gmail"
 
     # ── iMessage inbox read: "any new messages from X" / "did X reply" ─────────
     _msg_read_contact = _parse_message_read_query(user_input)

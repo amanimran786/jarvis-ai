@@ -5333,5 +5333,56 @@ class MeetingPrepFastPathTests(unittest.TestCase):
         self.assertIn("9:30 AM", text)
 
 
+class EmailReplyFastPathTests(unittest.TestCase):
+    """Fast-path routing for 'reply to that email from X' queries."""
+
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._awaiting_msg_recipient = False
+        router._last_msg_recipient = ""
+
+    def _consume(self, stream) -> str:
+        return "".join(stream)
+
+    def test_email_reply_query_detected_and_stages_draft(self):
+        """'reply to that email from Sarah' should find the email and ask for reply body."""
+        fake_emails = [
+            {
+                "sender": "Sarah Johnson",
+                "from_address": "sarah@example.com",
+                "subject": "Q2 planning",
+                "snippet": "Can we sync this week?",
+            },
+        ]
+        with patch("google_services.get_unread_email_subjects", return_value=fake_emails):
+            stream, label = router.route_stream("reply to that email from Sarah")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Sarah", text)
+        self.assertIn("Q2 planning", text)
+        self.assertIn("say", text.lower())
+
+    def test_email_reply_no_match_returns_not_found(self):
+        """When no emails are found, reply fast-path reports it cleanly."""
+        with patch("google_services.get_unread_email_subjects", return_value=[]):
+            stream, label = router.route_stream("reply to that email")
+            text = self._consume(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("couldn't find", text.lower())
+
+    def test_email_reply_body_collected_and_confirms(self):
+        """After staging an email reply recipient, providing body text should stage a full draft."""
+        router._set_pending_email_recipient("Sarah Johnson", "sarah@example.com", "Re: Q2 planning")
+        stream, label = router.route_stream("Thanks for reaching out, let's sync Thursday at 2pm")
+        text = self._consume(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Thursday", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
