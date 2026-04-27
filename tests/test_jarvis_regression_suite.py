@@ -5384,6 +5384,48 @@ class EmailReplyFastPathTests(unittest.TestCase):
         self.assertIn("Thursday", text)
 
 
+class EmailDigestFastPathTests(unittest.TestCase):
+    """JAR-4: 'what are my emails about today?' returns a 3-bullet local digest."""
+
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._clear_message_state()
+
+    def _consume(self, stream) -> str:
+        return "".join(chunk for chunk in stream if isinstance(chunk, str))
+
+    FAKE_EMAILS = [
+        {"sender": "Alice", "from_address": "alice@ex.com", "subject": "Q3 OKRs", "snippet": "please review the OKRs"},
+        {"sender": "Bob", "from_address": "bob@ex.com", "subject": "URGENT: server down", "snippet": "action required immediately"},
+        {"sender": "Carol", "from_address": "carol@ex.com", "subject": "Lunch plans", "snippet": "you free Thursday?"},
+    ]
+
+    def test_digest_returns_gmail_label(self):
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+            stream, label = router.route_stream("what are my emails about today?")
+        self.assertEqual(label, "Gmail")
+
+    def test_digest_has_three_bullets(self):
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+            stream, label = router.route_stream("give me an email digest")
+            text = self._consume(stream)
+        self.assertEqual(text.count("•"), 3)
+
+    def test_digest_flags_urgent(self):
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+            stream, label = router.route_stream("email summary")
+            text = self._consume(stream)
+        self.assertIn("urgent", text.lower())
+
+    def test_digest_empty_inbox(self):
+        with patch("google_services.get_unread_email_subjects", return_value=[]):
+            stream, label = router.route_stream("what's in my inbox today?")
+            text = self._consume(stream)
+        self.assertIn("clear", text.lower())
+
+
 class AlertsEndpointTests(unittest.TestCase):
     """GET /alerts returns structured list from watcher check functions."""
 
