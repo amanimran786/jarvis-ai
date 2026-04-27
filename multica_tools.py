@@ -95,7 +95,7 @@ def update_issue(issue_id: str, **kwargs) -> dict:
 
 
 def assign_issue(issue_id: str, agent_id: str) -> dict:
-    return _req("PUT", f"/api/issues/{issue_id}", {"assignee_id": agent_id})
+    return _req("PUT", f"/api/issues/{issue_id}", {"assignee_id": agent_id, "assignee_type": "agent"})
 
 
 def status_summary() -> str:
