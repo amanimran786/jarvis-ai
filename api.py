@@ -1521,6 +1521,46 @@ def dismiss_alert(alert_id: str):
     return {"ok": ok}
 
 
+@app.get("/messages/access")
+def get_messages_access():
+    """Check iMessage Full Disk Access status and return actionable instructions."""
+    import messages as _msg
+    status = _msg.messages_history_access_status()
+    prompt = "" if status["ok"] else _msg.messages_history_permission_text()
+    return {"ok": status["ok"], "path": str(status["path"]), "reason": status.get("reason", ""), "prompt": prompt}
+
+
+@app.get("/voice/diagnostics")
+def get_voice_diagnostics():
+    """Return mic candidates, TTS availability, and recent voice log tail."""
+    import pathlib
+    diag: dict = {}
+    try:
+        import voice as _v
+        candidates = _v._microphone_candidates()
+        diag["mic_candidates"] = [label for label, _ in candidates]
+        diag["mic_failure_cooldown_active"] = _v._mic_failure_cooldown_until > _v._time.monotonic()
+        diag["mic_last_failure"] = _v._mic_last_failure_detail
+    except Exception as e:
+        diag["mic_error"] = str(e)
+    try:
+        from local_runtime import local_tts as _lt
+        cfg = _lt.config()
+        diag["tts_available"] = cfg.get("available", False)
+        diag["tts_voice"] = cfg.get("voice", "")
+        diag["tts_enabled"] = cfg.get("enabled", False)
+    except Exception as e:
+        diag["tts_error"] = str(e)
+    try:
+        log_path = pathlib.Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
+        if log_path.exists():
+            lines = log_path.read_text(errors="replace").splitlines()
+            diag["voice_log_tail"] = lines[-20:]
+    except Exception:
+        pass
+    return {"ok": True, "diagnostics": diag}
+
+
 @app.post("/watcher/notify")
 def watcher_notify(req: dict):
     """Send a one-shot macOS notification via the watcher."""

@@ -16,6 +16,8 @@ _CONTACT_WITHOUT_HANDLE = "__CONTACT_WITHOUT_HANDLE__"
 _last_fuzzy_matches: list[str] = []
 _last_contact_choices: list[dict[str, str]] = []
 _last_applescript_error = ""
+_last_chat_db_access_error = ""
+_messages_history_access_prompt_shown = False
 MESSAGES_CHAT_DB = Path.home() / "Library" / "Messages" / "chat.db"
 
 
@@ -46,11 +48,36 @@ def messages_history_permission_text(db_path: Path | None = None) -> str:
             "Messages history access is available. Jarvis can read the local iMessage database "
             "when native history import is enabled."
         )
+    return _messages_history_full_disk_access_prompt(
+        Path(status["path"]),
+        str(status["reason"]),
+    )
+
+
+def _messages_history_full_disk_access_prompt(db_path: Path, reason: str = "") -> str:
+    reason_text = f" Reason: {reason}." if reason else ""
     return (
-        "Jarvis cannot read local iMessage history yet. Grant Full Disk Access to "
-        "Jarvis.app and the terminal app that launches Jarvis in System Settings > "
-        "Privacy & Security > Full Disk Access, then restart Jarvis. "
-        f"Database: {status['path']}. Reason: {status['reason']}"
+        "Jarvis can't read iMessage history yet — Full Disk Access is required. "
+        "Open System Settings › Privacy & Security › Full Disk Access and enable "
+        "both Terminal and Jarvis.app. Then quit and reopen Terminal and restart Jarvis. "
+        f"(To open directly: run `open 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'` in Terminal.)"
+        f"{reason_text}"
+    )
+
+
+def _mark_chat_db_access_error(reason: str) -> None:
+    global _last_chat_db_access_error
+    _last_chat_db_access_error = reason
+
+
+def _consume_messages_history_access_prompt() -> str:
+    global _messages_history_access_prompt_shown
+    if _messages_history_access_prompt_shown or not _last_chat_db_access_error:
+        return ""
+    _messages_history_access_prompt_shown = True
+    return _messages_history_full_disk_access_prompt(
+        MESSAGES_CHAT_DB,
+        _last_chat_db_access_error,
     )
 
 
@@ -450,13 +477,16 @@ LIMIT :n
 def _copy_chat_db_snapshot() -> bool:
     """Copy chat.db to /tmp to avoid WAL-lock issues. Returns True on success."""
     src = MESSAGES_CHAT_DB
+    _mark_chat_db_access_error("")
     try:
         import shutil
         if not src.exists():
+            _mark_chat_db_access_error("Messages chat.db was not found at the expected path.")
             return False
         shutil.copy2(str(src), str(_CHAT_DB_SNAPSHOT))
         return True
-    except Exception:
+    except Exception as exc:
+        _mark_chat_db_access_error(str(exc) or exc.__class__.__name__)
         return False
 
 
@@ -489,7 +519,8 @@ def _read_thread_from_chat_db(contact_or_number: str, last_n: int) -> list[tuple
             return None
         # rows are DESC (newest first) — reverse for display
         return [(row[1], row[2]) for row in reversed(rows)]
-    except Exception:
+    except Exception as exc:
+        _mark_chat_db_access_error(str(exc) or exc.__class__.__name__)
         return None
 
 
@@ -516,6 +547,7 @@ def read_recent_thread(contact_or_number: str, last_n: int = 5) -> str:
     if db_rows:
         lines = [f"[{sender}] {text}" for sender, text in db_rows]
         return "\n".join(lines)
+    access_prompt = _consume_messages_history_access_prompt()
 
     # --- attempt 2: Jarvis thread store (name-keyed) --------------------------
     thread_msgs = _mt.get_thread(contact_or_number, last_n)
@@ -524,7 +556,11 @@ def read_recent_thread(contact_or_number: str, last_n: int = 5) -> str:
         for m in thread_msgs:
             sender = "You" if m.get("direction") == "out" else contact_label
             lines.append(f"[{sender}] {m.get('body', '')}")
-        return "\n".join(lines)
+        transcript = "\n".join(lines)
+        return f"{transcript}\n\n{access_prompt}" if access_prompt else transcript
+
+    if access_prompt:
+        return access_prompt
 
     return f"No recent messages with {contact_label}."
 
