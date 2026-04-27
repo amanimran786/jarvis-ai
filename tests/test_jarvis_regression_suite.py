@@ -5488,27 +5488,41 @@ class ReminderFastPathTests(unittest.TestCase):
 
 
 class AlertsEndpointTests(unittest.TestCase):
-    """GET /alerts returns structured list from watcher check functions."""
+    """GET /alerts uses proactive_watcher buffer; alerts can be dismissed."""
 
-    def test_alerts_shape(self):
-        import jarvis_watcher as jw
-        cal_alerts   = [("cal:event1", "Starting in 5 min: Standup")]
-        email_alerts = [("email:boss:urgent", "Urgent email from Boss: server down")]
-        with patch.object(jw, "_check_calendar", return_value=cal_alerts), \
-             patch.object(jw, "_check_emails",   return_value=email_alerts):
-            structs = [{"type": "calendar", "message": m} for _, m in jw._check_calendar()] + \
-                      [{"type": "email",    "message": m} for _, m in jw._check_emails()]
-        self.assertEqual(len(structs), 2)
-        self.assertEqual(structs[0]["type"], "calendar")
-        self.assertEqual(structs[1]["type"], "email")
+    def setUp(self):
+        import proactive_watcher as pw
+        with pw._buf_lock:
+            pw._alerts.clear()
+        pw._seen_keys.clear()
 
-    def test_alerts_empty_when_no_events(self):
-        import jarvis_watcher as jw
-        with patch.object(jw, "_check_calendar", return_value=[]), \
-             patch.object(jw, "_check_emails",   return_value=[]):
-            structs = [{"type": "calendar", "message": m} for _, m in jw._check_calendar()] + \
-                      [{"type": "email",    "message": m} for _, m in jw._check_emails()]
-        self.assertEqual(structs, [])
+    def test_alerts_buffer_push_and_retrieve(self):
+        import proactive_watcher as pw
+        pw._push("calendar", "cal:standup", "Starting in 5 min: Standup")
+        pw._push("email",    "email:boss",  "Urgent email from Boss")
+        alerts = pw.get_alerts()
+        self.assertEqual(len(alerts), 2)
+        self.assertEqual(alerts[0]["kind"], "calendar")
+        self.assertEqual(alerts[1]["kind"], "email")
+
+    def test_duplicate_key_deduped(self):
+        import proactive_watcher as pw
+        pw._push("calendar", "cal:standup", "Starting in 5 min: Standup")
+        pw._push("calendar", "cal:standup", "Starting in 5 min: Standup")
+        self.assertEqual(len(pw.get_alerts()), 1)
+
+    def test_dismiss_removes_from_active_alerts(self):
+        import proactive_watcher as pw
+        pw._push("email", "email:urgent", "Urgent email from Boss")
+        alert_id = pw.get_alerts()[0]["id"]
+        ok = pw.dismiss_alert(alert_id)
+        self.assertTrue(ok)
+        active = pw.get_alerts()
+        self.assertEqual(len(active), 0)
+
+    def test_alerts_empty_initially(self):
+        import proactive_watcher as pw
+        self.assertEqual(pw.get_alerts(), [])
 
 
 if __name__ == "__main__":
