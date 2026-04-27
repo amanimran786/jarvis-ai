@@ -2289,6 +2289,19 @@ _INTERRUPT_BRIEFING_TRIGGERS = (
     "what's going on", "give me a rundown", "rundown please",
 )
 
+def _is_task_list_query(lower: str) -> bool:
+    """Detect 'what are my tasks / what do I have to do / show my task list'."""
+    return bool(re.search(
+        r"\b(?:what(?:'s| is| are)?)\b.{0,20}\b(?:tasks?|todos?|to.?do(?:s|es)?)\b"
+        r"|\b(?:show|list|check|get)\b.{0,15}\b(?:my\s+)?(?:tasks?|todos?|to.?do\s+list)\b"
+        r"|\b(?:any\s+)?(?:open\s+)?tasks?(?:\s+(?:for\s+)?(?:today|this\s+week|left))?\b"
+        r"|\btask\s+list\b|\bmy\s+todos?\b"
+        r"|\bwhat\s+(?:do\s+)?(?:i|i've|i\s+have\s+)?(?:got\s+)?to\s+do\b",
+        lower,
+        re.IGNORECASE,
+    ))
+
+
 _CATCHUP_TRIGGERS = {
     "what did i miss", "catch me up", "fill me in", "what happened",
     "anything urgent", "anything i missed", "what's new", "whats new",
@@ -2985,6 +2998,14 @@ def route_stream(user_input: str) -> tuple:
         return _greeting_brief_gen(), "Jarvis"
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
+
+    # ── Task list fast-path: "what are my tasks" / "show task list" ─────────
+    if _is_task_list_query(lower):
+        try:
+            result = _jagents._agent_tasks()
+            return _s(result.get("result", "Task hub unavailable.")), "Tasks"
+        except Exception:
+            return _s("Task hub unavailable."), "Tasks"
 
     # ── Catch-up / "what did I miss" fast-path ────────────────────────────────
     if _is_catchup_query(lower):
