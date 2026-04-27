@@ -5384,5 +5384,29 @@ class EmailReplyFastPathTests(unittest.TestCase):
         self.assertIn("Thursday", text)
 
 
+class AlertsEndpointTests(unittest.TestCase):
+    """GET /alerts returns structured list from watcher check functions."""
+
+    def test_alerts_shape(self):
+        import jarvis_watcher as jw
+        cal_alerts   = [("cal:event1", "Starting in 5 min: Standup")]
+        email_alerts = [("email:boss:urgent", "Urgent email from Boss: server down")]
+        with patch.object(jw, "_check_calendar", return_value=cal_alerts), \
+             patch.object(jw, "_check_emails",   return_value=email_alerts):
+            structs = [{"type": "calendar", "message": m} for _, m in jw._check_calendar()] + \
+                      [{"type": "email",    "message": m} for _, m in jw._check_emails()]
+        self.assertEqual(len(structs), 2)
+        self.assertEqual(structs[0]["type"], "calendar")
+        self.assertEqual(structs[1]["type"], "email")
+
+    def test_alerts_empty_when_no_events(self):
+        import jarvis_watcher as jw
+        with patch.object(jw, "_check_calendar", return_value=[]), \
+             patch.object(jw, "_check_emails",   return_value=[]):
+            structs = [{"type": "calendar", "message": m} for _, m in jw._check_calendar()] + \
+                      [{"type": "email",    "message": m} for _, m in jw._check_emails()]
+        self.assertEqual(structs, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
