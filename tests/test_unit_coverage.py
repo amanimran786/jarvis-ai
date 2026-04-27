@@ -2841,6 +2841,7 @@ class JarvisCliEndpointTests(unittest.TestCase):
         with patch("jarvis_cli.os.path.exists", return_value=True), \
              patch("jarvis_cli.os.path.realpath", side_effect=lambda p: p), \
              patch.object(jarvis_cli.sys, "executable", "/opt/anaconda3/bin/python3"), \
+             patch.object(jarvis_cli.sys, "prefix", "/opt/anaconda3"), \
              patch.object(jarvis_cli.sys, "argv", ["jarvis_cli.py", "--interactive"]), \
              patch.dict("jarvis_cli.os.environ", {}, clear=True), \
              patch("jarvis_cli.os.execve") as execve_mock:
