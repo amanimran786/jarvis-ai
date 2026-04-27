@@ -5426,6 +5426,62 @@ class EmailDigestFastPathTests(unittest.TestCase):
         self.assertIn("clear", text.lower())
 
 
+class ReminderFastPathTests(unittest.TestCase):
+    """JAR-5: 'remind me at 3pm to X' → Calendar or osascript fallback."""
+
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._clear_message_state()
+
+    def _consume(self, stream) -> str:
+        return "".join(chunk for chunk in stream if isinstance(chunk, str))
+
+    def test_parser_remind_me_at_time_to_task(self):
+        r = router._parse_calendar_reminder("remind me at 3pm to call dad")
+        self.assertIsNotNone(r)
+        title, dt = r
+        self.assertEqual(title, "call dad")
+        self.assertEqual(dt.hour, 15)
+
+    def test_parser_remind_me_to_task_at_time(self):
+        r = router._parse_calendar_reminder("remind me to call dad at 3pm")
+        self.assertIsNotNone(r)
+        title, dt = r
+        self.assertEqual(title, "call dad")
+        self.assertEqual(dt.hour, 15)
+
+    def test_parser_set_reminder_for_phrase(self):
+        r = router._parse_calendar_reminder("set a reminder at 2pm for the dentist")
+        self.assertIsNotNone(r)
+        title, dt = r
+        self.assertIn("dentist", title)
+        self.assertEqual(dt.hour, 14)
+
+    def test_parser_add_reminder_for(self):
+        r = router._parse_calendar_reminder("add a reminder for grocery run at 5pm")
+        self.assertIsNotNone(r)
+        title, _ = r
+        self.assertIn("grocery", title)
+
+    def test_fast_path_routes_to_calendar_label(self):
+        import datetime
+        future_dt = datetime.datetime.now() + datetime.timedelta(hours=3)
+        with patch("google_services.create_event", return_value="Reminder set."):
+            stream, label = router.route_stream("remind me at 6pm to review the PR")
+        self.assertEqual(label, "Calendar")
+
+    def test_fast_path_osascript_fallback(self):
+        import datetime
+        with patch("google_services.create_event", side_effect=Exception("no creds")), \
+             patch("router._schedule_osascript_alarm", return_value="Reminder set for 6:00 PM: review the PR.") as mock_osa:
+            stream, label = router.route_stream("remind me at 6pm to review the PR")
+            text = self._consume(stream)
+        self.assertEqual(label, "Calendar")
+        mock_osa.assert_called_once()
+
+
 class AlertsEndpointTests(unittest.TestCase):
     """GET /alerts returns structured list from watcher check functions."""
 
