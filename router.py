@@ -137,7 +137,7 @@ def _is_timer_request(lower: str) -> bool:
 
 
 def _parse_calendar_reminder(text: str):
-    """Parse natural 'remind me to X at Y' / 'schedule X at Y' into (title, dt) or None.
+    """Parse natural 'remind me to X at Y' / 'remind me at Y to X' / 'schedule X at Y' into (title, dt) or None.
 
     Returns (event_title: str, start_dt: datetime) or None if not parseable.
     Only handles same-day HH:MM AM/PM patterns — complex scheduling falls to orchestrator.
@@ -163,7 +163,21 @@ def _parse_calendar_reminder(text: str):
         # Ambiguous — assume PM for afternoon sanity (e.g., "at 3" → 3 PM)
         hour += 12
 
-    # Extract the event title — text between the verb and "at"
+    # "remind me at TIME to TITLE" — time comes before the task
+    time_first_match = re.search(
+        r"remind\s+me\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+to\s+(.+)",
+        text, re.IGNORECASE,
+    )
+    if time_first_match:
+        title = time_first_match.group(1).strip().strip(".,;")
+        if title and len(title) >= 3:
+            now = datetime.datetime.now()
+            start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if start_dt <= now:
+                start_dt += datetime.timedelta(days=1)
+            return title, start_dt
+
+    # "remind me to TITLE at TIME" and other verb-first patterns
     title_match = re.search(
         r"(?:remind\s+me\s+to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment)\s+(?:for|with|to)?|"
         r"create\s+(?:a\s+)?(?:meeting|event|calendar\s+event)\s+(?:for|with)?|"
@@ -184,6 +198,18 @@ def _parse_calendar_reminder(text: str):
         start_dt += datetime.timedelta(days=1)
 
     return title, start_dt
+
+
+def _schedule_osascript_alarm(title: str, dt) -> str:
+    """Spawn a background osascript process that fires a macOS notification at dt."""
+    import datetime
+    import subprocess
+    now = datetime.datetime.now()
+    delay_secs = max(0, int((dt - now).total_seconds()))
+    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    script = f'delay {delay_secs}\ndisplay notification "{safe_title}" with title "Jarvis Reminder" sound name "Glass"'
+    subprocess.Popen(["osascript", "-e", script])
+    return f"Reminder set for {dt.strftime('%-I:%M %p')}: {title}."
 
 
 def _parse_app(text: str):
@@ -1145,7 +1171,7 @@ def _parse_email_recipient_only(text: str) -> str:
     raw = _strip_polite_prefix(text or "").strip()
     if not raw:
         return ""
-    if re.search(r"\b(?:inbox|unread|read|check|show|list)\b", raw, flags=re.IGNORECASE):
+    if re.search(r"\b(?:inbox|unread|read|check|show|list|summary|digest|overview|recap|gist|tldr)\b", raw, flags=re.IGNORECASE):
         return ""
     patterns = (
         r"^(?:send\s+(?:an?\s+)?email\s+to|email|(?:write|draft|compose)\s+(?:an?\s+)?email\s+(?:to|for))\s+(.+)$",
@@ -1195,6 +1221,56 @@ def _find_email_to_reply(name_hint: str) -> tuple[str, str, str] | None:
     # fallback: most recent
     e = emails[0]
     return e["sender"], e.get("from_address", ""), f"Re: {e['subject']}"
+
+
+def _is_email_digest_query(lower: str) -> bool:
+    """Detect "what are my emails about today" / digest intent."""
+    return bool(re.search(
+        r"\b(?:emails?|mail|inbox)\b.{0,40}\b(?:about|summary|digest|overview|gist|tldr|tl;dr|today)\b"
+        r"|\b(?:what(?:'s| is| are)?)\b.{0,20}\b(?:emails?|mail|inbox)\b.{0,30}\b(?:about|say|contain|today)\b"
+        r"|\bemail\s+(?:digest|summary|overview|recap)\b"
+        r"|\bwhat(?:'s| is)\s+in\s+my\s+(?:email|inbox|mail)\b",
+        lower,
+        re.IGNORECASE,
+    ))
+
+
+def _build_email_digest(emails: list[dict]) -> str:
+    """Build a 3-bullet local summary of inbox emails — no LLM required."""
+    if not emails:
+        return "Your inbox is clear — no unread emails."
+
+    urgent_keywords = re.compile(
+        r"\b(?:urgent|asap|immediately|action required|fyi|deadline|today|respond|critical|alert|overdue)\b",
+        re.IGNORECASE,
+    )
+    urgent   = [e for e in emails if urgent_keywords.search(e.get("subject","") + " " + e.get("snippet",""))]
+    senders  = list(dict.fromkeys(e.get("sender","Unknown") for e in emails))
+    count    = len(emails)
+
+    # Bullet 1: volume + senders
+    if count == 1:
+        b1 = f"1 unread email from {senders[0]}."
+    elif len(senders) <= 3:
+        b1 = f"{count} unread emails from {', '.join(senders[:3])}."
+    else:
+        b1 = f"{count} unread emails from {', '.join(senders[:2])} and {len(senders)-2} others."
+
+    # Bullet 2: urgency
+    if urgent:
+        urg_subjects = ", ".join(f'"{e["subject"][:50]}"' for e in urgent[:2])
+        b2 = f"{len(urgent)} flagged urgent: {urg_subjects}."
+    else:
+        b2 = "Nothing flagged urgent."
+
+    # Bullet 3: top subjects
+    subjects = [e.get("subject","")[:60] for e in emails[:2] if e.get("subject")]
+    if subjects:
+        b3 = "Top threads: " + " / ".join(f'"{s}"' for s in subjects) + "."
+    else:
+        b3 = "No subject lines available."
+
+    return f"• {b1}\n• {b2}\n• {b3}"
 
 
 def _is_email_cancel_query(lower: str) -> bool:
@@ -1886,6 +1962,12 @@ def _dispatch_single_intent(query: str) -> str | None:
             return gs.get_todays_events()
         except Exception:
             return "Calendar is unavailable. You may need to re-authorize Google access."
+    if hint == "email" and _is_email_digest_query(query):
+        try:
+            import jarvis_agents as _ja
+            return _ja.email_digest()
+        except Exception:
+            return "Email is unavailable. You may need to re-authorize Google access."
     if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
@@ -2451,6 +2533,14 @@ def route_stream(user_input: str) -> tuple:
         to_address = _direct_email_or_empty(email_recipient_only)
         _set_pending_email_recipient(email_recipient_only, to_address)
         return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
+
+    # ── Email digest fast-path: "what are my emails about today?" ────────────
+    if _is_email_digest_query(lower) and not composed_email and not email_recipient_only:
+        try:
+            _emails = gs.get_unread_email_subjects(max_results=15)
+            return _s(_build_email_digest(_emails)), "Gmail"
+        except Exception:
+            return _s("I couldn't fetch your email digest right now."), "Gmail"
 
     # ── Email reply fast-path: "reply to that email from X" ──────────────────
     if _is_email_reply_query(lower) and not composed_email and not email_recipient_only:
@@ -3180,10 +3270,10 @@ def route_stream(user_input: str) -> tuple:
         return _s("I didn't catch the duration."), "Timer"
 
     # Calendar reminder / event creation fast-path
-    # "remind me to call dad at 3pm", "schedule standup with fiza at 10am",
-    # "add a meeting for client review at 2pm"
+    # "remind me to call dad at 3pm", "remind me at 3pm to call dad",
+    # "schedule standup with fiza at 10am", "add a meeting for client review at 2pm"
     _CAL_REMINDER_PREFIXES = (
-        "remind me to", "schedule ", "add a meeting",
+        "remind me to", "remind me at", "schedule ", "add a meeting",
         "create a calendar event", "create a meeting", "book a meeting", "book a call",
     )
     if any(lower.startswith(p) or p in lower for p in _CAL_REMINDER_PREFIXES):
@@ -3194,8 +3284,11 @@ def route_stream(user_input: str) -> tuple:
                 try:
                     result = gs.create_event(title, dt)
                     yield result
-                except Exception as e:
-                    yield f"Couldn't create the calendar event: {e}"
+                except Exception:
+                    try:
+                        yield _schedule_osascript_alarm(title, dt)
+                    except Exception as e2:
+                        yield f"Couldn't set the reminder: {e2}"
             return _cal_create_gen(), "Calendar"
 
     # Volume / mute
