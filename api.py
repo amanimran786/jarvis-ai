@@ -20,6 +20,8 @@ Endpoints:
   GET  /local/model-fleet — local Ollama fleet and free training-lane status
   POST /local/automation/colab-handoff — build a local training pack plus Colab notebook handoff
   POST /mode          — set mode: {"mode": "local"|"cloud"|"auto"|"open-source"}
+  GET  /alerts        — pending proactive alerts (calendar + urgent email)
+  POST /alerts/{id}/dismiss — dismiss a proactive alert
 """
 
 import json
@@ -1505,13 +1507,18 @@ def get_watcher_status():
 
 @app.get("/alerts")
 def get_alerts():
-    """Return pending proactive alerts (calendar + urgent email) without delivering them."""
-    import jarvis_watcher as _jw
-    cal   = _jw._check_calendar()
-    email = _jw._check_emails()
-    all_alerts = [{"type": "calendar", "message": m} for _, m in cal] + \
-                 [{"type": "email",    "message": m} for _, m in email]
-    return {"ok": True, "alerts": all_alerts, "count": len(all_alerts)}
+    """Return pending proactive alerts (calendar + urgent email)."""
+    import proactive_watcher as _pw
+    alerts = _pw.get_alerts()
+    return {"ok": True, "alerts": alerts, "count": len(alerts)}
+
+
+@app.post("/alerts/{alert_id}/dismiss")
+def dismiss_alert(alert_id: str):
+    """Dismiss a proactive alert by ID."""
+    import proactive_watcher as _pw
+    ok = _pw.dismiss_alert(alert_id)
+    return {"ok": ok}
 
 
 @app.post("/watcher/notify")
