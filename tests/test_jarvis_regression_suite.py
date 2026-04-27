@@ -5219,6 +5219,13 @@ class WebSearchSummaryTests(unittest.TestCase):
 class CatchupFastPathTests(unittest.TestCase):
     """Fast-path routing for catch-up / 'what did I miss' queries."""
 
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._awaiting_msg_recipient = False
+        router._last_msg_recipient = ""
+
     def _consume(self, stream) -> str:
         return "".join(stream)
 
@@ -5284,6 +5291,13 @@ class EmailUrgencyAgentTests(unittest.TestCase):
 
 class MeetingPrepFastPathTests(unittest.TestCase):
     """Fast-path routing for meeting prep / next-meeting queries."""
+
+    def setUp(self):
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._awaiting_msg_recipient = False
+        router._last_msg_recipient = ""
 
     def _consume(self, stream) -> str:
         return "".join(stream)
