@@ -2125,7 +2125,8 @@ class RouterTests(unittest.TestCase):
 
     def test_incoming_relay_without_instruction_records_and_asks_for_reply(self):
         with patch("router.msg_thread.record_incoming") as record_mock, \
-             patch("router._llm_suggest_reply", return_value="") as suggest_mock:
+             patch("router._llm_suggest_reply", return_value="") as suggest_mock, \
+             patch("router._suggest_reply_from_context", return_value=None):
             stream, label = router.route_stream("Aman Imran replied: beta reply received")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
@@ -2137,6 +2138,7 @@ class RouterTests(unittest.TestCase):
     def test_short_incoming_relay_stays_on_fast_path(self):
         with patch("router.msg_thread.record_incoming") as record_mock, \
              patch("router._llm_suggest_reply", return_value="") as suggest_mock, \
+             patch("router._suggest_reply_from_context", return_value=None), \
              patch("router.smart_stream") as smart_mock:
             stream, label = router.route_stream("Farhan replied: yo")
             text = "".join(stream)
@@ -2167,7 +2169,8 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(router._pending_msg_recipient, "Farhan")
 
     def test_messages_history_permission_bypasses_pending_relay_recipient(self):
-        router.route_stream("Farhan replied: yo")
+        with patch("router._suggest_reply_from_context", return_value=None):
+            router.route_stream("Farhan replied: yo")
 
         with patch("router.msg.messages_history_permission_text", return_value="Grant Full Disk Access to Jarvis.app."):
             stream, label = router.route_stream("messages history permission")
@@ -2179,11 +2182,13 @@ class RouterTests(unittest.TestCase):
 
     def test_reply_to_thread_command_wins_over_pending_relay_recipient(self):
         with patch("router.msg_thread.record_incoming"), \
-             patch("router._llm_suggest_reply", return_value=""):
+             patch("router._llm_suggest_reply", return_value=""), \
+             patch("router._suggest_reply_from_context", return_value=None):
             router.route_stream("Farhan replied: yo")
 
         with patch("router.msg_thread.format_thread_for_prompt", return_value="Farhan: yo"), \
-             patch("router._llm_suggest_reply", return_value=""):
+             patch("router._llm_suggest_reply", return_value=""), \
+             patch("router._suggest_reply_from_context", return_value=None):
             stream, label = router.route_stream("reply to Farhan")
             text = "".join(stream)
 
@@ -2202,8 +2207,8 @@ class RouterTests(unittest.TestCase):
             )
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn('draft reply to aman imran', text.lower())
-        self.assertIn('"do you want another smoke test?"', text.lower())
+        self.assertIn('aman imran', text.lower())
+        self.assertIn('do you want another smoke test?', text.lower())
         self.assertTrue(router._has_pending_message_draft())
         self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
         self.assertEqual(router._pending_message_draft["body"], "Do you want another smoke test?")
