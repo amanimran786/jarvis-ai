@@ -64,6 +64,53 @@ _run_count: int  = 0
 # Set of already-notified event/task keys so we don't repeat the same alert
 _notified_keys: set[str] = set()
 
+# ── Ambient triggers (ADK-style event-driven ambient agents) ──────────────────
+# Each trigger is a named function that fires when its condition is met.
+# Triggers run inside the watcher loop — they fire independently of the
+# 5-minute polling interval when their specific condition becomes true.
+
+_trigger_registry: dict[str, "AmbientTrigger"] = {}
+
+
+class AmbientTrigger:
+    """A named trigger that fires when its condition function returns True.
+
+    Designed after ADK LoopAgent: check() is called every loop iteration;
+    fire() runs the action; cool_down prevents re-firing too soon.
+    """
+    def __init__(self, name: str, check_fn: Callable[[], bool],
+                 fire_fn: Callable[[], None], cool_down: int = 300):
+        self.name = name
+        self._check = check_fn
+        self._fire = fire_fn
+        self.cool_down = cool_down
+        self._last_fired: float = 0.0
+
+    def poll(self) -> bool:
+        """Check condition and fire if met and not in cooldown. Returns True if fired."""
+        if time.monotonic() - self._last_fired < self.cool_down:
+            return False
+        try:
+            if self._check():
+                self._fire()
+                self._last_fired = time.monotonic()
+                return True
+        except Exception:
+            pass
+        return False
+
+
+def register_trigger(trigger: AmbientTrigger) -> None:
+    _trigger_registry[trigger.name] = trigger
+
+
+def _poll_triggers() -> None:
+    for trigger in list(_trigger_registry.values()):
+        try:
+            trigger.poll()
+        except Exception:
+            pass
+
 # Optional callback: when the watcher wants to speak, it calls this.
 # Set by main.py / ui.py via set_speak_callback().
 _speak_cb: Callable[[str], None] | None = None
@@ -391,6 +438,81 @@ def _watcher_loop() -> None:
             except Exception:
                 pass
 
+        # Ambient triggers — fire independently on their own conditions
+        try:
+            _poll_triggers()
+        except Exception:
+            pass
+
+
+# ── Built-in ambient triggers ─────────────────────────────────────────────────
+
+def _vault_new_note_check() -> bool:
+    """Return True if a vault note was modified/created since the last check."""
+    try:
+        import vault
+        vault_root = vault.VAULT_ROOT
+        cutoff = time.time() - _INTERVAL_SEC * 1.5
+        for p in vault_root.rglob("*.md"):
+            if p.stat().st_mtime > cutoff:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _vault_new_note_fire() -> None:
+    """Re-index the vault and notify if new notes were found."""
+    try:
+        import vault
+        result = vault.refresh_index()
+        added = result.get("added", 0)
+        if added > 0:
+            notify("Jarvis — Vault", f"{added} new note{'s' if added != 1 else ''} indexed in the brain.")
+    except Exception:
+        pass
+
+
+def _multica_new_issue_check() -> bool:
+    """Return True if there are unreviewed Multica issues assigned to an agent."""
+    try:
+        import multica_tools as mt
+        issues = mt.list_issues(status="todo") or []
+        # Fire if there are unassigned todo issues
+        return any(not i.get("assignee_id") for i in issues if isinstance(i, dict))
+    except Exception:
+        pass
+    return False
+
+
+def _multica_new_issue_fire() -> None:
+    """Alert about unassigned Multica board issues."""
+    try:
+        import multica_tools as mt
+        issues = mt.list_issues(status="todo") or []
+        unassigned = [i for i in issues if isinstance(i, dict) and not i.get("assignee_id")]
+        if unassigned:
+            titles = ", ".join(i.get("title", i.get("id", "?")) for i in unassigned[:3])
+            notify("Jarvis — Board", f"{len(unassigned)} unassigned issue{'s' if len(unassigned)!=1 else ''}: {titles}")
+    except Exception:
+        pass
+
+
+# Register built-in triggers (they activate when the watcher starts)
+register_trigger(AmbientTrigger(
+    name="vault_new_note",
+    check_fn=_vault_new_note_check,
+    fire_fn=_vault_new_note_fire,
+    cool_down=120,   # at most once every 2 minutes
+))
+
+register_trigger(AmbientTrigger(
+    name="multica_unassigned",
+    check_fn=_multica_new_issue_check,
+    fire_fn=_multica_new_issue_fire,
+    cool_down=600,   # at most once every 10 minutes
+))
+
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -431,4 +553,8 @@ def status() -> dict:
         "morning_brief_sent":    _morning_brief_date.isoformat() if _morning_brief_date else None,
         "eod_hour":              _EOD_HOUR,
         "eod_sent":              _eod_date.isoformat() if _eod_date else None,
+        "triggers":              {
+            name: {"cool_down": t.cool_down, "last_fired": t._last_fired}
+            for name, t in _trigger_registry.items()
+        },
     }

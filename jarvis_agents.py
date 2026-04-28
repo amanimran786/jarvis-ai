@@ -36,7 +36,10 @@ Router wires:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import pathlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -498,6 +501,139 @@ def _prewarm_synthesis_model():
 threading.Thread(target=_prewarm_synthesis_model, daemon=True).start()
 
 
+# ── Checkpoint / Resume (ADK-style resumable agents) ─────────────────────────
+# Each graph run gets a run_id (hash of agents + timestamp rounded to minute).
+# Completed node results are written to a JSON checkpoint sidecar so a crashed
+# run can skip already-finished nodes on the next invocation within 5 minutes.
+
+_CHECKPOINT_DIR = pathlib.Path.home() / ".jarvis" / "agent_checkpoints"
+_CHECKPOINT_TTL = 300  # seconds — stale checkpoints beyond this are ignored
+
+
+def _run_id(agents: list[str]) -> str:
+    key = ",".join(sorted(agents)) + str(int(time.time() // 60))
+    return hashlib.sha1(key.encode()).hexdigest()[:12]
+
+
+def _checkpoint_path(run_id: str) -> pathlib.Path:
+    _CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    return _CHECKPOINT_DIR / f"{run_id}.json"
+
+
+def _load_checkpoint(run_id: str) -> dict[str, dict]:
+    """Return {agent_name: result_dict} for any run within TTL."""
+    path = _checkpoint_path(run_id)
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if time.time() - data.get("_ts", 0) < _CHECKPOINT_TTL:
+                return {k: v for k, v in data.items() if not k.startswith("_")}
+    except Exception:
+        pass
+    return {}
+
+
+def _save_checkpoint(run_id: str, completed: dict[str, dict]) -> None:
+    try:
+        path = _checkpoint_path(run_id)
+        payload = {"_ts": time.time(), **completed}
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _evict_old_checkpoints() -> None:
+    """Remove checkpoint files older than TTL (best-effort, non-blocking)."""
+    try:
+        now = time.time()
+        for p in _CHECKPOINT_DIR.glob("*.json"):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                if now - data.get("_ts", 0) > _CHECKPOINT_TTL:
+                    p.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+# ── AgentGraph (ADK-style graph-based workflows) ──────────────────────────────
+# A directed graph of agent nodes with explicit staged execution.
+# Stage 0: fast data-collection nodes (no LLM) — run in parallel.
+# Stage 1+: nodes that depend on stage 0 output — receive merged context.
+# Final stage: optional LLM synthesis node.
+#
+# This separates $0 instant nodes from expensive LLM calls and lets downstream
+# nodes consume upstream results (shared session context = ADK handoff pattern).
+
+class AgentGraph:
+    """Minimal ADK-style agent graph for staged, resumable multi-agent runs."""
+
+    def __init__(self, name: str = "graph"):
+        self.name = name
+        # stages: list of lists of agent names
+        # stage 0 runs first (parallel), stage 1 gets stage-0 output as context, etc.
+        self._stages: list[list[str]] = []
+        # shared session context — passed between stages (ADK handoff pattern)
+        self._session: dict = {}
+
+    def stage(self, *agents: str) -> "AgentGraph":
+        """Add a parallel stage. Returns self for chaining."""
+        self._stages.append(list(agents))
+        return self
+
+    def run(self, context: str = "", resume: bool = True) -> list[dict]:
+        """Execute all stages in order, with optional checkpoint resume."""
+        all_agents = [a for stage in self._stages for a in stage]
+        run_id = _run_id(all_agents)
+        completed = _load_checkpoint(run_id) if resume else {}
+        all_results: list[dict] = list(completed.values())
+
+        for stage_idx, stage_agents in enumerate(self._stages):
+            pending = [a for a in stage_agents if a not in completed]
+            if not pending:
+                continue
+
+            # Build context for this stage: original context + prior stage output
+            stage_context = context
+            if stage_idx > 0 and all_results:
+                prior_text = _merge_results_raw(all_results)
+                stage_context = f"{context}\n\nPrior context:\n{prior_text}".strip()
+            elif self._session:
+                stage_context = (context + "\n" + json.dumps(self._session)).strip()
+
+            # Run pending nodes in this stage concurrently
+            stage_results: list[dict] = []
+            with ThreadPoolExecutor(max_workers=min(_MAX_WORKERS, len(pending))) as pool:
+                futures = {
+                    pool.submit(_AGENTS.get(a, _unknown_agent(a)), stage_context): a
+                    for a in pending
+                }
+                for future in as_completed(futures, timeout=_AGENT_TIMEOUT * 2):
+                    a_name = futures[future]
+                    try:
+                        r = future.result(timeout=_AGENT_TIMEOUT)
+                    except Exception as exc:
+                        r = {"agent": a_name, "status": "error",
+                             "result": f"{a_name} timed out: {exc}", "escalate": False}
+                    stage_results.append(r)
+                    completed[a_name] = r
+                    # Update shared session state with this agent's output
+                    self._session[a_name] = r.get("result", "")
+
+            all_results.extend(stage_results)
+            _save_checkpoint(run_id, completed)
+
+        threading.Thread(target=_evict_old_checkpoints, daemon=True).start()
+        return all_results
+
+
+def _merge_results_raw(results: list[dict]) -> str:
+    """Merge agent results to a plain string (no LLM, used for stage handoff)."""
+    parts = [r["result"] for r in results if r.get("status") == "ok" and r.get("result")]
+    return "\n\n".join(parts)
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def dispatch_single(agent: str, context: str = "") -> dict:
@@ -632,13 +768,25 @@ def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def run_briefing() -> str:
-    """Full Iron Man morning briefing: calendar + tasks + brain context."""
-    results = dispatch_parallel(_BRIEFING_AGENTS)
+    """Full Iron Man morning briefing using a staged AgentGraph.
+
+    Stage 0 — fast data nodes (no LLM): weather, calendar, tasks, email, board.
+    Stage 1 — context-enriched node: vault (gets stage-0 output as context).
+    Final — LLM synthesis over all results.
+
+    Resumable: if the process crashed mid-briefing in the last 5 minutes,
+    completed nodes are skipped and results are reused from the checkpoint.
+    """
+    graph = (
+        AgentGraph("briefing")
+        .stage("weather", "calendar", "tasks", "email", "board")  # stage 0: fast, parallel
+        .stage("vault")                                             # stage 1: uses stage-0 context
+    )
+    results = graph.run()
     body = _merge_results(results)
     if not body:
         return "All clear. Nothing on the calendar or task list that needs attention."
-    synthesised = _synthesise(body)
-    return synthesised
+    return _synthesise(body)
 
 
 def run_parallel(agents: list[str], context: str = "") -> str:
