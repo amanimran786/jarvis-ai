@@ -261,6 +261,14 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
 )
 
 
+# Fine-tuning lane routing:
+# - Apple Silicon (Mac ARM64): Use mlx-tune via local_mlx_training.py (native MLX backend)
+# - CUDA GPU (Linux/Windows): Use Unsloth via local_unsloth.py (2x faster, 70% less VRAM)
+# - Free tier LoRA: Google Colab Gemma or Unsloth notebooks (external, not guaranteed)
+# Unsloth fine-tuning candidates (CUDA GPU required, not Apple Silicon yet):
+#   - unsloth/gemma-4-4b-bnb-4bit  → 8GB VRAM, SFT/DPO via local_unsloth.py
+#   - unsloth/qwen3-8b-bnb-4bit    → 8GB VRAM, SFT/DPO via local_unsloth.py
+
 TRAINING_LANES: tuple[TrainingLane, ...] = (
     TrainingLane(
         id="teacher_examples",
@@ -327,6 +335,17 @@ TRAINING_LANES: tuple[TrainingLane, ...] = (
         use_for="Reasoning-style RL and adapter experiments such as GRPO on small open models.",
         caveat="Treat social claims about specific new model names as unverified until the notebook/source is checked.",
         source="https://unsloth.ai/docs/get-started/unsloth-notebooks",
+    ),
+    TrainingLane(
+        id="unsloth_local_cuda",
+        label="Unsloth local fine-tuning (CUDA GPU)",
+        status="conditional",
+        cost="free local loop after CUDA GPU available",
+        local_first=True,
+        action="pip install unsloth; POST /local/training/unsloth with dataset and model",
+        use_for="SFT and DPO on CUDA GPUs — 2x faster, 70% less VRAM than HuggingFace baseline.",
+        caveat="CUDA-only (not Apple Silicon yet). Apple Silicon users: use mlx-tune (local_mlx_training.py). Always eval adapted weights locally before promoting to Jarvis defaults.",
+        source="local_runtime/local_unsloth.py and https://unsloth.ai/",
     ),
     TrainingLane(
         id="jarvis_colab_dpo",
