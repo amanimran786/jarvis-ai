@@ -13,6 +13,7 @@ Components checked:
   mem0        — Qdrant + episodic memory availability
   vault       — vault directory readable, index fresh
   watcher     — background watcher thread alive
+  omlx        — oMLX Apple Silicon inference server (optional)
 
 Each check returns a ComponentStatus:
   { "name": str, "ok": bool, "detail": str, "degraded": bool }
@@ -157,6 +158,23 @@ def _check_watcher() -> ComponentStatus:
                 "detail": f"Watcher check error: {e}", "degraded": True}
 
 
+def _check_omlx() -> ComponentStatus:
+    try:
+        from local_runtime import local_omlx
+        if local_omlx.is_running():
+            models = local_omlx.list_models()
+            detail = f"oMLX running — {len(models)} model(s)"
+            if models:
+                detail += f": {', '.join(models[:3])}"
+            return {"name": "omlx", "ok": True, "detail": detail, "degraded": False}
+        return {"name": "omlx", "ok": False,
+                "detail": "oMLX not running (optional — provides SSD KV cache for long-context)",
+                "degraded": False}
+    except Exception as e:
+        return {"name": "omlx", "ok": False,
+                "detail": f"oMLX check error: {e}", "degraded": False}
+
+
 # ── Check registry ────────────────────────────────────────────────────────────
 
 _CHECKERS = {
@@ -167,6 +185,7 @@ _CHECKERS = {
     "mem0":    _check_mem0,
     "vault":   _check_vault,
     "watcher": _check_watcher,
+    "omlx":    _check_omlx,
 }
 
 # ── Caching (avoid hammering services on every verbal query) ──────────────────
