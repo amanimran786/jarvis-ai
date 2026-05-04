@@ -8,6 +8,10 @@ Supports: Qwen 2.5 Coder 7B, Qwen3 8B, Gemma4, DeepSeek R1 14B via 4-bit quantiz
 HF mirrors from mlx-community.
 
 Requires: mlx-tune, mlx-lm (pip install mlx-tune, only on Mac with Apple Silicon)
+
+Platform note: On Apple Silicon, prefer this module (mlx-tune) for local training.
+Unsloth (local_unsloth.py) offers 2x speed + 70% less VRAM on CUDA GPUs,
+but MLX/Apple Silicon support is coming soon. See local_unsloth.py for routing.
 """
 
 from __future__ import annotations
