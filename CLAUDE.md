@@ -1,234 +1,53 @@
 # CLAUDE.md
 
-This file gives Claude Code project-level instructions for working in this repository.
+Lean core instructions for the Jarvis codebase. Domain-specific rules are in `.claude/skills/`.
 
-It is intentionally opinionated. Jarvis is a local-first macOS desktop app with a packaged runtime, persistent state, voice I/O, and a lot of easy ways for AI agents to make shallow changes that look correct but break the real product.
-
-## Mission
-
-Jarvis is not a generic chatbot repo.
-
-It is a local-first desktop intelligence runtime for macOS with:
-
-- a PyQt6 desktop app
-- a local API/runtime
-- local-first model routing
-- voice, TTS, STT, meetings, memory, tools, and task execution
-- a packaged macOS app that must behave correctly outside the repo checkout
-
-The goal is to make Jarvis feel top-tier while staying local-first and operationally reliable.
+Jarvis is a local-first macOS desktop intelligence runtime with voice, TTS, STT, meetings, memory, tools, and task execution. It must work both in-repo and as a packaged app.
 
 ## Core Principles
 
-### 1. Think Before Coding
-
-Do not silently pick an interpretation and run with it.
-
+### Think Before Coding
 - State assumptions when they matter.
-- If a task is ambiguous in a way that changes behavior, ask a focused question.
-- If the repo already has a pattern, prefer that pattern over inventing a new one.
-- If a simpler solution exists, prefer it and say so.
+- If a task is ambiguous, ask a focused question.
+- If the repo has a pattern, prefer it over inventing new ones.
 
-### 2. Simplicity First
+### Simplicity First
+- Implement the smallest correct change. Would a strong engineer call it tight and boring?
+- No speculative abstractions, extra config, or “future-proofing”.
 
-Implement the smallest correct change.
+### Surgical Changes
+- Touch only what the request requires.
+- Do not refactor adjacent code or rename symbols for preference.
+- Clean up only dead code your change created.
 
-- No speculative abstractions.
-- No extra configuration unless the repo already uses configuration for that concern.
-- No new dependency for a problem that can be solved with existing code.
-- No “future-proofing” code that the user did not ask for.
-
-The standard is: would a strong engineer describe this diff as tight and boring?
-
-### 3. Surgical Changes
-
-Touch only what the request requires.
-
-- Do not refactor adjacent code unless the task requires it.
-- Do not rewrite comments, rename symbols, or move code around just because you would prefer it differently.
-- Clean up only the dead code or imports your own change created.
-- If you notice unrelated problems, mention them separately instead of folding them into the task.
-
-### 4. Goal-Driven Execution
-
-Turn requests into verifiable outcomes.
-
-For non-trivial work:
-
-1. define the success condition
-2. make the change
-3. verify it with the narrowest meaningful check
-4. if the repo has a packaged/runtime surface, verify there too
-
-Do not stop at “code looks right”.
+### Goal-Driven Execution
+- Define success condition, make change, verify with narrowest check.
+- For packaged/runtime work, verify the packaged app too.
+- Do not stop at “code looks right”.
 
 ## Jarvis-Specific Rules
 
 ### Local-First Is The Default
 
-Jarvis is open-source/local-first by default.
-
 - `config.py` is the source of truth for runtime defaults.
-- Assume `DEFAULT_MODE = "open-source"` is intentional unless the user explicitly wants cloud behavior.
-- Do not reintroduce paid or cloud fallbacks into the core path casually.
-- If a local path fails, fix the local path first instead of routing around it.
-
-### The Packaged App Is A Real Product Surface
-
-Source-only verification is not enough for desktop/runtime work.
-
-If your change touches any of these areas:
-
-- `voice.py`
-- `ui.py`
-- `main.py`
-- `Jarvis.spec`
-- anything under `local_runtime/`
-- packaged permissions, assets, or app behavior
-
-then you must treat the packaged app as part of the acceptance criteria.
-
-Use:
-
-```bash
-/Users/truthseeker/jarvis-ai/scripts/install_jarvis_app.sh --applications-only
-```
-
-Then verify the installed bundle, not just `dist/`.
-
-Important locations:
-
-- `/Users/truthseeker/Applications/Jarvis.app`
-- `/Users/truthseeker/Desktop/Jarvis.app`
-
-The Desktop app is a symlink to the Applications bundle. Always verify timestamps and the real target if there is any doubt.
-
-### Packaging Failures Are Common And Must Be Assumed
-
-For packaged-app work, do not assume import success in the repo means bundle success.
-
-Explicitly watch for:
-
-- missing PyInstaller hidden imports
-- missing package data files and assets
-- missing ONNX/model/VAD assets
-- macOS permission plist keys
-- path differences between repo runtime and frozen runtime
-- `BrokenPipeError` from print/logging in windowed app mode
-
-If a packaged feature fails, inspect the packaged runtime evidence before guessing.
-
-Important runtime artifacts:
-
-- `/Users/truthseeker/Library/Application Support/Jarvis/.jarvis_crash.log`
-- `/Users/truthseeker/Library/Application Support/Jarvis/.jarvis_runtime.json`
-- `/Users/truthseeker/Library/Application Support/Jarvis/.jarvis_voice.log`
-
-### Voice/STT/TTS Changes Need End-to-End Thinking
-
-Voice bugs in Jarvis often come from the seams between:
-
-- mic permissions
-- mic device selection
-- PortAudio / `speech_recognition`
-- local STT model load
-- packaged assets
-- TTS timing and post-speech capture
-- UI status clobbering
-
-Do not assume the visible symptom points to the failing layer.
-
-For voice work:
-
-- verify whether the mic opened
-- verify which input device was used
-- verify whether audio was captured
-- verify whether local STT returned text or an error
-- verify whether packaged assets exist
-
-Never claim “the mic is broken” or “STT is unavailable” without checking the runtime evidence.
-
-### Status Surfaces Must Reflect Reality
-
-Do not let generic UI/task status overwrite true voice/runtime status.
-
-If a UI element represents live capability state, it must be driven by that capability’s real state, not by unrelated activity like text requests or background tasks.
-
-### Preserve Current Product Direction
-
-Jarvis is aiming for:
-
-- local-first behavior
-- zero-API-cost core path where feasible
-- “Jarvis-like” desktop presence
-- fast, reliable operator behavior
-
-Changes should support that direction rather than drifting back toward a generic cloud chat app.
+- Assume `DEFAULT_MODE = “open-source”` is intentional.
+- Do not reintroduce paid or cloud fallbacks casually.
+- If a local path fails, fix the local path first.
 
 ### Use Context7 For External Library Docs, Not Repo Truth
 
-When implementing or debugging third-party libraries, frameworks, SDKs, or APIs, prefer up-to-date source documentation through Context7 before relying on model memory.
+When implementing third-party libraries, prefer up-to-date source documentation through Context7.
 
-Use Context7 for:
+Do not use Context7 as a substitute for reading this repository’s code or preserving Jarvis patterns.
 
-- library and API docs
-- version-specific setup and configuration
-- current code examples
+### Domain-Specific Rules
 
-Do not use Context7 as a substitute for:
+Detailed rules for specialized domains:
 
-- reading this repository's code
-- preserving existing Jarvis patterns
-- verifying packaged macOS app behavior
-
-### Obsidian Brain Contract
-
-The vault is not just a note dump. It is a shared operating surface for Jarvis and Obsidian.
-
-When changing the brain:
-
-- keep raw evidence in `vault/raw/` or `vault/raw/imports/`
-- keep durable curated notes in `vault/wiki/brain/`
-- follow `vault/wiki/brain/03 Brain Schema.md` for metadata, linking, and task style
-- follow `vault/wiki/brain/04 Capture Workflow.md` for promotion and placement rules
-- update `vault/wiki/brain/91 Vault Changelog.md` when a major brain change lands
-
-Prefer:
-
-- concise YAML frontmatter on new operational notes and templates
-- plain markdown tasks that stay useful without plugins
-- deterministic templates under `vault/templates/`
-- `.canvas` files for visual maps instead of plugin-specific drawing formats
-
-Do not turn the brain into plugin-dependent app logic. Borrow the good conventions from Obsidian Git, Dataview, Tasks, QuickAdd, Templater, JSON Canvas, and thin local bridge tools, but keep Jarvis able to read and write the vault correctly as plain markdown.
-
-### Claude Shared Brain Contract
-
-Claude Code and Jarvis share one local Obsidian brain.
-
-- Vault path: `/Users/truthseeker/jarvis-ai/vault`
-- Contract: `vault/wiki/brain/95 Claude Shared Brain Contract.md`
-- Repo map: `vault/indexes/Repo Map.md`
-- Context policy: `vault/wiki/brain/82 Context Budget Discipline.md`
-
-For Jarvis/project/memory questions, search the vault before answering:
-
-```bash
-rg -n --hidden -g '!.git' "QUERY" vault/
-```
-
-Read targeted files only. Do not bulk-load the vault, raw imports, generated indexes, or giant logs.
-
-Write to the vault only when Aman explicitly says "remember this", "log this", "save to brain", "append session lesson", or approves a proposed diff. Otherwise use `.claude/commands/propose-vault-update.md` and stop.
-
-Available Claude commands:
-
-- `/search-shared-brain <query>` — read-only targeted vault search
-- `/append-session-lesson <lesson>` — approval-gated append to the shared brain
-- `/propose-vault-update <path|new note>` — proposal-first vault update
-- `/token-discipline <task>` — context-saving preflight for large Jarvis work
-
-Do not auto-commit vault changes. Stage or show diffs for review.
+- **@.claude/skills/jarvis-voice.md** — Voice/STT/TTS/mic domain rules (verification checklist, common gotchas, runtime artifacts)
+- **@.claude/skills/jarvis-packaging.md** — PyInstaller packaged app rules (when to test, build script, common failures, BrokenPipeError prevention)
+- **@.claude/skills/jarvis-vault.md** — Obsidian brain/vault rules (write-only-when-approved, directory structure, brain schema, vault search)
+- **@.claude/skills/jarvis-testing.md** — Test patterns and mock injection (narrowest tests, pytest commands, mock setup, PyQt6/sounddevice mocking)
 
 ## Repo Facts To Preserve
 
@@ -264,44 +83,6 @@ python main.py --no-ui
 - `config.py` holds runtime defaults, model identifiers, STT/TTS configuration, and system behavior defaults.
 - Change defaults there instead of hardcoding them inline.
 
-## Testing Expectations
-
-Prefer the narrowest tests that prove the change.
-
-Examples:
-
-- logic/config change: targeted unit test
-- UI status regression: targeted regression test
-- packaged-app fix: targeted test plus packaged rebuild verification
-
-Common targeted test commands:
-
-```bash
-python3 -m pytest /Users/truthseeker/jarvis-ai/tests/test_voice_tts_regression.py -q
-python3 -m pytest /Users/truthseeker/jarvis-ai/tests/test_jarvis_regression_suite.py -k 'VoiceStatusUiRegressionTests or transcript_callback_forwards_to_live_bridge' -q
-python3 -m pytest /Users/truthseeker/jarvis-ai/tests/test_unit_coverage.py -q
-```
-
-If you add a regression for a bug, keep it small and directly tied to the real failure mode.
-
-## What To Avoid
-
-- Do not add dependencies without strong justification.
-- Do not bypass atomic write patterns in persistence modules.
-- Do not change system prompts or model defaults casually.
-- Do not trust repo runtime behavior as proof of packaged runtime behavior.
-- Do not “fix” a local failure by silently enabling cloud fallback unless explicitly intended.
-- Do not mix unrelated cleanup into bug-fix diffs.
-
-## Good Change Pattern
-
-For non-trivial Jarvis work, follow this shape:
-
-1. identify the real failing layer
-2. make the smallest fix there
-3. add a regression test for that failure mode
-4. rebuild or verify the packaged/runtime surface if relevant
-5. report the concrete evidence, not just conclusions
 
 ## Communication Style For This Repo
 
