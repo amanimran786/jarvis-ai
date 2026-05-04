@@ -96,6 +96,19 @@ Max spawn depth: 2 (parent → subagent → one more tier max). If a subagent ne
 
 Preferred tool order: WebFetch first → agent-browser CLI for dynamic pages → pdftotext for PDFs.
 
+
+## Specialized Agents
+
+Invoke these for targeted review work:
+
+- **python-reviewer** — PEP 8, type hints, security, Jarvis patterns (any `.py` change)
+- **security-reviewer** — subprocess, path traversal, secrets, LLM output safety
+- **tdd-guide** — write-tests-first, pytest red-green-refactor, AAA pattern
+- **silent-failure-hunter** — swallowed exceptions, missing logging, bad fallbacks
+- **build-error-resolver** — pytest failures, PyInstaller errors, import issues
+
+Security rules: **@.claude/skills/jarvis-security.md**
+
 ## Communication Style For This Repo
 
 When working in this codebase, prefer:
