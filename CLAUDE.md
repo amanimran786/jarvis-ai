@@ -84,6 +84,18 @@ python main.py --no-ui
 - Change defaults there instead of hardcoding them inline.
 
 
+## Task Delegation and Model Selection
+
+When spawning subagents, pick the cheapest model that can handle the job:
+
+- **Haiku**: bulk mechanical tasks — file reading, grep, format conversion, no judgment needed. Never spawns further subagents.
+- **Sonnet**: scoped research, code exploration, synthesis, writing. Default for most tasks.
+- **Opus**: only when real planning or architectural tradeoffs are required.
+
+Max spawn depth: 2 (parent → subagent → one more tier max). If a subagent needs a smarter model, it returns to the parent instead of self-escalating.
+
+Preferred tool order: WebFetch first → agent-browser CLI for dynamic pages → pdftotext for PDFs.
+
 ## Communication Style For This Repo
 
 When working in this codebase, prefer:
