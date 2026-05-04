@@ -247,6 +247,14 @@ PROVIDER_PRIORITY_OPUS = _env_csv(
 DEFAULT_MODE = "open-source"
 MAX_CONVERSATION_TURNS = 8
 
+# ── MLX local training (Apple Silicon only) ──────────────────────────────────
+# mlx-tune: pip install mlx-tune (only on Apple Silicon Mac)
+MLX_TRAINING_ENABLED = _env_flag("JARVIS_MLX_TRAINING_ENABLED", True)
+MLX_NUM_ITERS        = _env_int("JARVIS_MLX_NUM_ITERS", 100)
+MLX_LEARNING_RATE    = float(os.getenv("JARVIS_MLX_LEARNING_RATE", "1e-5"))
+MLX_LORA_RANK        = _env_int("JARVIS_MLX_LORA_RANK", 8)
+MLX_BATCH_SIZE       = _env_int("JARVIS_MLX_BATCH_SIZE", 4)
+
 
 def provider_runtime_config() -> dict:
     return {
