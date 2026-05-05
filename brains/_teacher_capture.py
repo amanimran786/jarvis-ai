@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import os
 
+_CAPTURE_TIERS = {"strong", "deep", "sonnet"}
+
 
 def is_enabled() -> bool:
     """Return True iff the teacher-capture flag is set in the environment."""
@@ -30,12 +32,13 @@ def capture(
 ) -> None:
     """Record a successful cloud answer as a teacher example.
 
-    No-op unless `JARVIS_TEACHER_CAPTURE=1` is set and the tier is strong/deep.
+    No-op unless `JARVIS_TEACHER_CAPTURE=1` is set and the tier is a
+    high-confidence teacher lane.
     Any failure is logged and swallowed.
     """
     if not is_enabled():
         return
-    if tier not in {"strong", "deep"}:
+    if tier not in _CAPTURE_TIERS:
         return
     if not (prompt and answer):
         return
