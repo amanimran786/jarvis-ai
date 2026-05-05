@@ -36,6 +36,27 @@ def test_run_eval_falls_back_to_benchmark_when_goldens_skipped():
     assert result["source"] == "benchmark_tracker"
 
 
+def test_run_eval_prefers_full_benchmark_over_partial_golden_counts():
+    """Full category benchmarks are the source of truth for promotion gates."""
+    trainer = local_finetune_scheduler.OvernightTrainer()
+    trainer.logger = MagicMock()
+
+    with patch("subprocess.run", side_effect=AssertionError("goldens should be fallback only")):
+        with patch.object(trainer, "_run_benchmark_eval") as mock_benchmark:
+            mock_benchmark.return_value = {
+                "passed": 597,
+                "failed": 4,
+                "total": 601,
+                "source": "benchmark_tracker",
+            }
+            result = trainer.run_eval()
+
+    assert result["passed"] == 597
+    assert result["failed"] == 4
+    assert result["total"] == 601
+    assert result["source"] == "benchmark_tracker"
+
+
 def test_run_training_adds_examples_count():
     """Training result should include source pack row count for dashboard history."""
     with tempfile.TemporaryDirectory() as tmpdir:

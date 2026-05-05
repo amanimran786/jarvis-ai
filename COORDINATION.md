@@ -33,11 +33,11 @@ Update this file when picking up or finishing a task. Commit the update so the o
 **Acceptance:** Config tag matches `ollama list` output, keepalive starts without 404
 **Status:** Open
 
-### [CLAUDE] Benchmark run — all 7 categories
-**Goal:** Run full category benchmark now that all test files are confirmed present
-**File:** `training/benchmark_tracker.py`, `training/benchmarks.jsonl`
-**Acceptance:** `benchmarks.jsonl` has a record with no skipped categories
-**Status:** Open — run `python3 training/benchmark_tracker.py` after overnight cycle
+### [DONE] Benchmark run — all 7 categories
+**Completed by Codex 2026-05-04 / verified Claude 2026-05-05**
+All 7 categories non-skipped in benchmarks.jsonl: voice 34/34, calendar 43/43,
+code 319/320, memory 23/23, tools 60/60, conversation 78/79, meeting 40/42.
+Overall: 99.33% (597/601). Tonight's auto-run will update with richer training pack.
 
 ### [CLAUDE] iMessage Full Disk Access
 **Goal:** Grant Full Disk Access to Terminal in System Settings so iMessage tools work
@@ -90,9 +90,18 @@ Ensures Codex always has Claude's latest changes.
 
 ## Handoff Notes
 
-**Last Claude session (2026-05-05):** Added auto-commit (Stage 6) and macOS notification (Stage 7)
-to `local_finetune_scheduler.py`. Benchmark run shows 99.33% (597/601 tests). Dashboard updated.
-COORDINATION.md updated with completed tasks.
+**Last Claude session (2026-05-05 — continued):**
+- `build_training_pack()` rewritten: 4 sources, 74 examples (teacher + verbatim + synthetic + fallback)
+- `benchmark_tracker` baseline updated to 597/601 (was stale at 312/313)
+- Dashboard now shows routing tier breakdown + pack composition panel
+- `EvalAgent` in brain_daemon now uses `benchmark_tracker.run_full_benchmark()` instead of
+  skipped golden cases — gives real per-category signal every 8 hours
+- **Teacher capture refined**: tier gate now captures high-confidence cloud teacher
+  lanes (`strong/deep/sonnet`) while skipping low-quality `haiku/mini/local` rows.
+  Training pack builder also filters known bad messaging-loop and overclaim examples.
+- `JARVIS_TEACHER_CAPTURE=1` added to: launchd plist + `main.py` startup default
+- `dashboard_generator._routing_stats()` added — shows local usage rate trend
+- `overnight_state.json` baseline corrected to 597/601
 
 **For Codex next session:** Pull latest main. Voice AUHAL fix + mem0 Qdrant verification +
 qwen3 model tag still open. See `.claude/skills/jarvis-voice.md` for voice checklist.
