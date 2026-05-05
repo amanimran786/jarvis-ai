@@ -43,6 +43,7 @@ Usage from router (write path)
 from __future__ import annotations
 
 import os
+import atexit
 import threading
 import time
 from pathlib import Path
@@ -241,6 +242,32 @@ def delete_all(user_id: str = _DEFAULT_USER) -> bool:
         return True
     except Exception:
         return False
+
+
+def close() -> None:
+    """Close embedded mem0/Qdrant resources before Python interpreter teardown."""
+    global _memory_instance
+    m = _memory_instance
+    if m is None:
+        return
+    try:
+        vector_store = getattr(m, "vector_store", None)
+        client = getattr(vector_store, "client", None)
+        client_close = getattr(client, "close", None)
+        if callable(client_close):
+            client_close()
+    except Exception:
+        pass
+    try:
+        memory_close = getattr(m, "close", None)
+        if callable(memory_close):
+            memory_close()
+    except Exception:
+        pass
+    _memory_instance = None
+
+
+atexit.register(close)
 
 
 # ── Format for prompt ──────────────────────────────────────────────────────────
