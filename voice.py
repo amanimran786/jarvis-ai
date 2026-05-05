@@ -2,6 +2,7 @@ import os
 import tempfile
 import subprocess
 import threading
+import time as _time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -45,11 +46,18 @@ _VOICE_DEVICE_SKIP = [
     "zoom audio",
     "zoomaudio",
     "aggregate",
+    "aggregate device",
     "multi-output",
+    "soundflower",
+    "background music",
+    "eqmac",
+    "obs virtual",
 ]
 _VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
 _MIC_OPEN_RETRY_SECONDS = 5.0
+_MIC_DEVICE_RETRY_SECONDS = 60.0
 _MIC_SKIP_LOGGED: set[str] = set()
+_MIC_RECENT_FAILURES: dict[str, float] = {}
 _MIC_OPEN_LOCK = threading.Lock()
 _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
@@ -112,18 +120,38 @@ def _debug_log(*args, **kwargs) -> None:
 
 def _get_microphone() -> sr.Microphone:
     """Return a Microphone on a real input device, skipping virtual loopback buses."""
-    try:
-        names = sr.Microphone.list_microphone_names()
-        for preferred in _PREFERRED_MICS:
-            for i, name in enumerate(names):
-                if preferred.lower() in name.lower():
-                    return sr.Microphone(device_index=i)
-        for i, name in enumerate(names):
-            if not any(skip in name.lower() for skip in _VOICE_DEVICE_SKIP):
-                return sr.Microphone(device_index=i)
-    except Exception:
-        pass
+    candidates = _microphone_candidates()
+    if candidates:
+        return candidates[0][1]
     return sr.Microphone()
+
+
+def _voice_device_skip_reason(name: str) -> str:
+    normalized = (name or "").lower()
+    if any(skip in normalized for skip in _VOICE_DEVICE_SKIP):
+        return "virtual, aggregate, or meeting audio device"
+    return ""
+
+
+def _mic_candidate_key(label: str) -> str:
+    return " ".join((label or "").lower().split())
+
+
+def _recent_mic_failure_active(label: str) -> bool:
+    key = _mic_candidate_key(label)
+    until = _MIC_RECENT_FAILURES.get(key, 0.0)
+    if until <= _time.monotonic():
+        _MIC_RECENT_FAILURES.pop(key, None)
+        return False
+    return True
+
+
+def _mark_mic_candidate_failed(label: str) -> None:
+    _MIC_RECENT_FAILURES[_mic_candidate_key(label)] = _time.monotonic() + _MIC_DEVICE_RETRY_SECONDS
+
+
+def _clear_mic_candidate_failure(label: str) -> None:
+    _MIC_RECENT_FAILURES.pop(_mic_candidate_key(label), None)
 
 
 def _input_capable_device_indexes() -> set[int] | None:
@@ -138,6 +166,25 @@ def _input_capable_device_indexes() -> set[int] | None:
             if int(info.get("maxInputChannels") or 0) > 0:
                 indexes.add(index)
         return indexes
+    except Exception:
+        return None
+    finally:
+        try:
+            if audio is not None:
+                audio.terminate()
+        except Exception:
+            pass
+
+
+def _default_input_device_info() -> dict | None:
+    """Return the current PyAudio default input device info when available."""
+    audio = None
+    try:
+        audio = sr.Microphone.get_pyaudio().PyAudio()
+        info = audio.get_default_input_device_info() or {}
+        if not info:
+            return None
+        return info
     except Exception:
         return None
     finally:
@@ -169,8 +216,41 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
     except Exception:
         names = []
     input_indexes = _input_capable_device_indexes()
+    default_info = _default_input_device_info()
+
     def _is_candidate_input(index: int | None, label: str) -> bool:
+        skip_reason = _voice_device_skip_reason(label)
+        if skip_reason:
+            skip_key = f"{index}:{label}:skip"
+            if skip_key not in _MIC_SKIP_LOGGED:
+                _MIC_SKIP_LOGGED.add(skip_key)
+                _debug_log(f"[Mic] Skipping {label}: {skip_reason}")
+            return False
+        if _recent_mic_failure_active(label):
+            return False
         if index is None:
+            if default_info:
+                default_name = str(default_info.get("name") or "Default input device")
+                default_index = default_info.get("index")
+                default_channels = int(default_info.get("maxInputChannels") or 0)
+                default_skip_reason = _voice_device_skip_reason(default_name)
+                if default_skip_reason:
+                    skip_key = f"default:{default_name}:skip"
+                    if skip_key not in _MIC_SKIP_LOGGED:
+                        _MIC_SKIP_LOGGED.add(skip_key)
+                        _debug_log(f"[Mic] Skipping default input device ({default_name}): {default_skip_reason}")
+                    return False
+                if default_channels <= 0:
+                    skip_key = f"default:{default_name}:channels"
+                    if skip_key not in _MIC_SKIP_LOGGED:
+                        _MIC_SKIP_LOGGED.add(skip_key)
+                        _debug_log(f"[Mic] Skipping default input device ({default_name}): no input channels")
+                    return False
+                try:
+                    if int(default_index) in seen:
+                        return False
+                except (TypeError, ValueError):
+                    pass
             return True
         if input_indexes is None:
             return True
@@ -211,7 +291,7 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
         if not any(skip in name.lower() for skip in _VOICE_DEVICE_SKIP):
             _append(i, name)
 
-    # Tier 4: macOS default input (last resort — may be a loopback or virtual device)
+    # Tier 4: macOS default input, but only if PyAudio says it is a real input.
     _append(None, "Default input device")
 
     return candidates
@@ -229,6 +309,8 @@ def _open_microphone_source():
             raise RuntimeError(f"Microphone retry cooldown active. {detail}")
 
         for label, microphone in _microphone_candidates():
+            if _recent_mic_failure_active(label):
+                continue
             source = None
             try:
                 with _suppress_native_audio_stderr():
@@ -236,6 +318,7 @@ def _open_microphone_source():
                 if getattr(source, "stream", None) is None:
                     raise RuntimeError(f"{label} opened without a live input stream")
                 _debug_log(f"[Mic] Using input device: {label}")
+                _clear_mic_candidate_failure(label)
                 _mic_failure_cooldown_until = 0.0
                 _mic_last_failure_detail = ""
                 try:
@@ -245,6 +328,7 @@ def _open_microphone_source():
                 return
             except Exception as exc:
                 last_error = exc
+                _mark_mic_candidate_failed(label)
                 _debug_log(f"[Mic] Failed to open {label}: {exc}")
                 try:
                     if source is not None:
@@ -282,7 +366,6 @@ _manual_wake_trigger = threading.Event()  # set by UI to skip wake-word wait
 # ── Ambient noise calibration cache ──────────────────────────────────────────
 # Calibrate once per session and cache the energy threshold.
 # adjust_for_ambient_noise() costs 300ms per call — we call it once and reuse.
-import time as _time
 _CALIBRATION_LOCK = threading.Lock()
 _CALIBRATION_TTL = 12.0           # re-calibrate every 12 s — fresh after each TTS turn
 _calibrated_at: float = 0.0

@@ -212,6 +212,9 @@ def transcribe_audio(wav_bytes: bytes, *, language: str | None = None) -> dict[s
     if engine == "openai":
         return {"ok": False, "engine": "openai", "text": "", "error": "local STT disabled"}
 
+    if not wav_bytes:
+        return {"ok": False, "engine": "faster-whisper", "text": "", "error": "empty audio"}
+
     if not local_available():
         return {"ok": False, "engine": "faster-whisper", "text": "", "error": _IMPORT_ERROR or "faster-whisper not installed"}
 

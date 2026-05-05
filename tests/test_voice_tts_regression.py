@@ -20,6 +20,7 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         voice._kokoro_disabled_reason = ""
         voice._mic_failure_cooldown_until = 0.0
         voice._mic_last_failure_detail = ""
+        voice._MIC_RECENT_FAILURES.clear()
 
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -262,6 +263,7 @@ class VoiceTtsRegressionTests(unittest.TestCase):
                 return names
 
         with patch("voice._input_capable_device_indexes", return_value={1, 3}), \
+             patch("voice._default_input_device_info", return_value=None), \
              patch("voice.sr.Microphone", _FakeMicrophone):
             candidates = voice._microphone_candidates()
 
@@ -269,6 +271,81 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         indexes = [mic.device_index for _, mic in candidates]
         self.assertEqual(labels, ["MacBook Pro Microphone", "Default input device"])
         self.assertEqual(indexes, [1, None])
+
+    def test_microphone_candidates_filter_virtual_devices_from_all_tiers(self):
+        names = [
+            "Aggregate Device",
+            "BlackHole 2ch",
+            "AirPods Pro Virtual Mic",
+            "MacBook Pro Microphone",
+        ]
+
+        class _FakeMicrophone:
+            def __init__(self, device_index=None):
+                self.device_index = device_index
+
+            @staticmethod
+            def list_microphone_names():
+                return names
+
+        with patch("voice._input_capable_device_indexes", return_value={0, 1, 2, 3}), \
+             patch("voice._default_input_device_info", return_value=None), \
+             patch("voice.sr.Microphone", _FakeMicrophone):
+            candidates = voice._microphone_candidates()
+
+        labels = [label for label, _ in candidates]
+        indexes = [mic.device_index for _, mic in candidates]
+        self.assertEqual(labels, ["MacBook Pro Microphone", "Default input device"])
+        self.assertEqual(indexes, [3, None])
+
+    def test_microphone_candidates_skip_virtual_default_input_device(self):
+        names = ["BlackHole 2ch", "Aggregate Device"]
+
+        class _FakeMicrophone:
+            def __init__(self, device_index=None):
+                self.device_index = device_index
+
+            @staticmethod
+            def list_microphone_names():
+                return names
+
+        with patch("voice._input_capable_device_indexes", return_value={0, 1}), \
+             patch(
+                 "voice._default_input_device_info",
+                 return_value={"index": 1, "name": "Aggregate Device", "maxInputChannels": 2},
+             ), \
+             patch("voice.sr.Microphone", _FakeMicrophone):
+            candidates = voice._microphone_candidates()
+
+        self.assertEqual(candidates, [])
+
+    def test_open_microphone_source_skips_recently_failed_candidate_on_next_open(self):
+        opened = []
+
+        class _BadMic:
+            def __enter__(self):
+                opened.append("bad")
+                raise RuntimeError("AUHAL unavailable")
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        class _GoodMic:
+            def __enter__(self):
+                opened.append("good")
+                return SimpleNamespace(stream=SimpleNamespace(close=lambda: None), audio=SimpleNamespace(terminate=lambda: None))
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        candidates = [("Bad Mic", _BadMic()), ("Good Mic", _GoodMic())]
+        with patch("voice._microphone_candidates", return_value=candidates):
+            with voice._open_microphone_source():
+                pass
+            with voice._open_microphone_source():
+                pass
+
+        self.assertEqual(opened, ["bad", "good", "good"])
 
     def test_wait_for_wake_word_backs_off_after_microphone_open_failure(self):
         voice._stop_requested.clear()

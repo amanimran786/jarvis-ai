@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import memory as mem
 
 
-MAX_ACTIVE_TURNS = 4
+MAX_ACTIVE_TURNS = 6
 SESSION_TIMEOUT_MINUTES = 20
 TOPIC_OVERLAP_THRESHOLD = 0.12
 MIN_ROTATE_MESSAGES = 2
@@ -166,6 +166,9 @@ def build_prompt_state(system_prompt: str, system_extra: str = "") -> tuple[str,
                 "Active conversation carry-over summary:\n"
                 + _STATE["summary"]
             )
+        if _STATE["recent_user_topics"]:
+            topics = "; ".join(_STATE["recent_user_topics"][-3:])
+            system_parts.append(f"Recent user topics: {topics}")
         if system_extra:
             system_parts.append(system_extra)
 

@@ -505,6 +505,82 @@ class OvernightTrainer:
         except Exception as e:
             self.logger.warning(f"Dashboard generation failed (non-fatal): {e}")
 
+        # Stage 6: Auto-commit training artifacts to git
+        self._auto_commit_artifacts(promoted)
+
+        # Stage 7: macOS notification
+        self._notify_training_complete(promoted)
+
+    def _auto_commit_artifacts(self, promoted: bool) -> None:
+        """
+        Commit overnight training artifacts to git so history accumulates.
+
+        Files committed:
+          - training/overnight_log.jsonl   (session log)
+          - training/benchmarks.jsonl      (benchmark history)
+          - training/dashboard.html        (rendered dashboard)
+          - training/overnight_state.json  (run state)
+        """
+        artifacts = [
+            "training/overnight_log.jsonl",
+            "training/benchmarks.jsonl",
+            "training/dashboard.html",
+            "training/overnight_state.json",
+        ]
+        try:
+            # Only stage files that actually exist
+            to_stage = [a for a in artifacts if (REPO_ROOT / a).exists()]
+            if not to_stage:
+                self.logger.info("Auto-commit: no artifact files found, skipping")
+                return
+
+            subprocess.run(
+                ["git", "add", *to_stage],
+                cwd=str(REPO_ROOT),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            promoted_tag = "promoted" if promoted else "no-promote"
+            date_tag = _today_date()
+            msg = f"chore(training): overnight artifacts {date_tag} [{promoted_tag}]"
+
+            result = subprocess.run(
+                ["git", "commit", "-m", msg],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                self.logger.info(f"Auto-commit: artifacts committed — {msg}")
+            elif "nothing to commit" in result.stdout + result.stderr:
+                self.logger.info("Auto-commit: nothing new to commit, skipping")
+            else:
+                self.logger.warning(f"Auto-commit: git commit returned {result.returncode}: {result.stderr.strip()}")
+
+        except Exception as e:
+            self.logger.warning(f"Auto-commit failed (non-fatal): {e}")
+
+    def _notify_training_complete(self, promoted: bool) -> None:
+        """Send a macOS notification when the overnight training cycle finishes."""
+        try:
+            status_word = "✅ Adapter promoted" if promoted else "⚠️ Not promoted (no improvement)"
+            script = (
+                f'display notification "{status_word}" '
+                f'with title "Jarvis Training Complete" '
+                f'sound name "Glass"'
+            )
+            subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.logger.info(f"macOS notification sent: promoted={promoted}")
+        except Exception as e:
+            self.logger.warning(f"macOS notification failed (non-fatal): {e}")
+
 
 def run_if_scheduled() -> Optional[dict]:
     """

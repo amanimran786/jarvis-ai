@@ -19,9 +19,14 @@ Mode commands:
 """
 
 import re
+import time as _time
+import threading as _threading
 
 from config import GPT_MINI
 from config import (
+    GPT_FULL,
+    GEMINI_FLASH,
+    GEMINI_PRO,
     LOCAL_DEFAULT,
     LOCAL_CODER,
     LOCAL_REASONING,
@@ -39,6 +44,9 @@ from config import (
     LOCAL_GEMMA4_STRONG,
     LOCAL_GEMMA4_MOE,
     LOCAL_QWEN3_6,
+    HAIKU,
+    SONNET,
+    OPUS,
 )
 from brains.brain import ask_stream
 from brains.brain_gemini import ask_gemini_stream
@@ -56,6 +64,10 @@ import provider_router
 import telemetry
 import jarvis_core_brain as _core_brain
 import mem0_layer as _m0
+
+_forced_model = ""
+_forced_provider = ""
+_forced_label = ""
 
 _current_mode = DEFAULT_MODE
 
@@ -189,6 +201,61 @@ def get_mode() -> str:
     return _current_mode
 
 
+def forced_model_status() -> dict:
+    if not _forced_model:
+        return {"active": False, "model": "", "provider": "", "label": ""}
+    return {
+        "active": True,
+        "model": _forced_model,
+        "provider": _forced_provider,
+        "label": _forced_label or _forced_model,
+    }
+
+
+def clear_forced_model() -> dict:
+    global _forced_model, _forced_provider, _forced_label
+    _forced_model = ""
+    _forced_provider = ""
+    _forced_label = ""
+    return forced_model_status()
+
+
+def _resolve_forced_model(name: str) -> dict:
+    candidate = (name or "").strip()
+    if not candidate:
+        return {"ok": False, "error": "Model name is empty."}
+
+    cloud_map = {
+        GPT_MINI: ("openai", "GPT-mini"),
+        GPT_FULL: ("openai", "GPT-4o"),
+        GEMINI_FLASH: ("gemini", "Gemini Flash"),
+        GEMINI_PRO: ("gemini", "Gemini Pro"),
+        HAIKU: ("anthropic", "Claude Haiku"),
+        SONNET: ("anthropic", "Claude Sonnet"),
+        OPUS: ("anthropic", "Claude Opus"),
+    }
+    if candidate in cloud_map:
+        provider, label = cloud_map[candidate]
+        return {"ok": True, "model": candidate, "provider": provider, "label": label, "local": False}
+
+    available = _cached_local_models()
+    if _has_model(candidate, available):
+        return {"ok": True, "model": candidate, "provider": "ollama", "label": candidate, "local": True}
+
+    return {"ok": False, "error": f"Model not found: {candidate}."}
+
+
+def set_forced_model(name: str) -> dict:
+    global _forced_model, _forced_provider, _forced_label
+    resolved = _resolve_forced_model(name)
+    if not resolved.get("ok"):
+        return resolved
+    _forced_model = resolved["model"]
+    _forced_provider = resolved["provider"]
+    _forced_label = resolved.get("label", resolved["model"])
+    return forced_model_status()
+
+
 def is_open_source_mode() -> bool:
     return _current_mode in {"open-source", "open_source", "opensource"}
 
@@ -199,7 +266,7 @@ def set_mode(mode: str) -> str:
     if mode == "opensource":
         mode = "open-source"
     if mode not in ("cloud", "local", "auto", "open-source"):
-        return f"Unknown mode. Use cloud, local, auto, or open-source."
+        return "Unknown mode. Use cloud, local, auto, or open-source."
     _current_mode = mode
     return {
         "cloud": "Cloud mode. Using OpenAI and Gemini first, with Claude as fallback.",
@@ -271,8 +338,6 @@ EXPLICIT_LOCAL = {
 }
 
 
-import time as _time
-import threading as _threading
 
 # ── Local model list cache with TTL ───────────────────────────────────────────
 # list_local_models() costs ~264ms (Ollama API roundtrip).
@@ -399,6 +464,7 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
     """Return a truthful summary of Jarvis's current routing state."""
     mode = _current_mode
     local_models = list_local_models()
+    forced = forced_model_status()
     _, resolved_skills = skills.build_system_extra(user_input, skill_id=skill_id, tool="chat")
     if resolved_skills:
         active_names = ", ".join(skill.id for skill in resolved_skills[:2])
@@ -432,10 +498,13 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
         return "I'm in open-source mode, but no local Ollama model is currently available."
 
     chain = " -> ".join(f"{candidate.label} ({candidate.model})" for candidate in plan.candidates[:4])
+    forced_note = ""
+    if forced.get("active"):
+        forced_note = f" Forced model override: {forced['label']} ({forced['model']})."
     return (
         f"I'm in {mode} mode{active_skill}. "
         f"For this request the active route chain is {chain}. "
-        f"Policy: {plan.reason}"
+        f"Policy: {plan.reason}.{forced_note}"
     )
 
 
@@ -609,6 +678,29 @@ def _engineering_companion_grounding(user_input: str) -> str:
     return "\n".join(lines)
 
 
+def _is_coding_request(user_input: str, tool: str | None) -> bool:
+    if tool != "chat":
+        return False
+    lower = (user_input or "").lower()
+    if not lower:
+        return False
+    coding_terms = (
+        "code", "repo", "patch", "diff", "edit", "refactor", "implement",
+        "test", "pytest", "unittest", "build", "compile", "fix", "bug",
+        "multi-file", "multiple files", "run tests", "typecheck",
+    )
+    return any(term in lower for term in coding_terms)
+
+
+def _coding_companion_grounding() -> str:
+    return (
+        "Coding companion guidance: approach this like a senior coding agent. "
+        "Inspect the repo before editing, make minimal diffs, and prefer multi-file edits only when required. "
+        "If you change code, run the smallest relevant tests or verification and report what ran and what changed. "
+        "If a command cannot be run, say what you would run and why."
+    )
+
+
 def _semantic_memory_hint(hits: list[dict] | None) -> str:
     if not hits:
         return ""
@@ -733,12 +825,16 @@ def smart_stream(
             engineering_grounding = _engineering_companion_grounding(user_input)
             if engineering_grounding:
                 system_extra = engineering_grounding + ("\n\n" + system_extra if system_extra else "")
+        if _is_coding_request(user_input, tool):
+            coding_grounding = _coding_companion_grounding()
+            if coding_grounding:
+                system_extra = coding_grounding + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
     # ── Parallel context assembly ──────────────────────────────────────────────
     # vault, graph, and semantic memory are all read-only and independent.
     # Running them concurrently cuts wall time from sum → max of the three.
-    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     def _get_vault():
         if runtime_voice_query:
@@ -823,6 +919,22 @@ def smart_stream(
 
     local_available = _has_local()
     local_model = _best_local(user_input) if local_available else ""
+
+    forced = forced_model_status()
+    if forced.get("active"):
+        candidate = provider_router.RouteCandidate(
+            provider=forced["provider"],
+            model=forced["model"],
+            local=forced["provider"] == "ollama",
+            label=f"Forced {forced.get('label') or forced['model']}",
+        )
+        plan = provider_router.RoutePlan(
+            mode=_current_mode,
+            tier="local" if candidate.local else "mini",
+            candidates=(candidate,),
+            reason="Forced model override.",
+        )
+        return _execute_forced_stream(plan, user_input, system_extra), candidate.label
 
     tier = _classify_complexity(user_input, active_skills=resolved_skills)
     explicit_cloud = mode == "cloud"
@@ -921,6 +1033,61 @@ def smart_stream(
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
     return _execute_plan_stream(), primary_label
+
+
+def _execute_forced_stream(plan: provider_router.RoutePlan, user_input: str, system_extra: str):
+    def _candidate_stream(candidate):
+        if candidate.provider == "ollama":
+            try:
+                from brains.brain_ollama import start_keepalive
+                start_keepalive(candidate.model)
+            except Exception:
+                pass
+            return ask_local_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                raise_on_error=True,
+            )
+        if candidate.provider == "openai":
+            return ask_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                bypass_local=True,
+            )
+        if candidate.provider == "gemini":
+            return ask_gemini_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+        if candidate.provider == "anthropic":
+            return ask_claude_stream(user_input, candidate.model, system_extra=system_extra, track_context=True)
+        raise RuntimeError(f"Unknown provider candidate: {candidate.provider}")
+
+    def _stream():
+        last_error = None
+        for candidate in plan.candidates:
+            try:
+                telemetry.log_route_decision(
+                    user_input=user_input,
+                    mode=plan.mode,
+                    tier=plan.tier,
+                    plan={"candidates": [c.__dict__ for c in plan.candidates]},
+                    selected={
+                        "provider": candidate.provider,
+                        "model": candidate.model,
+                        "local": candidate.local,
+                        "label": candidate.label,
+                    },
+                    reason=plan.reason,
+                )
+                yield from _candidate_stream(candidate)
+                return
+            except Exception as exc:
+                last_error = exc
+        yield f"I hit an upstream model error while answering this, and the forced model failed: {last_error}"
+
+    return _stream()
 
 
 def format_with_mini(

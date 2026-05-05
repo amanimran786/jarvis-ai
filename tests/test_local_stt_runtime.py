@@ -6,6 +6,15 @@ from local_runtime import local_stt
 
 
 class LocalSttRuntimeTests(unittest.TestCase):
+    def test_transcribe_audio_rejects_empty_audio_before_loading_model(self):
+        with patch("local_runtime.local_stt.configured_engine", return_value="faster-whisper"), \
+             patch("local_runtime.local_stt.local_available", side_effect=AssertionError("should not check runtime")):
+            result = local_stt.transcribe_audio(b"", language="en")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["engine"], "faster-whisper")
+        self.assertEqual(result["error"], "empty audio")
+
     def test_status_reports_faster_whisper_device_and_compute_type(self):
         with patch("local_runtime.local_stt.configured_engine", return_value="faster-whisper"), \
              patch("local_runtime.local_stt.local_available", return_value=True), \

@@ -188,15 +188,26 @@ Live status note:
 - `jarvis_health.py`
 - `Jarvis.spec`, packaging, bundle
 
-### Next Claude work (queuing after agents B+C finish)
-1. **Proactive email urgency monitor** — background task watching for urgent/flagged emails, surfaces in briefing
-2. **Context-aware reply suggestions** — when "X replied: Y", use thread history to suggest a reply using jarvis-local
-3. **Better web search summarization** — post-process `tools.web_search()` result through gemma4:e4b for a 2-sentence spoken summary
-4. **Calendar event prep** — "I have a meeting in 30 mins" fast-path → surface agenda + attendees
+### Wave 2 — MERGED to main (commit b1dea6d, 2026-04-26)
+All four sprint agents completed and merged. 388 tests passing, 0 failing.
 
-### Known conflicts to avoid
-- Both Claude and Codex have touched `router.py` — Claude is currently iterating it heavily. Codex should hold on router.py changes until agent B merges and Claude posts a clear "router stable" note here.
-- `messages.py` is safe: Claude only added `read_recent_thread` at the bottom. No Codex-owned functions were touched.
+Done:
+1. ✅ **Email urgency agent** — `_agent_email_urgent()` in jarvis_agents.py, runs every briefing
+2. ✅ **Context-aware reply suggestions** — `_suggest_reply_from_context()` in router.py
+3. ✅ **Web search summarization** — `_summarise_for_voice()` in tools.py
+4. ✅ **Calendar meeting prep fast-path** — `_is_meeting_prep_query()` + `_format_next_event()` in router.py
+5. ✅ **Catch-up fast-path** — `_CATCHUP_TRIGGERS` + `_is_catchup_query()` in router.py
+6. ✅ **Inbox read fast-path** — `_parse_message_read_query()` in router.py
+7. ✅ **All 10 pre-existing test failures fixed** — meeting routing, message state, UI rendering
+
+### Next Claude work (wave 3)
+1. **Email reply flow** — "reply to that email from X" → show thread → draft → confirm → send via google_services.send_email()
+2. **Proactive notification watcher** — background thread in api.py polling calendar (10-min lookahead) + urgent email; surfaces alert text to user
+3. **Daily email digest** — "what are my emails about today?" fast-path → 3-bullet summary via jarvis-local
+4. **Reminder fast-path** — "remind me at 3pm to X" → schedule via apple script or Google Calendar
+
+### Router stable signal
+router.py is stable as of commit b1dea6d. Codex can touch it for Codex-owned features.
 
 ## Codex / Claude sync - 2026-04-26 17:03 PDT
 
