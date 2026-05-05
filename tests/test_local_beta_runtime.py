@@ -1,4 +1,5 @@
 import json
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -132,6 +133,57 @@ class LocalBetaRuntimeTests(unittest.TestCase):
 
         self.assertEqual(status["latest_run"], str(latest))
         self.assertEqual(status["latest_error"], "timeout")
+
+    def test_route_case_timeout_bounds_hung_router_case(self):
+        def _slow_route(_prompt):
+            def _stream():
+                time.sleep(1.0)
+                yield "late"
+
+            return _stream(), "Open-Source"
+
+        with self.assertRaises(local_beta.BetaCaseTimeout):
+            local_beta._route_case_with_timeout(
+                _slow_route,
+                "slow prompt",
+                timeout_seconds=0.01,
+            )
+
+    def test_run_beta_suite_records_timeout_as_failure(self):
+        case = {
+            "id": "timeout_case",
+            "suite": "engineering",
+            "prompt": "debug a timeout",
+            "expected_label": "Open-Source",
+        }
+
+        def _slow_route(_prompt):
+            def _stream():
+                time.sleep(1.0)
+                yield "late"
+
+            return _stream(), "Open-Source"
+
+        with TemporaryDirectory() as tmp:
+            runs_dir = Path(tmp)
+            with patch("local_runtime.local_beta.RUNS_DIR", runs_dir), \
+                 patch("local_runtime.local_beta.ROOT", runs_dir.parent), \
+                 patch("local_runtime.local_beta.GOLDEN_CASES", [case]), \
+                 patch("router.route_stream", side_effect=_slow_route), \
+                 patch("local_runtime.local_beta.evals.log_failure") as log_failure:
+                result = local_beta.run_beta_suite(
+                    suite="engineering",
+                    limit=1,
+                    log_failures=True,
+                    case_timeout_seconds=0.01,
+                )
+
+        self.assertEqual(result["passed"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertEqual(result["failed_case_ids"], ["timeout_case"])
+        self.assertEqual(result["results"][0]["label"], "Timeout")
+        self.assertIn("timed out", result["results"][0]["response"])
+        log_failure.assert_called_once()
 
 
 if __name__ == "__main__":
