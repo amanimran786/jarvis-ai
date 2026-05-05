@@ -335,7 +335,21 @@ def run_sft(
                 "dry_run": False,
             }
 
-        # Build mlx_lm.lora command
+        # Write LoRA config YAML — rank and other hyperparams go here,
+        # not on the CLI (mlx_lm.lora >=0.20 reads rank from config file)
+        lora_config = {
+            "lora_parameters": {
+                "rank": lora_rank,
+                "alpha": lora_rank,
+                "dropout": 0.0,
+                "scale": 10.0,
+            }
+        }
+        import yaml as _yaml
+        lora_config_path = data_dir / "lora_config.yaml"
+        lora_config_path.write_text(_yaml.dump(lora_config), encoding="utf-8")
+
+        # Build mlx_lm.lora command — use --iters (not --num-iterations)
         cmd = [
             sys.executable,
             "-m",
@@ -343,11 +357,11 @@ def run_sft(
             "--model", mlx_id,
             "--train",
             "--data", str(data_dir),
-            "--num-iterations", str(num_iters),
+            "--iters", str(num_iters),
             "--learning-rate", str(learning_rate),
-            "--rank", str(lora_rank),
             "--batch-size", str(batch_size),
             "--adapter-path", str(output_dir),
+            "-c", str(lora_config_path),
         ]
 
         if val_jsonl:
