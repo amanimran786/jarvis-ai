@@ -162,17 +162,32 @@ def list_supported_models() -> list[str]:
 
 
 def _normalize_mlx_record(record: dict) -> dict | None:
-    """Return one MLX-supported training record, or None if unusable."""
-    if isinstance(record.get("messages"), list) and record["messages"]:
-        return {"messages": record["messages"]}
+    """Return one MLX messages-format record, or None if unusable.
 
+    mlx_lm >=0.20 only accepts {"messages": [...]} — the legacy
+    {"prompt": ..., "completion": ...} format was removed. Convert both.
+    """
+    # Already in messages format
+    if isinstance(record.get("messages"), list) and record["messages"]:
+        msgs = record["messages"]
+        # Ensure roles are valid
+        valid_roles = {"user", "assistant", "system"}
+        if all(isinstance(m, dict) and m.get("role") in valid_roles for m in msgs):
+            return {"messages": msgs}
+
+    # Convert prompt/completion → messages format
     prompt = record.get("prompt")
     completion = record.get("completion")
     if isinstance(prompt, str) and isinstance(completion, str):
         prompt = prompt.strip()
         completion = completion.strip()
         if prompt and completion:
-            return {"prompt": prompt, "completion": completion}
+            return {
+                "messages": [
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": completion},
+                ]
+            }
 
     return None
 
