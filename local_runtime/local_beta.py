@@ -1,5 +1,7 @@
 import json
 import os
+import signal
+import threading
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,11 @@ def _beta_root() -> Path:
 
 ROOT = _beta_root()
 RUNS_DIR = ROOT / "runs"
+DEFAULT_CASE_TIMEOUT_SECONDS = int(os.getenv("JARVIS_BETA_CASE_TIMEOUT", "45") or "45")
+
+
+class BetaCaseTimeout(TimeoutError):
+    """Raised when a single beta case exceeds its bounded runtime."""
 
 
 def _ensure_dirs() -> None:
@@ -30,6 +37,27 @@ def _ensure_dirs() -> None:
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+def _route_case_with_timeout(route_stream, prompt: str, timeout_seconds: int) -> tuple[str, str]:
+    """Run one router case with a Unix alarm timeout on the main thread."""
+    if timeout_seconds <= 0 or threading.current_thread() is not threading.main_thread():
+        stream, label = route_stream(prompt)
+        return "".join(stream), label
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def _raise_timeout(_signum, _frame):
+        raise BetaCaseTimeout(f"case exceeded {timeout_seconds}s")
+
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, timeout_seconds)
+    try:
+        stream, label = route_stream(prompt)
+        return "".join(stream), label
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 def _selected_cases(include_browser: bool = False, limit: int = 0, suite: str = "all") -> list[dict]:
@@ -143,6 +171,7 @@ def run_beta_suite(
     build_training_pack: bool = False,
     teacher_model: str = LOCAL_REASONING,
     suite: str = "all",
+    case_timeout_seconds: int = DEFAULT_CASE_TIMEOUT_SECONDS,
 ) -> dict:
     _ensure_dirs()
     from router import route_stream
@@ -156,8 +185,14 @@ def run_beta_suite(
 
     for case in cases:
         try:
-            stream, label = route_stream(case["prompt"])
-            text = "".join(stream)
+            text, label = _route_case_with_timeout(
+                route_stream,
+                case["prompt"],
+                case_timeout_seconds,
+            )
+        except BetaCaseTimeout:
+            label = "Timeout"
+            text = f"Beta runner timed out after {case_timeout_seconds}s while executing this case."
         except Exception as exc:
             label = "Error"
             text = f"Beta runner caught an exception while executing this case: {exc}"
@@ -202,6 +237,7 @@ def run_beta_suite(
         "failed": failed,
         "include_browser": include_browser,
         "suite": suite,
+        "case_timeout_seconds": case_timeout_seconds,
         "logged_failures": log_failures,
         "failed_case_ids": [item["id"] for item in results if not item["ok"]],
         "results": results,
