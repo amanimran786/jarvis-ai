@@ -12,8 +12,9 @@ STDERR_LOG="$HOME/Library/Logs/jarvis-training-error.log"
 cd "$REPO_DIR"
 
 echo "Launchd:"
-if launchctl list | grep -q "$LABEL"; then
-  launchctl list | grep "$LABEL"
+LAUNCHD_LIST="$(launchctl list || true)"
+if grep -q "$LABEL" <<<"$LAUNCHD_LIST"; then
+  grep "$LABEL" <<<"$LAUNCHD_LIST"
 else
   echo "  $LABEL is not loaded"
 fi
