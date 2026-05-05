@@ -176,17 +176,73 @@ def test_convert_to_mlx_format_transforms_jsonl():
         assert ok is True
         assert output_dir.exists()
 
-        output_file = output_dir / "train.jsonl"
-        assert output_file.exists()
+        split_files = [
+            output_dir / "train.jsonl",
+            output_dir / "valid.jsonl",
+            output_dir / "test.jsonl",
+        ]
+        for split_file in split_files:
+            assert split_file.exists()
+            assert split_file.read_text().strip()
 
         # Read output and verify format
-        lines = output_file.read_text().strip().split("\n")
-        assert len(lines) == 1
+        lines = split_files[0].read_text().strip().split("\n")
+        assert lines
 
         output_record = json.loads(lines[0])
         assert "messages" in output_record
         assert output_record["messages"] == test_data["messages"]
         assert "meta" not in output_record  # meta should be stripped
+
+
+def test_convert_to_mlx_format_supports_prompt_completion_packs():
+    """Overnight prompt/completion packs should produce non-empty MLX splits."""
+    from local_runtime import local_mlx_training
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_file = tmpdir / "overnight.jsonl"
+        records = [
+            {"prompt": f"User: task {i}\n\nJarvis:", "completion": f" response {i}"}
+            for i in range(30)
+        ]
+        input_file.write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n",
+            encoding="utf-8",
+        )
+
+        output_dir = tmpdir / "output"
+        ok, path = local_mlx_training._convert_to_mlx_format(input_file, output_dir)
+
+        assert ok is True
+        assert path == str(output_dir)
+
+        split_counts = {}
+        for split_name in ("train", "valid", "test"):
+            split_path = output_dir / f"{split_name}.jsonl"
+            lines = split_path.read_text(encoding="utf-8").strip().splitlines()
+            split_counts[split_name] = len(lines)
+            assert lines
+            loaded = json.loads(lines[0])
+            assert "prompt" in loaded
+            assert "completion" in loaded
+
+        assert split_counts == {"train": 22, "valid": 4, "test": 4}
+
+
+def test_convert_to_mlx_format_rejects_empty_pack():
+    """Invalid packs should fail before mlx_lm raises an opaque IndexError."""
+    from local_runtime import local_mlx_training
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        input_file = tmpdir / "empty.jsonl"
+        input_file.write_text('{"meta": {"source": "bad"}}\nnot-json\n', encoding="utf-8")
+
+        ok, error = local_mlx_training._convert_to_mlx_format(input_file, tmpdir / "out")
+
+        assert ok is False
+        assert "No usable training examples" in error
 
 
 def test_fuse_adapter_requires_availability():

@@ -174,6 +174,12 @@ class OvernightTrainer:
         )
 
         self.logger.info(f"Training result: ok={result.get('ok')}, error={result.get('error')}")
+        try:
+            result["examples_count"] = sum(
+                1 for line in pack_path.read_text(encoding="utf-8").splitlines() if line.strip()
+            )
+        except Exception:
+            result["examples_count"] = 0
         return result
 
     def run_eval(self) -> dict:
@@ -211,6 +217,11 @@ class OvernightTrainer:
                 failed = int(failed_match.group(1))
 
             total = passed + failed
+            if total == 0:
+                benchmark = self._run_benchmark_eval()
+                if benchmark.get("total", 0) > 0:
+                    return benchmark
+
             self.logger.info(f"Eval result: {passed} passed, {failed} failed (total {total})")
 
             return {"passed": passed, "failed": failed, "total": total}
@@ -221,6 +232,34 @@ class OvernightTrainer:
         except Exception as e:
             self.logger.error(f"Evaluation failed: {e}")
             return {"passed": 0, "failed": 0, "total": 0}
+
+    def _run_benchmark_eval(self) -> dict:
+        """Fallback eval gate when live golden cases are skipped."""
+        try:
+            sys.path.insert(0, str(TRAINING_ROOT))
+            from benchmark_tracker import run_full_benchmark
+
+            record = run_full_benchmark(model_version=f"jarvis-{_today_date()}")
+            passed = int(record.get("total_passed") or 0)
+            total = int(record.get("total_tests") or 0)
+            failed = max(0, total - passed)
+
+            if total > 0:
+                self.logger.info(
+                    f"Benchmark eval fallback: {passed} passed, {failed} failed (total {total})"
+                )
+                return {
+                    "passed": passed,
+                    "failed": failed,
+                    "total": total,
+                    "source": "benchmark_tracker",
+                    "overall": record.get("overall"),
+                    "categories": record.get("categories", {}),
+                }
+        except Exception as e:
+            self.logger.warning(f"Benchmark eval fallback failed: {e}")
+
+        return {"passed": 0, "failed": 0, "total": 0}
 
     def promote_if_better(self, training_result: dict, eval_result: dict) -> bool:
         """
@@ -320,7 +359,10 @@ class OvernightTrainer:
         session["eval_passed"] = eval_result.get("passed", 0)
         session["eval_total"] = eval_result.get("total", 0)
         session["examples_count"] = training_result.get("examples_count", 0)
-        session["duration_seconds"] = training_result.get("duration_seconds", 0)
+        session["duration_seconds"] = training_result.get(
+            "duration_seconds",
+            training_result.get("duration_sec", 0),
+        )
 
         # Update state
         self.state["last_run_date"] = _today_date()
