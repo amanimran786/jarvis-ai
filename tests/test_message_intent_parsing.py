@@ -80,6 +80,12 @@ def _setup_stubs():
     if "config" not in sys.modules:
         _install_stub("config", OPUS="gpt-4o", SONNET="claude-3-5-sonnet-20241022")
 
+    sys.modules["prompt_modifiers"].parse = lambda text: types.SimpleNamespace(
+        clean_text=text,
+        system_extra="",
+    )
+    sys.modules["memory"].track_topic = lambda *a, **kw: None
+
     # Stub model_router with needed functions BEFORE router imports it
     if "model_router" not in sys.modules or not hasattr(sys.modules["model_router"], "smart_stream"):
         _install_stub("model_router",
@@ -87,7 +93,9 @@ def _setup_stubs():
                       format_with_mini=lambda *a, **kw: "",
                       get_mode=lambda: "open-source",
                       set_mode=lambda *a, **kw: None,
-                      describe_runtime_for=lambda *a, **kw: "")
+                      describe_runtime_for=lambda *a, **kw: "",
+                      set_forced_model=lambda *a, **kw: None,
+                      clear_forced_model=lambda *a, **kw: None)
 
 
 class MessageIntentParsingTests(unittest.TestCase):
@@ -553,6 +561,56 @@ class MessageIntentParsingTests(unittest.TestCase):
     def test_confirm_does_not_match_cancel_query(self):
         """'confirm' must NOT be recognized as a cancel query."""
         self.assertFalse(self.router._is_message_cancel_query("confirm"))
+
+    def test_pending_message_draft_does_not_swallow_standalone_question(self):
+        """Unrelated questions should escape pending draft state."""
+        self.router._clear_message_state()
+        self.router._set_pending_message_draft("+15105550124", "Hey Farhan this is Jarvis")
+        self.router.smart_stream = lambda text: (iter(["Tokyo."]), "Open-Source")
+
+        stream, label = self.router.route_stream("What is the capital of Japan?")
+        text = "".join(stream)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertEqual(text, "Tokyo.")
+        self.assertTrue(self.router._has_pending_message_draft())
+
+    def test_pending_message_draft_does_not_swallow_web_search(self):
+        """Searches should escape pending draft state instead of replacing body."""
+        self.router._clear_message_state()
+        self.router._set_pending_message_draft("+15105550124", "Hey Farhan this is Jarvis")
+        self.router.tools.web_search = lambda query: f"searched:{query}"
+
+        stream, label = self.router.route_stream("Search the web for latest AI news")
+        text = "".join(stream)
+
+        self.assertEqual(label, "Search")
+        self.assertEqual(text, "searched:latest AI news")
+        self.assertTrue(self.router._has_pending_message_draft())
+
+    def test_pending_message_recipient_does_not_swallow_standalone_question(self):
+        """Waiting-for-body state should not turn unrelated questions into drafts."""
+        self.router._clear_message_state()
+        self.router._set_pending_recipient("+15105550124")
+        self.router.smart_stream = lambda text: (iter(["Tokyo."]), "Open-Source")
+
+        stream, label = self.router.route_stream("What is the capital of Japan?")
+        text = "".join(stream)
+
+        self.assertEqual(label, "Open-Source")
+        self.assertEqual(text, "Tokyo.")
+        self.assertEqual(self.router._pending_msg_recipient, "+15105550124")
+
+    def test_pending_message_draft_still_accepts_explicit_body_replacement(self):
+        """Actual replacement text should still update the pending draft."""
+        self.router._clear_message_state()
+        self.router._set_pending_message_draft("Aman Imran", "old body")
+
+        stream, label = self.router.route_stream("Make it say beta test only")
+        text = "".join(stream)
+
+        self.assertEqual(label, "Messages")
+        self.assertIn("beta test only", text)
 
 
 if __name__ == "__main__":
