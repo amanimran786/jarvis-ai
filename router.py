@@ -892,6 +892,15 @@ def _clear_pending_recipient():
 
 def _sanitize_message_body(body: str) -> str:
     cleaned = (body or "").strip().strip("\"'")
+    # Strip edit instructions used while a draft is pending.
+    cleaned = re.sub(
+        r"^(?:instead[, ]+)?(?:make|change|update|edit|replace)\s+"
+        r"(?:it|that|this|the\s+(?:message|draft))\s+"
+        r"(?:(?:to|as)\s+)?(?:say(?:ing)?\s*:?\s*)?",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     # Strip leading "say: " or bare "say " when used as a command prefix
     cleaned = re.sub(r"^say\s*:\s*", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^say\s+(?=\S)", "", cleaned, flags=re.IGNORECASE)
