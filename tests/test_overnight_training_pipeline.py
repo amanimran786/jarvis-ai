@@ -131,3 +131,68 @@ def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
         "--",
         *artifact_paths,
     ]
+
+
+def test_teacher_examples_use_current_system_prompt(tmp_path):
+    """Teacher files should not smuggle stale capability claims into training."""
+    teacher_dir = tmp_path / "teacher_examples"
+    teacher_dir.mkdir()
+    (teacher_dir / "example.jsonl").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": "stale prompt with sudo claims"},
+                    {"role": "user", "content": "What is 7 * 8?"},
+                    {"role": "assistant", "content": "Fifty-six."},
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch("local_runtime.local_finetune_scheduler.TRAINING_ROOT", tmp_path), \
+         patch("local_runtime.local_finetune_scheduler.config.SYSTEM_PROMPT", "canonical Jarvis prompt"):
+        examples = trainer._collect_teacher_examples()
+
+    assert len(examples) == 1
+    assert examples[0]["messages"][0] == {
+        "role": "system",
+        "content": "canonical Jarvis prompt",
+    }
+    assert "sudo claims" not in json.dumps(examples[0])
+
+
+def test_teacher_examples_get_system_prompt_when_missing(tmp_path):
+    """Messages-format examples without a system row still get the canonical prompt."""
+    teacher_dir = tmp_path / "teacher_examples"
+    teacher_dir.mkdir()
+    (teacher_dir / "example.jsonl").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "What is 2 + 2?"},
+                    {"role": "assistant", "content": "Four."},
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch("local_runtime.local_finetune_scheduler.TRAINING_ROOT", tmp_path), \
+         patch("local_runtime.local_finetune_scheduler.config.SYSTEM_PROMPT", "canonical Jarvis prompt"):
+        examples = trainer._collect_teacher_examples()
+
+    assert examples[0]["messages"][0]["role"] == "system"
+    assert examples[0]["messages"][0]["content"] == "canonical Jarvis prompt"
