@@ -53,8 +53,10 @@ class OvernightTrainer:
         TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
         PACKS_DIR.mkdir(parents=True, exist_ok=True)
 
-        self.state: dict = self._load_state()
         self.logger = logger
+        self.state: dict = self._load_state()
+        if self._repair_state_from_log():
+            self._save_state()
 
     def _load_state(self) -> dict:
         """Load state from overnight_state.json, or return fresh state."""
@@ -77,6 +79,104 @@ class OvernightTrainer:
                 "baseline_eval_passed": 0,
                 "baseline_eval_total": 0,
             }
+
+    def _read_log_sessions(self) -> list[dict]:
+        """Return valid sessions from the append-only overnight log."""
+        if not LOG_FILE.exists():
+            return []
+        sessions: list[dict] = []
+        try:
+            with LOG_FILE.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        session = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(session, dict):
+                        sessions.append(session)
+        except Exception as e:
+            self.logger.warning(f"Failed to read overnight log: {e}")
+        return sessions
+
+    @staticmethod
+    def _session_eval_counts(session: dict) -> tuple[int, int]:
+        stages = session.get("stages") if isinstance(session.get("stages"), dict) else {}
+        eval_stage = stages.get("eval") if isinstance(stages.get("eval"), dict) else {}
+        passed = int(session.get("eval_passed") or eval_stage.get("passed") or 0)
+        total = int(session.get("eval_total") or eval_stage.get("total") or 0)
+        return passed, total
+
+    @staticmethod
+    def _repair_session_summary(session: dict) -> dict:
+        """Backfill top-level summary fields used by status/dashboard consumers."""
+        repaired = dict(session)
+        stages = repaired.get("stages") if isinstance(repaired.get("stages"), dict) else {}
+        build = stages.get("build") if isinstance(stages.get("build"), dict) else {}
+        training = stages.get("training") if isinstance(stages.get("training"), dict) else {}
+        passed, total = OvernightTrainer._session_eval_counts(repaired)
+        repaired["eval_passed"] = passed
+        repaired["eval_total"] = total
+        if not repaired.get("examples_count"):
+            examples_count = int(training.get("examples_count") or 0)
+            pack_path = build.get("pack_path")
+            if not examples_count and pack_path:
+                try:
+                    examples_count = sum(
+                        1 for line in Path(pack_path).read_text(encoding="utf-8").splitlines() if line.strip()
+                    )
+                except Exception:
+                    examples_count = 0
+            repaired["examples_count"] = examples_count
+        if not repaired.get("duration_seconds"):
+            repaired["duration_seconds"] = training.get("duration_seconds", training.get("duration_sec", 0)) or 0
+        return repaired
+
+    def _repair_state_from_log(self) -> bool:
+        """Repair stale state from the append-only training log."""
+        sessions = self._read_log_sessions()
+        if not sessions:
+            return False
+
+        latest = self._repair_session_summary(sessions[-1])
+        latest_passed, latest_total = self._session_eval_counts(latest)
+        changed = False
+
+        current_session = self.state.get("last_session") if isinstance(self.state.get("last_session"), dict) else {}
+        if (
+            not current_session
+            or current_session.get("timestamp") != latest.get("timestamp")
+            or (not current_session.get("examples_count") and latest.get("examples_count"))
+            or (not current_session.get("duration_seconds") and latest.get("duration_seconds"))
+        ):
+            self.state["last_session"] = latest
+            changed = True
+        if not self.state.get("last_run_date") and latest.get("date"):
+            self.state["last_run_date"] = latest.get("date")
+            changed = True
+
+        promoted_sessions = [
+            self._repair_session_summary(session)
+            for session in sessions
+            if session.get("promoted") or (session.get("stages") or {}).get("promotion", {}).get("promoted")
+        ]
+        best = max(
+            promoted_sessions,
+            key=lambda session: self._session_eval_counts(session)[0],
+            default=latest if latest_total else {},
+        )
+        best_passed, best_total = self._session_eval_counts(best)
+        if best_total and (
+            best_passed > int(self.state.get("baseline_eval_passed") or 0)
+            or best_total > int(self.state.get("baseline_eval_total") or 0)
+        ):
+            self.state["baseline_eval_passed"] = best_passed
+            self.state["baseline_eval_total"] = best_total
+            changed = True
+
+        return changed
 
     def _save_state(self) -> None:
         """Persist state to overnight_state.json."""

@@ -1591,9 +1591,19 @@ def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
     raw = _strip_message_modifiers(_strip_polite_prefix(text or ""))
     raw = re.sub(r"^(?:now\s+)?(?:jarvis[, ]+)?", "", raw, flags=re.IGNORECASE).strip()
     raw = re.sub(r"\s+(?:text\s+)?message$", "", raw, flags=re.IGNORECASE).strip()
+    declared_relationship = re.match(
+        r"^(?:introduce\s+(?:yourself(?:\s+(?:jarvis|jarvia))?|(?:jarvis|jarvia)(?:\s+yourself)?))\s*,\s*"
+        r"(.+?)\s+is\s+my\s+(?:dad|father|mom|mother|parent|brother|sister)\b.*$",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if declared_relationship:
+        recipient = _clean_relationship_recipient(declared_relationship.group(1))
+        if recipient and _looks_like_contact_name(recipient):
+            return recipient, _JARVIS_INTRO_SHORT
     patterns = (
         (
-            r"^(?:introduce\s+(?:yourself(?:\s+jarvis)?|jarvis(?:\s+yourself)?|me))\s+(?:to\s+)?(.+?)(?:\s+(?:through|via|over|on|in|using)\s+(?:texts?|text\s+messages?|messages?|imessage|i\s*message|sms)\b|$|,)",
+            r"^(?:introduce\s+(?:yourself(?:\s+(?:jarvis|jarvia))?|(?:jarvis|jarvia)(?:\s+yourself)?|me))\s+(?:to\s+)?(.+?)(?:\s+(?:through|via|over|on|in|using)\s+(?:texts?|text\s+messages?|messages?|imessage|i\s*message|sms)\b|$|,)",
             _JARVIS_INTRO_SHORT,
         ),
         (
@@ -1698,6 +1708,17 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
         if recipient and _looks_like_contact_name(recipient):
             return recipient, _JARVIS_INTRO_SHORT
 
+    intro_payload = re.match(
+        r"^(.+?)\s+(?:and\s+)?(?:introduce|introducing)\s+"
+        r"(?:yourself|(?:jarvis|jarvia))(?:\s+(?:yourself|jarvis|jarvia))*\s*$",
+        payload,
+        flags=re.IGNORECASE,
+    ) if payload else None
+    if intro_payload:
+        recipient = _clean_relationship_recipient(intro_payload.group(1))
+        if recipient and _looks_like_contact_name(recipient):
+            return recipient, _JARVIS_INTRO_SHORT
+
     common_body_second_words = {
         "hi", "hello", "hey", "yo", "thanks", "thank", "ok", "okay", "yes", "no",
         "milk", "get", "bring", "buy", "pick", "remind", "ask", "tell", "introduce",
@@ -1737,6 +1758,12 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
 
     def _clean_body(raw_body: str) -> str:
         body = (raw_body or "").strip().strip("\"'")
+        if re.fullmatch(
+            r"(?:and\s+)?(?:introduce|introducing)\s+(?:yourself|(?:jarvis|jarvia))(?:\s+(?:yourself|jarvis|jarvia))*",
+            body,
+            flags=re.IGNORECASE,
+        ):
+            return _JARVIS_INTRO_SHORT
         body = re.sub(
             r",?\s+in\s+(?:a\s+)?(?:text|message|imessage|i\s*message|sms)\s+to\s+.+$",
             "",
