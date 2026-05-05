@@ -314,6 +314,13 @@ class OvernightTrainer:
         # Stage 4: Promote if better
         promoted = self.promote_if_better(training_result, eval_result)
         session["stages"]["promotion"] = {"promoted": promoted}
+        session["promoted"] = promoted
+
+        # Carry top-level eval fields for dashboard
+        session["eval_passed"] = eval_result.get("passed", 0)
+        session["eval_total"] = eval_result.get("total", 0)
+        session["examples_count"] = training_result.get("examples_count", 0)
+        session["duration_seconds"] = training_result.get("duration_seconds", 0)
 
         # Update state
         self.state["last_run_date"] = _today_date()
@@ -323,8 +330,38 @@ class OvernightTrainer:
         # Log session
         self.log_session(session)
 
+        # Stage 5: Run per-category benchmark and regenerate dashboard
+        self._run_post_training_benchmark(training_result, promoted)
+
         self.logger.info(f"Cycle complete: promoted={promoted}")
         return session
+
+    def _run_post_training_benchmark(self, training_result: dict, promoted: bool) -> None:
+        """Run category benchmarks and regenerate the HTML dashboard."""
+        try:
+            import sys, os
+            sys.path.insert(0, str(TRAINING_ROOT))
+            from benchmark_tracker import run_full_benchmark, log_benchmark, get_latest
+            from dashboard_generator import generate as generate_dashboard
+
+            baseline = get_latest()
+            adapter_path = training_result.get("adapter_path", "")
+            record = run_full_benchmark(
+                model_version=f"jarvis-{_today_date()}",
+                adapter_path=str(adapter_path),
+                baseline=baseline,
+            )
+            record["promoted"] = promoted
+            log_benchmark(record)
+            self.logger.info(f"Benchmark: overall={record.get('overall')} delta={record.get('delta_vs_baseline')}")
+        except Exception as e:
+            self.logger.warning(f"Benchmark run failed (non-fatal): {e}")
+
+        try:
+            from dashboard_generator import generate as generate_dashboard
+            generate_dashboard()
+        except Exception as e:
+            self.logger.warning(f"Dashboard generation failed (non-fatal): {e}")
 
 
 def run_if_scheduled() -> Optional[dict]:

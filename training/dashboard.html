@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="60">
+  <title>Jarvis Training Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #020A10;
+      color: #A8E6FF;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      padding: 24px;
+      min-height: 100vh;
+    }
+    h1 {
+      color: #00D4FF;
+      font-size: 22px;
+      letter-spacing: 4px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .subtitle { color: #4A8FA8; font-size: 11px; letter-spacing: 2px; margin-bottom: 28px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }
+    .card {
+      background: rgba(3, 18, 28, 0.85);
+      border: 1px solid #0D4F70;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card-label { color: #4A8FA8; font-size: 10px; letter-spacing: 2px; margin-bottom: 8px; }
+    .card-value { color: #00D4FF; font-size: 28px; font-weight: bold; }
+    .card-sub { color: #A8E6FF; font-size: 11px; margin-top: 4px; }
+    .section-title {
+      color: #00D4FF;
+      font-size: 11px;
+      letter-spacing: 3px;
+      margin-bottom: 14px;
+      border-bottom: 1px solid #0D4F70;
+      padding-bottom: 8px;
+    }
+    .chart-card { padding: 20px; }
+    .chart-wrap { position: relative; height: 240px; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      color: #4A8FA8;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid #0D4F70;
+    }
+    td {
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(13, 79, 112, 0.3);
+      font-size: 12px;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(0, 212, 255, 0.04); }
+    .footer {
+      color: #4A8FA8;
+      font-size: 10px;
+      text-align: center;
+      margin-top: 24px;
+      letter-spacing: 1px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+    .badge-green { background: rgba(0,255,136,0.12); color: #00FF88; border: 1px solid #00FF88; }
+    .badge-cyan  { background: rgba(0,212,255,0.12); color: #00D4FF; border: 1px solid #00D4FF; }
+  </style>
+</head>
+<body>
+
+<h1>J.A.R.V.I.S &mdash; TRAINING INTELLIGENCE</h1>
+<div class="subtitle">FINE-TUNING DASHBOARD &nbsp;·&nbsp; AUTO-REFRESH 60s &nbsp;·&nbsp; GENERATED 2026-05-04 23:14</div>
+
+<!-- Summary cards -->
+<div class="grid-4">
+  <div class="card">
+    <div class="card-label">TOTAL RUNS</div>
+    <div class="card-value">0</div>
+    <div class="card-sub">0 promoted to production</div>
+  </div>
+  <div class="card">
+    <div class="card-label">OVERALL BENCHMARK</div>
+    <div class="card-value" style="color:#4A8FA8">—</div>
+    <div class="card-sub">latest benchmark run</div>
+  </div>
+  <div class="card">
+    <div class="card-label">BASELINE EVAL</div>
+    <div class="card-value">50.0%</div>
+    <div class="card-sub">5/10 tests passing</div>
+  </div>
+  <div class="card">
+    <div class="card-label">LAST TRAINING</div>
+    <div class="card-value" style="font-size:18px;padding-top:5px">—</div>
+    <div class="card-sub">next run: 11:00 pm tonight</div>
+  </div>
+</div>
+
+<!-- Charts row -->
+<div class="grid-2">
+  <div class="card chart-card">
+    <div class="section-title">OVERALL EVAL SCORE — TRAINING HISTORY</div>
+    <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>
+  </div>
+  <div class="card chart-card">
+    <div class="section-title">CATEGORY BENCHMARK SCORES</div>
+    <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+  </div>
+</div>
+
+<!-- Category trend -->
+<div class="card chart-card" style="margin-bottom:24px">
+  <div class="section-title">CATEGORY TRENDS OVER TIME</div>
+  <div style="position:relative;height:220px"><canvas id="trendChart"></canvas></div>
+</div>
+
+<!-- Category table + Run history -->
+<div class="grid-2">
+  <div class="card">
+    <div class="section-title">BENCHMARK BY CATEGORY</div>
+    <table>
+      <thead><tr>
+        <th>CATEGORY</th><th>SCORE</th><th>PASS/TOTAL</th><th>DELTA</th>
+      </tr></thead>
+      <tbody><tr><td colspan="4" style="color:#4A8FA8;text-align:center">No benchmark data yet — runs after first overnight training</td></tr></tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div class="section-title">OVERNIGHT RUN HISTORY</div>
+    <table>
+      <thead><tr>
+        <th>DATE</th><th>SCORE</th><th>PASS/TOTAL</th><th>EXAMPLES</th><th>DURATION</th><th>PROMOTED</th>
+      </tr></thead>
+      <tbody><tr><td colspan="6" style="color:#4A8FA8;text-align:center">No training runs yet — first run at 11pm tonight</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+  JARVIS LOCAL FINE-TUNING &nbsp;·&nbsp; MLX APPLE SILICON &nbsp;·&nbsp;
+  11PM–7AM TRAINING WINDOW &nbsp;·&nbsp; DATA: training/benchmarks.jsonl + training/overnight_log.jsonl
+</div>
+
+<script>
+const DATA = {"run_dates": [], "run_scores": [], "run_examples": [], "cat_labels": ["Voice / STT", "Calendar", "Code", "Memory", "Tools", "Conversation", "Meeting"], "cat_scores": [0, 0, 0, 0, 0, 0, 0], "cat_colors": ["#4A8FA8", "#4A8FA8", "#4A8FA8", "#4A8FA8", "#4A8FA8", "#4A8FA8", "#4A8FA8"], "bench_dates": [], "cat_trend_datasets": [{"label": "Voice / STT", "data": [], "borderColor": "#00D4FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Calendar", "data": [], "borderColor": "#00FF88", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Code", "data": [], "borderColor": "#FFAA00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Memory", "data": [], "borderColor": "#FF6B00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Tools", "data": [], "borderColor": "#AA66FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Conversation", "data": [], "borderColor": "#FF4488", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Meeting", "data": [], "borderColor": "#44FFCC", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}]};
+
+const baseOpts = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { labels: { color: '#A8E6FF', font: { family: 'Courier New', size: 10 } } } },
+  scales: {
+    x: { ticks: { color: '#4A8FA8', font: { family: 'Courier New', size: 9 } }, grid: { color: 'rgba(13,79,112,0.3)' } },
+    y: { ticks: { color: '#4A8FA8', font: { family: 'Courier New', size: 9 } }, grid: { color: 'rgba(13,79,112,0.3)' }, min: 0, max: 100 },
+  },
+};
+
+// Score history line chart
+new Chart(document.getElementById('scoreChart'), {
+  type: 'line',
+  data: {
+    labels: DATA.run_dates.length ? DATA.run_dates : ['No runs yet'],
+    datasets: [{
+      label: 'Eval Score %',
+      data: DATA.run_scores.length ? DATA.run_scores : [0],
+      borderColor: '#00D4FF',
+      backgroundColor: 'rgba(0,212,255,0.08)',
+      fill: true,
+      tension: 0.4,
+      pointRadius: 5,
+      pointBackgroundColor: '#00D4FF',
+    }]
+  },
+  options: { ...baseOpts, plugins: { ...baseOpts.plugins, legend: { display: false } } },
+});
+
+// Category bar chart
+new Chart(document.getElementById('catChart'), {
+  type: 'bar',
+  data: {
+    labels: DATA.cat_labels,
+    datasets: [{
+      label: 'Score %',
+      data: DATA.cat_scores,
+      backgroundColor: DATA.cat_colors.map(c => c + '33'),
+      borderColor: DATA.cat_colors,
+      borderWidth: 2,
+      borderRadius: 4,
+    }]
+  },
+  options: {
+    ...baseOpts,
+    plugins: { ...baseOpts.plugins, legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#4A8FA8', font: { family: 'Courier New', size: 9 } }, grid: { display: false } },
+      y: { ticks: { color: '#4A8FA8', font: { family: 'Courier New', size: 9 } }, grid: { color: 'rgba(13,79,112,0.3)' }, min: 0, max: 100 },
+    },
+  },
+});
+
+// Category trend lines
+new Chart(document.getElementById('trendChart'), {
+  type: 'line',
+  data: {
+    labels: DATA.bench_dates.length ? DATA.bench_dates : ['No data yet'],
+    datasets: DATA.cat_trend_datasets.length ? DATA.cat_trend_datasets : [{
+      label: 'No benchmark data',
+      data: [null],
+      borderColor: '#4A8FA8',
+    }],
+  },
+  options: baseOpts,
+});
+</script>
+</body>
+</html>
