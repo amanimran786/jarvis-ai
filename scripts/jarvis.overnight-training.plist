@@ -27,6 +27,10 @@
 	<dict>
 		<key>HOME</key>
 		<string>/Users/truthseeker</string>
+		<key>JARVIS_TEACHER_CAPTURE</key>
+		<string>1</string>
+		<key>PATH</key>
+		<string>/Users/truthseeker/jarvis-ai/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
 	</dict>
 	<key>RunAtLoad</key>
 	<false/>

@@ -630,11 +630,15 @@ class OvernightTrainer:
 
     def run_eval(self) -> dict:
         """
-        Run evaluation suite via pytest.
+        Run evaluation suite.
 
         Returns {"passed": N, "failed": N, "total": N}.
         """
         self.logger.info("Running evaluation suite")
+
+        benchmark = self._run_benchmark_eval()
+        if benchmark.get("total", 0) > 0:
+            return benchmark
 
         try:
             result = subprocess.run(
@@ -663,10 +667,6 @@ class OvernightTrainer:
                 failed = int(failed_match.group(1))
 
             total = passed + failed
-            if total == 0:
-                benchmark = self._run_benchmark_eval()
-                if benchmark.get("total", 0) > 0:
-                    return benchmark
 
             self.logger.info(f"Eval result: {passed} passed, {failed} failed (total {total})")
 
@@ -680,9 +680,13 @@ class OvernightTrainer:
             return {"passed": 0, "failed": 0, "total": 0}
 
     def _run_benchmark_eval(self) -> dict:
-        """Fallback eval gate when live golden cases are skipped."""
+        """Primary eval gate using the full per-category benchmark tracker."""
+        inserted_path = False
         try:
-            sys.path.insert(0, str(TRAINING_ROOT))
+            training_path = str(TRAINING_ROOT)
+            if training_path not in sys.path:
+                sys.path.insert(0, training_path)
+                inserted_path = True
             from benchmark_tracker import run_full_benchmark
 
             record = run_full_benchmark(model_version=f"jarvis-{_today_date()}")
@@ -704,6 +708,12 @@ class OvernightTrainer:
                 }
         except Exception as e:
             self.logger.warning(f"Benchmark eval fallback failed: {e}")
+        finally:
+            if inserted_path:
+                try:
+                    sys.path.remove(str(TRAINING_ROOT))
+                except ValueError:
+                    pass
 
         return {"passed": 0, "failed": 0, "total": 0}
 
@@ -826,9 +836,12 @@ class OvernightTrainer:
 
     def _run_post_training_benchmark(self, training_result: dict, promoted: bool) -> None:
         """Run category benchmarks and regenerate the HTML dashboard."""
+        inserted_path = False
         try:
-            import sys, os
-            sys.path.insert(0, str(TRAINING_ROOT))
+            training_path = str(TRAINING_ROOT)
+            if training_path not in sys.path:
+                sys.path.insert(0, training_path)
+                inserted_path = True
             from benchmark_tracker import run_full_benchmark, log_benchmark, get_latest
             from dashboard_generator import generate as generate_dashboard
 
@@ -844,6 +857,12 @@ class OvernightTrainer:
             self.logger.info(f"Benchmark: overall={record.get('overall')} delta={record.get('delta_vs_baseline')}")
         except Exception as e:
             self.logger.warning(f"Benchmark run failed (non-fatal): {e}")
+        finally:
+            if inserted_path:
+                try:
+                    sys.path.remove(str(TRAINING_ROOT))
+                except ValueError:
+                    pass
 
         try:
             from dashboard_generator import generate as generate_dashboard

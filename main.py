@@ -436,6 +436,10 @@ def _run():
     api_host = _resolve_api_host()
     api_port = _resolve_api_port()
 
+    # Enable teacher capture by default so cloud responses are automatically
+    # recorded as training examples for the local model fine-tuning pipeline.
+    os.environ.setdefault("JARVIS_TEACHER_CAPTURE", "1")
+
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
     jarvis_watcher.start()
     brain_daemon.start()

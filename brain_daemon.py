@@ -254,87 +254,76 @@ class KnowledgeFeedAgent(BrainAgent):
 
 
 class EvalAgent(BrainAgent):
-    """Runs golden case evals every 8 hours and logs results."""
+    """
+    Runs full benchmark suite every 8 hours and logs results.
+
+    Uses benchmark_tracker.run_full_benchmark() for consistent per-category
+    results rather than the golden-cases file (which requires a live model).
+    Results are appended to training/eval_history.jsonl.
+    """
 
     def __init__(self):
         super().__init__("EvalAgent", 28800)  # 8 hours
 
     def run_once(self) -> dict:
         try:
-            # Run pytest on golden cases
-            cmd = [
-                "python3",
-                "-m",
-                "pytest",
-                "tests/test_jarvis_golden_cases.py",
-                "-q",
-                "--tb=no",
-            ]
+            import sys as _sys
+            repo = Path(__file__).parent
+            training_dir = repo / "training"
+            training_path = str(training_dir)
+            inserted_path = False
+            if training_path not in _sys.path:
+                _sys.path.insert(0, training_path)
+                inserted_path = True
+            try:
+                from benchmark_tracker import run_full_benchmark, get_latest
 
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                cwd=Path(__file__).parent,
-            )
-
-            # Parse output for "N passed" and "M failed"
-            passed = 0
-            failed = 0
-            output = result.stdout + result.stderr
-
-            for line in output.split("\n"):
-                if "passed" in line:
+                baseline = get_latest()
+                record = run_full_benchmark(
+                    model_version=f"daemon-eval-{datetime.now().strftime('%Y%m%d-%H')}",
+                    adapter_path="",
+                    baseline=baseline,
+                )
+            finally:
+                if inserted_path:
                     try:
-                        # Try to extract "5 passed"
-                        parts = line.split()
-                        for i, part in enumerate(parts):
-                            if part == "passed" and i > 0:
-                                passed = int(parts[i - 1])
-                    except (ValueError, IndexError):
-                        pass
-                if "failed" in line:
-                    try:
-                        parts = line.split()
-                        for i, part in enumerate(parts):
-                            if part == "failed" and i > 0:
-                                failed = int(parts[i - 1])
-                    except (ValueError, IndexError):
+                        _sys.path.remove(training_path)
+                    except ValueError:
                         pass
 
-            total = passed + failed if (passed > 0 or failed > 0) else 0
+            passed = record.get("total_passed", 0)
+            total = record.get("total_tests", 0)
+            overall = record.get("overall")
+            skipped = [c for c, d in record.get("categories", {}).items() if d.get("skipped")]
 
             # Log to eval_history.jsonl
-            eval_log_path = Path(__file__).parent / "training" / "eval_history.jsonl"
+            eval_log_path = training_dir / "eval_history.jsonl"
             eval_log_path.parent.mkdir(parents=True, exist_ok=True)
 
             eval_entry = {
                 "timestamp": datetime.now().isoformat(),
                 "passed": passed,
-                "failed": failed,
+                "failed": max(0, total - passed),
                 "total": total,
+                "overall": overall,
+                "skipped_categories": skipped,
+                "delta": record.get("delta_vs_baseline"),
             }
 
             with open(eval_log_path, "a") as f:
                 f.write(json.dumps(eval_entry) + "\n")
 
-            summary = f"Evals: {passed} passed"
-            if failed > 0:
-                summary += f", {failed} failed"
+            pct = f"{overall * 100:.1f}%" if overall is not None else "?"
+            summary = f"EvalAgent: {passed}/{total} ({pct})"
+            if skipped:
+                summary += f" [{len(skipped)} skipped]"
 
             return {"ok": total > 0, "summary": summary, "duration_ms": 0}
 
-        except subprocess.TimeoutExpired:
-            return {
-                "ok": False,
-                "summary": "Eval run timeout",
-                "duration_ms": 0,
-            }
         except Exception as e:
             return {
                 "ok": False,
-                "summary": f"Eval run failed: {str(e)[:80]}",
+                "summary": f"EvalAgent failed: {str(e)[:80]}",
                 "duration_ms": 0,
             }
 

@@ -219,42 +219,47 @@ class KnowledgeFeedAgentTests(unittest.TestCase):
 class EvalAgentTests(unittest.TestCase):
     """Tests for EvalAgent."""
 
-    def test_eval_agent_runs_pytest_and_parses_output(self):
-        """EvalAgent runs pytest and parses passed/failed."""
+    def test_eval_agent_runs_benchmark_tracker_and_logs_summary(self):
+        """EvalAgent runs benchmark_tracker and summarizes pass totals."""
         agent = brain_daemon.EvalAgent()
 
-        mock_result = MagicMock()
-        # Output format that's easier to parse
-        mock_result.stdout = "5 passed, 1 failed"
-        mock_result.stderr = ""
+        mock_benchmark = MagicMock()
+        mock_benchmark.get_latest.return_value = {"overall": 0.9}
+        mock_benchmark.run_full_benchmark.return_value = {
+            "total_passed": 5,
+            "total_tests": 6,
+            "overall": 0.8333,
+            "delta_vs_baseline": -0.0667,
+            "categories": {},
+        }
 
         mock_file = MagicMock()
         mock_file.__enter__ = MagicMock(return_value=mock_file)
         mock_file.__exit__ = MagicMock(return_value=False)
         mock_file.write = MagicMock()
 
-        with patch('subprocess.run', return_value=mock_result), \
-             patch('pathlib.Path') as mock_path_class:
-            # Mock the path operations
-            mock_path = MagicMock()
-            mock_path_class.return_value = mock_path
-            mock_path.parent = MagicMock()
-            mock_path.parent.mkdir = MagicMock()
-
+        with patch.dict('sys.modules', {'benchmark_tracker': mock_benchmark}):
             with patch('builtins.open', return_value=mock_file):
                 result = agent.run_once()
 
-        self.assertIn("summary", result)
-        # Check that eval ran (it may have parsed results or not, just verify it tried)
-        self.assertIsNotNone(result["summary"])
+        self.assertTrue(result["ok"])
+        self.assertIn("5/6", result["summary"])
+        mock_benchmark.run_full_benchmark.assert_called_once()
+        self.assertTrue(mock_file.write.called)
 
     def test_eval_agent_logs_to_jsonl(self):
         """EvalAgent appends eval result to eval_history.jsonl."""
         agent = brain_daemon.EvalAgent()
 
-        mock_result = MagicMock()
-        mock_result.stdout = "3 passed"
-        mock_result.stderr = ""
+        mock_benchmark = MagicMock()
+        mock_benchmark.get_latest.return_value = None
+        mock_benchmark.run_full_benchmark.return_value = {
+            "total_passed": 3,
+            "total_tests": 3,
+            "overall": 1.0,
+            "delta_vs_baseline": None,
+            "categories": {},
+        }
 
         written_lines = []
 
@@ -266,42 +271,47 @@ class EvalAgentTests(unittest.TestCase):
         mock_file.__enter__ = MagicMock(return_value=mock_file)
         mock_file.__exit__ = MagicMock(return_value=False)
 
-        with patch('subprocess.run', return_value=mock_result), \
-             patch('pathlib.Path.parent') as mock_parent, \
-             patch('pathlib.Path.mkdir'), \
+        with patch.dict('sys.modules', {'benchmark_tracker': mock_benchmark}), \
              patch('builtins.open', return_value=mock_file):
-
             result = agent.run_once()
 
         self.assertTrue(result["ok"])
+        self.assertTrue(written_lines)
+        self.assertIn('"passed": 3', written_lines[0])
 
-    def test_eval_agent_handles_timeout(self):
-        """EvalAgent handles subprocess timeout gracefully."""
+    def test_eval_agent_handles_benchmark_exception(self):
+        """EvalAgent handles benchmark tracker failures gracefully."""
         agent = brain_daemon.EvalAgent()
 
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('cmd', 120)):
+        mock_benchmark = MagicMock()
+        mock_benchmark.get_latest.return_value = None
+        mock_benchmark.run_full_benchmark.side_effect = TimeoutError("benchmark timeout")
+
+        with patch.dict('sys.modules', {'benchmark_tracker': mock_benchmark}):
             result = agent.run_once()
 
         self.assertFalse(result["ok"])
         self.assertIn("timeout", result["summary"].lower())
 
     def test_eval_agent_handles_no_tests(self):
-        """EvalAgent handles pytest with no results gracefully."""
+        """EvalAgent handles benchmark runs with no totals gracefully."""
         agent = brain_daemon.EvalAgent()
 
-        mock_result = MagicMock()
-        mock_result.stdout = "no tests found"
-        mock_result.stderr = ""
+        mock_benchmark = MagicMock()
+        mock_benchmark.get_latest.return_value = None
+        mock_benchmark.run_full_benchmark.return_value = {
+            "total_passed": 0,
+            "total_tests": 0,
+            "overall": None,
+            "categories": {},
+        }
 
-        with patch('subprocess.run', return_value=mock_result), \
-             patch('pathlib.Path.parent') as mock_parent, \
-             patch('pathlib.Path.mkdir'), \
+        with patch.dict('sys.modules', {'benchmark_tracker': mock_benchmark}), \
              patch('builtins.open', create=True):
-
             result = agent.run_once()
 
-        # Should handle gracefully even without parsed results
         self.assertIn("summary", result)
+        self.assertFalse(result["ok"])
 
 
 class TrainingPackAgentTests(unittest.TestCase):
