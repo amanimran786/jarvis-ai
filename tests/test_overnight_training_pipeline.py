@@ -99,7 +99,8 @@ def test_status_repairs_stale_state_from_successful_log():
         )
 
         with patch("local_runtime.local_finetune_scheduler.STATE_FILE", state_path), \
-             patch("local_runtime.local_finetune_scheduler.LOG_FILE", log_path):
+             patch("local_runtime.local_finetune_scheduler.LOG_FILE", log_path), \
+             patch("local_runtime.local_finetune_scheduler.TRAINING_ROOT", root):
             trainer = local_finetune_scheduler.OvernightTrainer()
 
     assert trainer.state["last_run_date"] == "2026-05-04"
@@ -107,6 +108,52 @@ def test_status_repairs_stale_state_from_successful_log():
     assert trainer.state["baseline_eval_total"] == 313
     assert trainer.state["last_session"]["examples_count"] == 30
     assert trainer.state["last_session"]["duration_seconds"] == 17.5
+
+
+def test_state_repairs_last_session_eval_from_latest_benchmark():
+    """Status should not keep showing stale partial eval totals after full benchmark exists."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        state_path = root / "overnight_state.json"
+        log_path = root / "overnight_log.jsonl"
+        benchmark_path = root / "benchmarks.jsonl"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "baseline_eval_passed": 312,
+                    "baseline_eval_total": 313,
+                    "last_session": {
+                        "timestamp": "2026-05-05T06:35:16Z",
+                        "stages": {"eval": {"passed": 312, "failed": 1, "total": 313}},
+                        "eval_passed": 312,
+                        "eval_total": 313,
+                    },
+                }
+            )
+        )
+        log_path.write_text("")
+        benchmark_path.write_text(
+            json.dumps(
+                {
+                    "total_passed": 597,
+                    "total_tests": 601,
+                    "overall": 0.9933,
+                    "categories": {"voice": {"passed": 34, "total": 34}},
+                }
+            )
+            + "\n"
+        )
+
+        with patch("local_runtime.local_finetune_scheduler.STATE_FILE", state_path), \
+             patch("local_runtime.local_finetune_scheduler.LOG_FILE", log_path), \
+             patch("local_runtime.local_finetune_scheduler.TRAINING_ROOT", root):
+            trainer = local_finetune_scheduler.OvernightTrainer()
+
+    assert trainer.state["baseline_eval_passed"] == 597
+    assert trainer.state["baseline_eval_total"] == 601
+    assert trainer.state["last_session"]["eval_passed"] == 597
+    assert trainer.state["last_session"]["eval_total"] == 601
+    assert trainer.state["last_session"]["stages"]["eval"]["categories"]["voice"]["passed"] == 34
 
 
 def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
