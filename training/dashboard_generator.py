@@ -84,6 +84,108 @@ def _color_for_score(score: Optional[float]) -> str:
     return "#FF4444"
 
 
+def _count_jsonl_rows(path: str | None) -> int:
+    if not path:
+        return 0
+    p = Path(path)
+    if not p.exists():
+        return 0
+    try:
+        return sum(1 for line in p.read_text(encoding="utf-8").splitlines() if line.strip())
+    except Exception:
+        return 0
+
+
+def _run_eval(run: dict) -> dict:
+    stages = run.get("stages", {}) if isinstance(run.get("stages"), dict) else {}
+    nested = stages.get("eval", {}) if isinstance(stages.get("eval"), dict) else {}
+    passed = run.get("eval_passed", nested.get("passed"))
+    total = run.get("eval_total", nested.get("total"))
+    if (not total or total == 0) and nested.get("total"):
+        passed = nested.get("passed")
+        total = nested.get("total")
+    try:
+        passed_i = int(passed)
+        total_i = int(total)
+    except (TypeError, ValueError):
+        return {"passed": None, "total": None, "score": None}
+    if total_i <= 0:
+        return {"passed": passed_i, "total": total_i, "score": None}
+    return {"passed": passed_i, "total": total_i, "score": passed_i / total_i}
+
+
+def _run_examples(run: dict) -> int:
+    try:
+        count = int(run.get("examples_count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count > 0:
+        return count
+    stages = run.get("stages", {}) if isinstance(run.get("stages"), dict) else {}
+    build = stages.get("build", {}) if isinstance(stages.get("build"), dict) else {}
+    return _count_jsonl_rows(build.get("pack_path"))
+
+
+def _run_duration(run: dict) -> float:
+    for key in ("duration_seconds", "duration_sec"):
+        try:
+            value = float(run.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value:
+            return value
+    stages = run.get("stages", {}) if isinstance(run.get("stages"), dict) else {}
+    training = stages.get("training", {}) if isinstance(stages.get("training"), dict) else {}
+    for key in ("duration_seconds", "duration_sec"):
+        try:
+            value = float(training.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value:
+            return value
+    return 0.0
+
+
+def _run_trained_ok(run: dict) -> bool:
+    stages = run.get("stages", {}) if isinstance(run.get("stages"), dict) else {}
+    training = stages.get("training", {}) if isinstance(stages.get("training"), dict) else {}
+    return bool(training.get("ok"))
+
+
+def _run_label(run: dict, index: int) -> str:
+    timestamp = str(run.get("timestamp") or "")
+    if "T" in timestamp:
+        return timestamp.replace("T", " ").replace("Z", "")[5:16]
+    return str(run.get("date") or f"Run {index + 1}")
+
+
+def _latest_learning_run(runs: list[dict]) -> dict:
+    for run in reversed(runs):
+        if _run_trained_ok(run) or run.get("promoted"):
+            return run
+    return runs[-1] if runs else {}
+
+
+def _baseline_counts(state: dict, benchmarks: list[dict], runs: list[dict]) -> tuple[int, int]:
+    for bench in reversed(benchmarks):
+        total = int(bench.get("total_tests") or 0)
+        if total > 0:
+            return int(bench.get("total_passed") or 0), total
+    for run in reversed(runs):
+        evaluated = _run_eval(run)
+        if evaluated["total"]:
+            return int(evaluated["passed"] or 0), int(evaluated["total"] or 0)
+    try:
+        state_passed = int(state.get("baseline_eval_passed") or 0)
+        state_total = int(state.get("baseline_eval_total") or 0)
+    except (TypeError, ValueError):
+        state_passed = 0
+        state_total = 0
+    if state_total > 0:
+        return state_passed, state_total
+    return 0, 1
+
+
 def generate() -> Path:
     overnight_runs = _load_jsonl(OVERNIGHT_LOG)
     benchmarks = _load_jsonl(BENCHMARK_LOG)
@@ -92,10 +194,10 @@ def generate() -> Path:
     # ── Summary stats ──────────────────────────────────────────────────────────
     total_runs = len(overnight_runs)
     promoted_runs = sum(1 for r in overnight_runs if r.get("promoted"))
-    last_run = overnight_runs[-1] if overnight_runs else {}
-    last_run_date = last_run.get("date", "—")
-    baseline_passed = state.get("baseline_eval_passed", 0)
-    baseline_total = state.get("baseline_eval_total", 1) or 1
+    trained_runs = sum(1 for r in overnight_runs if _run_trained_ok(r))
+    last_run = _latest_learning_run(overnight_runs)
+    last_run_date = _run_label(last_run, len(overnight_runs) - 1) if last_run else "—"
+    baseline_passed, baseline_total = _baseline_counts(state, benchmarks, overnight_runs)
     baseline_pct = f"{baseline_passed / baseline_total * 100:.1f}%"
 
     # Latest benchmark
@@ -104,11 +206,14 @@ def generate() -> Path:
 
     # ── Chart data ─────────────────────────────────────────────────────────────
     # Dates for x-axis (overnight runs)
-    run_dates = [r.get("date", f"Run {i+1}") for i, r in enumerate(overnight_runs)]
-    run_passed = [r.get("eval_passed", 0) for r in overnight_runs]
-    run_total = [r.get("eval_total", 1) or 1 for r in overnight_runs]
-    run_scores = [round(p / t * 100, 1) for p, t in zip(run_passed, run_total)]
-    run_examples = [r.get("examples_count", 0) for r in overnight_runs]
+    run_dates = [_run_label(r, i) for i, r in enumerate(overnight_runs)]
+    run_scores = []
+    for run in overnight_runs:
+        evaluated = _run_eval(run)
+        run_scores.append(
+            round(evaluated["score"] * 100, 1) if evaluated["score"] is not None else None
+        )
+    run_examples = [_run_examples(r) for r in overnight_runs]
 
     # Category scores from latest benchmark
     cat_scores = []
@@ -175,20 +280,22 @@ def generate() -> Path:
 
     # ── Run history rows ───────────────────────────────────────────────────────
     run_rows_html = ""
-    for r in reversed(overnight_runs[-20:]):
-        ep = r.get("eval_passed", 0)
-        et = r.get("eval_total", 1) or 1
-        sc = round(ep / et * 100, 1)
+    for idx, r in reversed(list(enumerate(overnight_runs[-20:]))):
+        evaluated = _run_eval(r)
+        ep = evaluated["passed"]
+        et = evaluated["total"]
+        sc = f"{round(evaluated['score'] * 100, 1)}%" if evaluated["score"] is not None else "—"
         promo = "✓" if r.get("promoted") else "—"
         promo_color = "#00FF88" if r.get("promoted") else "#4A8FA8"
-        ex = r.get("examples_count", 0)
-        dur = r.get("duration_seconds", 0)
+        ex = _run_examples(r)
+        dur = _run_duration(r)
         dur_str = f"{int(dur // 60)}m {int(dur % 60)}s" if dur else "—"
+        pass_total = f"{ep}/{et}" if et is not None and et > 0 else "—"
         run_rows_html += f"""
         <tr>
-          <td style="color:#A8E6FF">{r.get('date','—')}</td>
-          <td style="color:#00D4FF">{sc}%</td>
-          <td style="color:#A8E6FF">{ep}/{et}</td>
+          <td style="color:#A8E6FF">{_run_label(r, idx)}</td>
+          <td style="color:#00D4FF">{sc}</td>
+          <td style="color:#A8E6FF">{pass_total}</td>
           <td style="color:#A8E6FF">{ex}</td>
           <td style="color:#A8E6FF">{dur_str}</td>
           <td style="color:{promo_color};font-weight:bold">{promo}</td>
@@ -303,7 +410,7 @@ def generate() -> Path:
   <div class="card">
     <div class="card-label">TOTAL RUNS</div>
     <div class="card-value">{total_runs}</div>
-    <div class="card-sub">{promoted_runs} promoted to production</div>
+    <div class="card-sub">{trained_runs} trained · {promoted_runs} promoted</div>
   </div>
   <div class="card">
     <div class="card-label">OVERALL BENCHMARK</div>
@@ -311,9 +418,9 @@ def generate() -> Path:
     <div class="card-sub">latest benchmark run</div>
   </div>
   <div class="card">
-    <div class="card-label">BASELINE EVAL</div>
+    <div class="card-label">LATEST EVAL</div>
     <div class="card-value">{baseline_pct}</div>
-    <div class="card-sub">{baseline_passed}/{state.get('baseline_eval_total', 0)} tests passing</div>
+    <div class="card-sub">{baseline_passed}/{baseline_total} tests passing</div>
   </div>
   <div class="card">
     <div class="card-label">LAST TRAINING</div>

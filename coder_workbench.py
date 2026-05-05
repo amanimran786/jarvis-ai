@@ -8,6 +8,7 @@ actual git state instead of generic coding-agent advice.
 from __future__ import annotations
 
 import os
+import json
 import shlex
 import subprocess
 import time
@@ -16,6 +17,7 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parent
+BENCHMARK_LOG = ROOT / "training" / "benchmarks.jsonl"
 
 
 _RUNTIME_SURFACES = {
@@ -294,4 +296,74 @@ def summary_text() -> str:
     for item in payload["recommended_next"]:
         required = "required" if item.get("required") else "optional"
         lines.append(f"- {item['id']} [{required}]: {item['command']}")
+    return "\n".join(lines)
+
+
+def _latest_benchmark() -> dict[str, Any]:
+    if not BENCHMARK_LOG.exists():
+        return {}
+    latest: dict[str, Any] = {}
+    try:
+        for line in BENCHMARK_LOG.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            latest = json.loads(line)
+    except Exception:
+        return {}
+    return latest
+
+
+def improvement_text() -> str:
+    """Return repo-grounded improvement suggestions from current git and eval state."""
+    payload = status()
+    benchmark = _latest_benchmark()
+    categories = benchmark.get("categories", {}) if isinstance(benchmark, dict) else {}
+    weak_categories = []
+    for name, info in categories.items():
+        failed = int(info.get("failed") or 0) + int(info.get("errors") or 0)
+        total = int(info.get("total") or 0)
+        if total and failed:
+            weak_categories.append(f"{name} {info.get('passed', 0)}/{total}")
+
+    changed = payload.get("changed_files", [])
+    runtime_dirty = [
+        item["path"] for item in changed
+        if _touches_runtime([item["path"]])
+    ]
+
+    lines = [
+        "I inspected the repo state, recent benchmark data, and verification plan.",
+        f"Current branch is {payload['branch']} at {payload['head']}.",
+    ]
+    if changed:
+        lines.append(f"The worktree has {len(changed)} changed paths, so the first improvement is change control: isolate or commit the current work before adding more features.")
+    else:
+        lines.append("The worktree is clean, so the next improvement can be selected from benchmark evidence rather than cleanup pressure.")
+
+    suggestions: list[str] = []
+    if weak_categories:
+        suggestions.append(
+            "Tighten the failing benchmark categories next: "
+            + ", ".join(weak_categories[:4])
+            + "."
+        )
+    if runtime_dirty:
+        suggestions.append(
+            "Run the packaged-app verification path because runtime surfaces are dirty: "
+            + ", ".join(runtime_dirty[:5])
+            + "."
+        )
+    suggestions.append(
+        "Promote codebase review into a real fast path: inspect git state, benchmark failures, and verification commands before giving architectural advice."
+    )
+    suggestions.append(
+        "Keep overnight training evidence-gated: training completion should not count as learning unless eval totals, adapter path, examples, and promotion status are all visible."
+    )
+
+    lines.append("Highest-value improvements: " + " ".join(suggestions[:4]))
+    verify = payload.get("recommended_next", [])
+    if verify:
+        required = [item["command"] for item in verify if item.get("required")]
+        if required:
+            lines.append("Verification I would run first: " + required[0])
     return "\n".join(lines)

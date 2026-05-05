@@ -3225,6 +3225,12 @@ def route_stream(user_input: str) -> tuple:
 
     if _is_self_review_query(lower):
         return _s(_self_review_text()), "Self-Review"
+    if (
+        "codebase" in lower
+        and any(p in lower for p in ("look into", "inspect", "review", "suggest", "improvement", "improvements"))
+        and any(p in lower for p in ("your", "own", "jarvis"))
+    ):
+        return _s(coder_workbench.improvement_text()), "Self-Review"
     if _is_self_improve_safety_query(lower):
         return _s(_self_improve_safety_reply()), "Self-Improve"
     if _is_personal_interest_query(lower):
