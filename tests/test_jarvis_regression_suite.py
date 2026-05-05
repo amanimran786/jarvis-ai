@@ -1933,6 +1933,31 @@ class RouterTests(unittest.TestCase):
         self.assertIn("draft ready for imran butt", text.lower())
         self.assertIn("this is jarvis", text.lower())
 
+    def test_intro_with_declared_relationship_uses_declared_contact_name(self):
+        stream, label = router.route_stream("Introduce yourself Jarvis, Imran butt is my dad")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for imran butt", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+        self.assertNotIn("draft ready for jarvis", text.lower())
+
+    def test_message_intro_body_expands_to_safe_intro(self):
+        stream, label = router.route_stream("Message fiza : introduce yourself jarvis")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for fiza", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+        self.assertNotIn('draft ready for fiza: "jarvis"', text.lower())
+
+    def test_message_intro_typo_keeps_recipient_clean(self):
+        stream, label = router.route_stream("Message Imran introducing yourself jarvia via text")
+        text = "".join(stream)
+        self.assertEqual(label, "Messages")
+        self.assertIn("draft ready for imran", text.lower())
+        self.assertIn("this is jarvis", text.lower())
+        self.assertNotIn("imran introducing", text.lower())
+        self.assertNotIn("yourself jarvia", text.lower())
+
     def test_message_two_word_contact_only_asks_for_body(self):
         stream, label = router.route_stream("message Imran Butt")
         text = "".join(stream)
