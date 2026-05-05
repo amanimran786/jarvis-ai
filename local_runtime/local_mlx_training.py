@@ -45,17 +45,21 @@ def _ensure_mlx_dirs() -> None:
 
 
 def _is_apple_silicon() -> bool:
-    """Detect Apple Silicon Mac."""
+    """Detect Apple Silicon Mac (M1/M2/M3/M4)."""
     if platform.system() != "Darwin":
         return False
+    # platform.machine() returns "arm64" on Apple Silicon
+    if platform.machine() == "arm64":
+        return True
+    # Fallback: sysctl check
     try:
         result = subprocess.run(
-            ["sysctl", "-n", "hw.memtype"],
+            ["sysctl", "-n", "hw.optional.arm64"],
             capture_output=True,
             text=True,
             timeout=5,
         )
-        return "apple" in result.stdout.lower()
+        return result.stdout.strip() == "1"
     except Exception:
         return False
 
