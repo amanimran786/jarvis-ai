@@ -117,7 +117,10 @@ class OvernightTrainer:
 
         self.logger = logger
         self.state: dict = self._load_state()
-        if self._repair_state_from_log():
+        repaired = self._repair_state_from_log()
+        if self._repair_state_from_benchmarks():
+            repaired = True
+        if repaired:
             self._save_state()
 
     def _load_state(self) -> dict:
@@ -162,6 +165,28 @@ class OvernightTrainer:
         except Exception as e:
             self.logger.warning(f"Failed to read overnight log: {e}")
         return sessions
+
+    def _read_benchmark_records(self) -> list[dict]:
+        """Return valid records from the per-category benchmark log."""
+        benchmark_log = TRAINING_ROOT / "benchmarks.jsonl"
+        if not benchmark_log.exists():
+            return []
+        records: list[dict] = []
+        try:
+            with benchmark_log.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(record, dict):
+                        records.append(record)
+        except Exception as e:
+            self.logger.warning(f"Failed to read benchmark log: {e}")
+        return records
 
     @staticmethod
     def _session_eval_counts(session: dict) -> tuple[int, int]:
@@ -237,6 +262,44 @@ class OvernightTrainer:
             self.state["baseline_eval_passed"] = best_passed
             self.state["baseline_eval_total"] = best_total
             changed = True
+
+        return changed
+
+    def _repair_state_from_benchmarks(self) -> bool:
+        """Repair stale eval totals from the latest full category benchmark."""
+        records = self._read_benchmark_records()
+        if not records:
+            return False
+        latest = records[-1]
+        passed = int(latest.get("total_passed") or 0)
+        total = int(latest.get("total_tests") or 0)
+        if total <= 0:
+            return False
+
+        changed = False
+        current_passed = int(self.state.get("baseline_eval_passed") or 0)
+        current_total = int(self.state.get("baseline_eval_total") or 0)
+        if passed > current_passed or total > current_total:
+            self.state["baseline_eval_passed"] = passed
+            self.state["baseline_eval_total"] = total
+            changed = True
+
+        session = self.state.get("last_session")
+        if isinstance(session, dict):
+            session_passed, session_total = self._session_eval_counts(session)
+            if total > session_total or passed > session_passed:
+                stages = session.setdefault("stages", {})
+                stages["eval"] = {
+                    "passed": passed,
+                    "failed": max(0, total - passed),
+                    "total": total,
+                    "source": "benchmark_tracker",
+                    "overall": latest.get("overall"),
+                    "categories": latest.get("categories", {}),
+                }
+                session["eval_passed"] = passed
+                session["eval_total"] = total
+                changed = True
 
         return changed
 
