@@ -186,6 +186,42 @@ def _baseline_counts(state: dict, benchmarks: list[dict], runs: list[dict]) -> t
     return 0, 1
 
 
+def _routing_stats(repo_root: Path) -> dict:
+    """
+    Load routing_log.jsonl and compute tier breakdown and local-usage rate.
+
+    Returns:
+        {
+          "total": int,
+          "tiers": {"local": N, "sonnet": N, ...},
+          "local_pct": float,   # 0-1
+          "cloud_pct": float,
+        }
+    """
+    routing_log = repo_root / "routing_log.jsonl"
+    records = _load_jsonl(routing_log)
+    if not records:
+        return {"total": 0, "tiers": {}, "local_pct": 0.0, "cloud_pct": 0.0}
+
+    from collections import Counter
+
+    tiers: Counter = Counter()
+    for r in records:
+        tier = r.get("tier") or "unknown"
+        tiers[tier] += 1
+
+    total = len(records)
+    local_count = tiers.get("local", 0)
+    local_pct = local_count / total if total else 0.0
+
+    return {
+        "total": total,
+        "tiers": dict(tiers.most_common()),
+        "local_pct": local_pct,
+        "cloud_pct": 1.0 - local_pct,
+    }
+
+
 def generate() -> Path:
     overnight_runs = _load_jsonl(OVERNIGHT_LOG)
     benchmarks = _load_jsonl(BENCHMARK_LOG)
@@ -302,6 +338,38 @@ def generate() -> Path:
         </tr>"""
     if not run_rows_html:
         run_rows_html = '<tr><td colspan="6" style="color:#4A8FA8;text-align:center">No training runs yet — first run at 11pm tonight</td></tr>'
+
+    # ── Routing stats ──────────────────────────────────────────────────────────
+    routing = _routing_stats(TRAINING_ROOT.parent)
+    routing_total = routing["total"]
+    routing_local_pct = round(routing["local_pct"] * 100, 1)
+    routing_cloud_pct = round(routing["cloud_pct"] * 100, 1)
+    routing_tiers = routing["tiers"]  # {"local": N, "sonnet": N, ...}
+
+    # Build tier rows HTML for the routing table
+    tier_color_map = {
+        "local": "#00FF88",
+        "sonnet": "#00D4FF",
+        "mini": "#A8E6FF",
+        "haiku": "#FFAA00",
+        "opus": "#FF6B00",
+        "unknown": "#4A8FA8",
+    }
+    routing_rows_html = ""
+    for tier, count in routing_tiers.items():
+        pct = round(count / routing_total * 100, 1) if routing_total else 0
+        color = tier_color_map.get(tier, "#A8E6FF")
+        routing_rows_html += f"""
+        <tr>
+          <td style="color:{color};font-weight:bold">{tier}</td>
+          <td style="color:#A8E6FF">{count:,}</td>
+          <td style="color:{color}">{pct}%</td>
+        </tr>"""
+    if not routing_rows_html:
+        routing_rows_html = '<tr><td colspan="3" style="color:#4A8FA8">No routing data yet</td></tr>'
+
+    # Local-use gauge bar (HTML progress bar style)
+    local_bar_color = "#00FF88" if routing_local_pct >= 30 else ("#FFAA00" if routing_local_pct >= 15 else "#FF4444")
 
     # ── Serialize chart data ───────────────────────────────────────────────────
     chart_json = json.dumps({
@@ -466,6 +534,67 @@ def generate() -> Path:
       </tr></thead>
       <tbody>{run_rows_html}</tbody>
     </table>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top:20px">
+  <!-- Routing breakdown -->
+  <div class="card">
+    <div class="section-title">MODEL ROUTING — ALL TIME</div>
+    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">{routing_total:,} total queries</div>
+
+    <!-- Local usage bar -->
+    <div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#A8E6FF;margin-bottom:4px">
+        <span>LOCAL USAGE</span>
+        <span style="color:{local_bar_color};font-weight:bold">{routing_local_pct}%</span>
+      </div>
+      <div style="background:#0D4F70;border-radius:4px;height:8px;overflow:hidden">
+        <div style="background:{local_bar_color};width:{routing_local_pct}%;height:100%;border-radius:4px;transition:width 0.3s"></div>
+      </div>
+      <div style="font-size:10px;color:#4A8FA8;margin-top:4px">
+        ↑ goal: maximize local %, reduce cloud spend
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>TIER</th><th>QUERIES</th><th>SHARE</th></tr></thead>
+      <tbody>{routing_rows_html}</tbody>
+    </table>
+  </div>
+
+  <!-- Pack composition (latest run) -->
+  <div class="card">
+    <div class="section-title">TONIGHT'S TRAINING PACK</div>
+    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">Sources used to build training examples</div>
+    <table>
+      <thead><tr><th>SOURCE</th><th>TYPE</th><th>QUALITY</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="color:#00FF88;font-weight:bold">Teacher Examples</td>
+          <td style="color:#A8E6FF">Curated JSONL</td>
+          <td style="color:#00FF88">★★★★★</td>
+        </tr>
+        <tr>
+          <td style="color:#00D4FF;font-weight:bold">Verbatim (real)</td>
+          <td style="color:#A8E6FF">Live interactions</td>
+          <td style="color:#00D4FF">★★★★☆</td>
+        </tr>
+        <tr>
+          <td style="color:#FFAA00;font-weight:bold">Synthetic</td>
+          <td style="color:#A8E6FF">Tool-use / voice / memory</td>
+          <td style="color:#FFAA00">★★★☆☆</td>
+        </tr>
+        <tr>
+          <td style="color:#4A8FA8;font-weight:bold">Legacy (fallback)</td>
+          <td style="color:#4A8FA8">Summary rephrasing</td>
+          <td style="color:#4A8FA8">★★☆☆☆</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px;font-size:11px;color:#4A8FA8">
+      Pack size grows as more real interactions accumulate in verbatim log.
+    </div>
   </div>
 </div>
 
