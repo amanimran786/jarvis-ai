@@ -496,8 +496,8 @@ class TerminalFileTests(unittest.TestCase):
             result = terminal.list_directory(tmp)
         lines = result.splitlines()
         # Directories (ending with /) come before plain files
-        dir_indices = [i for i, l in enumerate(lines) if l.endswith("/")]
-        file_indices = [i for i, l in enumerate(lines) if not l.endswith("/")]
+        dir_indices = [i for i, line in enumerate(lines) if line.endswith("/")]
+        file_indices = [i for i, line in enumerate(lines) if not line.endswith("/")]
         if dir_indices and file_indices:
             self.assertLess(max(dir_indices), min(file_indices))
 
@@ -1555,6 +1555,12 @@ class ConversationContextTests(unittest.TestCase):
         system, _, _ = cc.build_prompt_state("Base.")
         self.assertIn("Prior conversation about Python.", system)
 
+    def test_build_prompt_state_includes_recent_topics(self):
+        import conversation_context as cc
+        cc._STATE["recent_user_topics"] = ["Improve routing", "Add tests"]
+        system, _, _ = cc.build_prompt_state("Base.")
+        self.assertIn("Recent user topics", system)
+
     def test_build_prompt_state_stats_has_required_keys(self):
         import conversation_context as cc
         _, _, stats = cc.build_prompt_state("")
@@ -1565,7 +1571,7 @@ class ConversationContextTests(unittest.TestCase):
 
     def test_compact_if_needed_compacts_overflow(self):
         import conversation_context as cc
-        # MAX_ACTIVE_TURNS (from conversation_context) = 4, so max_messages = 8.
+        # MAX_ACTIVE_TURNS (from conversation_context) controls max_messages.
         # Add 6 full turns (12 messages) to force compaction.
         max_messages = cc.MAX_ACTIVE_TURNS * 2
         with patch("conversation_context.mem.save_conversation"):
@@ -1574,6 +1580,19 @@ class ConversationContextTests(unittest.TestCase):
                 cc.end_turn(f"Assistant reply about databases {i}")
         self.assertLessEqual(len(cc._STATE["messages"]), max_messages)
         self.assertTrue(cc._STATE["summary"])
+
+    def test_forced_model_override_accepts_cloud_model(self):
+        import model_router
+        result = model_router.set_forced_model(model_router.GPT_MINI)
+        self.assertTrue(result.get("active"))
+        status = model_router.forced_model_status()
+        self.assertTrue(status.get("active"))
+        model_router.clear_forced_model()
+
+    def test_forced_model_override_rejects_unknown(self):
+        import model_router
+        result = model_router.set_forced_model("not-a-real-model")
+        self.assertFalse(result.get("ok"))
 
     # ── Stats ─────────────────────────────────────────────────────────────
 
@@ -2235,7 +2254,7 @@ class BehaviorHooksShellGatingTests(unittest.TestCase):
         with self._patch_log():
             behavior_hooks.pre_shell_command("ls -la")
         self.assertTrue(self._hook_log.exists())
-        lines = [l for l in self._hook_log.read_text().splitlines() if l.strip()]
+        lines = [line for line in self._hook_log.read_text().splitlines() if line.strip()]
         self.assertEqual(len(lines), 1)
         entry = json.loads(lines[0])
         self.assertEqual(entry["phase"], "pre_shell")

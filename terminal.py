@@ -169,3 +169,12 @@ def set_clipboard(text: str) -> str:
     """Copy text to clipboard."""
     subprocess.run(["pbcopy"], input=text.encode())
     return "Copied to clipboard."
+
+
+def format_output_for_cli(output: str, command: str) -> str:
+    """Format terminal output with syntax hints for CLI display."""
+    lines = output.split('\n')
+    if len(lines) > 20:
+        # Truncate with summary
+        return '\n'.join(lines[:10]) + f'\n... ({len(lines)-10} more lines) ...\n' + '\n'.join(lines[-3:])
+    return output

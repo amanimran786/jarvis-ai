@@ -12,6 +12,8 @@ class MessagesContactTests(unittest.TestCase):
         messages._last_contact_choices = []
         messages._last_fuzzy_matches = []
         messages._last_applescript_error = ""
+        messages._last_chat_db_access_error = ""
+        messages._messages_history_access_prompt_shown = False
 
     def test_lookup_contact_auto_resolves_single_reachable_duplicate(self):
         applescript_output = "__MULTI__\nAman Imran\t(510) 753-0173\nAman Imran\nAman Imran"
@@ -73,8 +75,37 @@ class MessagesContactTests(unittest.TestCase):
         text = messages.messages_history_permission_text(missing_path)
 
         self.assertIn("Full Disk Access", text)
+        self.assertIn("Terminal", text)
         self.assertIn("Jarvis.app", text)
         self.assertIn(str(missing_path), text)
+
+    def test_read_recent_thread_surfaces_chat_db_access_prompt_once(self):
+        with patch("messages._copy_chat_db_snapshot", return_value=False), \
+             patch("messages_thread.get_thread", return_value=[]):
+            messages._mark_chat_db_access_error("operation not permitted")
+
+            first = messages.read_recent_thread("+15105550179")
+            messages._mark_chat_db_access_error("operation not permitted")
+            second = messages.read_recent_thread("+15105550179")
+
+        self.assertIn("Full Disk Access", first)
+        self.assertIn("Terminal", first)
+        self.assertIn("operation not permitted", first)
+        self.assertEqual(second, "No recent messages with +15105550179.")
+
+    def test_read_recent_thread_appends_one_time_prompt_to_fallback_thread(self):
+        fallback = [{"direction": "in", "body": "got it"}]
+        with patch("messages._copy_chat_db_snapshot", return_value=False), \
+             patch("messages_thread.get_thread", return_value=fallback):
+            messages._mark_chat_db_access_error("operation not permitted")
+
+            first = messages.read_recent_thread("+15105550179")
+            messages._mark_chat_db_access_error("operation not permitted")
+            second = messages.read_recent_thread("+15105550179")
+
+        self.assertIn("[+15105550179] got it", first)
+        self.assertIn("Full Disk Access", first)
+        self.assertEqual(second, "[+15105550179] got it")
 
     def test_messages_history_access_status_reads_sqlite_database(self):
         with TemporaryDirectory() as tmp:

@@ -65,8 +65,15 @@ import messages_thread as msg_thread
 import call_privacy
 import provider_router
 import safety_permissions as perms
-from model_router import smart_stream, format_with_mini, get_mode, set_mode, describe_runtime_for
-from config import OPUS, SONNET
+from model_router import (
+    smart_stream,
+    format_with_mini,
+    get_mode,
+    set_mode,
+    describe_runtime_for,
+    set_forced_model,
+    clear_forced_model,
+)
 
 _on_timer_done = None
 
@@ -237,6 +244,9 @@ def _parse_volume(text: str):
 
 
 def _parse_browser_target(text: str):
+    # CDP browser integration: Use local_runtime.local_browser.fetch_page(url)
+    # in web search path instead of subprocess opening Chrome. Provides headless
+    # CDP-based page fetching with self-healing skill selectors.
     match = re.search(r"\b(?:browse to|open website|open site|go to|search(?: the web| google)? for)\b\s+(.+)", text, re.IGNORECASE)
     if not match:
         return None
@@ -413,6 +423,18 @@ def _requested_mode(lower: str) -> str | None:
         return "cloud"
     if "switch to auto mode" in lower or "use auto mode" in lower:
         return "auto"
+    return None
+
+
+def _requested_model_override(text: str) -> dict | None:
+    lower = (text or "").lower().strip()
+    if not lower:
+        return None
+    if any(p in lower for p in ("clear model", "reset model", "auto model", "model auto", "default model")):
+        return {"action": "clear"}
+    match = re.search(r"\b(?:use|switch|route|set)\s+(?:model|llm)\s+(?:to|as)?\s*([\w:._-]+)", lower)
+    if match:
+        return {"action": "set", "model": match.group(1)}
     return None
 
 
@@ -623,7 +645,6 @@ def _meeting_safe_mode_requested(lower: str) -> str | None:
 
 def _meeting_diagnostics_reply() -> str:
     meeting = overlay.detect_meeting_app(force_refresh=True) or "NONE"
-    browser_diag = browser.meeting_diagnostics()
     audio = meeting_listener.status_snapshot()
     preferred = audio.get("preferred", {})
     device = audio.get("active_device_name") or preferred.get("device_name") or "unknown"
@@ -3195,6 +3216,15 @@ def route_stream(user_input: str) -> tuple:
     requested_mode = _requested_mode(lower)
     if requested_mode:
         return _s(set_mode(requested_mode)), "Status"
+    model_override = _requested_model_override(user_input)
+    if model_override:
+        if model_override.get("action") == "clear":
+            status = clear_forced_model()
+            return _s("Cleared the forced model override." if not status.get("active") else "Model override is still active."), "Status"
+        result = set_forced_model(model_override.get("model", ""))
+        if not result.get("active"):
+            return _s(result.get("error", "Could not set that model override.")), "Status"
+        return _s(f"Forced model override set to {result.get('label', result.get('model'))}."), "Status"
     if _is_model_status_query(lower):
         return _s(_runtime_status_reply(user_input)), "Status"
     if _is_user_identity_query(lower):
@@ -3519,12 +3549,18 @@ def route_stream(user_input: str) -> tuple:
         dst, val, src = _conv_rev.group(1).lower(), float(_conv_rev.group(2)), _conv_rev.group(3).lower()
     if _conv or _conv_rev:
         def _normalize_unit(u):
-            if u.startswith("f"): return "F"
-            if u.startswith("c"): return "C"
-            if u in ("km", "k"): return "km"
-            if u.startswith("m"): return "miles"
-            if u.startswith("lb") or u.startswith("po"): return "lbs"
-            if u.startswith("kg") or u.startswith("ki"): return "kg"
+            if u.startswith("f"):
+                return "F"
+            if u.startswith("c"):
+                return "C"
+            if u in ("km", "k"):
+                return "km"
+            if u.startswith("m"):
+                return "miles"
+            if u.startswith("lb") or u.startswith("po"):
+                return "lbs"
+            if u.startswith("kg") or u.startswith("ki"):
+                return "kg"
             return u
         src_n, dst_n = _normalize_unit(src), _normalize_unit(dst)
         conv_result = None
@@ -3857,7 +3893,7 @@ def route_stream(user_input: str) -> tuple:
                 focus = _jagents.focus_advisor()
                 result = _jagents.write_daily_note(briefing_text=brief, focus_text=focus)
                 if result.get("action") == "already_exists":
-                    yield f"Today's daily note already exists in the vault."
+                    yield "Today's daily note already exists in the vault."
                 elif result.get("ok"):
                     note_name = (result.get("path") or "").split("/")[-1]
                     yield f"Daily note created: {note_name}. It's in vault/daily/ with your calendar, tasks, and focus for today."
@@ -4207,7 +4243,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         task = params.get("task", user_input)
 
         def _operative_stream():
-            yield f"Understood. Running the task autonomously now, sir."
+            yield "Understood. Running the task autonomously now, sir."
             steps_done = []
 
             def _progress(step_desc, detail):
