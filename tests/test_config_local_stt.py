@@ -79,8 +79,10 @@ class LocalSttConfigTests(unittest.TestCase):
 
     def test_system_prompt_enforces_truthful_scope_language(self):
         cfg = self._reload_with_env({})
-        self.assertIn("Do not claim to be unrestricted", cfg.SYSTEM_PROMPT)
-        self.assertIn("Never claim you can bypass runtime policy", cfg.SYSTEM_PROMPT)
+        # Honesty rules must prohibit inventing capabilities and claiming
+        # unverified actions — exact phrasing may vary as prompt is compressed.
+        self.assertIn("Never invent capabilities, permissions", cfg.SYSTEM_PROMPT)
+        self.assertIn("never claim you scanned", cfg.SYSTEM_PROMPT.lower())
 
 
 if __name__ == "__main__":

@@ -259,24 +259,29 @@ Return only the profile paragraph, no labels or headers."""
 # ── Get full context for system prompt ────────────────────────────────────────
 
 def get_learning_context() -> str:
-    """Return everything learned as context to inject into system prompt."""
+    """Return learned context to inject into system prompt.
+
+    Token budget discipline:
+    - User profile synthesis is OMITTED — memory.py already provides durable
+      profile via get_context(). Including it here doubled the profile cost.
+    - News feed capped to 1 item, summary trimmed to 80 chars.
+    - Behavioral insights capped to 2, trimmed to 80 chars each.
+    """
     kdata = _load_knowledge()
     parts = []
 
-    # Synthesized user profile
-    synthesis = kdata.get("user_profile", {}).get("synthesis")
-    if synthesis:
-        parts.append(f"User profile:\n{synthesis}")
-
-    # Recent knowledge feed
+    # Recent knowledge feed — cap to 1 item, short summary only
     feed = kdata.get("knowledge_feed", [])
     if feed:
-        items = "\n".join(f"- [{f['topic']}] {f['summary']}" for f in feed[-4:])
-        parts.append(f"Recent news in areas the user cares about:\n{items}")
+        latest = feed[-1]
+        summary = (latest.get("summary", "") or "")[:80]
+        topic = latest.get("topic", "")
+        parts.append(f"Recent: [{topic}] {summary}")
 
-    # Recent insights
+    # Behavioral insights — cap to 2, trimmed
     insights = kdata.get("insights", [])
     if insights:
-        parts.append("Behavioral insights:\n" + "\n".join(f"- {i}" for i in insights[-3:]))
+        capped = [str(i)[:80] for i in insights[-2:]]
+        parts.append("Behavioral insights:\n" + "\n".join(f"- {i}" for i in capped))
 
     return "\n\n" + "\n\n".join(parts) if parts else ""
