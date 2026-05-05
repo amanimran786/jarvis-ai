@@ -1,0 +1,503 @@
+"""
+Jarvis brain daemon — background agents that continuously improve the vault.
+
+Runs as daemon threads inside the Jarvis process. Each agent loop fires
+independently on its own schedule. Starts automatically from main.py.
+
+Agents:
+  - MemoryAgent (every 30min): consolidates working memory, dedupes facts
+  - VaultSynthAgent (every 2hrs): searches vault, updates brain indexes
+  - KnowledgeFeedAgent (every 4hrs): refreshes knowledge feed topics
+  - EvalAgent (every 8hrs): runs golden case evals, logs delta
+  - TrainingPackAgent (every 24hrs at midnight): builds training packs from recent conversations
+"""
+
+import json
+import logging
+import os
+import subprocess
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from abc import ABC, abstractmethod
+
+logger = logging.getLogger("brain_daemon")
+
+
+class BrainAgent(ABC):
+    """Base class for background brain agents."""
+
+    def __init__(self, name: str, interval_seconds: int):
+        self.name = name
+        self.interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._last_run = None
+        self._run_count = 0
+        self._thread = None
+
+    @abstractmethod
+    def run_once(self) -> dict:
+        """
+        Run one iteration of the agent.
+
+        Returns:
+            dict with keys: {"ok": bool, "summary": str, "duration_ms": int}
+        """
+        pass
+
+    def start(self) -> None:
+        """Start daemon thread running the agent loop."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning(f"Agent {self.name} is already running")
+            return
+
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        logger.debug(f"Started agent: {self.name}")
+
+    def stop(self) -> None:
+        """Stop the agent loop."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+        logger.debug(f"Stopped agent: {self.name}")
+
+    def _loop(self) -> None:
+        """Main loop: sleep interval, run_once, handle exceptions."""
+        while not self._stop_event.is_set():
+            try:
+                time.sleep(self.interval_seconds)
+                if self._stop_event.is_set():
+                    break
+
+                start_time = time.time()
+                result = self.run_once()
+                duration_ms = int((time.time() - start_time) * 1000)
+
+                self._run_count += 1
+                self._last_run = datetime.now()
+
+                ok = result.get("ok", False)
+                summary = result.get("summary", "no summary")
+                level = logging.INFO if ok else logging.WARNING
+                logger.log(
+                    level,
+                    f"[{self.name}] run #{self._run_count}: {summary} ({duration_ms}ms)",
+                )
+            except Exception as e:
+                logger.exception(f"[{self.name}] unhandled exception in loop:")
+
+    def status(self) -> dict:
+        """Return current status of the agent."""
+        next_run = None
+        if self._last_run is not None:
+            next_run = (
+                self._last_run.timestamp() + self.interval_seconds
+            )
+        return {
+            "name": self.name,
+            "interval_seconds": self.interval_seconds,
+            "last_run": self._last_run.isoformat() if self._last_run else None,
+            "run_count": self._run_count,
+            "next_run": next_run,
+        }
+
+
+class MemoryAgent(BrainAgent):
+    """Consolidates working memory and dedupes facts every 30min."""
+
+    def __init__(self):
+        super().__init__("MemoryAgent", 1800)  # 30 minutes
+
+    def run_once(self) -> dict:
+        try:
+            import memory
+
+            # Consolidate memory (builds working_memory and long_term_profile)
+            consolidate_result = memory.consolidate_memory()
+
+            # Load, dedupe facts, and save if changed
+            data = memory.load()
+            original_facts = data.get("facts", [])
+            deduped_facts = memory._dedupe_keep_order(original_facts)
+
+            facts_deduped = len(original_facts) - len(deduped_facts)
+            if facts_deduped > 0:
+                data["facts"] = deduped_facts
+                memory.save(data)
+
+            summary = (
+                f"Consolidated {len(original_facts)} facts, deduped {facts_deduped} duplicates"
+            )
+            return {"ok": True, "summary": summary, "duration_ms": 0}
+        except Exception as e:
+            return {
+                "ok": False,
+                "summary": f"Memory consolidation failed: {str(e)[:80]}",
+                "duration_ms": 0,
+            }
+
+
+class VaultSynthAgent(BrainAgent):
+    """Searches vault, updates brain indexes every 2 hours."""
+
+    def __init__(self):
+        super().__init__("VaultSynthAgent", 7200)  # 2 hours
+
+    def run_once(self) -> dict:
+        try:
+            vault_root = Path(__file__).parent / "vault"
+            brain_dir = vault_root / "wiki" / "brain"
+
+            if not brain_dir.exists():
+                return {
+                    "ok": False,
+                    "summary": "Vault brain directory not found",
+                    "duration_ms": 0,
+                }
+
+            # Search for decision/learned/insight in brain files
+            cmd = [
+                "rg",
+                "-n",
+                "--hidden",
+                "-g",
+                "!.git",
+                "decision|learned|insight",
+                str(brain_dir),
+                "--count-matches",
+            ]
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=30
+            )
+
+            # Count total matches
+            match_count = 0
+            for line in result.stdout.split("\n"):
+                if ":" in line:
+                    try:
+                        count = int(line.split(":")[-1])
+                        match_count += count
+                    except (ValueError, IndexError):
+                        pass
+
+            # Count brain files
+            brain_files = list(brain_dir.glob("*.md"))
+            file_count = len(brain_files)
+
+            # Check if brain files were modified in last 2 hours
+            now = datetime.now().timestamp()
+            recently_modified = False
+            for f in brain_files:
+                mtime = f.stat().st_mtime
+                if now - mtime < 7200:  # 2 hours
+                    recently_modified = True
+                    break
+
+            # Update Repo Map header with timestamp if brain changed recently
+            repo_map = vault_root / "indexes" / "Repo Map.md"
+            if recently_modified and repo_map.exists():
+                content = repo_map.read_text()
+                lines = content.split("\n", 1)
+                if lines:
+                    new_header = f"# Repo Map (synced {datetime.now().strftime('%Y-%m-%d %H:%M')})"
+                    if len(lines) > 1:
+                        new_content = new_header + "\n" + lines[1]
+                    else:
+                        new_content = new_header
+                    repo_map.write_text(new_content)
+
+            summary = f"Brain indexed: {file_count} files, {match_count} key matches"
+            return {"ok": True, "summary": summary, "duration_ms": 0}
+
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "summary": "Vault search timeout",
+                "duration_ms": 0,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "summary": f"Vault synthesis failed: {str(e)[:80]}",
+                "duration_ms": 0,
+            }
+
+
+class KnowledgeFeedAgent(BrainAgent):
+    """Refreshes knowledge feed topics every 4 hours."""
+
+    def __init__(self):
+        super().__init__("KnowledgeFeedAgent", 14400)  # 4 hours
+
+    def run_once(self) -> dict:
+        try:
+            from learner import _refresh_knowledge_feed
+
+            _refresh_knowledge_feed()
+            return {
+                "ok": True,
+                "summary": "Knowledge feed refreshed",
+                "duration_ms": 0,
+            }
+        except Exception as e:
+            error_msg = str(e)[:80]
+            # Silently skip on network/import errors (learner may fail without internet)
+            return {
+                "ok": False,
+                "summary": f"Knowledge feed skipped: {error_msg}",
+                "duration_ms": 0,
+            }
+
+
+class EvalAgent(BrainAgent):
+    """Runs golden case evals every 8 hours and logs results."""
+
+    def __init__(self):
+        super().__init__("EvalAgent", 28800)  # 8 hours
+
+    def run_once(self) -> dict:
+        try:
+            # Run pytest on golden cases
+            cmd = [
+                "python3",
+                "-m",
+                "pytest",
+                "tests/test_jarvis_golden_cases.py",
+                "-q",
+                "--tb=no",
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=Path(__file__).parent,
+            )
+
+            # Parse output for "N passed" and "M failed"
+            passed = 0
+            failed = 0
+            output = result.stdout + result.stderr
+
+            for line in output.split("\n"):
+                if "passed" in line:
+                    try:
+                        # Try to extract "5 passed"
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part == "passed" and i > 0:
+                                passed = int(parts[i - 1])
+                    except (ValueError, IndexError):
+                        pass
+                if "failed" in line:
+                    try:
+                        parts = line.split()
+                        for i, part in enumerate(parts):
+                            if part == "failed" and i > 0:
+                                failed = int(parts[i - 1])
+                    except (ValueError, IndexError):
+                        pass
+
+            total = passed + failed if (passed > 0 or failed > 0) else 0
+
+            # Log to eval_history.jsonl
+            eval_log_path = Path(__file__).parent / "training" / "eval_history.jsonl"
+            eval_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+            eval_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "passed": passed,
+                "failed": failed,
+                "total": total,
+            }
+
+            with open(eval_log_path, "a") as f:
+                f.write(json.dumps(eval_entry) + "\n")
+
+            summary = f"Evals: {passed} passed"
+            if failed > 0:
+                summary += f", {failed} failed"
+
+            return {"ok": total > 0, "summary": summary, "duration_ms": 0}
+
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "summary": "Eval run timeout",
+                "duration_ms": 0,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "summary": f"Eval run failed: {str(e)[:80]}",
+                "duration_ms": 0,
+            }
+
+
+class TrainingPackAgent(BrainAgent):
+    """Builds training packs from recent conversations every 24 hours (0-6am)."""
+
+    def __init__(self):
+        super().__init__("TrainingPackAgent", 86400)  # 24 hours
+
+    def run_once(self) -> dict:
+        # Only run between midnight and 6am
+        hour = datetime.now().hour
+        if not (0 <= hour < 6):
+            return {
+                "ok": True,
+                "summary": f"Training pack skipped (hour={hour}, need 0-6)",
+                "duration_ms": 0,
+            }
+
+        try:
+            from local_runtime.local_finetune_scheduler import OvernightTrainer
+
+            trainer = OvernightTrainer()
+            pack_path = trainer.build_training_pack()
+
+            summary = f"Training pack built: {pack_path}"
+            return {"ok": True, "summary": summary, "duration_ms": 0}
+
+        except ModuleNotFoundError:
+            return {
+                "ok": False,
+                "summary": "TrainingPackAgent: local_finetune_scheduler not available",
+                "duration_ms": 0,
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "summary": f"Training pack failed: {str(e)[:80]}",
+                "duration_ms": 0,
+            }
+
+
+class BrainDaemon:
+    """Manages all brain agents."""
+
+    def __init__(self):
+        self.agents = [
+            MemoryAgent(),
+            VaultSynthAgent(),
+            KnowledgeFeedAgent(),
+            EvalAgent(),
+            TrainingPackAgent(),
+        ]
+        self._running = False
+
+    def start(self) -> None:
+        """Start all agents."""
+        if self._running:
+            logger.warning("BrainDaemon is already running")
+            return
+
+        for agent in self.agents:
+            agent.start()
+
+        self._running = True
+        logger.info("BrainDaemon started with 5 agents")
+
+    def stop(self) -> None:
+        """Stop all agents."""
+        for agent in self.agents:
+            agent.stop()
+
+        self._running = False
+        logger.info("BrainDaemon stopped")
+
+    def status(self) -> dict:
+        """Return status of all agents."""
+        return {
+            "running": self._running,
+            "agents": [agent.status() for agent in self.agents],
+        }
+
+    def is_running(self) -> bool:
+        """Check if daemon is active."""
+        return self._running
+
+
+# Module-level daemon instance
+_daemon: BrainDaemon | None = None
+
+
+def start() -> BrainDaemon:
+    """Create and start the brain daemon."""
+    global _daemon
+    if _daemon is not None:
+        logger.warning("brain_daemon.start() called but daemon already exists")
+        if not _daemon.is_running():
+            _daemon.start()
+        return _daemon
+
+    _daemon = BrainDaemon()
+    _daemon.start()
+    return _daemon
+
+
+def stop() -> None:
+    """Stop the brain daemon."""
+    global _daemon
+    if _daemon is not None:
+        _daemon.stop()
+
+
+def status() -> dict:
+    """Get daemon status."""
+    if _daemon is None:
+        return {"running": False}
+    return _daemon.status()
+
+
+def get_activity_summary() -> str:
+    """
+    Human-readable summary for UI status bar.
+
+    Example: "Brain: memory consolidated 5min ago · eval 2hrs ago · vault synced 47min ago"
+    """
+    if _daemon is None or not _daemon.is_running():
+        return "Brain: offline"
+
+    summaries = []
+    now = datetime.now()
+
+    for agent in _daemon.agents:
+        st = agent.status()
+        last_run = st.get("last_run")
+        if not last_run:
+            continue
+
+        last_run_dt = datetime.fromisoformat(last_run)
+        delta = now - last_run_dt
+        total_seconds = int(delta.total_seconds())
+
+        if total_seconds < 60:
+            time_str = f"{total_seconds}s ago"
+        elif total_seconds < 3600:
+            minutes = total_seconds // 60
+            time_str = f"{minutes}m ago"
+        else:
+            hours = total_seconds // 3600
+            time_str = f"{hours}h ago"
+
+        # Short name
+        name_short = agent.name.replace("Agent", "").lower()
+        summaries.append(f"{name_short} {time_str}")
+
+    if not summaries:
+        return "Brain: waiting for agents"
+
+    return "Brain: " + " · ".join(summaries)
+
+
+# TO INTEGRATE: Add to main.py startup:
+#   import brain_daemon
+#   brain_daemon.start()
+# Add to shutdown:
+#   brain_daemon.stop()

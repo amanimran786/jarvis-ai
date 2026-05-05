@@ -47,10 +47,15 @@ build/
 .vscode/
 .run/
 
-# Claude Code local settings
+# Claude Code local settings — track agents/skills/settings, exclude caches
 .claude/*
 !.claude/commands/
 !.claude/commands/*.md
+!.claude/agents/
+!.claude/agents/*.md
+!.claude/skills/
+!.claude/skills/*.md
+!.claude/settings.json
 
 # macOS
 .DS_Store
