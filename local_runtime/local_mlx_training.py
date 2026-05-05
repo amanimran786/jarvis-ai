@@ -161,37 +161,122 @@ def list_supported_models() -> list[str]:
     return list(MLX_MODEL_PRESETS.keys())
 
 
+def _normalize_mlx_record(record: dict) -> dict | None:
+    """Return one MLX-supported training record, or None if unusable."""
+    if isinstance(record.get("messages"), list) and record["messages"]:
+        return {"messages": record["messages"]}
+
+    prompt = record.get("prompt")
+    completion = record.get("completion")
+    if isinstance(prompt, str) and isinstance(completion, str):
+        prompt = prompt.strip()
+        completion = completion.strip()
+        if prompt and completion:
+            return {"prompt": prompt, "completion": completion}
+
+    return None
+
+
+def _pad_records(records: list[dict], min_count: int) -> list[dict]:
+    if not records or len(records) >= min_count:
+        return records
+
+    padded = records[:]
+    idx = 0
+    while len(padded) < min_count:
+        padded.append(records[idx % len(records)])
+        idx += 1
+    return padded
+
+
+def _split_mlx_records(records: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    """Build deterministic non-empty train/valid/test splits for mlx_lm.lora."""
+    if not records:
+        return [], [], []
+
+    min_split_count = max(1, int(getattr(config, "MLX_BATCH_SIZE", 1) or 1))
+
+    if len(records) == 1:
+        padded = _pad_records(records[:], min_split_count)
+        return padded, padded[:], padded[:]
+
+    if len(records) == 2:
+        train = _pad_records(records[:1], min_split_count)
+        valid = _pad_records(records[1:], min_split_count)
+        test = _pad_records(records[1:], min_split_count)
+        return train, valid, test
+
+    split_size = max(1, min_split_count, len(records) // 10)
+    if split_size * 2 >= len(records):
+        split_size = max(1, (len(records) - 1) // 2)
+
+    test = records[-split_size:]
+    valid = records[-(split_size * 2):-split_size]
+    train = records[:-(split_size * 2)]
+
+    if not train:
+        train = records[:1]
+    if not valid:
+        valid = records[-2:-1]
+    if not test:
+        test = records[-1:]
+
+    train = _pad_records(train, min_split_count)
+    valid = _pad_records(valid, min_split_count)
+    test = _pad_records(test, min_split_count)
+
+    return train, valid, test
+
+
+def _write_jsonl(path: Path, records: list[dict]) -> None:
+    with path.open("w", encoding="utf-8") as outfile:
+        for record in records:
+            outfile.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _load_mlx_records(input_path: Path) -> list[dict]:
+    records: list[dict] = []
+    with input_path.open("r", encoding="utf-8") as infile:
+        for line in infile:
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            mlx_record = _normalize_mlx_record(record)
+            if mlx_record:
+                records.append(mlx_record)
+    return records
+
+
 def _convert_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[bool, str]:
     """
     Convert Jarvis JSONL pack format to mlx-tune messages format.
 
-    Jarvis format: {"messages": [...], "meta": {...}}
-    MLX format: {"messages": [...]} (no metadata needed)
+    Jarvis formats:
+    - {"messages": [...], "meta": {...}}
+    - {"prompt": "...", "completion": "..."}
 
-    Actually, they're already compatible! mlx-tune expects messages format,
-    and Jarvis packs already use it. Just copy the file with only messages.
+    mlx_lm.lora loads train.jsonl, valid.jsonl, and test.jsonl unconditionally.
+    Any empty split raises IndexError inside mlx_lm, so write all three.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "train.jsonl"
 
     try:
-        with input_path.open("r", encoding="utf-8") as infile:
-            with output_path.open("w", encoding="utf-8") as outfile:
-                for line in infile:
-                    line = line.strip()
-                    if not line:
-                        continue
+        records = _load_mlx_records(input_path)
+        if not records:
+            return False, f"No usable training examples in {input_path}"
 
-                    try:
-                        record = json.loads(line)
-                        # mlx-tune expects only messages field
-                        if "messages" in record:
-                            mlx_record = {"messages": record["messages"]}
-                            outfile.write(json.dumps(mlx_record, ensure_ascii=False) + "\n")
-                    except json.JSONDecodeError:
-                        continue
+        train, valid, test = _split_mlx_records(records)
+        _write_jsonl(output_dir / "train.jsonl", train)
+        _write_jsonl(output_dir / "valid.jsonl", valid)
+        _write_jsonl(output_dir / "test.jsonl", test)
 
-        return True, str(output_path)
+        return True, str(output_dir)
     except Exception as e:
         return False, str(e)
 
@@ -367,20 +452,9 @@ def run_sft(
         if val_jsonl:
             val_path = Path(val_jsonl)
             if val_path.exists():
-                # Copy val data to data_dir/valid.jsonl
-                with val_path.open("r", encoding="utf-8") as infile:
-                    with (data_dir / "valid.jsonl").open("w", encoding="utf-8") as outfile:
-                        for line in infile:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                record = json.loads(line)
-                                if "messages" in record:
-                                    mlx_record = {"messages": record["messages"]}
-                                    outfile.write(json.dumps(mlx_record, ensure_ascii=False) + "\n")
-                            except json.JSONDecodeError:
-                                continue
+                val_records = _load_mlx_records(val_path)
+                if val_records:
+                    _write_jsonl(data_dir / "valid.jsonl", val_records)
 
         cmd_str = " ".join(cmd)
 
