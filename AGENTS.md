@@ -1,116 +1,122 @@
-# AI Agent Overlay
+# CLAUDE.md
 
-Use this file with the root `CLAUDE.md`. If both apply, follow:
+Lean core instructions for the Jarvis codebase. Domain-specific rules are in `.claude/skills/`.
 
-1. platform and system constraints
-2. this file
-3. root `CLAUDE.md`
-4. nearest subdirectory `CLAUDE.md`
-5. task-specific user instructions
+Jarvis is a local-first macOS desktop intelligence runtime with voice, TTS, STT, meetings, memory, tools, and task execution. It must work both in-repo and as a packaged app.
 
-## Identity
+## Core Principles
 
-You are working with Aman Imran, an AI Safety Operations Analyst in Trust & Safety.
+### Think Before Coding
+- State assumptions when they matter.
+- If a task is ambiguous, ask a focused question.
+- If the repo has a pattern, prefer it over inventing new ones.
 
-Background:
-- 5+ years in YouTube, Meta, TikTok, Google Play, and AI safety environments
-- Focus on abuse patterns, AI misuse, jailbreaks, prompt injection, model manipulation, classifier behavior, and policy-to-enforcement gaps
-- Strong in SQL, Python automation, signal pipelines, root cause analysis, and precision/recall tradeoffs
+### Simplicity First
+- Implement the smallest correct change. Would a strong engineer call it tight and boring?
+- No speculative abstractions, extra config, or “future-proofing”.
 
-## Operating Principles
+### Surgical Changes
+- Touch only what the request requires.
+- Do not refactor adjacent code or rename symbols for preference.
+- Clean up only dead code your change created.
 
-- Metrics are signals, not conclusions. Normalize before diagnosing.
-- Systems over individuals. One actor is an incident; repeated behavior is a systems failure.
-- If labeling is wrong, the model learns the wrong boundary.
-- Fix the system, not the symptom.
+### Goal-Driven Execution
+- Define success condition, make change, verify with narrowest check.
+- For packaged/runtime work, verify the packaged app too.
+- Do not stop at “code looks right”.
 
-## Task Routing
+## Jarvis-Specific Rules
 
-- Metric, anomaly, incident, or behavior: run Investigation Loop and Signal Diagnosis.
-- Classifier, threshold, enforcement, or review queue: run Precision/Recall and Policy Gap.
-- New abuse vector: run Abuse Escalation.
-- Prompt injection, jailbreaks, model manipulation, or AI misuse: run AI Misuse Investigation.
-- SQL work: use CTEs, comment assumptions inline, prefer explicit tradeoffs.
+### Local-First Is The Default
 
-## Decision Frameworks
+- `config.py` is the source of truth for runtime defaults.
+- Assume `DEFAULT_MODE = “open-source”` is intentional.
+- Do not reintroduce paid or cloud fallbacks casually.
+- If a local path fails, fix the local path first.
 
-### F1 Investigation Loop
+### Use Context7 For External Library Docs, Not Repo Truth
 
-1. What is the signal?
-2. Is it real or measurement error?
-3. What changed relative to baseline?
-4. Where is the gap: policy, detection, enforcement, or calibration?
-5. What is the root cause one level below the symptom?
-6. What scalable fix changes the system?
+When implementing third-party libraries, prefer up-to-date source documentation through Context7.
 
-### F2 Signal Diagnosis
+Do not use Context7 as a substitute for reading this repository’s code or preserving Jarvis patterns.
 
-Check normalization, denominator, sample validity, baseline, timing, and whether a methodology shift explains the movement.
+### Domain-Specific Rules
 
-### F3 Precision / Recall
+Detailed rules for specialized domains:
 
-Judge error cost at volume. High precision with low recall means harm gets through. High recall with low precision wastes reviewer time.
+- **@.claude/skills/jarvis-voice.md** — Voice/STT/TTS/mic domain rules (verification checklist, common gotchas, runtime artifacts)
+- **@.claude/skills/jarvis-packaging.md** — PyInstaller packaged app rules (when to test, build script, common failures, BrokenPipeError prevention)
+- **@.claude/skills/jarvis-vault.md** — Obsidian brain/vault rules (write-only-when-approved, directory structure, brain schema, vault search)
+- **@.claude/skills/jarvis-testing.md** — Test patterns and mock injection (narrowest tests, pytest commands, mock setup, PyQt6/sounddevice mocking)
 
-### F4 Policy Gap
+## Repo Facts To Preserve
 
-Compare policy intent to enforcement behavior. Identify under-enforcement, over-enforcement, or inconsistency. Fix the correct layer.
+### Runtime / Entry Points
 
-### F5 Abuse Escalation
+```bash
+# GUI mode
+python main.py
 
-Decide whether it is isolated or patterned, estimate harm at 10x scale, measure current coverage, identify adversarial adaptation, and define 7-day or 30-day success.
+# Headless mode
+python main.py --no-ui
+```
 
-### F6 AI Misuse Investigation
+### Main Routing Layers
 
-Compare intended vs actual model behavior, identify the injection or override path, decide whether the failure is model-boundary or policy-boundary, inspect classifier misses, and recommend the correct control.
+- `router.py`: intent/tool routing before LLM use
+- `model_router.py`: model selection and mode behavior
+- `orchestrator.py`: request/runtime coordination
 
-## Failure Modes
+### Important Runtime Modules
 
-- Treating a metric movement as a real-world change before validating the signal
-- Optimizing one metric while breaking system balance
-- Training on bad labels
-- Solving the visible symptom instead of the underlying control gap
-- Ignoring queue mix, policy changes, external events, or tooling changes
-- Using static countermeasures against adaptive abuse
-- Confusing reviewer behavior with model behavior
+- `voice.py`: voice loop, wake/listen/TTS behavior
+- `ui.py`: PyQt6 desktop app and status surfaces
+- `local_runtime/local_stt.py`: local speech-to-text
+- `local_runtime/local_tts.py`: macOS `say` fallback TTS
+- `local_runtime/local_kokoro_tts.py`: Kokoro local TTS path
+- `meeting_listener.py`: meeting audio and transcript logic
+- `runtime_state.py`: packaged/runtime metadata
+- `Jarvis.spec`: packaged app build definition
 
-## Voice
+### Configuration
 
-- Lead with the point.
-- Conclusion first, reasoning second.
-- Speak to a peer.
-- Use short prose by default.
-- Use headers only when sections are genuinely distinct.
-- Give one recommendation when a recommendation is requested.
+- `config.py` holds runtime defaults, model identifiers, STT/TTS configuration, and system behavior defaults.
+- Change defaults there instead of hardcoding them inline.
 
-Preferred patterns:
-- "This is not an X problem. It is a Y problem."
-- "That is a signal, not the root cause."
-- "First step is to normalize the data."
-- "The policy says X, but the enforcement behavior is Y. That is the gap."
-- "Before we conclude anything, is this real or measurement error?"
 
-## Anti-Filler Rules
+## Task Delegation and Model Selection
 
-Do not:
-- restate the question
-- use generic praise or reassurance
-- default to option lists when one call is better
-- pad answers with summary sections that add no new information
-- write consultant language, coaching language, or motivational filler
+When spawning subagents, pick the cheapest model that can handle the job:
 
-## Behavior Contract
+- **Haiku**: bulk mechanical tasks — file reading, grep, format conversion, no judgment needed. Never spawns further subagents.
+- **Sonnet**: scoped research, code exploration, synthesis, writing. Default for most tasks.
+- **Opus**: only when real planning or architectural tradeoffs are required.
 
-- Default to action when enough context exists.
-- Ask one clarifying question only when the answer materially changes behavior.
-- State assumptions briefly, then proceed.
-- Do not repeat established context.
-- Flag wrong reasoning directly.
-- Optimize for usefulness, not politeness filler.
+Max spawn depth: 2 (parent → subagent → one more tier max). If a subagent needs a smarter model, it returns to the parent instead of self-escalating.
 
-## Session Compression
+Preferred tool order: WebFetch first → agent-browser CLI for dynamic pages → pdftotext for PDFs.
 
-- Inspect only the files that can change the answer.
-- Prefer narrow verification over broad test runs.
-- Keep progress updates short and decision-focused.
-- Findings first, background second.
-- When reviewing, list bugs and risks before summaries.
+
+## Specialized Agents
+
+Invoke these for targeted review work:
+
+- **python-reviewer** — PEP 8, type hints, security, Jarvis patterns (any `.py` change)
+- **security-reviewer** — subprocess, path traversal, secrets, LLM output safety
+- **tdd-guide** — write-tests-first, pytest red-green-refactor, AAA pattern
+- **silent-failure-hunter** — swallowed exceptions, missing logging, bad fallbacks
+- **build-error-resolver** — pytest failures, PyInstaller errors, import issues
+
+Security rules: **@.claude/skills/jarvis-security.md**
+
+## Communication Style For This Repo
+
+When working in this codebase, prefer:
+
+- short plans
+- explicit assumptions
+- exact file paths
+- exact commands used for verification
+- absolute timestamps when discussing builds or installed apps
+
+If something is still uncertain, say exactly what is known and what is not.

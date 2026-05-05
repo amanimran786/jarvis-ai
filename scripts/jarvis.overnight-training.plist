@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.jarvis.overnight-training</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/truthseeker/jarvis-ai/venv/bin/python3</string>
+		<string>-m</string>
+		<string>local_runtime.local_finetune_scheduler</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>23</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/Users/truthseeker/jarvis-ai</string>
+	<key>StandardOutPath</key>
+	<string>/Users/truthseeker/Library/Logs/jarvis-training.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/truthseeker/Library/Logs/jarvis-training-error.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/truthseeker</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

@@ -12,6 +12,10 @@ import subprocess
 # ── Clean shutdown — reap all multiprocessing children before exit ────────────
 def _reap_children() -> None:
     """Terminate any live multiprocessing child processes (resource_tracker, etc.)."""
+    try:
+        brain_daemon.stop()
+    except Exception:
+        pass
     children = multiprocessing.active_children()
     for child in children:
         try:
@@ -69,6 +73,7 @@ import evals
 import jarvis_daemon
 import jarvis_watcher
 import runtime_state
+import brain_daemon
 
 
 CRASH_LOG = str(runtime_state.crash_log_path())
@@ -191,7 +196,18 @@ def _run_headless():
     from local_runtime import local_stt
     from router import route_stream, set_timer_callback, record_turn as _record_turn
     from voice import speak, speak_stream, listen, wait_for_wake_word
+    from desktop.cli_ui import CLISession, ThinkingIndicator
     jarvis_watcher.set_speak_callback(speak)
+
+    cli = CLISession(use_rich=True)
+    cli.print_header()
+
+    # Show brain agent activity in status bar
+    try:
+        activity = brain_daemon.get_activity_summary()
+        cli.agents_active = len([a for a in brain_daemon.status().get("agents", []) if a.get("status") == "active"])
+    except Exception:
+        activity = ""
 
     END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
     QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -207,7 +223,7 @@ def _run_headless():
             speak(gs.get_todays_events())
             speak(gs.get_unread_emails(max_results=3))
         except Exception as e:
-            print(f"[Briefing Error] {e}")
+            cli.print_jarvis_message(f"Briefing error: {e}")
 
     def handle_memory(user_input):
         lower = user_input.lower().strip()
@@ -234,8 +250,6 @@ def _run_headless():
                 misses += 1
                 if misses >= 2:
                     return True
-                # Don't speak on first miss — just wait silently so ambient noise
-                # doesn't cause Jarvis to constantly interject "Still here."
                 continue
             misses = 0
             lower = user_input.lower().strip()
@@ -245,16 +259,28 @@ def _run_headless():
             if lower in END_CONVERSATION:
                 speak("Alright.")
                 return True
-            # Ignore single-word noise captures ("um", "uh", "hm") without responding
             if len(lower.split()) == 1 and lower in {"um", "uh", "hm", "hmm", "ah", "oh", "er"}:
                 continue
             if handle_memory(user_input):
                 continue
             try:
-                stream, model = route_stream(user_input)
-                print(f"[{model}]")
-                reply = speak_stream(stream)
+                cli.print_user_message(user_input)
+                with ThinkingIndicator(cli):
+                    stream, model = route_stream(user_input)
+                cli.current_model = model
+                reply = cli.stream_jarvis_response(stream)
+                # Speak the reply aloud too
+                speak(reply)
                 _record_turn(user_input, reply)
+                # Refresh brain activity count in status bar
+                try:
+                    cli.agents_active = len([
+                        a for a in brain_daemon.status().get("agents", [])
+                        if a.get("status") == "active"
+                    ])
+                    cli.print_status_bar()
+                except Exception:
+                    pass
             except Exception:
                 traceback.print_exc()
                 speak("Sorry, something went wrong.")
@@ -263,9 +289,11 @@ def _run_headless():
     stt_status = local_stt.status()
     if stt_status.get("active_engine") == "unavailable":
         reason = stt_status.get("import_error") or "No speech-to-text backend is available."
-        print(f"[Voice] Voice input unavailable: {reason} Launch with ./venv/bin/python main.py")
+        cli.print_jarvis_message(f"Voice input unavailable: {reason}")
+        cli.print_jarvis_message("Tip: Launch with ./venv/bin/python main.py for GUI mode.")
         return
     speak("Online.")
+    cli.print_status_bar()
     while True:
         wait_for_wake_word()
         if not conversation_loop():
@@ -410,6 +438,7 @@ def _run():
 
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
     jarvis_watcher.start()
+    brain_daemon.start()
     _start_deferred_startup_tasks()
 
     if "--console" in sys.argv:

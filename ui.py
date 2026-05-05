@@ -21,17 +21,17 @@ import evals
 import conversation_context as ctx
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit, QLineEdit, QLabel, QFileDialog, QInputDialog,
-    QScrollArea, QFrame, QSizePolicy, QGraphicsDropShadowEffect
+    QPushButton, QTextEdit, QLabel, QFileDialog, QInputDialog,
+    QScrollArea, QFrame, QSizePolicy
 )
 from PyQt6.QtCore import (
-    Qt, QObject, QThread, pyqtSignal, QTimer, QSize, QPropertyAnimation,
+    Qt, QObject, QThread, pyqtSignal, QTimer, QPropertyAnimation,
     QRect, QPoint, QEasingCurve, QRectF
 )
 from PyQt6.QtGui import (
     QFont, QColor, QPalette, QIcon, QTextCursor, QKeyEvent,
     QPainter, QPen, QBrush, QLinearGradient, QRadialGradient,
-    QPainterPath, QFontDatabase, QCursor, QPixmap
+    QPainterPath, QCursor, QPixmap
 )
 from PyQt6 import sip
 
@@ -39,16 +39,15 @@ from router import route_stream, set_timer_callback, record_turn as _record_turn
 import jarvis_watcher as _jarvis_watcher
 from voice import speak, speak_stream, listen, wait_for_wake_word, trigger_wake_word as _voice_trigger_wake_word, request_stop as _voice_request_stop, clear_stop_request as _voice_clear_stop_request
 import memory as mem
-import briefing
-import tools
-import google_services as gs
 import terminal
 import stealth
 import hardware as hw
 import browser
 from desktop import overlay as _overlay_mod
+from desktop.agent_status_panel import AgentStatusPanel
 import call_privacy
 from local_runtime import local_stt
+from local_runtime import live_beta
 
 try:
     import meeting_controller as _meeting_controller_mod
@@ -766,8 +765,10 @@ class JarvisOrb(QWidget):
 
         # Pulse (breathing)
         self._pulse += 0.025 * spd * self._pulse_dir
-        if self._pulse >= 1.0: self._pulse_dir = -1
-        elif self._pulse <= 0.0: self._pulse_dir = 1
+        if self._pulse >= 1.0:
+            self._pulse_dir = -1
+        elif self._pulse <= 0.0:
+            self._pulse_dir = 1
 
         # Ring rotation
         self._ring_angle  = (self._ring_angle + 0.6 * spd) % 360
@@ -1416,7 +1417,7 @@ class VoiceWorker(QThread):
                             speak(f"Improvement failed: {ex}")
                     threading.Thread(target=_do_improve, daemon=True).start()
 
-            except Exception as e:
+            except Exception:
                 err = "Sorry, something went wrong."
                 speak(err)
                 self.message.emit(err, "jarvis", "")
@@ -1524,7 +1525,7 @@ class MessageBubble(QFrame):
         msg.setFont(QFont("Courier New", 12))
 
         if is_user:
-            msg.setStyleSheet(f"""
+            msg.setStyleSheet("""
                 color: #FFD9B8;
                 background: rgba(34, 15, 2, 220);
                 border: 1px solid #FF6B00;
@@ -1562,8 +1563,8 @@ class JarvisWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("J.A.R.V.I.S")
-        self.setMinimumSize(400, 500)
-        self.resize(500, 900)
+        self.setMinimumSize(620, 500)
+        self.resize(740, 900)
         self._session_started = datetime.now()
         self.setWindowFlags(
             Qt.WindowType.Window |
@@ -1571,6 +1572,7 @@ class JarvisWindow(QMainWindow):
         )
         self._workers = []
         self._last_jarvis_interaction = None
+        self._response_started_at = {}
         self._streaming_bubble = None
         self._active_response_id = 0
         self._streaming_response_id = None
@@ -1595,6 +1597,7 @@ class JarvisWindow(QMainWindow):
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
         self._start_voice()
+        self._start_brain_daemon_refresh()
 
     def _bind_live_update_signals(self):
         if getattr(self, "_live_signals_bound", False):
@@ -1606,6 +1609,23 @@ class JarvisWindow(QMainWindow):
         if hasattr(self, "_apply_device_summary_update"):
             self._live_updates.device_summary.connect(self._apply_device_summary_update)
         self._live_signals_bound = True
+
+    def _start_brain_daemon_refresh(self) -> None:
+        """Refresh AgentStatusPanel from brain_daemon every 30 seconds."""
+        self._brain_refresh_timer = QTimer(self)
+        self._brain_refresh_timer.timeout.connect(self._refresh_agent_panel)
+        self._brain_refresh_timer.start(30_000)
+        # Immediate first refresh
+        self._refresh_agent_panel()
+
+    def _refresh_agent_panel(self) -> None:
+        """Push latest brain_daemon status into the side panel."""
+        try:
+            import brain_daemon as _bd
+            status = _bd.status()
+            self._agent_panel.update_from_daemon(status)
+        except Exception:
+            pass
 
     def _on_transcript(self, text: str):
         try:
@@ -1629,9 +1649,22 @@ class JarvisWindow(QMainWindow):
         central.setPalette(p)
         self.setCentralWidget(central)
 
-        root = QVBoxLayout(central)
+        # Outer horizontal layout: [main content | agent panel]
+        outer = QHBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Main content column
+        main_col = QWidget()
+        main_col.setAutoFillBackground(False)
+        root = QVBoxLayout(main_col)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        outer.addWidget(main_col, stretch=1)
+
+        # Agent status panel (right side, always visible, collapsible)
+        self._agent_panel = AgentStatusPanel()
+        outer.addWidget(self._agent_panel)
 
         # Animated HUD background (lives behind everything)
         self._hud_bg = HUDBackground(central)
@@ -1796,6 +1829,14 @@ class JarvisWindow(QMainWindow):
         action_row.addWidget(self.visibility_btn)
         self._refresh_visibility_mode()
 
+        self.beta_btn = QPushButton("β LIVE BETA")
+        self.beta_btn.setFixedHeight(28)
+        self.beta_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.beta_btn.setToolTip("Toggle live beta logging and feedback loop")
+        self.beta_btn.clicked.connect(self._toggle_live_beta)
+        action_row.addWidget(self.beta_btn)
+        self._apply_live_beta_state()
+
         self.compact_btn = QPushButton("▁")
         self.compact_btn.setFixedSize(28, 28)
         self.compact_btn.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
@@ -1840,6 +1881,7 @@ class JarvisWindow(QMainWindow):
         self._left_telemetry.add_metric("status", "CURRENT STATE")
         self._left_telemetry.add_metric("memory", "MEMORY NODES")
         self._left_telemetry.add_metric("recent", "RECENT FAILURES")
+        self._left_telemetry.add_metric("beta", "LIVE BETA")
         orb_layout.addWidget(self._left_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         center_stack = QVBoxLayout()
@@ -1893,7 +1935,7 @@ class JarvisWindow(QMainWindow):
         self.chat_layout.addStretch()
 
         self.scroll.setWidget(self.chat_widget)
-        self.scroll.setStyleSheet(f"background: transparent; border: none;")
+        self.scroll.setStyleSheet("background: transparent; border: none;")
         root.addWidget(self.scroll, stretch=1)
 
         # ── Divider ──────────────────────────────────────────────────────────
@@ -1938,6 +1980,14 @@ class JarvisWindow(QMainWindow):
         self.flag_btn = self._hud_btn("⚑")
         self.flag_btn.setToolTip("Flag the last Jarvis answer for evals")
         self.flag_btn.clicked.connect(self._flag_last_answer)
+
+        self.rate_up_btn = self._hud_btn("👍")
+        self.rate_up_btn.setToolTip("Mark the last Jarvis answer as helpful")
+        self.rate_up_btn.clicked.connect(lambda: self._rate_last_answer(True))
+
+        self.rate_down_btn = self._hud_btn("👎")
+        self.rate_down_btn.setToolTip("Mark the last Jarvis answer as unhelpful")
+        self.rate_down_btn.clicked.connect(lambda: self._rate_last_answer(False))
 
         self.input_field = EnterLineEdit()
         self.input_field.setPlaceholderText("ENTER COMMAND...")
@@ -1984,6 +2034,8 @@ class JarvisWindow(QMainWindow):
         i_layout.addWidget(self.scan_btn)
         i_layout.addWidget(self.cam_btn)
         i_layout.addWidget(self.flag_btn)
+        i_layout.addWidget(self.rate_up_btn)
+        i_layout.addWidget(self.rate_down_btn)
         i_layout.addWidget(self.input_field, stretch=1)
         i_layout.addWidget(self.send_btn)
         root.addWidget(input_bar)
@@ -2790,6 +2842,8 @@ class JarvisWindow(QMainWindow):
         self._left_telemetry.set_metric("status", status, self._status_color_for_text(status))
         self._left_telemetry.set_metric("memory", f"{facts} facts / {focus} focus", C_WHITE_DIM)
         self._left_telemetry.set_metric("recent", f"{recent_failures} in 24h", C_WARNING if recent_failures else C_GREEN)
+        beta_label = "ON" if live_beta.is_enabled() else "OFF"
+        self._left_telemetry.set_metric("beta", beta_label, C_CYAN if live_beta.is_enabled() else C_TEXT_DIM)
 
         self._right_telemetry.set_metric("uptime", uptime, C_WHITE_DIM)
         self._right_telemetry.set_metric("messages", str(message_count), C_CYAN)
@@ -3102,6 +3156,7 @@ class JarvisWindow(QMainWindow):
         self._streaming_response_id = None
         if self._streaming_bubble is not None:
             self._streaming_bubble = None
+        self._response_started_at[request_id] = time.time()
         return request_id
 
     def _is_stale_response(self, request_id: int | None) -> bool:
@@ -3111,6 +3166,8 @@ class JarvisWindow(QMainWindow):
         if self._is_stale_response(request_id):
             return
         self._active_response_id = request_id
+        if request_id not in self._response_started_at:
+            self._response_started_at[request_id] = time.time()
         self._start_stream_bubble(model, request_id=request_id)
 
     def _update_scoped_stream_bubble(self, request_id: int, text: str):
@@ -3159,6 +3216,14 @@ class JarvisWindow(QMainWindow):
     def _add_message(self, text: str, sender: str, model: str, request_id: int | None = None):
         if self._is_stale_response(request_id):
             return
+        if sender == "jarvis":
+            started = self._response_started_at.pop(request_id, None) if request_id is not None else None
+            if started:
+                elapsed = time.time() - started
+                if model:
+                    model = f"{model} • {elapsed:.1f}s"
+                else:
+                    model = f"{elapsed:.1f}s"
         # If a streaming bubble already has this text, finalize it instead of
         # creating a duplicate bubble.
         if sender == "jarvis" and self._streaming_bubble is not None:
@@ -3191,6 +3256,63 @@ class JarvisWindow(QMainWindow):
     def _register_interaction(self, entry: dict):
         if entry and entry.get("response"):
             self._last_jarvis_interaction = entry
+            try:
+                live_beta.record_interaction(entry, source="ui")
+            except Exception:
+                pass
+
+    def _apply_live_beta_state(self):
+        if not hasattr(self, "beta_btn"):
+            return
+        enabled = live_beta.is_enabled()
+        label = "β LIVE BETA" if enabled else "β BETA OFF"
+        color = C_CYAN if enabled else C_TEXT_DIM
+        self.beta_btn.setText(label)
+        self.beta_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {color}; border: 1px solid {color}; border-radius: 3px; padding: 0 10px; letter-spacing: 1px; }}"
+            f"QPushButton:hover {{ color: {C_CYAN}; border-color: {C_CYAN}; background: {C_BLUE}; }}"
+        )
+
+    def _toggle_live_beta(self):
+        enabled = not live_beta.is_enabled()
+        live_beta.set_enabled(enabled)
+        self._apply_live_beta_state()
+        msg = "Live beta logging is now on." if enabled else "Live beta logging is now off."
+        self._add_message(msg, "jarvis", "Beta")
+
+    def _rate_last_answer(self, positive: bool):
+        entry = self._last_jarvis_interaction
+        if not entry:
+            self._add_message("No recent Jarvis reply is available to rate yet.", "jarvis", "Eval")
+            return
+        issue = ""
+        expected = ""
+        if not positive:
+            issue, ok = QInputDialog.getText(
+                self,
+                "Thumbs Down Feedback",
+                "What should have been better?",
+                text="Needs more specific technical steps."
+            )
+            if not ok:
+                return
+            expected, _ = QInputDialog.getText(
+                self,
+                "Expected Behavior",
+                "What should Jarvis have done instead?",
+                text=""
+            )
+        live_beta.record_feedback(
+            interaction=entry,
+            rating=1 if positive else -1,
+            issue=issue.strip(),
+            expected=expected.strip(),
+            source="ui_rating",
+        )
+        if positive:
+            self._add_message("Logged positive feedback for the last answer.", "jarvis", "Eval")
+        else:
+            self._add_message("Logged negative feedback for the last answer.", "jarvis", "Eval")
 
     def _flag_last_answer(self):
         entry = self._last_jarvis_interaction
@@ -3222,6 +3344,16 @@ class JarvisWindow(QMainWindow):
             expected=expected.strip(),
             source="ui_feedback",
         )
+        try:
+            live_beta.record_feedback(
+                interaction=entry,
+                rating=-1,
+                issue=issue.strip(),
+                expected=expected.strip(),
+                source="ui_feedback",
+            )
+        except Exception:
+            pass
         self._add_message(f"Logged feedback under {failure['category']} for the last Jarvis answer.", "jarvis", "Eval")
 
     def _set_status(self, text: str):
@@ -4078,7 +4210,7 @@ end tell
         self._call_status_label.setStyleSheet(self._call_status_css(tone))
 
     def _toggle_meeting_safe_mode(self):
-        enabled = call_privacy.toggle_enabled()
+        call_privacy.toggle_enabled()
         msg = call_privacy.status_text()
         self._add_message(msg, "jarvis", "Meeting")
         self._set_status("ONLINE")
