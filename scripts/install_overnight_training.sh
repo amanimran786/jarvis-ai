@@ -16,19 +16,30 @@ fi
 # Ensure LaunchAgents directory exists
 mkdir -p "$LAUNCH_AGENTS_DIR"
 
-# Copy plist to LaunchAgents
-cp "$PLIST_FILE" "$LAUNCH_AGENTS_DIR/"
-echo "Copied plist to $LAUNCH_AGENTS_DIR/jarvis.overnight-training.plist"
+DEST="$LAUNCH_AGENTS_DIR/jarvis.overnight-training.plist"
+LABEL="ai.jarvis.overnight-training"
+DOMAIN="gui/$(id -u)"
 
-# Load the plist
-launchctl load "$LAUNCH_AGENTS_DIR/jarvis.overnight-training.plist"
-echo "Loaded plist with launchctl"
+# Copy plist to LaunchAgents
+cp "$PLIST_FILE" "$DEST"
+echo "Copied plist to $DEST"
+
+# Reload idempotently. bootout fails when the job is not loaded, which is fine.
+launchctl bootout "$DOMAIN" "$DEST" >/dev/null 2>&1 || true
+if launchctl bootstrap "$DOMAIN" "$DEST"; then
+    launchctl enable "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
+    echo "Loaded $LABEL with launchctl bootstrap"
+else
+    echo "bootstrap failed; trying legacy launchctl load"
+    launchctl load "$DEST"
+fi
 
 echo ""
 echo "Installed successfully! Training runs nightly at 11pm."
 echo ""
 echo "Check status:"
 echo "  launchctl list | grep jarvis"
+echo "  bash scripts/overnight_training_status.sh"
 echo ""
 echo "View logs:"
 echo "  tail -f ~/Library/Logs/jarvis-training.log"
