@@ -18,12 +18,14 @@ memory/chroma/
 memory/working/session.json
 usage_log.jsonl
 usage_state.json
+usage_state.*.tmp
 hook_events.jsonl
 training/exports/
 training/distilled/
 training/preferences/
 training/modelfiles/
 training/packs/
+training/mlx_adapters/
 training/handoffs/
 training/model_evals/
 training/automation/

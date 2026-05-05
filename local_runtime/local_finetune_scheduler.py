@@ -35,6 +35,37 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _current_system_prompt() -> str:
+    """Return the current canonical Jarvis system prompt for training rows."""
+    try:
+        return getattr(config, "SYSTEM_PROMPT", "You are Jarvis.") or "You are Jarvis."
+    except Exception:
+        return "You are Jarvis."
+
+
+def _normalize_training_messages(messages: list[dict]) -> list[dict]:
+    """Replace stored system prompts with the current runtime prompt."""
+    normalized: list[dict] = []
+    has_system = False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "").strip()
+        content = str(message.get("content") or "").strip()
+        if role not in {"system", "user", "assistant"} or not content:
+            continue
+        if role == "system":
+            if has_system:
+                continue
+            normalized.append({"role": "system", "content": _current_system_prompt()})
+            has_system = True
+        else:
+            normalized.append({"role": role, "content": content})
+    if not has_system:
+        normalized.insert(0, {"role": "system", "content": _current_system_prompt()})
+    return normalized
+
+
 def _timestamp() -> str:
     """Return ISO timestamp."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -296,8 +327,11 @@ class OvernightTrainer:
                     record = json.loads(line)
                     # Accept records that already have messages list
                     if isinstance(record.get("messages"), list) and len(record["messages"]) >= 2:
-                        # Strip heavy meta fields but keep messages
-                        examples.append({"messages": record["messages"]})
+                        messages = _normalize_training_messages(record["messages"])
+                        if any(m["role"] == "user" for m in messages) and any(
+                            m["role"] == "assistant" for m in messages
+                        ):
+                            examples.append({"messages": messages})
             except Exception as e:
                 self.logger.warning(f"Skipping teacher file {jsonl_path.name}: {e}")
 
@@ -317,7 +351,7 @@ class OvernightTrainer:
 
         try:
             import config as _config
-            system_prompt = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+            system_prompt = _current_system_prompt()
         except Exception:
             system_prompt = "You are Jarvis."
 
@@ -371,7 +405,7 @@ class OvernightTrainer:
         """
         try:
             import config as _config
-            sp = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+            sp = _current_system_prompt()
         except Exception:
             sp = "You are Jarvis."
 
@@ -507,7 +541,7 @@ class OvernightTrainer:
 
         try:
             import config as _config
-            sp = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+            sp = _current_system_prompt()
         except Exception:
             sp = "You are Jarvis."
 
