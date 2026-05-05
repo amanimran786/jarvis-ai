@@ -55,7 +55,7 @@ def messages_history_permission_text(db_path: Path | None = None) -> str:
 
 
 def _messages_history_full_disk_access_prompt(db_path: Path, reason: str = "") -> str:
-    reason_text = f" Reason: {reason}." if reason else ""
+    reason_text = f" Reason: {reason}. Path: {db_path}." if reason else f" Path: {db_path}."
     return (
         "Jarvis can't read iMessage history yet — Full Disk Access is required. "
         "Open System Settings › Privacy & Security › Full Disk Access and enable "
