@@ -83,7 +83,7 @@
 <body>
 
 <h1>J.A.R.V.I.S &mdash; TRAINING INTELLIGENCE</h1>
-<div class="subtitle">FINE-TUNING DASHBOARD &nbsp;·&nbsp; AUTO-REFRESH 60s &nbsp;·&nbsp; GENERATED 2026-05-05 13:53</div>
+<div class="subtitle">FINE-TUNING DASHBOARD &nbsp;·&nbsp; AUTO-REFRESH 60s &nbsp;·&nbsp; GENERATED 2026-05-05 15:24</div>
 
 <!-- Summary cards -->
 <div class="grid-4">
@@ -236,6 +236,87 @@
           <td style="color:#4A8FA8;font-weight:bold">—</td>
         </tr></tbody>
     </table>
+  </div>
+</div>
+
+<div class="grid-2" style="margin-top:20px">
+  <!-- Routing breakdown -->
+  <div class="card">
+    <div class="section-title">MODEL ROUTING — ALL TIME</div>
+    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">1,261 total queries</div>
+
+    <!-- Local usage bar -->
+    <div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#A8E6FF;margin-bottom:4px">
+        <span>LOCAL USAGE</span>
+        <span style="color:#FFAA00;font-weight:bold">23.5%</span>
+      </div>
+      <div style="background:#0D4F70;border-radius:4px;height:8px;overflow:hidden">
+        <div style="background:#FFAA00;width:23.5%;height:100%;border-radius:4px;transition:width 0.3s"></div>
+      </div>
+      <div style="font-size:10px;color:#4A8FA8;margin-top:4px">
+        ↑ goal: maximize local %, reduce cloud spend
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>TIER</th><th>QUERIES</th><th>SHARE</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="color:#00D4FF;font-weight:bold">sonnet</td>
+          <td style="color:#A8E6FF">418</td>
+          <td style="color:#00D4FF">33.1%</td>
+        </tr>
+        <tr>
+          <td style="color:#A8E6FF;font-weight:bold">mini</td>
+          <td style="color:#A8E6FF">387</td>
+          <td style="color:#A8E6FF">30.7%</td>
+        </tr>
+        <tr>
+          <td style="color:#00FF88;font-weight:bold">local</td>
+          <td style="color:#A8E6FF">296</td>
+          <td style="color:#00FF88">23.5%</td>
+        </tr>
+        <tr>
+          <td style="color:#FFAA00;font-weight:bold">haiku</td>
+          <td style="color:#A8E6FF">160</td>
+          <td style="color:#FFAA00">12.7%</td>
+        </tr></tbody>
+    </table>
+  </div>
+
+  <!-- Pack composition (latest run) -->
+  <div class="card">
+    <div class="section-title">TONIGHT'S TRAINING PACK</div>
+    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">Sources used to build training examples</div>
+    <table>
+      <thead><tr><th>SOURCE</th><th>TYPE</th><th>QUALITY</th></tr></thead>
+      <tbody>
+        <tr>
+          <td style="color:#00FF88;font-weight:bold">Teacher Examples</td>
+          <td style="color:#A8E6FF">Curated JSONL</td>
+          <td style="color:#00FF88">★★★★★</td>
+        </tr>
+        <tr>
+          <td style="color:#00D4FF;font-weight:bold">Verbatim (real)</td>
+          <td style="color:#A8E6FF">Live interactions</td>
+          <td style="color:#00D4FF">★★★★☆</td>
+        </tr>
+        <tr>
+          <td style="color:#FFAA00;font-weight:bold">Synthetic</td>
+          <td style="color:#A8E6FF">Tool-use / voice / memory</td>
+          <td style="color:#FFAA00">★★★☆☆</td>
+        </tr>
+        <tr>
+          <td style="color:#4A8FA8;font-weight:bold">Legacy (fallback)</td>
+          <td style="color:#4A8FA8">Summary rephrasing</td>
+          <td style="color:#4A8FA8">★★☆☆☆</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px;font-size:11px;color:#4A8FA8">
+      Pack size grows as more real interactions accumulate in verbatim log.
+    </div>
   </div>
 </div>
 

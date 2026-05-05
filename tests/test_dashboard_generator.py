@@ -84,3 +84,33 @@ def test_generate_repairs_stale_run_history_fields(tmp_path, monkeypatch):
     assert "0m 17s" in html
     assert "99/100 tests passing" in html
     assert "LATEST EVAL" in html
+
+
+def test_generate_routes_new_dashboard_cards_through_real_grid(tmp_path, monkeypatch):
+    overnight = tmp_path / "overnight_log.jsonl"
+    benchmark = tmp_path / "benchmarks.jsonl"
+    state = tmp_path / "overnight_state.json"
+    output = tmp_path / "dashboard.html"
+    routing_log = tmp_path / "routing_log.jsonl"
+
+    overnight.write_text("", encoding="utf-8")
+    benchmark.write_text("", encoding="utf-8")
+    state.write_text("{}", encoding="utf-8")
+    routing_log.write_text(
+        json.dumps({"tier": "local"}) + "\n" + json.dumps({"tier": "sonnet"}) + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(dashboard_generator, "OVERNIGHT_LOG", overnight)
+    monkeypatch.setattr(dashboard_generator, "BENCHMARK_LOG", benchmark)
+    monkeypatch.setattr(dashboard_generator, "STATE_FILE", state)
+    monkeypatch.setattr(dashboard_generator, "OUTPUT", output)
+    monkeypatch.setattr(dashboard_generator, "TRAINING_ROOT", tmp_path / "training")
+
+    dashboard_generator.generate()
+    html = output.read_text(encoding="utf-8")
+
+    assert 'class="grid" style="grid-template-columns' not in html
+    assert 'class="grid-2" style="margin-top:20px"' in html
+    assert "MODEL ROUTING" in html
+    assert "50.0%" in html
