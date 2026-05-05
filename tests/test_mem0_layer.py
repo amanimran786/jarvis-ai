@@ -7,6 +7,7 @@ import mem0_layer
 class Mem0LayerTests(unittest.TestCase):
     def tearDown(self):
         mem0_layer._last_error = ""
+        mem0_layer._memory_instance = None
 
     def test_search_uses_filters_for_current_mem0_api(self):
         calls = []
@@ -79,6 +80,26 @@ class Mem0LayerTests(unittest.TestCase):
 
         self.assertEqual(results[0]["memory"], "stored fact")
         self.assertEqual(calls, [{"filters": {"user_id": "aman"}, "top_k": 1000}])
+
+    def test_close_closes_embedded_qdrant_client_before_shutdown(self):
+        calls = []
+
+        class _Client:
+            def close(self):
+                calls.append("client")
+
+        class _Memory:
+            vector_store = type("_VectorStore", (), {"client": _Client()})()
+
+            def close(self):
+                calls.append("memory")
+
+        mem0_layer._memory_instance = _Memory()
+
+        mem0_layer.close()
+
+        self.assertEqual(calls, ["client", "memory"])
+        self.assertIsNone(mem0_layer._memory_instance)
 
 
 if __name__ == "__main__":

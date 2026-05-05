@@ -86,3 +86,48 @@ def test_status_repairs_stale_state_from_successful_log():
     assert trainer.state["baseline_eval_total"] == 313
     assert trainer.state["last_session"]["examples_count"] == 30
     assert trainer.state["last_session"]["duration_seconds"] == 17.5
+
+
+def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
+    """Scheduled artifact commits must not sweep unrelated staged agent work."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        for rel_path in (
+            "training/overnight_log.jsonl",
+            "training/benchmarks.jsonl",
+            "training/dashboard.html",
+            "training/overnight_state.json",
+        ):
+            path = root / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n", encoding="utf-8")
+
+        trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+            local_finetune_scheduler.OvernightTrainer
+        )
+        trainer.logger = MagicMock()
+
+        with patch("local_runtime.local_finetune_scheduler.REPO_ROOT", root), \
+             patch("local_runtime.local_finetune_scheduler._today_date", return_value="2026-05-05"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            trainer._auto_commit_artifacts(promoted=True)
+
+    add_args = mock_run.call_args_list[0].args[0]
+    commit_args = mock_run.call_args_list[1].args[0]
+    artifact_paths = [
+        "training/overnight_log.jsonl",
+        "training/benchmarks.jsonl",
+        "training/dashboard.html",
+        "training/overnight_state.json",
+    ]
+
+    assert add_args == ["git", "add", *artifact_paths]
+    assert commit_args == [
+        "git",
+        "commit",
+        "-m",
+        "chore(training): overnight artifacts 2026-05-05 [promoted]",
+        "--",
+        *artifact_paths,
+    ]
