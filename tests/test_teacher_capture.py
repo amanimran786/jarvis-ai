@@ -38,10 +38,21 @@ class TeacherCaptureGateTests(unittest.TestCase):
 
     def test_capture_skips_low_tier(self):
         from brains import _teacher_capture
+        for tier in ("cheap", "haiku", "mini", "local"):
+            with patch.dict(os.environ, {"JARVIS_TEACHER_CAPTURE": "1"}, clear=False), \
+                 patch("local_runtime.local_training.record_teacher_example") as record:
+                _teacher_capture.capture("p", "a", tier=tier, provider="openai", model="gpt-4o-mini")
+            record.assert_not_called()
+
+    def test_capture_records_sonnet_tier_when_enabled(self):
+        from brains import _teacher_capture
         with patch.dict(os.environ, {"JARVIS_TEACHER_CAPTURE": "1"}, clear=False), \
-             patch("local_runtime.local_training.record_teacher_example") as record:
-            _teacher_capture.capture("p", "a", tier="cheap", provider="openai", model="gpt-4o-mini")
-        record.assert_not_called()
+             patch("local_runtime.local_training.record_teacher_example",
+                   return_value={"ok": True}) as record:
+            _teacher_capture.capture("p", "a", tier="sonnet", provider="anthropic", model="claude-sonnet")
+        record.assert_called_once()
+        kwargs = record.call_args.kwargs
+        self.assertEqual(kwargs["tags"], ["tier:sonnet", "provider:anthropic", "model:claude-sonnet"])
 
     def test_capture_records_strong_tier_when_enabled(self):
         from brains import _teacher_capture

@@ -196,3 +196,71 @@ def test_teacher_examples_get_system_prompt_when_missing(tmp_path):
 
     assert examples[0]["messages"][0]["role"] == "system"
     assert examples[0]["messages"][0]["content"] == "canonical Jarvis prompt"
+
+
+def test_teacher_examples_skip_known_bad_capability_claims(tmp_path):
+    """The overnight pack must not train on overbroad capability bragging."""
+    teacher_dir = tmp_path / "teacher_examples"
+    teacher_dir.mkdir()
+    (teacher_dir / "bad.jsonl").write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "Now give a more in-depth introduction."},
+                    {
+                        "role": "assistant",
+                        "content": "I have direct access to Aman's Mac and admin/sudo privileges.",
+                    },
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch("local_runtime.local_finetune_scheduler.TRAINING_ROOT", tmp_path), \
+         patch("local_runtime.local_finetune_scheduler.config.SYSTEM_PROMPT", "canonical Jarvis prompt"):
+        examples = trainer._collect_teacher_examples()
+
+    assert examples == []
+
+
+def test_verbatim_examples_skip_known_bad_message_loops(tmp_path):
+    """Bad live messaging loops should not become training examples."""
+    memory_dir = tmp_path / "memory" / "conversations"
+    memory_dir.mkdir(parents=True)
+    verbatim = memory_dir / "verbatim.jsonl"
+    verbatim.write_text(
+        json.dumps(
+            {
+                "user": "send it",
+                "assistant": "Draft ready for it: \"Hi Dad\". Say confirm send to send it.",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "user": "what can you do",
+                "assistant": "I can check the runtime, route tasks, and tell you what is ready.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch("local_runtime.local_finetune_scheduler.REPO_ROOT", tmp_path), \
+         patch("local_runtime.local_finetune_scheduler.config.SYSTEM_PROMPT", "canonical Jarvis prompt"):
+        examples = trainer._collect_verbatim_examples(limit=10)
+
+    assert len(examples) == 1
+    assert examples[0]["messages"][1]["content"] == "what can you do"

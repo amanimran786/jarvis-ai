@@ -66,6 +66,37 @@ def _normalize_training_messages(messages: list[dict]) -> list[dict]:
     return normalized
 
 
+_TRAINING_REJECT_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("unrestricted", "overclaims unrestricted operation"),
+    ("no refusals", "overclaims refusal-free behavior"),
+    ("without hesitation", "overclaims unconditional execution"),
+    ("admin/sudo privileges", "overclaims admin capability"),
+    ("sudo privileges", "overclaims admin capability"),
+    ("run any terminal command with admin", "overclaims admin capability"),
+    ("direct access to aman's mac", "overclaims broad device access"),
+    ("extracts knowledge from every conversation automatically", "overclaims automatic learning"),
+    ("what would you like to say to my?", "broken message recipient parse"),
+    ("draft ready for it:", "broken message recipient parse"),
+    ("draft ready for that to:", "broken message recipient parse"),
+    ("draft ready for to:", "broken message recipient parse"),
+)
+
+
+def _training_quality_issue(messages: list[dict]) -> str | None:
+    """Return a reject reason for examples that would teach known bad behavior."""
+    assistant_text = "\n".join(
+        str(message.get("content") or "")
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "assistant"
+    ).lower()
+    if not assistant_text:
+        return "missing assistant response"
+    for needle, reason in _TRAINING_REJECT_PATTERNS:
+        if needle in assistant_text:
+            return reason
+    return None
+
+
 def _timestamp() -> str:
     """Return ISO timestamp."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -328,6 +359,12 @@ class OvernightTrainer:
                     # Accept records that already have messages list
                     if isinstance(record.get("messages"), list) and len(record["messages"]) >= 2:
                         messages = _normalize_training_messages(record["messages"])
+                        issue = _training_quality_issue(messages)
+                        if issue:
+                            self.logger.info(
+                                f"Skipping teacher row in {jsonl_path.name}: {issue}"
+                            )
+                            continue
                         if any(m["role"] == "user" for m in messages) and any(
                             m["role"] == "assistant" for m in messages
                         ):
@@ -382,13 +419,18 @@ class OvernightTrainer:
 
         examples = []
         for user, asst in recent:
-            examples.append({
+            example = {
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user},
                     {"role": "assistant", "content": asst},
                 ]
-            })
+            }
+            issue = _training_quality_issue(example["messages"])
+            if issue:
+                self.logger.info(f"Skipping verbatim row: {issue}")
+                continue
+            examples.append(example)
         return examples
 
     def _build_synthetic_examples(self) -> list[dict]:
