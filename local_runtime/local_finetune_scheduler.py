@@ -201,59 +201,329 @@ class OvernightTrainer:
         today = _today_date()
         return last_run != today
 
+    # ------------------------------------------------------------------
+    # Training pack builders
+    # ------------------------------------------------------------------
+
     def build_training_pack(self) -> Optional[Path]:
         """
-        Read conversation history from memory.json, format as JSONL.
+        Build overnight training pack from multiple ranked sources:
+
+          1. Teacher examples (training/teacher_examples/*.jsonl)
+             Highest-quality curated pairs — always included in full.
+          2. Real verbatim conversations (memory/conversations/verbatim.jsonl)
+             Actual Jarvis interactions: tool-use, voice commands, memory recall.
+          3. Synthetic typed examples for tool-use / voice / memory patterns.
+          4. Legacy memory.json summaries as a low-quality fallback.
+
+        Output: messages format {"messages": [{"role": ..., "content": ...}, ...]}
+        required by mlx_lm ≥0.31.x.
 
         Returns path to overnight_{date}.jsonl or None if <10 examples.
-        Format: {"prompt": "User: <msg>\n\nJarvis:", "completion": " <response>"}
+        """
+        examples: list[dict] = []
+
+        # Source 1 — teacher examples (already in messages format)
+        teacher_examples = self._collect_teacher_examples()
+        examples.extend(teacher_examples)
+        self.logger.info(f"Teacher examples: {len(teacher_examples)}")
+
+        # Source 2 — verbatim real conversations
+        verbatim_examples = self._collect_verbatim_examples(limit=80)
+        examples.extend(verbatim_examples)
+        self.logger.info(f"Verbatim examples: {len(verbatim_examples)}")
+
+        # Source 3 — synthetic typed examples for underrepresented patterns
+        synthetic = self._build_synthetic_examples()
+        examples.extend(synthetic)
+        self.logger.info(f"Synthetic examples: {len(synthetic)}")
+
+        # Source 4 — legacy memory.json summaries (fallback, low quality)
+        if len(examples) < 30:
+            legacy = self._collect_legacy_summary_examples()
+            examples.extend(legacy)
+            self.logger.info(f"Legacy fallback examples: {len(legacy)}")
+
+        if len(examples) < 10:
+            self.logger.info(f"Only {len(examples)} examples; need >=10 — aborting pack")
+            return None
+
+        # Deduplicate by user message content
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for ex in examples:
+            msgs = ex.get("messages", [])
+            user_content = next(
+                (m["content"] for m in msgs if m.get("role") == "user"), ""
+            )
+            key = user_content[:120]
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(ex)
+
+        self.logger.info(f"Pack size after dedup: {len(deduped)} examples")
+
+        today = _today_date()
+        pack_path = PACKS_DIR / f"overnight_{today}.jsonl"
+        try:
+            with pack_path.open("w", encoding="utf-8") as f:
+                for ex in deduped:
+                    f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+            self.logger.info(f"Built training pack: {pack_path} ({len(deduped)} examples)")
+            return pack_path
+        except Exception as e:
+            self.logger.error(f"Failed to save pack: {e}")
+            return None
+
+    def _collect_teacher_examples(self) -> list[dict]:
+        """
+        Load all JSONL files from training/teacher_examples/.
+
+        Each file is expected to contain one JSON object per line in messages format.
+        Returns examples as-is (already correctly formatted).
+        """
+        teacher_dir = TRAINING_ROOT / "teacher_examples"
+        if not teacher_dir.exists():
+            return []
+
+        examples = []
+        for jsonl_path in sorted(teacher_dir.glob("*.jsonl")):
+            try:
+                for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    record = json.loads(line)
+                    # Accept records that already have messages list
+                    if isinstance(record.get("messages"), list) and len(record["messages"]) >= 2:
+                        # Strip heavy meta fields but keep messages
+                        examples.append({"messages": record["messages"]})
+            except Exception as e:
+                self.logger.warning(f"Skipping teacher file {jsonl_path.name}: {e}")
+
+        return examples
+
+    def _collect_verbatim_examples(self, limit: int = 80) -> list[dict]:
+        """
+        Read real Jarvis interactions from memory/conversations/verbatim.jsonl.
+
+        Format in file: {"user": "...", "assistant": "...", ...}
+        Converts to messages format. Skips trivial pairs (assistant < 20 chars).
+        Samples the most recent `limit` interactions.
+        """
+        verbatim_path = REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl"
+        if not verbatim_path.exists():
+            return []
+
+        try:
+            import config as _config
+            system_prompt = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+        except Exception:
+            system_prompt = "You are Jarvis."
+
+        records = []
+        try:
+            for line in verbatim_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                user = (r.get("user") or "").strip()
+                asst = (r.get("assistant") or "").strip()
+                # Skip trivial or diagnostic ping-pong pairs
+                if not user or len(asst) < 20:
+                    continue
+                if user.startswith("USER: Reply with LOCAL_OK"):
+                    continue
+                records.append((user, asst))
+        except Exception as e:
+            self.logger.warning(f"Failed to read verbatim log: {e}")
+            return []
+
+        # Take the most recent `limit` interactions
+        recent = records[-limit:]
+
+        examples = []
+        for user, asst in recent:
+            examples.append({
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user},
+                    {"role": "assistant", "content": asst},
+                ]
+            })
+        return examples
+
+    def _build_synthetic_examples(self) -> list[dict]:
+        """
+        Return handcrafted synthetic examples for tool-use, voice, and memory patterns.
+
+        These cover categories that may be sparse in real logs:
+          - Calendar event creation
+          - Terminal command execution
+          - Web search + answer
+          - Voice command → spoken response
+          - Memory recall (preferences, projects)
+          - iMessage / contact lookup
+        """
+        try:
+            import config as _config
+            sp = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+        except Exception:
+            sp = "You are Jarvis."
+
+        def ex(user: str, asst: str) -> dict:
+            return {
+                "messages": [
+                    {"role": "system", "content": sp},
+                    {"role": "user", "content": user},
+                    {"role": "assistant", "content": asst},
+                ]
+            }
+
+        return [
+            # Calendar
+            ex(
+                "Schedule a meeting with Sarah tomorrow at 2pm called Engineering Sync.",
+                "Done. Engineering Sync is on your calendar for tomorrow at 2 PM. "
+                "I'll send Sarah an invite.",
+            ),
+            ex(
+                "What's on my calendar this week?",
+                "You have three things: a dentist appointment Tuesday at 10 AM, "
+                "team standup Wednesday at 9, and dinner with dad Friday at 7.",
+            ),
+            ex(
+                "Cancel my 3pm today.",
+                "Cancelled. Your 3 PM slot is clear.",
+            ),
+            # Terminal / code
+            ex(
+                "Run the test suite.",
+                "Running pytest now.",
+            ),
+            ex(
+                "What's my git status?",
+                "You're on main, 2 files modified, nothing staged. "
+                "Changes are in router.py and config.py.",
+            ),
+            ex(
+                "Open the jarvis-ai directory in VS Code.",
+                "Opening VS Code in the jarvis-ai directory.",
+            ),
+            # Search / knowledge
+            ex(
+                "What's the latest on WWDC 2026?",
+                "Apple hasn't announced dates yet as of my last update. "
+                "I'll search for current news.",
+            ),
+            ex(
+                "What's 15% of 340?",
+                "Fifty-one dollars.",
+            ),
+            # Voice / TTS commands
+            ex(
+                "Set a timer for 10 minutes.",
+                "Timer set for 10 minutes.",
+            ),
+            ex(
+                "Turn the volume down.",
+                "Volume reduced.",
+            ),
+            ex(
+                "Read my latest email.",
+                "From Sarah, subject: Budget Review — she's asking for the Q2 numbers "
+                "by end of week.",
+            ),
+            # iMessage / contacts
+            ex(
+                "Message dad and tell him I'll be home by 8.",
+                "Draft ready for Dad: I'll be home by 8. Say confirm to send.",
+            ),
+            ex(
+                "What's mom's number?",
+                "Your mom's number is saved as +1 510 555 0101.",
+            ),
+            # Memory / preferences
+            ex(
+                "What coding language do I prefer?",
+                "Python is your primary language. "
+                "You also work in TypeScript for frontend and shell scripting for automation.",
+            ),
+            ex(
+                "What projects am I working on?",
+                "Jarvis AI is the main one. "
+                "You also have the portfolio site and a research project on local model training.",
+            ),
+            ex(
+                "Remember that I prefer dark mode in all apps.",
+                "Saved. Dark mode preference noted across all apps.",
+            ),
+            # System control
+            ex(
+                "Take a screenshot.",
+                "Screenshot captured and saved to your Desktop.",
+            ),
+            ex(
+                "What's my battery level?",
+                "Battery is at 73%, plugged in and charging.",
+            ),
+            ex(
+                "Lock the screen.",
+                "Screen locked.",
+            ),
+            # Conversational / identity
+            ex(
+                "What can you do?",
+                "I can run terminal commands, manage your calendar and email, send iMessages, "
+                "search the web, control your Mac, write and debug code, recall anything you've "
+                "told me, and learn from every conversation. What do you need?",
+            ),
+            ex(
+                "Are you actually Jarvis or just a chatbot?",
+                "I'm Jarvis — a fully integrated runtime on your Mac, not a generic chatbot. "
+                "I have direct access to your terminal, calendar, contacts, and system controls.",
+            ),
+        ]
+
+    def _collect_legacy_summary_examples(self) -> list[dict]:
+        """
+        Low-quality fallback: build examples from memory.json conversation summaries.
+
+        Used only when other sources produce fewer than 30 examples.
         """
         if not MEMORY_FILE.exists():
-            self.logger.warning(f"Memory file not found: {MEMORY_FILE}")
-            return None
+            return []
 
         try:
             with MEMORY_FILE.open("r", encoding="utf-8") as f:
                 memory = json.load(f)
         except Exception as e:
-            self.logger.error(f"Failed to load memory: {e}")
-            return None
+            self.logger.warning(f"Failed to load memory.json: {e}")
+            return []
 
-        # Extract conversation history (list of dicts with 'date' and 'summary' fields)
+        try:
+            import config as _config
+            sp = getattr(_config, "SYSTEM_PROMPT", "You are Jarvis.")
+        except Exception:
+            sp = "You are Jarvis."
+
         convos = memory.get("conversation_history", [])
-        if not convos:
-            self.logger.info("No conversation history found")
-            return None
-
-        # For now, we use summaries as synthetic data.
-        # In production, integrate with usage_log.jsonl for real prompt/completion pairs.
         examples = []
         for convo in convos:
             summary = (convo.get("summary") or "").strip()
-            if summary:
-                # Synthetic example: user asked something, Jarvis responded with summary
+            if len(summary) > 30:
                 examples.append({
-                    "prompt": f"User: Tell me about {summary}\n\nJarvis:",
-                    "completion": f" {summary}"
+                    "messages": [
+                        {"role": "system", "content": sp},
+                        {"role": "user", "content": f"What happened in our recent conversation?"},
+                        {"role": "assistant", "content": summary},
+                    ]
                 })
-
-        if len(examples) < 10:
-            self.logger.info(f"Only {len(examples)} examples; need >=10")
-            return None
-
-        # Save to overnight_{date}.jsonl
-        today = _today_date()
-        pack_path = PACKS_DIR / f"overnight_{today}.jsonl"
-
-        try:
-            with pack_path.open("w", encoding="utf-8") as f:
-                for ex in examples:
-                    f.write(json.dumps(ex, ensure_ascii=False) + "\n")
-            self.logger.info(f"Built training pack: {pack_path} ({len(examples)} examples)")
-            return pack_path
-        except Exception as e:
-            self.logger.error(f"Failed to save pack: {e}")
-            return None
+        return examples
 
     def run_training(self, pack_path: Path) -> dict:
         """
@@ -546,8 +816,10 @@ class OvernightTrainer:
             date_tag = _today_date()
             msg = f"chore(training): overnight artifacts {date_tag} [{promoted_tag}]"
 
+            # Use a pathspec so Claude/Codex/user-staged work cannot be swept
+            # into the scheduled artifact commit.
             result = subprocess.run(
-                ["git", "commit", "-m", msg],
+                ["git", "commit", "-m", msg, "--", *to_stage],
                 cwd=str(REPO_ROOT),
                 capture_output=True,
                 text=True,

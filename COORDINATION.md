@@ -44,13 +44,16 @@ Update this file when picking up or finishing a task. Commit the update so the o
 **Action:** User must do this manually: System Settings → Privacy → Full Disk Access → Terminal ✓
 **Status:** Blocked (needs user)
 
-### [BOTH] Training pack quality — richer examples
-**Goal:** Current pack is 30 generic conversation-summary examples. Improve with:
-- Real tool-use pairs (calendar create, terminal run, search)
-- Voice command → response pairs
-- Memory recall examples
-**File:** `local_runtime/local_finetune_scheduler.py` → `build_training_pack()`
-**Status:** Open — Codex can add example formatters, Claude will update schema
+### [DONE] Training pack quality — richer examples
+**Completed by Claude 2026-05-05**
+`build_training_pack()` now has 4 ranked sources:
+1. Teacher examples from `training/teacher_examples/*.jsonl` (11 curated)
+2. Real verbatim conversations from `memory/conversations/verbatim.jsonl` (up to 80 real pairs)
+3. 21 handcrafted synthetic examples (calendar, terminal, voice, iMessage, memory, system control)
+4. Legacy memory.json summaries as low-quality fallback (only if total < 30)
+Pack size: 74 examples (up from 30 generic summaries). All in messages format for mlx_lm ≥0.31.x.
+**Helpers added:** `_collect_teacher_examples()`, `_collect_verbatim_examples()`,
+`_build_synthetic_examples()`, `_collect_legacy_summary_examples()`
 
 ---
 
