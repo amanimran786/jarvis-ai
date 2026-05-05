@@ -610,7 +610,8 @@ class MessageIntentParsingTests(unittest.TestCase):
         text = "".join(stream)
 
         self.assertEqual(label, "Messages")
-        self.assertIn("beta test only", text)
+        self.assertIn("Draft ready for Aman Imran: \"beta test only\"", text)
+        self.assertNotIn("Make it say", text)
 
 
 if __name__ == "__main__":
