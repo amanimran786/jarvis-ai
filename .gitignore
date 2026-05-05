@@ -25,6 +25,8 @@ training/distilled/
 training/preferences/
 training/modelfiles/
 training/packs/
+training/eval_history.jsonl
+training/teacher_examples/jarvis_teacher_*.jsonl
 training/mlx_adapters/
 training/handoffs/
 training/model_evals/
