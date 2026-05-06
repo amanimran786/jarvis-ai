@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -994,13 +995,18 @@ class OvernightTrainer:
 
     def _notify_training_complete(self, promoted: bool) -> None:
         """Send a macOS notification when the overnight training cycle finishes."""
+        if os.environ.get("JARVIS_OVERNIGHT_QUIET") == "1":
+            self.logger.info("macOS notification suppressed: quiet overnight mode")
+            return
+
         try:
             status_word = "✅ Adapter promoted" if promoted else "⚠️ Not promoted (no improvement)"
             script = (
                 f'display notification "{status_word}" '
-                f'with title "Jarvis Training Complete" '
-                f'sound name "Glass"'
+                f'with title "Jarvis Training Complete"'
             )
+            if os.environ.get("JARVIS_NO_NOTIFICATION_SOUND") != "1":
+                script += ' sound name "Glass"'
             subprocess.run(
                 ["osascript", "-e", script],
                 capture_output=True,

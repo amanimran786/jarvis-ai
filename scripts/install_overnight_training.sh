@@ -1,15 +1,21 @@
 #!/bin/bash
-# Install Jarvis overnight training scheduler via launchd
+# Install Jarvis quiet overnight worker via launchd
 #
 # Usage: bash scripts/install_overnight_training.sh
 
 set -e
 
-PLIST_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jarvis.overnight-training.plist"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLIST_FILE="$SCRIPT_DIR/jarvis.overnight-training.plist"
+WORKER_FILE="$SCRIPT_DIR/jarvis_overnight_worker.sh"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 if [ ! -f "$PLIST_FILE" ]; then
     echo "Error: plist file not found at $PLIST_FILE"
+    exit 1
+fi
+if [ ! -f "$WORKER_FILE" ]; then
+    echo "Error: worker script not found at $WORKER_FILE"
     exit 1
 fi
 
@@ -21,6 +27,7 @@ LABEL="ai.jarvis.overnight-training"
 DOMAIN="gui/$(id -u)"
 
 # Copy plist to LaunchAgents
+chmod +x "$WORKER_FILE"
 cp "$PLIST_FILE" "$DEST"
 echo "Copied plist to $DEST"
 
@@ -35,13 +42,16 @@ else
 fi
 
 echo ""
-echo "Installed successfully! Training runs nightly at 11pm."
+echo "Installed successfully! Quiet overnight Jarvis work runs nightly at 11pm."
+echo "It does not open Terminal or steal focus; inspect it with logs."
 echo ""
 echo "Check status:"
 echo "  launchctl list | grep jarvis"
 echo "  bash scripts/overnight_training_status.sh"
 echo ""
 echo "View logs:"
+echo "  tail -f ~/Library/Logs/jarvis-overnight-worker.log"
+echo "  tail -f ~/Library/Logs/jarvis-overnight-worker-error.log"
 echo "  tail -f ~/Library/Logs/jarvis-training.log"
 echo "  tail -f ~/Library/Logs/jarvis-training-error.log"
 echo ""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -199,6 +200,43 @@ def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
         "--",
         *artifact_paths,
     ]
+
+
+def test_quiet_overnight_mode_suppresses_training_notification():
+    """The launchd overnight job must not play notification sounds or steal attention."""
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch.dict(os.environ, {"JARVIS_OVERNIGHT_QUIET": "1"}, clear=False), \
+         patch("subprocess.run") as mock_run:
+        trainer._notify_training_complete(promoted=True)
+
+    mock_run.assert_not_called()
+    trainer.logger.info.assert_called_with(
+        "macOS notification suppressed: quiet overnight mode"
+    )
+
+
+def test_non_quiet_notification_can_disable_sound_only():
+    """Manual runs can still notify without using an audible notification sound."""
+    trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+        local_finetune_scheduler.OvernightTrainer
+    )
+    trainer.logger = MagicMock()
+
+    with patch.dict(
+        os.environ,
+        {"JARVIS_OVERNIGHT_QUIET": "0", "JARVIS_NO_NOTIFICATION_SOUND": "1"},
+        clear=False,
+    ), patch("subprocess.run") as mock_run:
+        trainer._notify_training_complete(promoted=False)
+
+    args = mock_run.call_args.args[0]
+    assert args[:2] == ["osascript", "-e"]
+    assert "Jarvis Training Complete" in args[2]
+    assert "sound name" not in args[2]
 
 
 def test_teacher_examples_use_current_system_prompt(tmp_path):
