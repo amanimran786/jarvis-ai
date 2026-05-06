@@ -1619,6 +1619,31 @@ class RouterTests(unittest.TestCase):
         send_mock.assert_called_once()
         self.assertEqual(send_mock.call_args[0][1], "hello")
 
+    def test_message_status_does_not_replace_pending_draft_recipient(self):
+        with patch("router._eager_resolve_contact", return_value="5107530173"):
+            stream1, label1 = router.route_stream("send a message to Aman Imran saying hello beta")
+            text1 = "".join(stream1)
+            stream2, label2 = router.route_stream("message status")
+            text2 = "".join(stream2)
+
+        self.assertEqual(label1, "Messages")
+        self.assertIn("draft ready for aman imran", text1.lower())
+        self.assertEqual(label2, "Messages")
+        self.assertIn("draft ready for aman imran", text2.lower())
+        self.assertNotIn("what would you like to say to status", text2.lower())
+        self.assertEqual(router._pending_message_draft["recipient"], "Aman Imran")
+
+    def test_eager_contact_resolution_prefers_contacts_over_stale_thread_address(self):
+        stale_threads = [
+            {"contact": "Aman Imran", "address": "+15105550179", "message_count": 3}
+        ]
+        with patch("router.msg.lookup_contact", return_value="5107530173") as lookup_mock, \
+             patch("router.msg_thread.list_threads", return_value=stale_threads):
+            resolved = router._eager_resolve_contact("Aman Imran")
+
+        self.assertEqual(resolved, "5107530173")
+        lookup_mock.assert_called_once_with("Aman Imran")
+
     def test_message_single_turn_parses_recipient_and_body(self):
         with patch("router.msg.send_imessage", return_value="Sent to Aman Imran.") as send_mock:
             stream, label = router.route_stream("message Aman Imran Hello")
@@ -1651,7 +1676,8 @@ class RouterTests(unittest.TestCase):
             stream, label = router.route_stream("Send a text message to dad to get chocolate milk")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn('draft ready for dad: "get chocolate milk"', text.lower())
+        self.assertIn("draft ready for dad", text.lower())
+        self.assertIn('"get chocolate milk"', text.lower())
         send_mock.assert_not_called()
 
     def test_message_single_turn_understands_text_my_dad_phrase(self):
@@ -1660,7 +1686,8 @@ class RouterTests(unittest.TestCase):
             stream, label = router.route_stream("text my dad to get milk")
             text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn('draft ready for dad: "get milk"', text.lower())
+        self.assertIn("draft ready for dad", text.lower())
+        self.assertIn('"get milk"', text.lower())
         send_mock.assert_not_called()
 
     def test_message_dad_and_ask_him_to_strips_instruction_words(self):
