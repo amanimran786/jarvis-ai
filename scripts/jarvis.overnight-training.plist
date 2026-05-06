@@ -6,9 +6,8 @@
 	<string>ai.jarvis.overnight-training</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/truthseeker/jarvis-ai/venv/bin/python3</string>
-		<string>-m</string>
-		<string>local_runtime.local_finetune_scheduler</string>
+		<string>/bin/bash</string>
+		<string>/Users/truthseeker/jarvis-ai/scripts/jarvis_overnight_worker.sh</string>
 	</array>
 	<key>StartCalendarInterval</key>
 	<dict>
@@ -20,17 +19,25 @@
 	<key>WorkingDirectory</key>
 	<string>/Users/truthseeker/jarvis-ai</string>
 	<key>StandardOutPath</key>
-	<string>/Users/truthseeker/Library/Logs/jarvis-training.log</string>
+	<string>/Users/truthseeker/Library/Logs/jarvis-overnight-launchd.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/truthseeker/Library/Logs/jarvis-training-error.log</string>
+	<string>/Users/truthseeker/Library/Logs/jarvis-overnight-launchd-error.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>HOME</key>
 		<string>/Users/truthseeker</string>
 		<key>JARVIS_TEACHER_CAPTURE</key>
 		<string>1</string>
+		<key>JARVIS_OVERNIGHT_QUIET</key>
+		<string>1</string>
+		<key>JARVIS_NO_NOTIFICATION_SOUND</key>
+		<string>1</string>
+		<key>JARVIS_OVERNIGHT_PREVENT_SLEEP</key>
+		<string>1</string>
+		<key>JARVIS_OVERNIGHT_NICE</key>
+		<string>10</string>
 		<key>PATH</key>
-		<string>/Users/truthseeker/jarvis-ai/venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+		<string>/Users/truthseeker/jarvis-ai/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 	</dict>
 	<key>RunAtLoad</key>
 	<false/>
