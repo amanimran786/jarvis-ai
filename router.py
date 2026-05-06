@@ -921,8 +921,16 @@ def _eager_resolve_contact(recipient: str) -> str | None:
     """Return resolved phone/email for a name recipient if unambiguous, else None."""
     if re.search(r"[\d@\+]", recipient):
         return None
-    # Check thread history first — if we've messaged someone with this name (or first name),
-    # prefer that known address over a potentially wrong Contacts lookup.
+    # Contacts is the source of truth for delivery. Thread history is only a
+    # fallback because old beta tests may have recorded stale numbers.
+    found = msg.lookup_contact(recipient)
+    if found and not found.startswith("__"):
+        return found
+    if found in {msg._AMBIGUOUS_CONTACT, msg._FUZZY_MATCHES, msg._CONTACT_WITHOUT_HANDLE}:
+        return None
+
+    # Fallback for contacts not available in macOS Contacts but present in the
+    # local Jarvis-side thread store.
     name_lower = recipient.strip().lower()
     for thread in msg_thread.list_threads():
         stored_name = (thread.get("contact") or "").strip().lower()
@@ -930,9 +938,6 @@ def _eager_resolve_contact(recipient: str) -> str | None:
             addr = thread.get("address", "")
             if addr and re.search(r"[\d@]", addr):
                 return addr
-    found = msg.lookup_contact(recipient)
-    if found and not found.startswith("__"):
-        return found
     return None
 
 
@@ -1652,6 +1657,19 @@ def _parse_indirect_message_request(text: str) -> tuple[str, str] | None:
 
 
 def _looks_like_message_status_query(lower: str) -> bool:
+    text = _strip_polite_prefix(lower or "").strip().strip(" .!?")
+    if text in {
+        "message status",
+        "messages status",
+        "text status",
+        "draft status",
+        "send status",
+        "status of message",
+        "status of the message",
+        "status of draft",
+        "status of the draft",
+    }:
+        return True
     return any(
         phrase in lower for phrase in (
             "did you message",
