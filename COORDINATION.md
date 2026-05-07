@@ -90,7 +90,26 @@ Ensures Codex always has Claude's latest changes.
 
 ## Handoff Notes
 
-**Last Claude session (2026-05-05 — continued):**
+### [DONE] Training dashboard HUD redesign
+**Completed by Claude 2026-05-06**
+`training/dashboard_generator.py` HTML template fully rewritten to match J.A.R.V.I.S. HUD aesthetic:
+- Dark space background (#050507) + hex-grid SVG overlay + CSS scanlines
+- Animated blue orb with 3 concentric spinning rings (rspin/opulse keyframes)
+- CSS custom properties for full palette (--cyan #00CFFF, --gold #FFB300, --green #00FF88)
+- Corner bracket decorations on all cards via ::before/::after pseudo-elements
+- Status chips row: ONLINE / BENCHMARK {score} / MLX TRAINING ACTIVE
+- Section titles with `//` prefix glyph and cyan text-shadow glow
+- Chart.js dark theme with matching gridlines and tooltip style
+- All data sources preserved (routing stats, pack composition, category trends)
+
+---
+
+**Last Claude session (2026-05-06):**
+- Training dashboard HTML redesigned: J.A.R.V.I.S. HUD aesthetic (orb, hex grid, scanlines, corner brackets, status chips, glow palette)
+- File: `training/dashboard_generator.py` — HTML template only, all Python data logic unchanged
+
+**For Codex next session:** Pull latest main. Voice AUHAL fix + mem0 Qdrant verification +
+qwen3 model tag still open. See `.claude/skills/jarvis-voice.md` for voice checklist.
 - `build_training_pack()` rewritten: 4 sources, 74 examples (teacher + verbatim + synthetic + fallback)
 - `benchmark_tracker` baseline updated to 597/601 (was stale at 312/313)
 - Dashboard now shows routing tier breakdown + pack composition panel
