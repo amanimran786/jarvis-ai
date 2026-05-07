@@ -117,6 +117,25 @@ class OvernightTrainerScheduleTests(unittest.TestCase):
 
             assert trainer.should_run_tonight() is True
 
+    def test_should_run_tonight_after_post_midnight_run_same_calendar_date(self):
+        """A 00:xx run belongs to the previous overnight window, not tonight."""
+        trainer = local_finetune_scheduler.OvernightTrainer()
+        trainer.state = {
+            "last_run_date": "2026-05-06",
+            "last_session": {"timestamp": "2026-05-06T00:32:12", "date": "2026-05-06"},
+        }
+
+        with patch("local_runtime.local_finetune_scheduler._training_window_date", return_value="2026-05-06"):
+            assert trainer.should_run_tonight() is True
+
+    def test_should_not_run_twice_in_same_overnight_window(self):
+        """Once a logical window is recorded, launchd retries should no-op."""
+        trainer = local_finetune_scheduler.OvernightTrainer()
+        trainer.state = {"last_run_window_date": "2026-05-06"}
+
+        with patch("local_runtime.local_finetune_scheduler._training_window_date", return_value="2026-05-06"):
+            assert trainer.should_run_tonight() is False
+
 
 class OvernightTrainerBuildPackTests(unittest.TestCase):
     """Test build_training_pack() with mock memory data."""
