@@ -44,11 +44,11 @@ def _ensure_model_files() -> bool:
         return False
 
 
-def _synthesize_with_model(kokoro_instance, text: str, voice: str) -> str | None:
+def _synthesize_with_model(kokoro_instance, text: str, voice: str, speed: float = 1.0) -> str | None:
     """Synthesize using an already-loaded Kokoro instance."""
     try:
         import numpy as np, wave, io
-        samples, sr = kokoro_instance.create(text.strip(), voice=voice, speed=1.0, lang="en-us")
+        samples, sr = kokoro_instance.create(text.strip(), voice=voice, speed=speed, lang="en-us")
         samples_i16 = (np.clip(samples, -1.0, 1.0) * 32767).astype(np.int16)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
@@ -62,7 +62,7 @@ def _synthesize_with_model(kokoro_instance, text: str, voice: str) -> str | None
         return None
 
 
-def _synthesize(text: str, voice: str) -> str | None:
+def _synthesize(text: str, voice: str, speed: float = 1.0) -> str | None:
     """One-shot synthesis: load model, synthesize, return WAV path."""
     if not _ensure_model_files():
         return None
@@ -70,7 +70,7 @@ def _synthesize(text: str, voice: str) -> str | None:
         from kokoro_onnx import Kokoro
         model_dir = Path.home() / ".jarvis" / "kokoro"
         k = Kokoro(str(model_dir / "kokoro-v1.0.onnx"), str(model_dir / "voices-v1.0.bin"))
-        return _synthesize_with_model(k, text, voice)
+        return _synthesize_with_model(k, text, voice, speed)
     except Exception as exc:
         sys.stderr.write(f"[Kokoro] Load/synthesis error: {exc}\n"); sys.stderr.flush()
         return None
@@ -121,12 +121,17 @@ def run_daemon() -> None:
 
         text = req.get("text", "").strip()
         voice = req.get("voice", "am_onyx")
+        try:
+            speed = float(req.get("speed", 1.0))
+        except (TypeError, ValueError):
+            speed = 1.0
+        speed = max(0.70, min(speed, 1.25))
 
         if not text:
             _reply({"ok": False, "error": "empty text", "wav_path": None})
             continue
 
-        wav_path = _synthesize_with_model(kokoro, text, voice)
+        wav_path = _synthesize_with_model(kokoro, text, voice, speed)
         if wav_path:
             _reply({"ok": True, "error": "", "wav_path": wav_path})
         else:
@@ -145,12 +150,17 @@ def main():
 
     text = sys.argv[1]
     voice = sys.argv[2]
+    try:
+        speed = float(sys.argv[3]) if len(sys.argv) >= 4 else 1.0
+    except (TypeError, ValueError):
+        speed = 1.0
+    speed = max(0.70, min(speed, 1.25))
 
     if not text.strip():
         print(json.dumps({"ok": False, "error": "empty text", "wav_path": None}))
         sys.exit(1)
 
-    wav_path = _synthesize(text, voice)
+    wav_path = _synthesize(text, voice, speed)
     if wav_path:
         print(json.dumps({"ok": True, "error": "", "wav_path": wav_path}))
     else:

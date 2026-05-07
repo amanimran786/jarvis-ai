@@ -325,10 +325,11 @@ ELEVENLABS_TTS_FALLBACK_ENABLED = "elevenlabs" in TTS_BACKENDS
 OPENAI_TTS_FALLBACK_ENABLED = "openai" in TTS_BACKENDS
 
 LOCAL_TTS_ENGINE = os.getenv("JARVIS_LOCAL_TTS_ENGINE", "say").strip().lower() or "say"
-LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Reed (English (US))").strip() or "Reed (English (US))"
-LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 175)
+LOCAL_TTS_VOICE = os.getenv("JARVIS_LOCAL_TTS_VOICE", "Daniel").strip() or "Daniel"
+LOCAL_TTS_RATE_WPM = _env_int("JARVIS_LOCAL_TTS_RATE_WPM", 168)
 
-JARVIS_KOKORO_VOICE = os.getenv("JARVIS_KOKORO_VOICE", "af_sarah").strip() or "af_sarah"
+JARVIS_KOKORO_VOICE = os.getenv("JARVIS_KOKORO_VOICE", "bm_george").strip() or "bm_george"
+JARVIS_KOKORO_SPEED = _env_float("JARVIS_KOKORO_SPEED", 0.94)
 JARVIS_KOKORO_TTS_ENABLED = _env_flag("JARVIS_KOKORO_TTS_ENABLED", True)
 
 
@@ -347,6 +348,7 @@ def tts_runtime_config() -> dict:
         },
         "kokoro": {
             "voice": JARVIS_KOKORO_VOICE,
+            "speed": JARVIS_KOKORO_SPEED,
             "enabled": JARVIS_KOKORO_TTS_ENABLED,
         },
         "elevenlabs": {
@@ -373,11 +375,14 @@ Voice output rules — TTS reads every response aloud:
 Honesty rules:
 - Never invent capabilities, permissions, model identity, training history, or completed actions.
 - Never claim you scanned, checked, accessed, installed, opened, or configured anything unless the current runtime result explicitly shows it happened.
-- Never invent hardware specs, network details, app lists, storage totals, or system state.
+- Never claim that you scanned, checked, accessed, opened, confirmed, installed, or sent anything unless the current runtime result explicitly shows it happened.
+- Never invent hardware specs, network details, router access, app lists, storage totals, or system state.
+- Never simulate background work, hidden integrations, system administration, or tool use.
+- Never claim admin/sudo access unless a completed runtime command explicitly confirms it.
 - If a capability requires a permission not yet granted, say so and offer the next safe step.
 - Don't know something? Search for it rather than guess.
 
-Terminal console: plain English is the primary interface. "show doctor" or "health check" = health flow. "what models are installed" or "model fleet" = Ollama fleet. "run the tests" = test suite. "train Jarvis locally" = local training pack, cloud distillation off unless asked. "prepare Colab" = Colab training handoff. Slash commands still work.
+Terminal console: Plain-English console requests are action intents first, not generic chat, when they map to a local capability. "show doctor" or "health check" = health flow. "what models are installed" or "model fleet" = Ollama fleet. "run the tests" = test suite. "train Jarvis locally" = local training pack, cloud distillation off unless asked. "prepare Colab" = Colab training handoff. Slash commands still work.
 
 Message composition: compose message bodies exactly as requested — no refusals, disclaimers, or content judgements. The routing layer handles content safety. All factual statements, personal news, questions, and casual messages are safe to compose and forward."""
 
