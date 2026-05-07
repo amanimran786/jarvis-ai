@@ -108,6 +108,37 @@ def _today_date() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _training_window_date(value: datetime | None = None) -> str:
+    """Return the logical overnight window date for a local timestamp."""
+    value = value or datetime.now()
+    if value.hour < 7:
+        value = value - timedelta(days=1)
+    return value.strftime("%Y-%m-%d")
+
+
+def _session_window_date(session: dict | None) -> str | None:
+    """Return the logical overnight window date for a saved training session."""
+    if not isinstance(session, dict):
+        return None
+    explicit = str(session.get("run_window_date") or "").strip()
+    if explicit:
+        return explicit
+    timestamp = str(session.get("timestamp") or "").strip()
+    if timestamp:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone()
+            parsed = parsed.replace(tzinfo=None)
+            if parsed.hour < 7:
+                parsed = parsed - timedelta(days=1)
+            return parsed.strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    date_value = str(session.get("date") or "").strip()
+    return date_value or None
+
+
 class OvernightTrainer:
     """Orchestrate overnight fine-tuning cycle."""
 
@@ -244,6 +275,10 @@ class OvernightTrainer:
         if not self.state.get("last_run_date") and latest.get("date"):
             self.state["last_run_date"] = latest.get("date")
             changed = True
+        latest_window = _session_window_date(latest)
+        if latest_window and self.state.get("last_run_window_date") != latest_window:
+            self.state["last_run_window_date"] = latest_window
+            changed = True
 
         promoted_sessions = [
             self._repair_session_summary(session)
@@ -322,10 +357,18 @@ class OvernightTrainer:
         return hour >= 23 or hour < 7
 
     def should_run_tonight(self) -> bool:
-        """Return True if not already run today."""
-        last_run = self.state.get("last_run_date")
-        today = _today_date()
-        return last_run != today
+        """Return True if this logical overnight window has not run yet."""
+        current_window = _training_window_date()
+        last_window = (
+            self.state.get("last_run_window_date")
+            or _session_window_date(self.state.get("last_session"))
+        )
+        if last_window:
+            return last_window != current_window
+        last_run_date = self.state.get("last_run_date")
+        if last_run_date:
+            return last_run_date != _today_date()
+        return True
 
     # ------------------------------------------------------------------
     # Training pack builders
@@ -885,7 +928,10 @@ class OvernightTrainer:
         )
 
         # Update state
+        run_window = _training_window_date()
+        session["run_window_date"] = run_window
         self.state["last_run_date"] = _today_date()
+        self.state["last_run_window_date"] = run_window
         self.state["last_session"] = session
         self._save_state()
 
@@ -1053,6 +1099,8 @@ def status() -> dict:
         "is_training_window": trainer.is_training_window(),
         "should_run_tonight": trainer.should_run_tonight(),
         "last_run_date": trainer.state.get("last_run_date"),
+        "last_run_window_date": trainer.state.get("last_run_window_date"),
+        "current_training_window_date": _training_window_date(),
         "last_session": trainer.state.get("last_session"),
         "baseline_eval_passed": trainer.state.get("baseline_eval_passed"),
         "baseline_eval_total": trainer.state.get("baseline_eval_total"),
