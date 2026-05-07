@@ -15,6 +15,9 @@ DEFAULT_RATE_WPM = 175
 MAX_TEXT_LENGTH = 4000
 _VOICE_CACHE: list[str] | None = None
 _PREFERRED_VOICES = [
+    "Daniel",
+    "Reed (English (UK))",
+    "Eddy (English (UK))",
     "Reed (English (US))",
     "Eddy (English (US))",
     "Flo (English (US))",

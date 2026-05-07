@@ -87,6 +87,7 @@ C_GREEN     = "#00FF88"       # online / status green
 C_PANEL     = "#021018"       # message panel bg
 C_WHITE_DIM = "#D8F6FF"       # highlight text
 C_WARNING   = "#FFAA00"       # processing state
+C_AMBER     = "#F8C24A"       # objective / mission accent
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -725,6 +726,17 @@ class JarvisOrb(QWidget):
         # Waveform bars (32 bars around equator)
         self._bars       = [0.0] * 32
         self._bar_target = [0.0] * 32
+        # Dense point cloud gives the center a holographic "reactor core" feel.
+        self._particles = [
+            {
+                "r": random.uniform(0.04, 0.58),
+                "a": random.uniform(0, math.tau),
+                "z": random.uniform(0.15, 1.0),
+                "s": random.uniform(0.7, 2.2),
+                "v": random.uniform(-0.006, 0.009),
+            }
+            for _ in range(180)
+        ]
 
         # Timer — 50fps
         self._timer = QTimer(self)
@@ -774,6 +786,8 @@ class JarvisOrb(QWidget):
         self._ring_angle  = (self._ring_angle + 0.6 * spd) % 360
         self._ring2_ang   = (self._ring2_ang  - 0.9 * spd) % 360
         self._wave_phase += 0.08 * spd
+        for particle in self._particles:
+            particle["a"] = (particle["a"] + particle["v"] * spd) % math.tau
 
         # Waveform bars — smooth towards random targets when speaking
         if self._state == self.STATE_SPEAKING:
@@ -840,6 +854,21 @@ class JarvisOrb(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(QRectF(cx - r, cy - r, r * 2, r * 2))
 
+        # ── 2b. Particle swarm core ───────────────────────────────────────
+        particle_boost = {"idle": 0.55, "listening": 0.8, "speaking": 1.0}.get(self._state, 0.55)
+        for particle in self._particles:
+            pr = particle["r"] * r * (0.58 + 0.08 * math.sin(self._wave_phase + particle["z"]))
+            px = cx + math.cos(particle["a"]) * pr
+            py = cy + math.sin(particle["a"] * 1.11) * pr * (0.72 + 0.18 * particle["z"])
+            if (px - cx) ** 2 + (py - cy) ** 2 > (r * 0.72) ** 2:
+                continue
+            twinkle = 0.55 + 0.45 * math.sin(self._wave_phase * 1.7 + particle["a"] * 3.0)
+            alpha = int((35 + 165 * particle["z"] * twinkle) * particle_boost)
+            size = particle["s"] * (0.85 + 0.45 * pulse)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QBrush(QColor(120, 235, 255, max(18, min(230, alpha)))))
+            p.drawEllipse(QRectF(px - size / 2, py - size / 2, size, size))
+
         # ── 3. Latitude wave lines (move when speaking) ───────────────────
         n_lat = 7
         wave_amp = (0.06 + 0.18 * pulse) * r if self._state == self.STATE_SPEAKING \
@@ -899,6 +928,29 @@ class JarvisOrb(QWidget):
             ang = i * 30
             p.drawArc(QRectF(-dash_r, -dash_r, dash_r * 2, dash_r * 2),
                       int(ang * 16), int(18 * 16))
+        p.restore()
+
+        # ── 5b. Mechanical reticle ticks ──────────────────────────────────
+        p.save()
+        p.translate(cx, cy)
+        p.rotate(-self._ring_angle * 0.32)
+        tick_pen = QPen(QColor(0, 212, 255, int(80 + 75 * pulse)), 1.2)
+        tick_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(tick_pen)
+        for i in range(36):
+            if i % 3 == 0:
+                inner = r + 18
+                outer = r + 29
+            else:
+                inner = r + 22
+                outer = r + 26
+            ang = (i / 36.0) * math.tau
+            p.drawLine(
+                int(math.cos(ang) * inner),
+                int(math.sin(ang) * inner),
+                int(math.cos(ang) * outer),
+                int(math.sin(ang) * outer),
+            )
         p.restore()
 
         # ── 6. Counter-rotating mid ring ──────────────────────────────────
@@ -1068,6 +1120,14 @@ class HUDBackground(QWidget):
             for y in range(0, h, step):
                 p.drawPoint(x, y)
 
+        # Fine engineering grid, like a transparent targeting pane.
+        p.setPen(QPen(QColor(0, 130, 180, 16), 1))
+        major = 56
+        for x in range(0, w, major):
+            p.drawLine(x, 0, x, h)
+        for y in range(0, h, major):
+            p.drawLine(0, y, w, y)
+
         # Holographic target rings
         p.setPen(QPen(QColor(0, 212, 255, 34), 1))
         center_x = w / 2
@@ -1075,6 +1135,22 @@ class HUDBackground(QWidget):
         for factor in (0.18, 0.25, 0.33):
             rr = min(w, h) * factor
             p.drawEllipse(QRectF(center_x - rr, center_y - rr, rr * 2, rr * 2))
+        p.save()
+        p.translate(center_x, center_y)
+        p.rotate((self._scan_y % 360) * 0.12)
+        p.setPen(QPen(QColor(0, 212, 255, 44), 1))
+        reticle_r = min(w, h) * 0.36
+        for i in range(48):
+            if i % 4:
+                continue
+            ang = i / 48 * math.tau
+            p.drawLine(
+                int(math.cos(ang) * (reticle_r - 12)),
+                int(math.sin(ang) * (reticle_r - 12)),
+                int(math.cos(ang) * reticle_r),
+                int(math.sin(ang) * reticle_r),
+            )
+        p.restore()
 
         # Light beam accents
         beam = QLinearGradient(w * 0.15, 0, w * 0.75, h)
@@ -1307,6 +1383,61 @@ class TelemetryPanel(QFrame):
         dot = self._dot_widgets.get(key)
         if dot is not None and color:
             dot.set_color(color)
+
+
+class MissionObjectiveCard(QFrame):
+    """Compact objective strip under the orb, inspired by flight-HUD panels."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("MissionObjectiveCard")
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(520)
+        self.setStyleSheet(
+            _glass_panel_css(border=C_CYAN, fill="rgba(1, 16, 28, 215)", radius=8)
+        )
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(12)
+
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(2)
+
+        title = QLabel("PRESENT OBJECTIVE")
+        title.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {C_AMBER}; background: transparent; letter-spacing: 2px;")
+        left.addWidget(title)
+
+        self._objective = QLabel("Awaiting command")
+        self._objective.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._objective.setWordWrap(True)
+        self._objective.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
+        left.addWidget(self._objective)
+        layout.addLayout(left, stretch=1)
+
+        self._status = QLabel("READY")
+        self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._status.setMinimumWidth(72)
+        self._status.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._status.setStyleSheet(
+            _glass_panel_css(border=C_GREEN, fill="rgba(0, 255, 136, 0.10)", radius=6)
+            + f"color: {C_GREEN}; padding: 5px 8px; letter-spacing: 1px;"
+        )
+        layout.addWidget(self._status)
+
+    def set_objective(self, text: str, status: str = "READY", color: str = C_GREEN) -> None:
+        cleaned = " ".join((text or "").split()).strip() or "Awaiting command"
+        if len(cleaned) > 96:
+            cleaned = cleaned[:93].rstrip() + "..."
+        self._objective.setText(cleaned)
+        self._objective.setToolTip(text or cleaned)
+        self._status.setText(status)
+        self._status.setStyleSheet(
+            _glass_panel_css(border=color, fill="rgba(0, 212, 255, 0.10)", radius=6)
+            + f"color: {color}; padding: 5px 8px; letter-spacing: 1px;"
+        )
 
 
 # ── Worker threads ─────────────────────────────────────────────────────────────
@@ -1894,6 +2025,9 @@ class JarvisWindow(QMainWindow):
 
         self._signal_bars = SignalBars()
         center_stack.addWidget(self._signal_bars, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self._mission_card = MissionObjectiveCard()
+        center_stack.addWidget(self._mission_card, alignment=Qt.AlignmentFlag.AlignCenter)
         orb_layout.addLayout(center_stack, stretch=1)
 
         self._right_telemetry = TelemetryPanel("TACTICAL FEED")
@@ -3233,6 +3367,8 @@ class JarvisWindow(QMainWindow):
             self._streaming_bubble = None
             self._streaming_response_id = None
             self._show_toolbar_message(text, sender, model)
+            if hasattr(self, "_mission_card"):
+                self._mission_card.set_objective("Response delivered", "DONE", C_GREEN)
             _safe_single_shot(
                 50,
                 "JarvisWindow._scroll_to_latest_message",
@@ -3245,6 +3381,11 @@ class JarvisWindow(QMainWindow):
         count = self.chat_layout.count()
         self.chat_layout.insertWidget(count - 1, bubble)
         self._show_toolbar_message(text, sender, model)
+        if hasattr(self, "_mission_card"):
+            if sender == "user":
+                self._mission_card.set_objective(text, "ACTIVE", C_AMBER)
+            elif sender == "jarvis":
+                self._mission_card.set_objective("Response delivered", "DONE", C_GREEN)
         _safe_single_shot(
             50,
             "JarvisWindow._scroll_to_latest_message",
@@ -3398,6 +3539,8 @@ class JarvisWindow(QMainWindow):
             self._status_dot.set_color(C_WARNING)
             self._orb.set_state(JarvisOrb.STATE_SPEAKING)
             self._signal_bars.set_intensity(1.0)
+            if hasattr(self, "_mission_card"):
+                self._mission_card.set_objective(display_text.title(), "ACTIVE", C_WARNING)
             busy = True
         else:
             self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")

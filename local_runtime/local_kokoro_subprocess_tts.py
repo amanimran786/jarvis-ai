@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config import JARVIS_KOKORO_VOICE, JARVIS_KOKORO_TTS_ENABLED
+from config import JARVIS_KOKORO_SPEED, JARVIS_KOKORO_VOICE, JARVIS_KOKORO_TTS_ENABLED
 
 DEFAULT_ENGINE = "kokoro"
 MAX_TEXT_LENGTH = 4000
@@ -256,7 +256,7 @@ def _daemon_synthesize(text: str, voice: str) -> str | None:
 
         proc = _daemon_proc
         try:
-            request = json.dumps({"text": text, "voice": voice}) + "\n"
+            request = json.dumps({"text": text, "voice": voice, "speed": JARVIS_KOKORO_SPEED}) + "\n"
             proc.stdin.write(request)
             proc.stdin.flush()
         except Exception:
@@ -314,7 +314,7 @@ def _run_synthesis_oneshot(text: str, voice: str) -> str | None:
         return None
     try:
         result = subprocess.run(
-            [python, script, text, voice],
+            [python, script, text, voice, str(JARVIS_KOKORO_SPEED)],
             capture_output=True, timeout=SUBPROCESS_TIMEOUT, text=True,
         )
         if result.returncode != 0:
@@ -351,6 +351,7 @@ def config() -> dict[str, Any]:
         "engine": DEFAULT_ENGINE,
         "enabled": JARVIS_KOKORO_TTS_ENABLED,
         "voice": JARVIS_KOKORO_VOICE,
+        "speed": JARVIS_KOKORO_SPEED,
         "available": available(),
         "subprocess_mode": True,
         "daemon_mode": True,

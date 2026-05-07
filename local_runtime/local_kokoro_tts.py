@@ -7,7 +7,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from config import JARVIS_KOKORO_VOICE, JARVIS_KOKORO_TTS_ENABLED
+from config import JARVIS_KOKORO_SPEED, JARVIS_KOKORO_VOICE, JARVIS_KOKORO_TTS_ENABLED
 
 DEFAULT_ENGINE = "kokoro"
 SAMPLE_RATE = 24000
@@ -57,7 +57,7 @@ def prewarm_phrase_cache() -> None:
             if key in _phrase_cache:
                 continue
             try:
-                samples, sr = model.create(phrase, voice=voice, speed=1.0, lang="en-us")
+                samples, sr = model.create(phrase, voice=voice, speed=JARVIS_KOKORO_SPEED, lang="en-us")
                 wav = _samples_to_wav_bytes(samples, sr)
                 with _phrase_cache_lock:
                     _phrase_cache[key] = wav
@@ -160,6 +160,7 @@ def config() -> dict[str, Any]:
         "engine": DEFAULT_ENGINE,
         "enabled": JARVIS_KOKORO_TTS_ENABLED,
         "voice": JARVIS_KOKORO_VOICE,
+        "speed": JARVIS_KOKORO_SPEED,
         "sample_rate": SAMPLE_RATE,
         "model_path": str(_MODEL_PATH),
         "voices_path": str(_VOICES_PATH),
@@ -249,7 +250,7 @@ def speak(text: str) -> dict[str, Any]:
                 "text": normalized, "voice": voice, "error": "kokoro model unavailable"}
 
     try:
-        samples, sample_rate = model.create(normalized, voice=voice, speed=1.0, lang="en-us")
+        samples, sample_rate = model.create(normalized, voice=voice, speed=JARVIS_KOKORO_SPEED, lang="en-us")
         wav_bytes = _samples_to_wav_bytes(samples, sample_rate)
         _play_wav_bytes(wav_bytes)
         return {"ok": True, "engine": DEFAULT_ENGINE, "spoken": True,

@@ -18,6 +18,11 @@ class LocalTtsRuntimeTests(unittest.TestCase):
              patch("local_runtime.local_tts._available_voices", return_value=["Flo (English (US))", "Samantha"]):
             self.assertEqual(local_tts._configured_voice(), "Flo (English (US))")
 
+    def test_configured_voice_prefers_cinematic_uk_voice_when_available(self):
+        with patch("local_runtime.local_tts.LOCAL_TTS_VOICE", "Missing Voice"), \
+             patch("local_runtime.local_tts._available_voices", return_value=["Daniel", "Reed (English (UK))", "Samantha"]):
+            self.assertEqual(local_tts._configured_voice(), "Daniel")
+
     def test_configured_rate_uses_less_robotic_default(self):
         with patch("local_runtime.local_tts.LOCAL_TTS_RATE_WPM", 175):
             self.assertEqual(local_tts._configured_rate(), 175)
