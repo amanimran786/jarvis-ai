@@ -386,233 +386,386 @@ def generate() -> Path:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     # ── HTML template ──────────────────────────────────────────────────────────
+    _score_color = _color_for_score(overall_score)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="refresh" content="60">
-  <title>Jarvis Training Dashboard</title>
+  <title>J.A.R.V.I.S. — Training Intelligence</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
-    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    /* ── Reset & Variables ── */
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    :root {{
+      --bg:        #050507;
+      --bg2:       #07090F;
+      --card:      #080D14;
+      --border:    #0A2233;
+      --cyan:      #00CFFF;
+      --cyan-dim:  #005F80;
+      --gold:      #FFB300;
+      --green:     #00FF88;
+      --red:       #FF4444;
+      --text:      #7EC8DC;
+      --text-dim:  #2E5A6A;
+      --font:      'Courier New', 'Lucida Console', monospace;
+    }}
+
     body {{
-      background: #020A10;
-      color: #A8E6FF;
-      font-family: 'Courier New', monospace;
-      font-size: 13px;
-      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
       min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
     }}
-    h1 {{
-      color: #00D4FF;
+
+    /* Scanlines */
+    body::before {{
+      content: '';
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px, transparent 2px,
+        rgba(0,207,255,0.016) 2px, rgba(0,207,255,0.016) 3px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }}
+
+    /* Hex grid background — subtle structural lattice */
+    body::after {{
+      content: '';
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='104'%3E%3Cpath d='M30 4L4 19v30l26 15 26-15V19L30 4zm0 5l21 12.1v24.2L30 57.4 9 45.3V21.1L30 9z' fill='none' stroke='%2300CFFF' stroke-opacity='0.035' stroke-width='1'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }}
+
+    .layout {{
+      position: relative; z-index: 1;
+      padding: 20px 26px 32px;
+      max-width: 1640px;
+      margin: 0 auto;
+    }}
+
+    /* ── Topbar ── */
+    .topbar {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 22px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }}
+    .title-h1 {{
       font-size: 22px;
-      letter-spacing: 4px;
+      letter-spacing: 10px;
+      color: var(--cyan);
+      text-shadow: 0 0 22px rgba(0,207,255,0.65), 0 0 55px rgba(0,207,255,0.22);
       font-weight: bold;
-      margin-bottom: 4px;
+      line-height: 1;
     }}
-    .subtitle {{ color: #4A8FA8; font-size: 11px; letter-spacing: 2px; margin-bottom: 28px; }}
-    .grid-4 {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }}
-    .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 24px; }}
-    .card {{
-      background: rgba(3, 18, 28, 0.85);
-      border: 1px solid #0D4F70;
-      border-radius: 10px;
-      padding: 18px 20px;
-    }}
-    .card-label {{ color: #4A8FA8; font-size: 10px; letter-spacing: 2px; margin-bottom: 8px; }}
-    .card-value {{ color: #00D4FF; font-size: 28px; font-weight: bold; }}
-    .card-sub {{ color: #A8E6FF; font-size: 11px; margin-top: 4px; }}
-    .section-title {{
-      color: #00D4FF;
-      font-size: 11px;
+    .title-sub {{
+      color: var(--text-dim);
+      font-size: 9px;
       letter-spacing: 3px;
-      margin-bottom: 14px;
-      border-bottom: 1px solid #0D4F70;
-      padding-bottom: 8px;
+      margin-top: 5px;
     }}
-    .chart-card {{ padding: 20px; }}
-    .chart-wrap {{ position: relative; height: 240px; }}
+
+    /* ── Status chips ── */
+    .chips {{ display: flex; gap: 7px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }}
+    .chip {{
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px;
+      border-radius: 2px;
+      font-size: 9px; letter-spacing: 2px; font-weight: bold;
+      border: 1px solid currentColor;
+    }}
+    .chip::before {{ content: '●'; font-size: 5px; }}
+    .chip-green {{ color: var(--green); border-color: rgba(0,255,136,0.35); background: rgba(0,255,136,0.05); text-shadow: 0 0 8px currentColor; }}
+    .chip-cyan  {{ color: var(--cyan);  border-color: rgba(0,207,255,0.35); background: rgba(0,207,255,0.05); text-shadow: 0 0 8px currentColor; }}
+    .chip-gold  {{ color: var(--gold);  border-color: rgba(255,179,0,0.35);  background: rgba(255,179,0,0.05);  text-shadow: 0 0 8px currentColor; }}
+    .chip-dim   {{ color: var(--text-dim); border-color: var(--border); background: transparent; }}
+    .ts {{ color: var(--text-dim); font-size: 9px; letter-spacing: 2px; margin-top: 7px; text-align: right; }}
+
+    /* ── Orb ── */
+    .orb-section {{ display: flex; justify-content: center; align-items: center; }}
+    .orb-wrap {{ position: relative; width: 180px; height: 180px; flex-shrink: 0; }}
+    .orb-ring {{
+      position: absolute; border-radius: 50%;
+      border: 1px solid rgba(0,207,255,0.22);
+      top: 0; left: 0; right: 0; bottom: 0;
+    }}
+    .orb-r1 {{ top:8px; left:8px; right:8px; bottom:8px; animation: rspin 9s linear infinite; }}
+    .orb-r2 {{ top:18px; left:18px; right:18px; bottom:18px; animation: rspin 15s linear infinite reverse; border-style: dashed; opacity:.5; }}
+    .orb-r3 {{ top:28px; left:28px; right:28px; bottom:28px; animation: rspin 22s linear infinite; opacity:.28; }}
+    @keyframes rspin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
+    .orb-core {{
+      position: absolute; top:38px; left:38px; right:38px; bottom:38px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 38% 34%, rgba(0,207,255,0.55), rgba(0,70,130,0.65) 52%, rgba(2,14,42,0.85));
+      box-shadow: 0 0 18px rgba(0,207,255,0.65), 0 0 48px rgba(0,207,255,0.3), inset 0 0 14px rgba(0,207,255,0.22);
+      animation: opulse 3.2s ease-in-out infinite;
+      display: flex; align-items: center; justify-content: center;
+    }}
+    @keyframes opulse {{
+      0%,100% {{ box-shadow: 0 0 18px rgba(0,207,255,0.65), 0 0 48px rgba(0,207,255,0.30), inset 0 0 14px rgba(0,207,255,0.22); }}
+      50%      {{ box-shadow: 0 0 28px rgba(0,207,255,0.85), 0 0 72px rgba(0,207,255,0.45), inset 0 0 22px rgba(0,207,255,0.35); }}
+    }}
+    .orb-text {{ color: var(--cyan); font-size: 9px; letter-spacing: 3px; text-shadow: 0 0 10px currentColor; }}
+
+    /* ── Cards ── */
+    .card {{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 15px 17px;
+      position: relative;
+    }}
+    /* Corner brackets */
+    .card::before {{
+      content: '';
+      position: absolute; top: -1px; left: -1px;
+      width: 10px; height: 10px;
+      border-top: 2px solid var(--cyan);
+      border-left: 2px solid var(--cyan);
+    }}
+    .card::after {{
+      content: '';
+      position: absolute; bottom: -1px; right: -1px;
+      width: 10px; height: 10px;
+      border-bottom: 2px solid var(--cyan);
+      border-right: 2px solid var(--cyan);
+    }}
+    .card-label {{ color: var(--text-dim); font-size: 9px; letter-spacing: 2px; margin-bottom: 8px; }}
+    .card-value {{ color: var(--cyan); font-size: 26px; font-weight: bold; text-shadow: 0 0 14px rgba(0,207,255,0.5); line-height: 1; }}
+    .card-value.gold  {{ color: var(--gold);  text-shadow: 0 0 14px rgba(255,179,0,0.55); }}
+    .card-value.green {{ color: var(--green); text-shadow: 0 0 14px rgba(0,255,136,0.55); }}
+    .card-sub {{ color: var(--text-dim); font-size: 10px; margin-top: 5px; }}
+
+    .section-title {{
+      color: var(--cyan);
+      font-size: 9px; letter-spacing: 3px;
+      padding-bottom: 8px; margin-bottom: 13px;
+      border-bottom: 1px solid rgba(0,207,255,0.12);
+      text-shadow: 0 0 10px rgba(0,207,255,0.5);
+      display: flex; align-items: center; gap: 8px;
+    }}
+    .section-title::before {{ content: '//'; color: var(--text-dim); font-size: 10px; }}
+
+    /* ── Layout grids ── */
+    .grid-4 {{ display: grid; grid-template-columns: repeat(4,1fr); gap: 11px; margin-bottom: 16px; }}
+    .grid-2 {{ display: grid; grid-template-columns: 1fr 1fr;       gap: 11px; margin-bottom: 16px; }}
+
+    /* ── Charts ── */
+    .chart-wrap    {{ position: relative; height: 210px; }}
+    .chart-wrap-lg {{ position: relative; height: 195px; }}
+
+    /* ── Tables ── */
     table {{ width: 100%; border-collapse: collapse; }}
     th {{
-      color: #4A8FA8;
-      font-size: 10px;
-      letter-spacing: 1px;
-      text-align: left;
-      padding: 8px 12px;
-      border-bottom: 1px solid #0D4F70;
+      color: var(--text-dim); font-size: 9px; letter-spacing: 2px;
+      text-align: left; padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
     }}
     td {{
-      padding: 9px 12px;
-      border-bottom: 1px solid rgba(13, 79, 112, 0.3);
-      font-size: 12px;
+      padding: 7px 10px;
+      border-bottom: 1px solid rgba(10,34,51,0.6);
+      font-size: 11px; color: var(--text);
     }}
     tr:last-child td {{ border-bottom: none; }}
-    tr:hover td {{ background: rgba(0, 212, 255, 0.04); }}
+    tr:hover td {{ background: rgba(0,207,255,0.03); }}
+
+    /* ── Progress bars ── */
+    .bar-track {{ background: rgba(10,34,51,0.9); border-radius: 2px; height: 5px; overflow: hidden; margin-top: 3px; }}
+    .bar-fill  {{ height: 100%; border-radius: 2px; }}
+
+    /* ── Footer ── */
     .footer {{
-      color: #4A8FA8;
-      font-size: 10px;
-      text-align: center;
-      margin-top: 24px;
-      letter-spacing: 1px;
+      color: var(--text-dim); font-size: 9px; text-align: center;
+      margin-top: 18px; padding-top: 12px;
+      border-top: 1px solid var(--border); letter-spacing: 2px;
     }}
-    .badge {{
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: bold;
-      letter-spacing: 1px;
-    }}
-    .badge-green {{ background: rgba(0,255,136,0.12); color: #00FF88; border: 1px solid #00FF88; }}
-    .badge-cyan  {{ background: rgba(0,212,255,0.12); color: #00D4FF; border: 1px solid #00D4FF; }}
   </style>
 </head>
 <body>
+<div class="layout">
 
-<h1>J.A.R.V.I.S &mdash; TRAINING INTELLIGENCE</h1>
-<div class="subtitle">FINE-TUNING DASHBOARD &nbsp;·&nbsp; AUTO-REFRESH 60s &nbsp;·&nbsp; GENERATED {generated_at}</div>
-
-<!-- Summary cards -->
-<div class="grid-4">
-  <div class="card">
-    <div class="card-label">TOTAL RUNS</div>
-    <div class="card-value">{total_runs}</div>
-    <div class="card-sub">{trained_runs} trained · {promoted_runs} promoted</div>
-  </div>
-  <div class="card">
-    <div class="card-label">OVERALL BENCHMARK</div>
-    <div class="card-value" style="color:{_color_for_score(overall_score)}">{_pct(overall_score)}</div>
-    <div class="card-sub">latest benchmark run</div>
-  </div>
-  <div class="card">
-    <div class="card-label">LATEST EVAL</div>
-    <div class="card-value">{baseline_pct}</div>
-    <div class="card-sub">{baseline_passed}/{baseline_total} tests passing</div>
-  </div>
-  <div class="card">
-    <div class="card-label">LAST TRAINING</div>
-    <div class="card-value" style="font-size:18px;padding-top:5px">{last_run_date or '—'}</div>
-    <div class="card-sub">next run: 11:00 pm tonight</div>
-  </div>
-</div>
-
-<!-- Charts row -->
-<div class="grid-2">
-  <div class="card chart-card">
-    <div class="section-title">OVERALL EVAL SCORE — TRAINING HISTORY</div>
-    <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>
-  </div>
-  <div class="card chart-card">
-    <div class="section-title">CATEGORY BENCHMARK SCORES</div>
-    <div class="chart-wrap"><canvas id="catChart"></canvas></div>
-  </div>
-</div>
-
-<!-- Category trend -->
-<div class="card chart-card" style="margin-bottom:24px">
-  <div class="section-title">CATEGORY TRENDS OVER TIME</div>
-  <div style="position:relative;height:220px"><canvas id="trendChart"></canvas></div>
-</div>
-
-<!-- Category table + Run history -->
-<div class="grid-2">
-  <div class="card">
-    <div class="section-title">BENCHMARK BY CATEGORY</div>
-    <table>
-      <thead><tr>
-        <th>CATEGORY</th><th>SCORE</th><th>PASS/TOTAL</th><th>DELTA</th>
-      </tr></thead>
-      <tbody>{cat_rows_html}</tbody>
-    </table>
-  </div>
-  <div class="card">
-    <div class="section-title">OVERNIGHT RUN HISTORY</div>
-    <table>
-      <thead><tr>
-        <th>DATE</th><th>SCORE</th><th>PASS/TOTAL</th><th>EXAMPLES</th><th>DURATION</th><th>PROMOTED</th>
-      </tr></thead>
-      <tbody>{run_rows_html}</tbody>
-    </table>
-  </div>
-</div>
-
-<div class="grid-2" style="margin-top:20px">
-  <!-- Routing breakdown -->
-  <div class="card">
-    <div class="section-title">MODEL ROUTING — ALL TIME</div>
-    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">{routing_total:,} total queries</div>
-
-    <!-- Local usage bar -->
-    <div style="margin-bottom:16px">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#A8E6FF;margin-bottom:4px">
-        <span>LOCAL USAGE</span>
-        <span style="color:{local_bar_color};font-weight:bold">{routing_local_pct}%</span>
-      </div>
-      <div style="background:#0D4F70;border-radius:4px;height:8px;overflow:hidden">
-        <div style="background:{local_bar_color};width:{routing_local_pct}%;height:100%;border-radius:4px;transition:width 0.3s"></div>
-      </div>
-      <div style="font-size:10px;color:#4A8FA8;margin-top:4px">
-        ↑ goal: maximize local %, reduce cloud spend
-      </div>
+  <!-- ── Top bar ── -->
+  <div class="topbar">
+    <div>
+      <div class="title-h1">J.A.R.V.I.S.</div>
+      <div class="title-sub">JUST A RATHER VERY INTELLIGENT SYSTEM &nbsp;·&nbsp; TRAINING INTELLIGENCE FEED</div>
     </div>
-
-    <table>
-      <thead><tr><th>TIER</th><th>QUERIES</th><th>SHARE</th></tr></thead>
-      <tbody>{routing_rows_html}</tbody>
-    </table>
-  </div>
-
-  <!-- Pack composition (latest run) -->
-  <div class="card">
-    <div class="section-title">TONIGHT'S TRAINING PACK</div>
-    <div style="font-size:11px;color:#4A8FA8;margin-bottom:12px">Sources used to build training examples</div>
-    <table>
-      <thead><tr><th>SOURCE</th><th>TYPE</th><th>QUALITY</th></tr></thead>
-      <tbody>
-        <tr>
-          <td style="color:#00FF88;font-weight:bold">Teacher Examples</td>
-          <td style="color:#A8E6FF">Curated JSONL</td>
-          <td style="color:#00FF88">★★★★★</td>
-        </tr>
-        <tr>
-          <td style="color:#00D4FF;font-weight:bold">Verbatim (real)</td>
-          <td style="color:#A8E6FF">Live interactions</td>
-          <td style="color:#00D4FF">★★★★☆</td>
-        </tr>
-        <tr>
-          <td style="color:#FFAA00;font-weight:bold">Synthetic</td>
-          <td style="color:#A8E6FF">Tool-use / voice / memory</td>
-          <td style="color:#FFAA00">★★★☆☆</td>
-        </tr>
-        <tr>
-          <td style="color:#4A8FA8;font-weight:bold">Legacy (fallback)</td>
-          <td style="color:#4A8FA8">Summary rephrasing</td>
-          <td style="color:#4A8FA8">★★☆☆☆</td>
-        </tr>
-      </tbody>
-    </table>
-    <div style="margin-top:12px;font-size:11px;color:#4A8FA8">
-      Pack size grows as more real interactions accumulate in verbatim log.
+    <div>
+      <div class="chips">
+        <span class="chip chip-green">ONLINE</span>
+        <span class="chip chip-cyan">BENCHMARK {_pct(overall_score)}</span>
+        <span class="chip chip-gold">MLX TRAINING ACTIVE</span>
+        <span class="chip chip-dim">11PM NIGHTLY</span>
+      </div>
+      <div class="ts">AUTO-REFRESH 60s &nbsp;·&nbsp; SYNC {generated_at}</div>
     </div>
   </div>
-</div>
 
-<div class="footer">
-  JARVIS LOCAL FINE-TUNING &nbsp;·&nbsp; MLX APPLE SILICON &nbsp;·&nbsp;
-  11PM–7AM TRAINING WINDOW &nbsp;·&nbsp; DATA: training/benchmarks.jsonl + training/overnight_log.jsonl
+  <!-- ── Orb + KPI cards ── -->
+  <div style="display:grid;grid-template-columns:200px 1fr;gap:18px;align-items:center;margin-bottom:16px">
+    <div class="orb-section">
+      <div class="orb-wrap">
+        <div class="orb-ring orb-r1"></div>
+        <div class="orb-ring orb-r2"></div>
+        <div class="orb-ring orb-r3"></div>
+        <div class="orb-core"><span class="orb-text">JARVIS</span></div>
+      </div>
+    </div>
+    <div class="grid-4" style="margin:0">
+      <div class="card">
+        <div class="card-label">TRAINING RUNS</div>
+        <div class="card-value">{total_runs}</div>
+        <div class="card-sub">{trained_runs} trained &middot; {promoted_runs} promoted</div>
+      </div>
+      <div class="card">
+        <div class="card-label">OVERALL BENCHMARK</div>
+        <div class="card-value" style="color:{_score_color};text-shadow:0 0 14px {_score_color}88">{_pct(overall_score)}</div>
+        <div class="card-sub">latest benchmark run</div>
+      </div>
+      <div class="card">
+        <div class="card-label">EVAL PASSING</div>
+        <div class="card-value gold">{baseline_pct}</div>
+        <div class="card-sub">{baseline_passed}/{baseline_total} tests</div>
+      </div>
+      <div class="card">
+        <div class="card-label">LAST TRAINING</div>
+        <div style="font-size:13px;color:var(--cyan);margin-top:5px;letter-spacing:1px;text-shadow:0 0 10px rgba(0,207,255,0.5)">{last_run_date or '—'}</div>
+        <div class="card-sub">next: 23:00 tonight</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Score history + Category bars ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">EVAL SCORE — TRAINING HISTORY</div>
+      <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="section-title">CATEGORY BENCHMARK SCORES</div>
+      <div class="chart-wrap"><canvas id="catChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- ── Category trend ── -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">CATEGORY TRENDS — BENCHMARK HISTORY</div>
+    <div class="chart-wrap-lg"><canvas id="trendChart"></canvas></div>
+  </div>
+
+  <!-- ── Category table + Run history ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">BENCHMARK BY CATEGORY</div>
+      <table>
+        <thead><tr><th>CATEGORY</th><th>SCORE</th><th>PASS/TOTAL</th><th>DELTA</th></tr></thead>
+        <tbody>{cat_rows_html}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="section-title">OVERNIGHT RUN HISTORY</div>
+      <table>
+        <thead><tr><th>DATE</th><th>SCORE</th><th>PASS/TOTAL</th><th>EXAMPLES</th><th>DUR</th><th>&#8593;</th></tr></thead>
+        <tbody>{run_rows_html}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Routing + Pack composition ── -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="section-title">MODEL ROUTING — ALL TIME</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">{routing_total:,} total queries</div>
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px">
+          <span style="color:var(--text)">LOCAL USAGE RATE</span>
+          <span style="color:{local_bar_color};font-weight:bold;text-shadow:0 0 8px {local_bar_color}">{routing_local_pct}%</span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill" style="background:{local_bar_color};width:{routing_local_pct}%;box-shadow:0 0 6px {local_bar_color}"></div>
+        </div>
+        <div style="font-size:9px;color:var(--text-dim);margin-top:4px">&#8593; goal: maximize local · reduce cloud spend</div>
+      </div>
+      <table>
+        <thead><tr><th>TIER</th><th>QUERIES</th><th>SHARE</th></tr></thead>
+        <tbody>{routing_rows_html}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="section-title">TRAINING PACK COMPOSITION</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">Ranked source quality for tonight's pack</div>
+      <table>
+        <thead><tr><th>SOURCE</th><th>TYPE</th><th>QUALITY</th></tr></thead>
+        <tbody>
+          <tr>
+            <td style="color:var(--green);font-weight:bold">Teacher Examples</td>
+            <td>Curated JSONL</td>
+            <td style="color:var(--green)">&#9733;&#9733;&#9733;&#9733;&#9733;</td>
+          </tr>
+          <tr>
+            <td style="color:var(--cyan);font-weight:bold">Verbatim (real)</td>
+            <td>Live interactions</td>
+            <td style="color:var(--cyan)">&#9733;&#9733;&#9733;&#9733;&#9734;</td>
+          </tr>
+          <tr>
+            <td style="color:var(--gold);font-weight:bold">Synthetic</td>
+            <td>Tool-use / voice / memory</td>
+            <td style="color:var(--gold)">&#9733;&#9733;&#9733;&#9734;&#9734;</td>
+          </tr>
+          <tr>
+            <td style="color:var(--text-dim);font-weight:bold">Legacy (fallback)</td>
+            <td style="color:var(--text-dim)">Summary rephrasing</td>
+            <td style="color:var(--text-dim)">&#9733;&#9733;&#9734;&#9734;&#9734;</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:10px;font-size:9px;color:var(--text-dim)">Pack grows as real interactions accumulate in verbatim log.</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    JARVIS LOCAL FINE-TUNING &nbsp;&middot;&nbsp; MLX APPLE SILICON &nbsp;&middot;&nbsp;
+    23:00&ndash;07:00 TRAINING WINDOW &nbsp;&middot;&nbsp; benchmarks.jsonl + overnight_log.jsonl
+  </div>
 </div>
 
 <script>
 const DATA = {chart_json};
 
+const C = {{ CYAN:'#00CFFF', GOLD:'#FFB300', GREEN:'#00FF88', DIM:'#2E5A6A', TEXT:'#7EC8DC' }};
+
+const gridLine = 'rgba(10,34,51,0.7)';
+const tickFont = {{ family: 'Courier New', size: 9 }};
+
 const baseOpts = {{
   responsive: true,
   maintainAspectRatio: false,
-  plugins: {{ legend: {{ labels: {{ color: '#A8E6FF', font: {{ family: 'Courier New', size: 10 }} }} }} }},
+  plugins: {{
+    legend: {{ labels: {{ color: C.TEXT, font: tickFont, boxWidth: 10, padding: 12 }} }},
+    tooltip: {{
+      backgroundColor: '#07090F',
+      borderColor: '#0A2233',
+      borderWidth: 1,
+      titleColor: C.CYAN,
+      bodyColor: C.TEXT,
+      titleFont: tickFont,
+      bodyFont: tickFont,
+    }},
+  }},
   scales: {{
-    x: {{ ticks: {{ color: '#4A8FA8', font: {{ family: 'Courier New', size: 9 }} }}, grid: {{ color: 'rgba(13,79,112,0.3)' }} }},
-    y: {{ ticks: {{ color: '#4A8FA8', font: {{ family: 'Courier New', size: 9 }} }}, grid: {{ color: 'rgba(13,79,112,0.3)' }}, min: 0, max: 100 }},
+    x: {{ ticks: {{ color: C.DIM, font: tickFont }}, grid: {{ color: gridLine }} }},
+    y: {{ ticks: {{ color: C.DIM, font: tickFont }}, grid: {{ color: gridLine }}, min: 0, max: 100 }},
   }},
 }};
 
@@ -622,15 +775,14 @@ new Chart(document.getElementById('scoreChart'), {{
   data: {{
     labels: DATA.run_dates.length ? DATA.run_dates : ['No runs yet'],
     datasets: [{{
-      label: 'Eval Score %',
+      label: 'Eval %',
       data: DATA.run_scores.length ? DATA.run_scores : [0],
-      borderColor: '#00D4FF',
-      backgroundColor: 'rgba(0,212,255,0.08)',
-      fill: true,
-      tension: 0.4,
-      pointRadius: 5,
-      pointBackgroundColor: '#00D4FF',
-    }}]
+      borderColor: C.CYAN,
+      backgroundColor: 'rgba(0,207,255,0.07)',
+      fill: true, tension: 0.42,
+      pointRadius: 4, pointBackgroundColor: C.CYAN,
+      borderWidth: 2,
+    }}],
   }},
   options: {{ ...baseOpts, plugins: {{ ...baseOpts.plugins, legend: {{ display: false }} }} }},
 }});
@@ -643,18 +795,18 @@ new Chart(document.getElementById('catChart'), {{
     datasets: [{{
       label: 'Score %',
       data: DATA.cat_scores,
-      backgroundColor: DATA.cat_colors.map(c => c + '33'),
+      backgroundColor: DATA.cat_colors.map(c => c + '28'),
       borderColor: DATA.cat_colors,
-      borderWidth: 2,
-      borderRadius: 4,
-    }}]
+      borderWidth: 1.5,
+      borderRadius: 2,
+    }}],
   }},
   options: {{
     ...baseOpts,
     plugins: {{ ...baseOpts.plugins, legend: {{ display: false }} }},
     scales: {{
-      x: {{ ticks: {{ color: '#4A8FA8', font: {{ family: 'Courier New', size: 9 }} }}, grid: {{ display: false }} }},
-      y: {{ ticks: {{ color: '#4A8FA8', font: {{ family: 'Courier New', size: 9 }} }}, grid: {{ color: 'rgba(13,79,112,0.3)' }}, min: 0, max: 100 }},
+      x: {{ ticks: {{ color: C.DIM, font: tickFont }}, grid: {{ display: false }} }},
+      y: {{ ticks: {{ color: C.DIM, font: tickFont }}, grid: {{ color: gridLine }}, min: 0, max: 100 }},
     }},
   }},
 }});
@@ -665,13 +817,18 @@ new Chart(document.getElementById('trendChart'), {{
   data: {{
     labels: DATA.bench_dates.length ? DATA.bench_dates : ['No data yet'],
     datasets: DATA.cat_trend_datasets.length ? DATA.cat_trend_datasets : [{{
-      label: 'No benchmark data',
-      data: [null],
-      borderColor: '#4A8FA8',
+      label: 'No benchmark data', data: [null], borderColor: C.DIM,
     }}],
   }},
   options: baseOpts,
 }});
+
+// Live clock update in chip
+(function tick() {{
+  const el = document.getElementById('live-ts');
+  if (el) el.textContent = new Date().toLocaleTimeString('en-GB', {{hour:'2-digit',minute:'2-digit',second:'2-digit'}});
+  setTimeout(tick, 1000);
+}})();
 </script>
 </body>
 </html>
