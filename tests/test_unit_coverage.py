@@ -1571,11 +1571,13 @@ class ConversationContextTests(unittest.TestCase):
 
     def test_compact_if_needed_compacts_overflow(self):
         import conversation_context as cc
-        # MAX_ACTIVE_TURNS (from conversation_context) controls max_messages.
-        # Add 6 full turns (12 messages) to force compaction.
+        # MAX_ACTIVE_TURNS controls max_messages = MAX_ACTIVE_TURNS * 2.
+        # Overflow requires STRICTLY MORE than max_messages — 6 turns fills
+        # the buffer exactly (12 == 12) without triggering compaction.
+        # Use MAX_ACTIVE_TURNS + 1 turns to guarantee overflow.
         max_messages = cc.MAX_ACTIVE_TURNS * 2
         with patch("conversation_context.mem.save_conversation"):
-            for i in range(6):
+            for i in range(cc.MAX_ACTIVE_TURNS + 1):
                 cc.begin_turn(f"User question about databases {i}")
                 cc.end_turn(f"Assistant reply about databases {i}")
         self.assertLessEqual(len(cc._STATE["messages"]), max_messages)
