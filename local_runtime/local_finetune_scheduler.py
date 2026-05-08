@@ -481,25 +481,43 @@ class OvernightTrainer:
 
         return examples
 
-    def _collect_verbatim_examples(self, limit: int = 80) -> list[dict]:
+    # User-turn prefixes that indicate system/background content, not real requests.
+    _VERBATIM_USER_SKIP_PREFIXES = (
+        "USER: Reply with LOCAL_OK",
+        "Current date:",        # knowledge-feed background queries
+        "current date:",
+    )
+
+    # Max times the same user turn (first 60 chars) may appear in the pack.
+    # Prevents "what time is it" from flooding training with identical examples.
+    _VERBATIM_DEDUP_MAX = 2
+
+    def _collect_verbatim_examples(self, limit: int = 100) -> list[dict]:
         """
         Read real Jarvis interactions from memory/conversations/verbatim.jsonl.
 
         Format in file: {"user": "...", "assistant": "...", ...}
-        Converts to messages format. Skips trivial pairs (assistant < 20 chars).
-        Samples the most recent `limit` interactions.
+        Converts to messages format.
+
+        Filters applied:
+          - Short assistant responses (< 20 chars) — not informative
+          - System/background user turns (LOCAL_OK pings, knowledge-feed queries)
+          - Per-query dedup cap: each unique user prefix appears at most
+            _VERBATIM_DEDUP_MAX times, preventing "what time is it" × 16
+          - Standard quality gate via _training_quality_issue
+
+        Samples most-recent `limit` interactions after filtering.
         """
         verbatim_path = REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl"
         if not verbatim_path.exists():
             return []
 
         try:
-            import config as _config
             system_prompt = _current_system_prompt()
         except Exception:
             system_prompt = "You are Jarvis."
 
-        records = []
+        raw_pairs: list[tuple[str, str]] = []
         try:
             for line in verbatim_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -511,18 +529,31 @@ class OvernightTrainer:
                     continue
                 user = (r.get("user") or "").strip()
                 asst = (r.get("assistant") or "").strip()
-                # Skip trivial or diagnostic ping-pong pairs
+
+                # Drop trivial/diagnostic pairs
                 if not user or len(asst) < 20:
                     continue
-                if user.startswith("USER: Reply with LOCAL_OK"):
+                if any(user.startswith(pfx) for pfx in self._VERBATIM_USER_SKIP_PREFIXES):
                     continue
-                records.append((user, asst))
+
+                raw_pairs.append((user, asst))
         except Exception as e:
             self.logger.warning(f"Failed to read verbatim log: {e}")
             return []
 
-        # Take the most recent `limit` interactions
-        recent = records[-limit:]
+        # Deduplicate by user-message prefix — cap each pattern at _VERBATIM_DEDUP_MAX
+        # Iterate in reverse (newest first) so we keep the most recent occurrences.
+        from collections import Counter
+        prefix_counts: Counter = Counter()
+        deduped: list[tuple[str, str]] = []
+        for user, asst in reversed(raw_pairs):
+            prefix = user[:60].lower()
+            if prefix_counts[prefix] < self._VERBATIM_DEDUP_MAX:
+                prefix_counts[prefix] += 1
+                deduped.append((user, asst))
+        # Restore chronological order, take most recent `limit`
+        deduped.reverse()
+        recent = deduped[-limit:]
 
         examples = []
         for user, asst in recent:
@@ -722,7 +753,9 @@ class OvernightTrainer:
         result = local_mlx_training.run_sft(
             model_tag,
             train_jsonl=pack_path,
-            num_iters=2,  # Lightweight for overnight
+            # Use config default (JARVIS_MLX_NUM_ITERS, default 100).
+            # 74 examples × batch_size 4 ≈ 18 steps/epoch → 100 iters ≈ 5.4 epochs.
+            # At ~18s/iter that's ~30 minutes — well within the 7-hour window.
             dry_run=False,
         )
 
