@@ -1152,6 +1152,47 @@ class OrchestratorTests(unittest.TestCase):
             model_router.set_mode(previous)
         self.assertEqual(decision.tool, "calendar")
 
+    def test_open_source_mode_uses_local_structured_classifier_for_complex_intent(self):
+        previous = model_router.get_mode()
+        raw = (
+            '{"tool":"notes","confidence":0.91,"action":"write",'
+            '"params":{"title":"Decision notes","content":"Capture decisions from this discussion."}}'
+        )
+        try:
+            model_router.set_mode("open-source")
+            with patch("orchestrator.ask_claude", side_effect=AssertionError("should not call claude")), \
+                 patch("brains.brain_ollama.ask_local_structured", return_value=raw) as local_mock:
+                decision = orchestrator.classify(
+                    "Please prepare a note capturing the main decisions from this discussion so I can find it later "
+                    "in my notes archive after this session."
+                )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "notes")
+        self.assertEqual(decision.params["title"], "Decision notes")
+        local_mock.assert_called_once()
+
+    def test_open_source_mode_falls_back_to_chat_when_local_structured_classifier_fails(self):
+        previous = model_router.get_mode()
+        try:
+            model_router.set_mode("open-source")
+            with patch("orchestrator.ask_claude", side_effect=AssertionError("should not call claude")), \
+                 patch("brains.brain_ollama.ask_local_structured", side_effect=RuntimeError("ollama unavailable")):
+                decision = orchestrator.classify(
+                    "Please sort out what kind of general response this long ambiguous request should receive "
+                    "without sending it to any cloud classifier at all."
+                )
+        finally:
+            model_router.set_mode(previous)
+        self.assertEqual(decision.tool, "chat")
+
+    def test_parse_preserves_nested_params(self):
+        decision = orchestrator._parse(
+            '{"tool":"weather","confidence":0.9,"action":"get","params":{"location":"San Jose"}}'
+        )
+        self.assertEqual(decision.tool, "weather")
+        self.assertEqual(decision.params, {"location": "San Jose"})
+
     def test_science_prompt_auto_invokes_specialized_agent(self):
         previous = model_router.get_mode()
         try:

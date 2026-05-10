@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from brains.brain_claude import ask_claude
-from config import HAIKU
+from config import HAIKU, LOCAL_DEFAULT, LOCAL_STRUCTURED_CLASSIFIER_ENABLED
 import skills
 import model_router
 import tool_registry
@@ -27,6 +27,18 @@ import tool_registry
 # ── Tool registry ─────────────────────────────────────────────────────────────
 TOOLS = tool_registry.tools()
 _TOOL_LIST = tool_registry.tool_list_text()
+
+_TOOL_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "tool": {"type": "string", "enum": sorted(TOOLS.keys())},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "action": {"type": "string"},
+        "params": {"type": "object"},
+    },
+    "required": ["tool", "confidence", "action", "params"],
+    "additionalProperties": False,
+}
 
 _SYSTEM = f"""You are Jarvis's intent classifier. Given user input, select the best tool.
 
@@ -120,6 +132,9 @@ def classify(user_input: str) -> ToolDecision:
 
     # In local or open-source mode skip cloud classification entirely.
     if model_router.is_open_source_mode() or model_router.get_mode() == "local":
+        local_decision = _classify_with_local_structured(user_input)
+        if local_decision:
+            return _attach_skill(user_input, local_decision)
         return _attach_skill(user_input, _FALLBACK)
 
     # Full LLM classification
@@ -330,37 +345,67 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
     return None
 
 
+def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
+    """Classify with Ollama structured outputs when cloud classification is disabled."""
+    if not LOCAL_STRUCTURED_CLASSIFIER_ENABLED:
+        return None
+    try:
+        from brains.brain_ollama import ask_local_structured
+
+        raw = ask_local_structured(
+            user_input,
+            schema=_TOOL_DECISION_SCHEMA,
+            model=LOCAL_DEFAULT,
+            system=_build_system(user_input),
+        )
+        if not raw.strip():
+            return None
+        return _parse(raw)
+    except Exception as e:
+        print(f"[Orchestrator] Local structured classification failed: {e}")
+        return None
+
+
 def _parse(raw: str) -> ToolDecision:
     """Parse LLM JSON response into ToolDecision."""
     raw = raw.strip()
-
-    # Strip markdown fences
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-    # Find the first complete JSON object (non-greedy to avoid extra data errors)
-    match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
-    if not match:
+    data = _load_json_object(raw)
+    if not isinstance(data, dict):
         return _FALLBACK
-
-    try:
-        data = json.loads(match.group())
-    except json.JSONDecodeError:
-        # Try the whole string as a last resort
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return _FALLBACK
 
     tool = data.get("tool", "chat")
     if tool not in TOOLS:
         tool = "chat"
 
+    params = data.get("params", {})
+    if not isinstance(params, dict):
+        params = {}
+
     return ToolDecision(
         tool=tool,
         confidence=float(data.get("confidence", 0.5)),
         action=str(data.get("action", "")),
-        params=dict(data.get("params", {})),
+        params=params,
         raw=raw,
     )
+
+
+def _load_json_object(raw: str) -> dict | None:
+    """Load the first JSON object from a model response, preserving nested params."""
+    candidate = raw.strip()
+    if candidate.startswith("```"):
+        lines = candidate.split("\n")
+        candidate = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:])
+        candidate = candidate.strip()
+
+    decoder = json.JSONDecoder()
+    starts = [0] if candidate.startswith("{") else []
+    starts.extend(idx for idx, char in enumerate(candidate) if char == "{" and idx not in starts)
+    for start in starts:
+        try:
+            data, _ = decoder.raw_decode(candidate[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None

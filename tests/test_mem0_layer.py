@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+import os
 
 import mem0_layer
 
@@ -8,6 +9,40 @@ class Mem0LayerTests(unittest.TestCase):
     def tearDown(self):
         mem0_layer._last_error = ""
         mem0_layer._memory_instance = None
+        mem0_layer._init_attempted = False
+        mem0_layer._available = False
+
+    def test_build_config_preserves_local_first_defaults(self):
+        config = mem0_layer._build_config()
+
+        self.assertEqual(config["llm"]["provider"], "ollama")
+        self.assertEqual(config["embedder"]["provider"], "ollama")
+        self.assertEqual(config["embedder"]["config"]["model"], "nomic-embed-text:latest")
+        self.assertEqual(config["vector_store"]["provider"], "qdrant")
+        self.assertEqual(config["vector_store"]["config"]["collection_name"], "jarvis_nomic_768_v2")
+        self.assertEqual(config["vector_store"]["config"]["embedding_model_dims"], 768)
+        self.assertIn("path", config["vector_store"]["config"])
+        self.assertNotIn("host", config["vector_store"]["config"])
+        self.assertNotIn("url", config["vector_store"]["config"])
+        self.assertNotIn("api_key", config["vector_store"]["config"])
+
+    def test_collection_name_can_be_overridden_explicitly(self):
+        with patch.dict(os.environ, {"JARVIS_MEM0_COLLECTION": "jarvis_nomic_768_hybrid"}):
+            config = mem0_layer._build_config()
+
+        self.assertEqual(config["vector_store"]["config"]["collection_name"], "jarvis_nomic_768_hybrid")
+
+    def test_mem0_telemetry_disabled_by_default(self):
+        self.assertEqual(os.environ.get("MEM0_TELEMETRY"), "False")
+
+    def test_status_reports_semantic_only_when_fastembed_missing(self):
+        with patch("mem0_layer._get_instance", return_value=None), \
+             patch("mem0_layer.importlib.util.find_spec", return_value=None):
+            status = mem0_layer.status()
+
+        self.assertFalse(status["available"])
+        self.assertFalse(status["fastembed_available"])
+        self.assertEqual(status["search_mode"], "semantic_only")
 
     def test_search_uses_filters_for_current_mem0_api(self):
         calls = []

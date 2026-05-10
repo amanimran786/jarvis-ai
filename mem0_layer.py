@@ -44,17 +44,20 @@ from __future__ import annotations
 
 import os
 import atexit
+import importlib.util
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault("MEM0_TELEMETRY", "False")
 
 # ── Storage paths ──────────────────────────────────────────────────────────────
 _HOME = Path.home()
 _MEM0_DIR = _HOME / ".mem0" / "jarvis"
 _QDRANT_PATH = str(_MEM0_DIR / "qdrant")
 _HISTORY_PATH = str(_MEM0_DIR / "history.db")
-_COLLECTION_NAME = "jarvis_nomic_768_v2"
+_DEFAULT_COLLECTION_NAME = "jarvis_nomic_768_v2"
 
 _MEM0_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -68,6 +71,15 @@ _init_lock = threading.Lock()
 _init_attempted = False
 _available = False   # set True only after successful init
 _last_error = ""
+
+
+def _fastembed_available() -> bool:
+    """True when Qdrant hybrid BM25 support can be enabled by mem0."""
+    return importlib.util.find_spec("fastembed") is not None
+
+
+def _collection_name() -> str:
+    return os.getenv("JARVIS_MEM0_COLLECTION", _DEFAULT_COLLECTION_NAME).strip() or _DEFAULT_COLLECTION_NAME
 
 
 def _build_config() -> dict:
@@ -99,7 +111,7 @@ def _build_config() -> dict:
         "vector_store": {
             "provider": "qdrant",
             "config": {
-                "collection_name": _COLLECTION_NAME,
+                "collection_name": _collection_name(),
                 "embedding_model_dims": 768,
                 "path": _QDRANT_PATH,
             },
@@ -302,9 +314,11 @@ def status() -> dict:
     avail = is_available()
     info: dict = {
         "available": avail,
-        "collection": _COLLECTION_NAME,
+        "collection": _collection_name(),
         "store": _QDRANT_PATH if avail else "not initialized",
         "history_db": _HISTORY_PATH if avail else "not initialized",
+        "fastembed_available": _fastembed_available(),
+        "search_mode": "hybrid_bm25_semantic" if _fastembed_available() else "semantic_only",
     }
     if _last_error:
         info["last_error"] = _last_error

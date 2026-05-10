@@ -25,5 +25,5 @@ prompt_toolkit
 cryptography
 kokoro-onnx  # Local TTS — free, no API
 # ── Memory and retrieval (2026-04) ────────────────────────────────────────────
-mem0ai          # Cross-session episodic memory (Ollama-backed, local Qdrant)
-qdrant-client   # Vector store for mem0 (embedded local, no server needed)
+mem0ai>=2.0,<3          # Cross-session episodic memory (Ollama-backed, local Qdrant)
+qdrant-client>=1.17,<2  # Vector store for mem0 (embedded local, no server needed)
