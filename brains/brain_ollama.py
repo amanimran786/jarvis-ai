@@ -9,6 +9,7 @@ import os
 import atexit
 import threading
 import time
+from typing import Any
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
 import memory as mem
 import conversation_context as ctx
@@ -38,6 +39,7 @@ except Exception:
 # DeepSeek R1:14b reasons heavily before first token — 600s default, overridable via env
 _OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 _OLLAMA_VISION_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_VISION_TIMEOUT_SECONDS", "30"))
+_OLLAMA_STRUCTURED_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_STRUCTURED_TIMEOUT_SECONDS", "20"))
 _CLIENT_SINGLETON = None
 _CLIENT_LOCK = threading.Lock()
 
@@ -61,6 +63,13 @@ def _vision_client():
     if httpx is None:
         return _ollama.Client(timeout=_OLLAMA_VISION_TIMEOUT_SECONDS)
     timeout = httpx.Timeout(connect=5.0, read=_OLLAMA_VISION_TIMEOUT_SECONDS, write=15.0, pool=5.0)
+    return _ollama.Client(timeout=timeout)
+
+
+def _structured_client():
+    if httpx is None:
+        return _ollama.Client(timeout=_OLLAMA_STRUCTURED_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(connect=3.0, read=_OLLAMA_STRUCTURED_TIMEOUT_SECONDS, write=10.0, pool=3.0)
     return _ollama.Client(timeout=timeout)
 
 
@@ -217,6 +226,57 @@ def get_best_available(preferred: str) -> str:
 
 def ask_local(user_input: str, model: str = LOCAL_DEFAULT, system_extra: str = "", track_context: bool = False, raise_on_error: bool = False) -> str:
     return "".join(ask_local_stream(user_input, model, system_extra=system_extra, track_context=track_context, raise_on_error=raise_on_error))
+
+
+def ask_local_structured(
+    user_input: str,
+    schema: dict[str, Any] | str,
+    model: str = LOCAL_DEFAULT,
+    system: str = "",
+    raise_on_error: bool = True,
+) -> str:
+    """Return one non-streamed local response constrained by an Ollama JSON schema."""
+    prompt_for_fit = f"{system}\n\n{user_input}" if system else user_input
+    model = _fits_local(prompt_for_fit, model)
+    model = get_best_available(model)
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": user_input})
+
+    try:
+        response = _structured_client().chat(
+            model=model,
+            messages=messages,
+            stream=False,
+            format=schema,
+            options={
+                "temperature": 0,
+                "num_predict": int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256")),
+            },
+        )
+        content = (response.message.content or "").strip()
+        prompt_eval_count = getattr(response, "prompt_eval_count", None)
+        eval_count = getattr(response, "eval_count", None)
+        usage_tracker.record(
+            provider="ollama",
+            model=model,
+            local=True,
+            source="brain_ollama.ask_local_structured",
+            prompt_tokens=prompt_eval_count,
+            completion_tokens=eval_count,
+            total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+            messages=messages,
+            response_text=content,
+            estimated=(prompt_eval_count is None and eval_count is None),
+            metadata={"structured": True},
+        )
+        return content
+    except Exception as e:
+        if raise_on_error:
+            raise RuntimeError(str(e)) from e
+        return ""
 
 
 def ask_local_stream(
