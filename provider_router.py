@@ -13,6 +13,7 @@ from config import (
     FREE_FIRST_ENABLED,
     PAID_FALLBACK_ENABLED,
     LOCAL_STRICT_FIRST,
+    APPLE_FOUNDATION_MODEL,
     PROVIDER_PRIORITY_MINI,
     PROVIDER_PRIORITY_HAIKU,
     PROVIDER_PRIORITY_SONNET,
@@ -86,21 +87,49 @@ def _cloud_candidates_for_tier(tier: str) -> list[RouteCandidate]:
     return candidates
 
 
+def _local_candidates(
+    *,
+    tier: str,
+    local_available: bool,
+    local_model: str,
+    apple_foundation_available: bool,
+    ollama_label: str,
+) -> list[RouteCandidate]:
+    candidates: list[RouteCandidate] = []
+    if tier == "mini" and apple_foundation_available:
+        candidates.append(RouteCandidate(
+            provider="apple_foundation",
+            model=APPLE_FOUNDATION_MODEL,
+            local=True,
+            label="Apple Foundation",
+        ))
+    if local_available and local_model:
+        candidates.append(RouteCandidate(provider="ollama", model=local_model, local=True, label=ollama_label))
+    return candidates
+
+
 def build_plan(
     *,
     mode: str,
     tier: str,
     local_available: bool,
     local_model: str = "",
+    apple_foundation_available: bool = False,
     explicit_cloud: bool = False,
 ) -> RoutePlan:
     normalized_mode = _normalize_mode(mode)
     normalized_tier = _normalize_tier(tier)
     candidates: list[RouteCandidate] = []
+    local_candidates = _local_candidates(
+        tier=normalized_tier,
+        local_available=local_available,
+        local_model=local_model,
+        apple_foundation_available=apple_foundation_available,
+        ollama_label="Open-Source" if normalized_mode == "open-source" else "Local",
+    )
 
     if normalized_mode == "open-source":
-        if local_available and local_model:
-            candidates.append(RouteCandidate(provider="ollama", model=local_model, local=True, label="Open-Source"))
+        candidates.extend(local_candidates)
         return RoutePlan(
             mode=normalized_mode,
             tier=normalized_tier,
@@ -114,15 +143,14 @@ def build_plan(
     should_prefer_local = (
         FREE_FIRST_ENABLED
         and not explicit_cloud
-        and local_available
-        and bool(local_model)
+        and bool(local_candidates)
         and (normalized_mode in {"local", "auto"} or (normalized_mode == "cloud" and not explicit_cloud))
     )
     if normalized_mode == "local":
-        should_prefer_local = local_available and bool(local_model)
+        should_prefer_local = bool(local_candidates)
 
     if should_prefer_local:
-        candidates.append(RouteCandidate(provider="ollama", model=local_model, local=True, label="Local"))
+        candidates.extend(local_candidates)
         if not PAID_FALLBACK_ENABLED:
             return RoutePlan(
                 mode=normalized_mode,

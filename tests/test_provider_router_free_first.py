@@ -18,6 +18,60 @@ class ProviderRouterFreeFirstTests(unittest.TestCase):
         self.assertEqual(plan.candidates[0].provider, "ollama")
         self.assertEqual(plan.candidates[0].model, "jarvis-local")
 
+    def test_mini_tier_prefers_apple_foundation_when_available(self):
+        plan = provider_router.build_plan(
+            mode="open-source",
+            tier="mini",
+            local_available=True,
+            local_model="jarvis-local",
+            apple_foundation_available=True,
+            explicit_cloud=False,
+        )
+
+        self.assertGreaterEqual(len(plan.candidates), 2)
+        self.assertEqual(plan.candidates[0].provider, "apple_foundation")
+        self.assertEqual(plan.candidates[0].model, "apple-foundationmodel")
+        self.assertEqual(plan.candidates[1].provider, "ollama")
+
+    def test_open_source_can_use_apple_foundation_without_ollama_for_mini(self):
+        plan = provider_router.build_plan(
+            mode="open-source",
+            tier="mini",
+            local_available=False,
+            local_model="",
+            apple_foundation_available=True,
+            explicit_cloud=False,
+        )
+
+        self.assertEqual(len(plan.candidates), 1)
+        self.assertEqual(plan.candidates[0].provider, "apple_foundation")
+
+    def test_non_mini_tier_keeps_ollama_ahead_of_apple_foundation(self):
+        plan = provider_router.build_plan(
+            mode="open-source",
+            tier="sonnet",
+            local_available=True,
+            local_model="jarvis-local",
+            apple_foundation_available=True,
+            explicit_cloud=False,
+        )
+
+        self.assertGreaterEqual(len(plan.candidates), 1)
+        self.assertEqual(plan.candidates[0].provider, "ollama")
+
+    def test_apple_foundation_is_skipped_for_explicit_cloud(self):
+        plan = provider_router.build_plan(
+            mode="auto",
+            tier="mini",
+            local_available=True,
+            local_model="jarvis-local",
+            apple_foundation_available=True,
+            explicit_cloud=True,
+        )
+
+        self.assertGreaterEqual(len(plan.candidates), 1)
+        self.assertNotEqual(plan.candidates[0].provider, "apple_foundation")
+
     def test_explicit_cloud_need_skips_local_first(self):
         plan = provider_router.build_plan(
             mode="auto",

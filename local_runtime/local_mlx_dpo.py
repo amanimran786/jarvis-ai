@@ -119,6 +119,62 @@ def _write_jsonl(path: Path, examples: list[dict]) -> None:
             f.write(json.dumps(example, ensure_ascii=False) + "\n")
 
 
+def _assistant_text(value) -> str:
+    """Normalize Jarvis or mlx preference answer fields into plain text."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, dict):
+                parts.append(str(item.get("content") or ""))
+        return "\n".join(parts).strip()
+    return ""
+
+
+def validate_preference_dataset(pairs: list[dict]) -> dict:
+    """Validate preference pairs before local preference optimization."""
+    errors: list[str] = []
+    valid = 0
+    bad_chosen_markers = (
+        "traceback",
+        "runtimeerror",
+        "exception:",
+        "training error",
+        "i hit an upstream model error",
+    )
+    auto_sources = {"auto", "autopilot", "mined", "failure_mining", "local_eval", "overnight"}
+
+    for idx, pair in enumerate(pairs, start=1):
+        prompt = str(pair.get("prompt") or "").strip()
+        chosen = _assistant_text(pair.get("chosen"))
+        rejected = _assistant_text(pair.get("rejected"))
+        meta = pair.get("meta") if isinstance(pair.get("meta"), dict) else {}
+        source = str(meta.get("source") or pair.get("source") or "").strip().lower()
+        reviewed = bool(pair.get("reviewed") or pair.get("trusted") or meta.get("reviewed") or meta.get("trusted"))
+
+        if not prompt or not chosen or not rejected:
+            errors.append(f"pair {idx}: missing prompt/chosen/rejected")
+            continue
+        if chosen == rejected:
+            errors.append(f"pair {idx}: chosen and rejected are identical")
+            continue
+        if any(marker in chosen.lower() for marker in bad_chosen_markers):
+            errors.append(f"pair {idx}: chosen answer looks like a runtime failure")
+            continue
+        if source in auto_sources and not reviewed:
+            errors.append(f"pair {idx}: auto-mined pair is not marked reviewed/trusted")
+            continue
+        valid += 1
+
+    return {
+        "ok": valid > 0 and not errors,
+        "valid_count": valid,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
 def export_latest_preferences_for_mlx(output_dir: str | Path | None = None) -> dict:
     """
     Find the latest Jarvis preference JSONL and convert to mlx-lm-lora format.
@@ -230,6 +286,25 @@ def run_preference_training(
         - pair_count: int
     """
     _ensure_dirs()
+    algorithm = algorithm.strip().lower()
+
+    if algorithm not in list_algorithms():
+        return {
+            "ok": False,
+            "adapter_path": None,
+            "algorithm": algorithm,
+            "model_tag": ollama_tag,
+            "iters": num_iters,
+            "duration_sec": None,
+            "error": (
+                "Unsupported preference algorithm: grpo is not implemented for Jarvis's local MLX lane yet."
+                if algorithm == "grpo"
+                else f"Unsupported preference algorithm: {algorithm}. Supported: {list_algorithms()}"
+            ),
+            "command": "",
+            "dry_run": dry_run,
+            "pair_count": 0,
+        }
 
     # Check availability
     if not is_available():
@@ -311,6 +386,21 @@ def run_preference_training(
             "command": "",
             "dry_run": dry_run,
             "pair_count": 0,
+        }
+
+    validation = validate_preference_dataset(pairs)
+    if not validation["ok"]:
+        return {
+            "ok": False,
+            "adapter_path": None,
+            "algorithm": algorithm,
+            "model_tag": ollama_tag,
+            "iters": num_iters,
+            "duration_sec": None,
+            "error": "Preference dataset failed validation: " + "; ".join(validation["errors"][:3]),
+            "command": "",
+            "dry_run": dry_run,
+            "pair_count": len(pairs),
         }
 
     # Prepare output directory

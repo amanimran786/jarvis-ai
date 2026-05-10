@@ -460,6 +460,22 @@ def _best_local(text: str) -> str:
     return available[0] if available else LOCAL_DEFAULT
 
 
+def _apple_foundation_available_for(user_input: str, tool: str | None, tier: str, system_extra: str = "") -> bool:
+    """Gate Apple's 4096-token local model to short, simple chat requests."""
+    if tier != "mini":
+        return False
+    if tool and tool != "chat":
+        return False
+    combined = f"{system_extra}\n{user_input}" if system_extra else user_input
+    if len(combined) > 2000:
+        return False
+    try:
+        from brains import brain_apple_foundation
+        return brain_apple_foundation.is_available()
+    except Exception:
+        return False
+
+
 def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> str:
     """Return a truthful summary of Jarvis's current routing state."""
     mode = _current_mode
@@ -477,21 +493,32 @@ def describe_runtime_for(user_input: str = "", skill_id: str | None = None) -> s
     tier = _classify_complexity(user_input or "general conversation", active_skills=resolved_skills)
     explicit_cloud = mode == "cloud"
     if mode == "auto":
+        apple_foundation_available = _apple_foundation_available_for(
+            user_input or "general conversation",
+            "chat",
+            tier,
+        )
         policy = cost_policy.route_decision(
             user_input or "general conversation",
             tier,
             tool="chat",
-            local_available=bool(local_models),
+            local_available=bool(local_models) or apple_foundation_available,
         )
         tier = policy.get("tier", tier)
         explicit_cloud = policy.get("provider") == "cloud"
 
     local_model = _best_local(user_input or "general conversation") if local_models else ""
+    apple_foundation_available = _apple_foundation_available_for(
+        user_input or "general conversation",
+        "chat",
+        tier,
+    )
     plan = provider_router.build_plan(
         mode=mode,
         tier=tier,
         local_available=bool(local_models),
         local_model=local_model,
+        apple_foundation_available=apple_foundation_available,
         explicit_cloud=explicit_cloud,
     )
     if not plan.candidates:
@@ -937,16 +964,18 @@ def smart_stream(
         return _execute_forced_stream(plan, user_input, system_extra), candidate.label
 
     tier = _classify_complexity(user_input, active_skills=resolved_skills)
+    apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
     explicit_cloud = mode == "cloud"
     if mode == "auto":
         policy = cost_policy.route_decision(
             user_input,
             tier,
             tool=tool,
-            local_available=local_available,
+            local_available=local_available or apple_foundation_available,
         )
         tier = policy["tier"]
         explicit_cloud = policy.get("provider") == "cloud"
+        apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
 
     plan = provider_router.build_plan(
 
@@ -954,6 +983,7 @@ def smart_stream(
         tier=tier,
         local_available=local_available,
         local_model=local_model,
+        apple_foundation_available=apple_foundation_available,
         explicit_cloud=explicit_cloud,
     )
 
@@ -971,6 +1001,15 @@ def smart_stream(
             except Exception:
                 pass
             return ask_local_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                raise_on_error=True,
+            )
+        if candidate.provider == "apple_foundation":
+            from brains.brain_apple_foundation import ask_apple_foundation_stream
+            return ask_apple_foundation_stream(
                 user_input,
                 candidate.model,
                 system_extra=system_extra,
@@ -1017,7 +1056,7 @@ def smart_stream(
                 # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
                 # tier in {strong, deep}).
                 raw_stream = _candidate_stream(candidate)
-                if candidate.provider == "ollama":
+                if candidate.local:
                     yield from raw_stream
                 else:
                     yield from _capture_cloud_stream(
@@ -1119,11 +1158,13 @@ def format_with_mini(
         prompt = prompt + f"\n\nUser context for personalization:{context}"
     local_available = _has_local()
     local_model = _best_local(prompt) if local_available else ""
+    apple_foundation_available = _apple_foundation_available_for(prompt, tool, "mini", system_extra)
     plan = provider_router.build_plan(
         mode=_current_mode,
         tier="mini",
         local_available=local_available,
         local_model=local_model,
+        apple_foundation_available=apple_foundation_available,
         explicit_cloud=_current_mode == "cloud",
     )
     if not plan.candidates:
@@ -1135,6 +1176,16 @@ def format_with_mini(
             try:
                 if candidate.provider == "ollama":
                     yield from ask_local_stream(
+                        prompt,
+                        candidate.model,
+                        system_extra=system_extra,
+                        track_context=False,
+                        raise_on_error=True,
+                    )
+                    return
+                if candidate.provider == "apple_foundation":
+                    from brains.brain_apple_foundation import ask_apple_foundation_stream
+                    yield from ask_apple_foundation_stream(
                         prompt,
                         candidate.model,
                         system_extra=system_extra,

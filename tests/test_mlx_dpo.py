@@ -155,6 +155,37 @@ class MlxDpoFormatConversionTests(unittest.TestCase):
 class MlxDpoTrainingTests(unittest.TestCase):
     """Tests for preference training execution."""
 
+    def test_validate_preference_dataset_rejects_bad_pairs(self):
+        validation = local_mlx_dpo.validate_preference_dataset([
+            {
+                "prompt": "Q",
+                "chosen": "same",
+                "rejected": "same",
+            },
+            {
+                "prompt": "Q2",
+                "chosen": "RuntimeError: model failed",
+                "rejected": "A better answer.",
+            },
+        ])
+
+        self.assertFalse(validation["ok"])
+        self.assertEqual(validation["valid_count"], 0)
+        self.assertGreaterEqual(validation["error_count"], 2)
+
+    def test_validate_preference_dataset_rejects_unreviewed_auto_mined_pairs(self):
+        validation = local_mlx_dpo.validate_preference_dataset([
+            {
+                "prompt": "Q",
+                "chosen": "Good answer.",
+                "rejected": "Bad answer.",
+                "meta": {"source": "local_eval"},
+            }
+        ])
+
+        self.assertFalse(validation["ok"])
+        self.assertIn("reviewed", validation["errors"][0])
+
     def test_run_preference_training_dry_run_returns_command(self):
         """Dry run should return the command without executing."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -186,6 +217,17 @@ class MlxDpoTrainingTests(unittest.TestCase):
             self.assertIn("mlx_lm_lora.train", result["command"])
             self.assertEqual(result["pair_count"], 1)
             self.assertIsNone(result["adapter_path"])
+
+    def test_run_preference_training_rejects_grpo_until_local_backend_exists(self):
+        result = local_mlx_dpo.run_preference_training(
+            "qwen2.5-coder:7b",
+            algorithm="grpo",
+            dry_run=True,
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("grpo", result["error"].lower())
+        self.assertIn("not implemented", result["error"].lower())
 
     def test_run_preference_training_fails_gracefully_when_unavailable(self):
         """Should return error when mlx-lm-lora is unavailable."""
