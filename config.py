@@ -223,6 +223,12 @@ PAID_FALLBACK_ENABLED = _env_flag("JARVIS_PAID_FALLBACK_ENABLED", True)
 LOCAL_STRICT_FIRST = _env_flag("JARVIS_LOCAL_STRICT_FIRST", True)
 ROUTING_TRANSPARENCY_ENABLED = _env_flag("JARVIS_ROUTING_TRANSPARENCY_ENABLED", True)
 LOCAL_STRUCTURED_CLASSIFIER_ENABLED = _env_flag("JARVIS_LOCAL_STRUCTURED_CLASSIFIER_ENABLED", True)
+APPLE_FOUNDATION_ENABLED = _env_flag("JARVIS_APPLE_FOUNDATION_ENABLED", False)
+APPLE_FOUNDATION_BASE_URL = os.getenv("JARVIS_APPLE_FOUNDATION_BASE_URL", "http://localhost:11434/v1").strip() or "http://localhost:11434/v1"
+APPLE_FOUNDATION_MODEL = os.getenv("JARVIS_APPLE_FOUNDATION_MODEL", "apple-foundationmodel").strip() or "apple-foundationmodel"
+APPLE_FOUNDATION_API_KEY = os.getenv("JARVIS_APPLE_FOUNDATION_API_KEY", "unused").strip() or "unused"
+APPLE_FOUNDATION_TIMEOUT_SECONDS = _env_float("JARVIS_APPLE_FOUNDATION_TIMEOUT_SECONDS", 12.0)
+APPLE_FOUNDATION_MAX_TOKENS = _env_int("JARVIS_APPLE_FOUNDATION_MAX_TOKENS", 160)
 
 # Provider priority is configurable per complexity tier.
 # Supported providers: openai, gemini, anthropic.
@@ -263,6 +269,9 @@ def provider_runtime_config() -> dict:
         "paid_fallback_enabled": PAID_FALLBACK_ENABLED,
         "local_strict_first": LOCAL_STRICT_FIRST,
         "routing_transparency_enabled": ROUTING_TRANSPARENCY_ENABLED,
+        "apple_foundation_enabled": APPLE_FOUNDATION_ENABLED,
+        "apple_foundation_base_url": APPLE_FOUNDATION_BASE_URL,
+        "apple_foundation_model": APPLE_FOUNDATION_MODEL,
         "provider_priority": {
             "mini": list(PROVIDER_PRIORITY_MINI),
             "haiku": list(PROVIDER_PRIORITY_HAIKU),

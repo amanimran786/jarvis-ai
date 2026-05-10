@@ -619,6 +619,11 @@ def warm_vision_cache() -> None:
 def local_capabilities() -> dict:
     models = list_local_models()
     vision_runtime = _vision_runtime_status()
+    try:
+        from brains import brain_apple_foundation
+        apple_foundation = brain_apple_foundation.status()
+    except Exception:
+        apple_foundation = {"enabled": False, "available": False}
 
     def _selected(preferred: str) -> str | None:
         if not models:
@@ -641,6 +646,7 @@ def local_capabilities() -> dict:
         "vision_status_detail": vision_runtime["detail"],
         "vision_timeout_seconds": _OLLAMA_VISION_TIMEOUT_SECONDS,
         "embedding_model": _best_embed_model(),
+        "apple_foundation": apple_foundation,
         "reasoning_boost_enabled": True,
         "timeout_seconds": _OLLAMA_TIMEOUT_SECONDS,
     }
