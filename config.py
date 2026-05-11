@@ -178,8 +178,10 @@ LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
 LOCAL_PREFER_TUNED = os.getenv("LOCAL_PREFER_TUNED", "0").strip().lower() in {"1", "true", "yes", "on"}
 LOCAL_DEFAULT        = os.getenv("LOCAL_DEFAULT_MODEL", "gemma4:e4b")
 # Gemma 4 MTP drafter for speculative decoding — 2x speed on coding tasks.
-# ollama pull gemma4:e4b-mtp  (then set JARVIS_APPLE_FOUNDATION_ENABLED=true when on macOS 26)
-LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "gemma4:e4b-mtp")
+# Check available tags: ollama list | grep gemma4
+# Common tags when released: gemma4:e4b-mtp  or  gemma4-mtp:e4b
+# Leave empty to disable speculative decoding (safe default).
+LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")
 LOCAL_CODER     = os.getenv("LOCAL_CODER_MODEL", "qwen2.5-coder:7b")
 LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen3-coder:30b")
 # DeepSeek R1 has built-in chain-of-thought reasoning — pull it with:
