@@ -14,6 +14,59 @@ Update this file when picking up or finishing a task. Commit the update so the o
 
 ## Active Tasks
 
+### [DONE] GRPO training support + package upgrades + Whisper upgrade + Apple Foundation fix
+**Completed by Claude 2026-05-11**
+- `local_runtime/local_mlx_dpo.py`: GRPO fully implemented in `run_preference_training()`.
+  `list_algorithms()` now returns `["dpo", "orpo", "ipo", "grpo"]`.
+  Added `_build_grpo_prompt_file()` helper — extracts user messages from latest overnight SFT pack as
+  GRPO prompt data (GRPO uses prompts only, no preference pairs).
+  Full `--train-mode grpo` command with `--group-size`, `--reward-functions`, `--reward-weights`,
+  `--max-completion-length`, `--temperature`. Verified: `ok: True` on Apple Silicon with venv python.
+- `local_runtime/local_finetune_scheduler.py`: `_collect_verbatim_examples(limit=80)` → `limit=100`.
+  `_build_synthetic_examples()`: 21 → 34 patterns (meeting summaries, conversation control, code debugging).
+- Training pack: 74 → 132 examples after dedup. 100 iters nightly (~30 min vs 37 sec).
+- `.env`: `JARVIS_FASTER_WHISPER_MODEL=small.en` → `large-v3-turbo` (8x faster, same accuracy, ~1.6 GB).
+- Packages installed: `fastembed` (hybrid BM25+semantic search in mem0), `mem0ai==2.0.2` (p95 17s→1.4s).
+- `config.py`: Added `LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")` (empty = disabled).
+  Gemma 4 MTP drafter tag `gemma4:e4b-mtp` not yet in Ollama registry — commented out in `.env`.
+- **Apple Foundation Model fix**: Wrong PyPI `apfel` package (functional programming lib, not the server).
+  Real apfel is a native macOS binary: `brew tap Arthur-Ficial/tap && brew install apfel`.
+  Corrected port: 11434 → **11438** in `.env` (`JARVIS_APPLE_FOUNDATION_BASE_URL`).
+  `brain_apple_foundation.py` is fully coded and ready — just needs `apfel serve` running.
+
+### [BLOCKED] Apple Foundation Model — needs brew install on user's Mac
+**Owner: User**
+- Run: `pip uninstall apfel -y` (removes wrong PyPI package)
+- Run: `brew tap Arthur-Ficial/tap && brew install apfel`
+- To use: `apfel serve &` (starts OpenAI-compatible server on port 11438)
+- Then Jarvis `brain_apple_foundation.py` auto-detects and routes short queries there
+
+### [DONE] Fix failing code test + training iterations + verbatim filter
+**Completed by Claude 2026-05-07**
+- `test_unit_coverage.py::ConversationContextTests::test_compact_if_needed_compacts_overflow`:
+  Fixed off-by-one — 6 turns == limit exactly, never overflows. Changed to MAX_ACTIVE_TURNS+1.
+  Code category now 320/320, overall should reach 608/608 (100%).
+- `local_finetune_scheduler.py run_training()`: removed `num_iters=2` override.
+  Now uses `config.MLX_NUM_ITERS` (default 100). ~30 min runtime vs 37 seconds before.
+- `_collect_verbatim_examples()`: added knowledge-feed prefix filter ("Current date:"),
+  per-query dedup cap (max 2× same user turn), limit raised 80→100.
+  Result: 100 high-quality diverse verbatim examples vs 80 with duplicates.
+
+### [DONE] Training pack expansion — 13 curated teacher examples + 13 more synthetic
+**Completed by Claude 2026-05-08**
+- 13 new teacher examples in `training/teacher_examples/jarvis_teacher_20260509_*.jsonl`:
+  Coding/arch patterns: postgres zero-downtime migration, job queue design (SELECT FOR UPDATE SKIP LOCKED),
+  optimistic vs pessimistic locking, flaky worker pool debugging.
+  Verbatim interaction patterns: good morning/night, weather, calendar, battery, briefing, vault notes,
+  marathon math. All 13 pass quality gate.
+- Teacher pack: 11 → 24 examples.
+- `_build_synthetic_examples()`: added 13 new patterns (meeting summaries, conversation control,
+  code debugging). Synthetic: 21 → 34 examples.
+- Call site limit fixed: `_collect_verbatim_examples(limit=80)` → `limit=100`.
+- **Total pack tonight: 132 examples (was 74). Training: 100 iters (was 2).**
+- NOTE: New teacher files are gitignored (runtime pattern). Need `git add -f` to commit,
+  or user runs: `cd ~/jarvis-ai && git add -f training/teacher_examples/jarvis_teacher_20260509*.jsonl`
+
 ### [CODEX] Voice / PaMacCore AUHAL mic fix
 **File:** `voice.py`, `local_runtime/local_stt.py`
 **Goal:** Fix PaMacCore AUHAL errors causing mic input to fail
@@ -104,23 +157,16 @@ Ensures Codex always has Claude's latest changes.
 
 ---
 
-**Last Claude session (2026-05-06):**
-- Training dashboard HTML redesigned: J.A.R.V.I.S. HUD aesthetic (orb, hex grid, scanlines, corner brackets, status chips, glow palette)
-- File: `training/dashboard_generator.py` — HTML template only, all Python data logic unchanged
+**Last Claude session (2026-05-11):**
+- GRPO fully implemented in `local_runtime/local_mlx_dpo.py` — `run_preference_training(algorithm="grpo")` works
+- Training pack: 74 → 132 examples; verbatim cap 80→100; synthetic 21→34 patterns
+- `.env`: Whisper `small.en` → `large-v3-turbo`; Apple Foundation port corrected 11434 → 11438
+- `config.py`: `LOCAL_DEFAULT_DRAFTER` added (empty by default; enable when Ollama releases gemma4 MTP tag)
+- Installed: `fastembed` (hybrid BM25+semantic in mem0), `mem0ai==2.0.2`
+- Apple Foundation Model: wrong `apfel` PyPI package identified and documented.
+  User must: `pip uninstall apfel -y && brew tap Arthur-Ficial/tap && brew install apfel`
+  Then `apfel serve &` to activate; `brain_apple_foundation.py` will auto-detect on port 11438.
 
-**For Codex next session:** Pull latest main. Voice AUHAL fix + mem0 Qdrant verification +
+**For Codex next session:** Pull latest. Voice AUHAL fix + mem0 Qdrant verification +
 qwen3 model tag still open. See `.claude/skills/jarvis-voice.md` for voice checklist.
-- `build_training_pack()` rewritten: 4 sources, 74 examples (teacher + verbatim + synthetic + fallback)
-- `benchmark_tracker` baseline updated to 597/601 (was stale at 312/313)
-- Dashboard now shows routing tier breakdown + pack composition panel
-- `EvalAgent` in brain_daemon now uses `benchmark_tracker.run_full_benchmark()` instead of
-  skipped golden cases — gives real per-category signal every 8 hours
-- **Teacher capture refined**: tier gate now captures high-confidence cloud teacher
-  lanes (`strong/deep/sonnet`) while skipping low-quality `haiku/mini/local` rows.
-  Training pack builder also filters known bad messaging-loop and overclaim examples.
-- `JARVIS_TEACHER_CAPTURE=1` added to: launchd plist + `main.py` startup default
-- `dashboard_generator._routing_stats()` added — shows local usage rate trend
-- `overnight_state.json` baseline corrected to 597/601
-
-**For Codex next session:** Pull latest main. Voice AUHAL fix + mem0 Qdrant verification +
-qwen3 model tag still open. See `.claude/skills/jarvis-voice.md` for voice checklist.
+Wire `LOCAL_DEFAULT_DRAFTER` into `brain_ollama.py` when Ollama releases gemma4 MTP tag.

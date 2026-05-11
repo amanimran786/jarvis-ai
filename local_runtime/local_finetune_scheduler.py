@@ -19,14 +19,15 @@ from pathlib import Path
 from typing import Optional
 
 import config
+import runtime_state
 from local_runtime import local_mlx_training
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TRAINING_ROOT = REPO_ROOT / "training"
+TRAINING_ROOT = runtime_state.writable_data_path("training", seed_from=REPO_ROOT / "training")
 STATE_FILE = TRAINING_ROOT / "overnight_state.json"
 LOG_FILE = TRAINING_ROOT / "overnight_log.jsonl"
 PACKS_DIR = TRAINING_ROOT / "packs"
-MEMORY_FILE = REPO_ROOT / "memory.json"
+MEMORY_FILE = runtime_state.writable_data_path("memory.json", seed_from=REPO_ROOT / "memory.json")
 
 # Ensure logging is configured
 logging.basicConfig(
@@ -398,7 +399,7 @@ class OvernightTrainer:
         self.logger.info(f"Teacher examples: {len(teacher_examples)}")
 
         # Source 2 — verbatim real conversations
-        verbatim_examples = self._collect_verbatim_examples(limit=80)
+        verbatim_examples = self._collect_verbatim_examples(limit=100)
         examples.extend(verbatim_examples)
         self.logger.info(f"Verbatim examples: {len(verbatim_examples)}")
 
@@ -508,7 +509,12 @@ class OvernightTrainer:
 
         Samples most-recent `limit` interactions after filtering.
         """
-        verbatim_path = REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl"
+        verbatim_path = runtime_state.writable_data_path(
+            "memory",
+            "conversations",
+            "verbatim.jsonl",
+            seed_from=REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl",
+        )
         if not verbatim_path.exists():
             return []
 
@@ -700,6 +706,70 @@ class OvernightTrainer:
                 "Are you actually Jarvis or just a chatbot?",
                 "I'm Jarvis — a fully integrated runtime on your Mac, not a generic chatbot. "
                 "I have direct access to your terminal, calendar, contacts, and system controls.",
+            ),
+            # Meeting / transcript
+            ex(
+                "Summarize today's meeting.",
+                "Today's meeting covered three topics: Q2 roadmap priorities, the infra "
+                "migration timeline, and a decision to move the launch date to June 15. "
+                "Action items: you own the migration plan, Sarah owns the launch comms.",
+            ),
+            ex(
+                "What was decided in the call?",
+                "Two decisions: ship the auth refactor before the new feature, and schedule "
+                "a follow-up with the design team next Thursday.",
+            ),
+            ex(
+                "Who was on that call?",
+                "Four people: you, Sarah, Marcus, and the PM from the partner team.",
+            ),
+            ex(
+                "Did anyone mention the deadline?",
+                "Yes — Marcus raised it. The deadline is May 31 and the team agreed it's firm.",
+            ),
+            ex(
+                "What were my action items from the standup?",
+                "Two: finish the PR review for the memory module, and ping Lena about "
+                "the staging environment access.",
+            ),
+            # Conversation / clarification
+            ex(
+                "Never mind.",
+                "Got it.",
+            ),
+            ex(
+                "Wait, forget that last thing.",
+                "Sure, ignoring that.",
+            ),
+            ex(
+                "Can you repeat that?",
+                "Of course — I said your 3 PM is cancelled and the next slot is open.",
+            ),
+            ex(
+                "Stop.",
+                "Stopped.",
+            ),
+            ex(
+                "That's wrong.",
+                "My mistake — what's the correct version?",
+            ),
+            # Code / debugging
+            ex(
+                "I'm getting a KeyError on 'user_id' in my Flask handler.",
+                "The key isn't in the dict when the handler runs. Three likely causes: "
+                "missing field in the request JSON, wrong key name, or the JSON body wasn't "
+                "parsed — check `request.get_json()` returned something and the key spelling.",
+            ),
+            ex(
+                "My pytest is hanging on one test.",
+                "Hanging tests usually mean a blocking call with no timeout — check for "
+                "`time.sleep`, an unresolved `await`, a subprocess without `timeout=`, or "
+                "a threading lock that never releases. Add `-x --timeout=10` to isolate it.",
+            ),
+            ex(
+                "How do I check which Python is being used?",
+                "Run `which python3` and `python3 --version`. "
+                "In a virtualenv, also run `pip show pip` to confirm the env is active.",
             ),
         ]
 
