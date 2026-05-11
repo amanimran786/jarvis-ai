@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import runtime_state
+
 _MLX_LM_LORA_AVAILABLE = False
 try:
     import mlx.core as mx
@@ -25,7 +27,7 @@ except ImportError:
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TRAINING_ROOT = REPO_ROOT / "training"
+TRAINING_ROOT = runtime_state.writable_data_path("training", seed_from=REPO_ROOT / "training")
 PREFERENCES_DIR = TRAINING_ROOT / "preferences"
 MLX_ADAPTERS_DIR = TRAINING_ROOT / "mlx_dpo_adapters"
 
@@ -85,7 +87,7 @@ def status() -> dict:
 
 def list_algorithms() -> list[str]:
     """Return supported preference training algorithms."""
-    return ["dpo", "orpo", "ipo"]
+    return ["dpo", "orpo", "ipo", "grpo"]
 
 
 def _latest_preferences_path() -> Path | None:
@@ -93,6 +95,52 @@ def _latest_preferences_path() -> Path | None:
     _ensure_dirs()
     preferences = sorted(PREFERENCES_DIR.glob("*.jsonl"))
     return preferences[-1] if preferences else None
+
+
+def _build_grpo_prompt_file(output_path: Path) -> int:
+    """
+    Extract user prompts from the most recent SFT training pack for GRPO.
+
+    GRPO trains by sampling multiple completions per prompt and scoring them
+    with reward functions — it needs prompts only, not chosen/rejected pairs.
+    We source prompts from the overnight SFT pack (real Jarvis interactions).
+
+    Returns number of prompts written, or 0 if no pack found.
+    """
+    packs_dir = TRAINING_ROOT / "packs"
+    packs = sorted(packs_dir.glob("overnight_*.jsonl")) if packs_dir.exists() else []
+    if not packs:
+        return 0
+
+    latest_pack = packs[-1]
+    prompts: list[dict] = []
+    seen: set[str] = set()
+
+    for line in latest_pack.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        messages = row.get("messages", [])
+        user_msg = next(
+            (m["content"] for m in messages if m.get("role") == "user"), None
+        )
+        if user_msg and user_msg not in seen:
+            seen.add(user_msg)
+            # GRPO data format: single "prompt" key per row
+            prompts.append({"prompt": user_msg})
+
+    if not prompts:
+        return 0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        for row in prompts:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return len(prompts)
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -257,20 +305,32 @@ def run_preference_training(
     learning_rate: float = 5e-6,
     lora_rank: int = 8,
     beta: float = 0.1,
+    # GRPO-specific parameters (ignored for DPO/ORPO/IPO)
+    grpo_group_size: int = 4,
+    grpo_reward_functions: str = "accuracy_reward,format_reward",
+    grpo_reward_weights: str = "[0.7, 0.3]",
+    grpo_max_completion_length: int = 256,
+    grpo_temperature: float = 0.8,
     dry_run: bool = False,
 ) -> dict:
     """
-    Run DPO/ORPO preference fine-tuning via mlx-lm-lora.
+    Run DPO/ORPO/IPO/GRPO preference fine-tuning via mlx-lm-lora.
 
     Args:
         ollama_tag: Model tag like "qwen2.5-coder:7b"
-        preference_jsonl: Path to preference JSONL (auto-finds latest if None)
-        algorithm: "dpo", "orpo", or "ipo" (default: "orpo")
+        preference_jsonl: Path to preference JSONL (auto-finds latest if None).
+            For GRPO: path to prompt-only JSONL; auto-extracted from SFT pack if None.
+        algorithm: "dpo", "orpo", "ipo", or "grpo" (default: "orpo")
         output_dir: Where to save adapter (default: TRAINING_ROOT/mlx_dpo_adapters/...)
         num_iters: Training iterations (default: 50)
         learning_rate: Learning rate (default: 5e-6)
         lora_rank: LoRA rank (default: 8)
-        beta: KL penalty for DPO (default: 0.1)
+        beta: KL penalty for DPO/IPO (ignored for GRPO)
+        grpo_group_size: Completions sampled per prompt for GRPO (default: 4)
+        grpo_reward_functions: Comma-separated reward fn names for GRPO
+        grpo_reward_weights: JSON array of weights matching reward functions
+        grpo_max_completion_length: Max tokens per GRPO completion (default: 256)
+        grpo_temperature: Sampling temperature for GRPO completions (default: 0.8)
         dry_run: Return command without executing (default: False)
 
     Returns dict with:
@@ -338,6 +398,104 @@ def run_preference_training(
 
     preset = _DPO_MODEL_PRESETS[ollama_tag]
     model_id = preset["mlx_id"]
+
+    # ── GRPO branch — uses prompt-only data and reward functions ─────────────
+    if algorithm == "grpo":
+        model_slug = ollama_tag.replace(":", "_").replace(".", "_")
+        adapter_dir = MLX_ADAPTERS_DIR / "grpo" / model_slug / _timestamp()
+        if output_dir:
+            adapter_dir = Path(output_dir)
+        adapter_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resolve prompt data: explicit file or auto-extract from SFT pack
+        if preference_jsonl:
+            grpo_data_path = Path(preference_jsonl)
+            if not grpo_data_path.exists():
+                return {
+                    "ok": False, "adapter_path": None, "algorithm": "grpo",
+                    "model_tag": ollama_tag, "iters": num_iters,
+                    "duration_sec": None,
+                    "error": f"Prompt file not found: {preference_jsonl}",
+                    "command": "", "dry_run": dry_run, "pair_count": 0,
+                }
+            prompt_count = sum(1 for _ in grpo_data_path.read_text().splitlines() if _.strip())
+        else:
+            grpo_data_path = PREFERENCES_DIR / f"grpo_prompts_{_timestamp()}.jsonl"
+            prompt_count = _build_grpo_prompt_file(grpo_data_path)
+            if prompt_count == 0:
+                return {
+                    "ok": False, "adapter_path": None, "algorithm": "grpo",
+                    "model_tag": ollama_tag, "iters": num_iters,
+                    "duration_sec": None,
+                    "error": "No SFT pack found to extract GRPO prompts from. "
+                             "Run build_training_pack() first or pass preference_jsonl.",
+                    "command": "", "dry_run": dry_run, "pair_count": 0,
+                }
+
+        cmd = [
+            sys.executable, "-m", "mlx_lm_lora.train",
+            "--model", model_id,
+            "--train-mode", "grpo",
+            "--data", str(grpo_data_path),
+            "--num-iterations", str(num_iters),
+            "--learning-rate", str(learning_rate),
+            "--rank", str(lora_rank),
+            "--group-size", str(grpo_group_size),
+            "--reward-functions", grpo_reward_functions,
+            "--reward-weights", grpo_reward_weights,
+            "--max-completion-length", str(grpo_max_completion_length),
+            "--temperature", str(grpo_temperature),
+            "--adapter-path", str(adapter_dir),
+        ]
+        command_str = " ".join(cmd)
+
+        if dry_run:
+            return {
+                "ok": True, "adapter_path": None, "algorithm": "grpo",
+                "model_tag": ollama_tag, "iters": num_iters,
+                "duration_sec": None, "error": None,
+                "command": command_str, "dry_run": True,
+                "pair_count": prompt_count,
+            }
+
+        start_time = time.time()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            duration = time.time() - start_time
+            if result.returncode != 0:
+                return {
+                    "ok": False, "adapter_path": None, "algorithm": "grpo",
+                    "model_tag": ollama_tag, "iters": num_iters,
+                    "duration_sec": duration,
+                    "error": f"GRPO training failed: {result.stderr[-500:]}",
+                    "command": command_str, "dry_run": False,
+                    "pair_count": prompt_count,
+                }
+            return {
+                "ok": True, "adapter_path": str(adapter_dir), "algorithm": "grpo",
+                "model_tag": ollama_tag, "iters": num_iters,
+                "duration_sec": duration, "error": None,
+                "command": command_str, "dry_run": False,
+                "pair_count": prompt_count,
+            }
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False, "adapter_path": None, "algorithm": "grpo",
+                "model_tag": ollama_tag, "iters": num_iters,
+                "duration_sec": 3600.0,
+                "error": "GRPO training timed out after 1 hour.",
+                "command": command_str, "dry_run": False,
+                "pair_count": prompt_count,
+            }
+        except Exception as exc:
+            return {
+                "ok": False, "adapter_path": None, "algorithm": "grpo",
+                "model_tag": ollama_tag, "iters": num_iters,
+                "duration_sec": None, "error": str(exc),
+                "command": command_str, "dry_run": False,
+                "pair_count": prompt_count,
+            }
+    # ── end GRPO branch ───────────────────────────────────────────────────────
 
     # Find or convert preference data
     if preference_jsonl:
