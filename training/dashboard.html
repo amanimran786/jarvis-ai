@@ -219,7 +219,7 @@
         <span class="chip chip-gold">MLX TRAINING ACTIVE</span>
         <span class="chip chip-dim">11PM NIGHTLY</span>
       </div>
-      <div class="ts">AUTO-REFRESH 60s &nbsp;·&nbsp; SYNC 2026-05-10 23:26</div>
+      <div class="ts">AUTO-REFRESH 60s &nbsp;·&nbsp; SYNC 2026-05-12 23:27</div>
     </div>
   </div>
 
@@ -236,8 +236,8 @@
     <div class="grid-4" style="margin:0">
       <div class="card">
         <div class="card-label">TRAINING RUNS</div>
-        <div class="card-value">13</div>
-        <div class="card-sub">9 trained &middot; 8 promoted</div>
+        <div class="card-value">15</div>
+        <div class="card-sub">11 trained &middot; 10 promoted</div>
       </div>
       <div class="card">
         <div class="card-label">OVERALL BENCHMARK</div>
@@ -251,7 +251,7 @@
       </div>
       <div class="card">
         <div class="card-label">LAST TRAINING</div>
-        <div style="font-size:13px;color:var(--cyan);margin-top:5px;letter-spacing:1px;text-shadow:0 0 10px rgba(0,207,255,0.5)">05-11 06:00</div>
+        <div style="font-size:13px;color:var(--cyan);margin-top:5px;letter-spacing:1px;text-shadow:0 0 10px rgba(0,207,255,0.5)">05-13 06:00</div>
         <div class="card-sub">next: 23:00 tonight</div>
       </div>
     </div>
@@ -331,6 +331,22 @@
       <table>
         <thead><tr><th>DATE</th><th>SCORE</th><th>PASS/TOTAL</th><th>EXAMPLES</th><th>DUR</th><th>&#8593;</th></tr></thead>
         <tbody>
+        <tr>
+          <td style="color:#A8E6FF">05-13 06:00</td>
+          <td style="color:#00D4FF">100.0%</td>
+          <td style="color:#A8E6FF">623/623</td>
+          <td style="color:#A8E6FF">132</td>
+          <td style="color:#A8E6FF">25m 11s</td>
+          <td style="color:#00FF88;font-weight:bold">✓</td>
+        </tr>
+        <tr>
+          <td style="color:#A8E6FF">05-12 06:00</td>
+          <td style="color:#00D4FF">100.0%</td>
+          <td style="color:#A8E6FF">623/623</td>
+          <td style="color:#A8E6FF">132</td>
+          <td style="color:#A8E6FF">27m 51s</td>
+          <td style="color:#00FF88;font-weight:bold">✓</td>
+        </tr>
         <tr>
           <td style="color:#A8E6FF">05-11 06:00</td>
           <td style="color:#00D4FF">100.0%</td>
@@ -443,7 +459,7 @@
   <div class="grid-2">
     <div class="card">
       <div class="section-title">MODEL ROUTING — ALL TIME</div>
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">1,332 total queries</div>
+      <div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">1,360 total queries</div>
       <div style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px">
           <span style="color:var(--text)">LOCAL USAGE RATE</span>
@@ -459,23 +475,23 @@
         <tbody>
         <tr>
           <td style="color:#A8E6FF;font-weight:bold">mini</td>
-          <td style="color:#A8E6FF">440</td>
-          <td style="color:#A8E6FF">33.0%</td>
+          <td style="color:#A8E6FF">460</td>
+          <td style="color:#A8E6FF">33.8%</td>
         </tr>
         <tr>
           <td style="color:#00D4FF;font-weight:bold">sonnet</td>
           <td style="color:#A8E6FF">428</td>
-          <td style="color:#00D4FF">32.1%</td>
+          <td style="color:#00D4FF">31.5%</td>
         </tr>
         <tr>
           <td style="color:#00FF88;font-weight:bold">local</td>
-          <td style="color:#A8E6FF">301</td>
+          <td style="color:#A8E6FF">307</td>
           <td style="color:#00FF88">22.6%</td>
         </tr>
         <tr>
           <td style="color:#FFAA00;font-weight:bold">haiku</td>
-          <td style="color:#A8E6FF">163</td>
-          <td style="color:#FFAA00">12.2%</td>
+          <td style="color:#A8E6FF">165</td>
+          <td style="color:#FFAA00">12.1%</td>
         </tr></tbody>
       </table>
     </div>
@@ -518,7 +534,7 @@
 </div>
 
 <script>
-const DATA = {"run_dates": ["05-05 06:19", "05-05 06:21", "05-05 06:23", "05-05 06:30", "05-05 06:32", "05-05 06:35", "05-06 06:00", "05-06 07:32", "05-07 06:04", "05-08 06:00", "05-09 06:00", "05-10 06:08", "05-11 06:00"], "run_scores": [null, null, null, null, null, 99.7, 99.5, 99.5, 99.8, 99.8, 100.0, 100.0, 100.0], "run_examples": [30, 30, 30, 30, 30, 30, 74, 74, 74, 74, 132, 132, 132], "cat_labels": ["Voice / STT", "Calendar", "Code", "Memory", "Tools", "Conversation", "Meeting"], "cat_scores": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "cat_colors": ["#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88"], "bench_dates": ["2026-05-04", "2026-05-04", "2026-05-04", "2026-05-05", "2026-05-06", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10"], "cat_trend_datasets": [{"label": "Voice / STT", "data": [null, null, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#00D4FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Calendar", "data": [null, null, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#00FF88", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Code", "data": [99.7, 99.7, 99.7, 99.7, 99.7, 99.7, 99.7, 100.0, 100.0, 100.0], "borderColor": "#FFAA00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Memory", "data": [null, null, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#FF6B00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Tools", "data": [null, null, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#AA66FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Conversation", "data": [null, null, 98.7, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#FF4488", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Meeting", "data": [null, null, 95.2, 95.2, 95.2, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#44FFCC", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}]};
+const DATA = {"run_dates": ["05-05 06:19", "05-05 06:21", "05-05 06:23", "05-05 06:30", "05-05 06:32", "05-05 06:35", "05-06 06:00", "05-06 07:32", "05-07 06:04", "05-08 06:00", "05-09 06:00", "05-10 06:08", "05-11 06:00", "05-12 06:00", "05-13 06:00"], "run_scores": [null, null, null, null, null, 99.7, 99.5, 99.5, 99.8, 99.8, 100.0, 100.0, 100.0, 100.0, 100.0], "run_examples": [30, 30, 30, 30, 30, 30, 74, 74, 74, 74, 132, 132, 132, 132, 132], "cat_labels": ["Voice / STT", "Calendar", "Code", "Memory", "Tools", "Conversation", "Meeting"], "cat_scores": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "cat_colors": ["#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88", "#00FF88"], "bench_dates": ["2026-05-04", "2026-05-05", "2026-05-06", "2026-05-06", "2026-05-07", "2026-05-08", "2026-05-09", "2026-05-10", "2026-05-11", "2026-05-12"], "cat_trend_datasets": [{"label": "Voice / STT", "data": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#00D4FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Calendar", "data": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#00FF88", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Code", "data": [99.7, 99.7, 99.7, 99.7, 99.7, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#FFAA00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Memory", "data": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#FF6B00", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Tools", "data": [100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#AA66FF", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Conversation", "data": [98.7, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#FF4488", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}, {"label": "Meeting", "data": [95.2, 95.2, 95.2, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "borderColor": "#44FFCC", "backgroundColor": "transparent", "tension": 0.4, "pointRadius": 4, "spanGaps": true}]};
 
 const C = { CYAN:'#00CFFF', GOLD:'#FFB300', GREEN:'#00FF88', DIM:'#2E5A6A', TEXT:'#7EC8DC' };
 
