@@ -42,6 +42,36 @@
       ]
     },
     {
+      "id": "job_application_forms",
+      "name": "Job Application Form Filling",
+      "description": "Fill Workday, Greenhouse, Lever, and similar job application work-experience sections from a user-provided resume with conservative, non-submitting browser automation.",
+      "tool": "browser",
+      "cost_hint": "sonnet",
+      "triggers": [
+        "job application form",
+        "fill application",
+        "autofill application",
+        "workday",
+        "greenhouse",
+        "lever",
+        "professional experience",
+        "work experience",
+        "resume pdf",
+        "application page",
+        "employment history"
+      ],
+      "negative_triggers": [
+        "cover letter",
+        "interview prep",
+        "salary negotiation",
+        "rewrite my resume"
+      ],
+      "path": "job_application_forms/SKILL.md",
+      "resources": [
+        "job_application_forms/references/form_filling_rules.md"
+      ]
+    },
+    {
       "id": "career_interview_ops",
       "name": "Career Interview Ops",
       "description": "Handle offer evaluation, company-specific interview prep, story-bank building, and application-state tracking using Aman's real career-ops files and sourced evidence.",
