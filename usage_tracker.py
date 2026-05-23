@@ -15,10 +15,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import runtime_state
 
-ROOT = Path(__file__).resolve().parent
+ROOT = runtime_state.app_data_dir() if runtime_state.is_frozen_app() else Path(__file__).resolve().parent
 USAGE_LOG = ROOT / "usage_log.jsonl"
-USAGE_STATE = ROOT / "usage_state.json"
+USAGE_STATE = runtime_state.writable_data_path(
+    "usage_state.json",
+    seed_from=Path(__file__).resolve().parent / "usage_state.json",
+)
 
 _LOCK = threading.Lock()
 _MAX_RECENT = 50

@@ -2613,6 +2613,19 @@ class JarvisWindow(QMainWindow):
         self._voice_status_raw = "AWAITING WAKE WORD"
         return self._ensure_voice_worker_running()
 
+    def _pause_voice_worker_for_smart_listen(self) -> None:
+        worker = getattr(self, "voice_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            worker.wait(4000)
+            self._voice_paused_for_smart_listen = True
+
+    def _resume_voice_worker_after_smart_listen(self) -> bool:
+        if not getattr(self, "_voice_paused_for_smart_listen", False):
+            return False
+        self._voice_paused_for_smart_listen = False
+        return self._restart_voice_worker_to_standby()
+
     # ── Hotkey handlers ────────────────────────────────────────────────────────
 
     def _hotkey_screen(self):
@@ -2718,6 +2731,7 @@ class JarvisWindow(QMainWindow):
     def _toggle_smart_listen(self):
         if _meeting_is_running():
             msg = _meeting_stop()
+            self._resume_voice_worker_after_smart_listen()
             self.suggest_panel.hide()
             self._add_message(msg, "jarvis", "")
             meeting = _overlay_mod.detect_meeting_app() or "NONE"
@@ -2731,6 +2745,7 @@ class JarvisWindow(QMainWindow):
             self.listen_btn.setText("🎧")
             self._set_status("ONLINE")
         else:
+            self._pause_voice_worker_for_smart_listen()
             msg = _meeting_start(
                 on_transcript=self._on_transcript,
                 on_suggestion=self._on_suggestion,
@@ -2763,7 +2778,6 @@ class JarvisWindow(QMainWindow):
         _force_text_widget_update(self.transcript_label, hint or "Live suggestion ready.")
         if hasattr(self, "_subtitle"):
             self._subtitle.setText(hint or "Smart Listen active")
-        self._add_message(suggestion, "jarvis", "Meeting")
         self._update_meeting_toolbar_layout()
 
     def _show_suggestion(self, suggestion: str):
@@ -2833,12 +2847,12 @@ class JarvisWindow(QMainWindow):
         self._last_live_listener_started_at = 0.0
         self._last_live_transcript_at = 0.0
         self._last_live_suggestion_at = 0.0
+        self._pause_voice_worker_for_smart_listen()
         msg = _meeting_start(
             on_transcript=self._on_transcript,
             on_suggestion=self._on_suggestion,
         )
         self.suggest_panel.show()
-        self._add_message(msg, "jarvis", "")
         self.transcript_label.setText("Live call transcript incoming...")
         self._subtitle.setText("Smart Listen active")
         self.listen_btn.setText("■")
@@ -4362,6 +4376,7 @@ end tell
     def _toggle_smart_listen(self):
         if _meeting_is_running():
             msg = _meeting_stop()
+            self._resume_voice_worker_after_smart_listen()
             self._add_message(msg, "jarvis", "")
             self._last_live_listener_started_at = 0.0
             self._last_live_transcript_at = 0.0
@@ -4370,6 +4385,7 @@ end tell
             self.listen_btn.setText("🎧")
             self._set_status("ONLINE")
         else:
+            self._pause_voice_worker_for_smart_listen()
             msg = _meeting_start(
                 on_transcript=self._on_transcript,
                 on_suggestion=self._on_suggestion,

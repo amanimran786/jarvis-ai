@@ -17,13 +17,18 @@ from pathlib import Path
 from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED
 from brains.brain_ollama import list_local_models
 import cost_policy
+import runtime_state
 from local_runtime import local_model_eval
 from local_runtime import local_training
 import model_router
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ROOT = REPO_ROOT / "training" / "automation"
+ROOT = runtime_state.writable_data_path(
+    "training",
+    "automation",
+    seed_from=REPO_ROOT / "training" / "automation",
+)
 CYCLES_DIR = ROOT / "cycles"
 
 

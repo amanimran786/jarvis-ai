@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import json
+import shutil
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,6 +111,30 @@ def app_data_dir() -> Path:
     else:
         path = Path.home() / "Library" / "Application Support" / "Jarvis"
     path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def is_frozen_app() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def source_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def writable_data_path(*parts: str, seed_from: str | os.PathLike[str] | None = None) -> Path:
+    """Return a writable runtime path without mutating the packaged app bundle."""
+    path = (app_data_dir() if is_frozen_app() else source_root()).joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if is_frozen_app() and seed_from is not None and not path.exists():
+        seed = Path(seed_from)
+        try:
+            if seed.is_file():
+                shutil.copy2(seed, path)
+            elif seed.is_dir():
+                shutil.copytree(seed, path)
+        except OSError:
+            pass
     return path
 
 

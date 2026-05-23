@@ -11,10 +11,11 @@ import re
 from pathlib import Path
 
 from config import INTERVIEW_ACTIVE_COMPANY, INTERVIEW_ACTIVE_ROLE, KB_ROOT
+import vault
 
 
 CAREER_KB_ROOT = KB_ROOT / "career"
-BRAIN_ROOT = Path(__file__).resolve().parent / "vault" / "wiki" / "brain"
+BRAIN_ROOT = vault.VAULT_ROOT / "wiki" / "brain"
 UNIVERSAL_BASE_POINTER = CAREER_KB_ROOT / "universal_base.md"
 UNIVERSAL_BASE_SOURCE = CAREER_KB_ROOT / "Jarvis_Universal_Interview_Context.md"
 PACKS_DIR = CAREER_KB_ROOT / "packs"

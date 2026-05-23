@@ -23,6 +23,7 @@ import urllib.request
 import re
 from html import unescape
 
+import runtime_state
 from model_router import format_with_mini
 
 _SUPPORTED_BROWSERS = ("Google Chrome", "ChatGPT Atlas", "Brave Browser", "Safari")
@@ -1105,7 +1106,7 @@ def get_chrome_history(query: str = "", limit: int = 50) -> list[dict]:
     if not chrome_history_path.exists():
         return [{"error": "Chrome History database not found."}]
 
-    cache_dir = Path(__file__).resolve().parent / ".jarvis_cache"
+    cache_dir = runtime_state.writable_data_path(".jarvis_cache")
     cache_dir.mkdir(exist_ok=True)
     temp_db_path = cache_dir / "History.sqlite"
 

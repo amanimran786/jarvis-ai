@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import runtime_state
 
 log = logging.getLogger("jarvis.task_persistence")
 
@@ -26,7 +27,11 @@ def db_path() -> Path:
     if override:
         path = Path(override).expanduser()
     else:
-        path = _repo_root() / "runtime" / "jarvis_tasks.sqlite3"
+        path = runtime_state.writable_data_path(
+            "runtime",
+            "jarvis_tasks.sqlite3",
+            seed_from=_repo_root() / "runtime" / "jarvis_tasks.sqlite3",
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 

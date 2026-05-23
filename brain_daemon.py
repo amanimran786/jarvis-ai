@@ -22,6 +22,8 @@ from datetime import datetime
 from pathlib import Path
 from abc import ABC, abstractmethod
 
+import runtime_state
+
 logger = logging.getLogger("brain_daemon")
 
 
@@ -148,7 +150,9 @@ class VaultSynthAgent(BrainAgent):
 
     def run_once(self) -> dict:
         try:
-            vault_root = Path(__file__).parent / "vault"
+            import vault
+
+            vault_root = vault.VAULT_ROOT
             brain_dir = vault_root / "wiki" / "brain"
 
             if not brain_dir.exists():
@@ -269,7 +273,10 @@ class EvalAgent(BrainAgent):
         try:
             import sys as _sys
             repo = Path(__file__).parent
-            training_dir = repo / "training"
+            training_dir = runtime_state.writable_data_path(
+                "training",
+                seed_from=repo / "training",
+            )
             training_path = str(training_dir)
             inserted_path = False
             if training_path not in _sys.path:

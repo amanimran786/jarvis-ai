@@ -5,7 +5,10 @@ import uuid
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-EVALS_FILE = os.path.join(os.path.dirname(__file__), "evals.json")
+import runtime_state
+
+_BUNDLED_EVALS_FILE = os.path.join(os.path.dirname(__file__), "evals.json")
+EVALS_FILE = str(runtime_state.writable_data_path("evals.json", seed_from=_BUNDLED_EVALS_FILE))
 
 _DEFAULTS = {
     "interactions": [],

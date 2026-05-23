@@ -16,8 +16,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import runtime_state
 
-ROOT = Path(__file__).resolve().parent
+ROOT = runtime_state.app_data_dir() if runtime_state.is_frozen_app() else Path(__file__).resolve().parent
 HOOK_LOG = ROOT / "hook_events.jsonl"
 _LOCK = threading.Lock()
 

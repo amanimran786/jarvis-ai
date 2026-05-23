@@ -47,10 +47,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import runtime_state
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 
-_ROOT = Path(__file__).resolve().parent
-MEMORY_DIR = _ROOT / "memory"
+MEMORY_DIR = runtime_state.writable_data_path("memory", seed_from=Path(__file__).resolve().parent / "memory")
 SEMANTIC_DIR = MEMORY_DIR / "semantic"
 EPISODIC_DIR = MEMORY_DIR / "episodic"
 CONVERSATIONS_DIR = MEMORY_DIR / "conversations"

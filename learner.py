@@ -22,8 +22,10 @@ from datetime import datetime, timezone
 from provider_priority import ask_with_priority
 from tools import web_search
 import memory as mem
+import runtime_state
 
-KNOWLEDGE_FILE = os.path.join(os.path.dirname(__file__), "knowledge.json")
+_BUNDLED_KNOWLEDGE_FILE = os.path.join(os.path.dirname(__file__), "knowledge.json")
+KNOWLEDGE_FILE = str(runtime_state.writable_data_path("knowledge.json", seed_from=_BUNDLED_KNOWLEDGE_FILE))
 FEED_INTERVAL_HOURS = 4  # how often to refresh the knowledge feed
 
 

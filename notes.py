@@ -2,7 +2,10 @@ import json
 import os
 from datetime import datetime
 
-NOTES_FILE = os.path.join(os.path.dirname(__file__), "notes.json")
+import runtime_state
+
+_BUNDLED_NOTES_FILE = os.path.join(os.path.dirname(__file__), "notes.json")
+NOTES_FILE = str(runtime_state.writable_data_path("notes.json", seed_from=_BUNDLED_NOTES_FILE))
 
 
 def _load() -> list:

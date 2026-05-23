@@ -18,13 +18,14 @@ from pathlib import Path
 from collections import Counter
 
 import evals
+import runtime_state
 import skills
 from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED, SYSTEM_PROMPT
 from provider_priority import ask_with_priority
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TRAINING_ROOT = REPO_ROOT / "training"
+TRAINING_ROOT = runtime_state.writable_data_path("training", seed_from=REPO_ROOT / "training")
 EXPORTS_DIR = TRAINING_ROOT / "exports"
 DISTILLED_DIR = TRAINING_ROOT / "distilled"
 TEACHER_DIR = TRAINING_ROOT / "teacher_examples"

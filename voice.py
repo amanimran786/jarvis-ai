@@ -20,6 +20,7 @@ from config import (
 import call_privacy
 from local_runtime import local_stt
 from local_runtime import local_tts
+from local_runtime.audio_capture_guard import audio_capture
 # Prefer the subprocess bridge when it imports cleanly, but keep runtime stable
 # while that path is still being debugged.
 try:
@@ -302,7 +303,7 @@ def _open_microphone_source():
     """Open a live microphone stream, skipping candidates that fail to provide one."""
     global _mic_failure_cooldown_until, _mic_last_failure_detail
     last_error: Exception | None = None
-    with _MIC_OPEN_LOCK:
+    with audio_capture("voice-microphone"), _MIC_OPEN_LOCK:
         now = _time.monotonic()
         if now < _mic_failure_cooldown_until:
             detail = _mic_last_failure_detail or "microphone retry cooldown active"
@@ -787,34 +788,26 @@ def wait_for_wake_word() -> None:
         try:
             with _open_microphone_source() as source:
                 _ensure_calibrated(source)
-                while True:
-                    if _stop_requested.is_set():
-                        return
-                    if _manual_wake_trigger.is_set():
-                        _manual_wake_trigger.clear()
-                        _debug_log("\n[Wake word manually triggered]")
-                        return
-                    _done_speaking.wait(timeout=10)
-                    if _stop_requested.is_set():
-                        return
-                    if _manual_wake_trigger.is_set():
-                        _manual_wake_trigger.clear()
-                        _debug_log("\n[Wake word manually triggered]")
-                        return
-                    audio = _capture_audio_window(
-                        source,
-                        duration=WAKE_WORD_WINDOW_SECONDS,
-                        reason="wake word",
-                    )
-                    text = _transcribe_wake_audio(audio)
-                    if _wake_word_match(text or ""):
-                        _debug_log(f"\n[Wake word detected: '{text}']")
-                        return
-                    _debug_log(".", end="", flush=True)
+                if _stop_requested.is_set():
+                    return
+                if _manual_wake_trigger.is_set():
+                    _manual_wake_trigger.clear()
+                    _debug_log("\n[Wake word manually triggered]")
+                    return
+                audio = _capture_audio_window(
+                    source,
+                    duration=WAKE_WORD_WINDOW_SECONDS,
+                    reason="wake word",
+                )
         except RuntimeError as exc:
             _debug_log(f"[Mic] {exc}")
             _time.sleep(_MIC_OPEN_RETRY_SECONDS)
             continue
+        text = _transcribe_wake_audio(audio)
+        if _wake_word_match(text or ""):
+            _debug_log(f"\n[Wake word detected: '{text}']")
+            return
+        _debug_log(".", end="", flush=True)
 
 
 def tts_engine() -> str:
