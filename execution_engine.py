@@ -14,10 +14,11 @@ from brains.brain_claude import ask_claude
 from config import SONNET
 import skills
 import tool_registry
+import runtime_state
 from task_planner import TaskStep
 
 
-TRACE_DIR = Path(__file__).resolve().parent / "training" / "execution_traces"
+TRACE_DIR = runtime_state.writable_data_path("training", "execution_traces")
 DEFAULT_MALWARE_API_BASE = os.getenv("JARVIS_MALWARE_API_BASE", "http://127.0.0.1:9100").strip()
 
 

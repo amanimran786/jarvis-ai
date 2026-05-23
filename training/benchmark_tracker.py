@@ -39,7 +39,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-TRAINING_ROOT = Path(__file__).parent
+import runtime_state
+
+_BUNDLED_TRAINING_ROOT = Path(__file__).parent
+TRAINING_ROOT = runtime_state.writable_data_path(
+    "training",
+    seed_from=_BUNDLED_TRAINING_ROOT,
+)
 BENCHMARK_LOG = TRAINING_ROOT / "benchmarks.jsonl"
 TESTS_DIR = Path(__file__).parent.parent / "tests"
 

@@ -27,10 +27,11 @@ from pathlib import Path
 from typing import Optional
 
 import config
+import runtime_state
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TRAINING_ROOT = REPO_ROOT / "training"
+TRAINING_ROOT = runtime_state.writable_data_path("training", seed_from=REPO_ROOT / "training")
 EXPORTS_DIR = TRAINING_ROOT / "exports"
 PACKS_DIR = TRAINING_ROOT / "packs"
 MLX_ADAPTERS_DIR = TRAINING_ROOT / "mlx_adapters"

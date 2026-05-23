@@ -191,6 +191,16 @@ def _normalize_contact_address(address: str) -> str:
     return re.sub(r"[\s\-\(\)]", "", value)
 
 
+def _contact_address_equivalence_key(address: str) -> str:
+    value = _normalize_contact_address(address)
+    if "@" in value:
+        return value.lower()
+    digits = re.sub(r"\D", "", value)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits or value
+
+
 def _dedupe_choice_displays(choices: list[dict[str, str]]) -> list[dict[str, str]]:
     counts: dict[str, int] = {}
     for choice in choices:
@@ -382,6 +392,11 @@ def lookup_contact(name: str) -> str | None:
                 })
             reachable_choices = [choice for choice in choices if choice["address"]]
             if len(reachable_choices) == 1:
+                _last_contact_choices = []
+                _last_fuzzy_matches = []
+                return reachable_choices[0]["address"]
+            reachable_addresses = {_contact_address_equivalence_key(choice["address"]) for choice in reachable_choices}
+            if len(reachable_addresses) == 1:
                 _last_contact_choices = []
                 _last_fuzzy_matches = []
                 return reachable_choices[0]["address"]

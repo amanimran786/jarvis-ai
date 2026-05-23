@@ -139,6 +139,30 @@ class MessageIntentParsingTests(unittest.TestCase):
         """Per-test cleanup."""
         pass
 
+    def test_current_activity_query_does_not_hallucinate_external_chat(self):
+        """Current-activity questions should be grounded, not answered from old memory."""
+        self.router.meeting_listener.status_snapshot = lambda: {"running": False}
+        stream, label = self.router.route_stream("how exactly were you talking to Farhan and about what?")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("not talking to anyone", text.lower())
+        self.assertIn("explicitly confirm", text.lower())
+
+    def test_current_activity_query_reports_degraded_smart_listen(self):
+        self.router.meeting_listener.status_snapshot = lambda: {
+            "running": True,
+            "active_source_name": "BlackHole 2ch",
+            "last_error": "PortAudio error",
+            "degraded_reasons": ["last_error"],
+            "last_transcript": "She can't be alone, does she?",
+        }
+        stream, label = self.router.route_stream("who were you talking to?")
+        text = "".join(stream)
+        self.assertEqual(label, "Status")
+        self.assertIn("Smart Listen is running on BlackHole 2ch", text)
+        self.assertIn("degraded", text.lower())
+        self.assertIn("should not treat that audio as a real conversation", text)
+
     def test_message_with_contact_scope_and_channel_hints(self):
         """send a message to dad in my contacts using iMessage, to get milk
         -> recipient='dad', body='get milk'

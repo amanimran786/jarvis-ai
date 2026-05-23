@@ -18,6 +18,7 @@ import sounddevice as sd
 import wave
 from openai import OpenAI
 from config import OPENAI_API_KEY
+from local_runtime.audio_capture_guard import audio_capture
 from local_runtime import local_stt
 from provider_priority import ask_with_priority
 import semantic_memory as _smem
@@ -537,14 +538,15 @@ def status_snapshot() -> dict:
 def _record_chunk(seconds: int) -> np.ndarray:
     """Record a chunk of audio from the selected device."""
     global _actual_sample_rate
-    frames = sd.rec(
-        int(seconds * _actual_sample_rate),
-        samplerate=_actual_sample_rate,
-        channels=1,
-        dtype='int16',
-        device=_device_index
-    )
-    sd.wait()
+    with audio_capture("smart-listen"):
+        frames = sd.rec(
+            int(seconds * _actual_sample_rate),
+            samplerate=_actual_sample_rate,
+            channels=1,
+            dtype='int16',
+            device=_device_index
+        )
+        sd.wait()
     return frames.flatten()
 
 
@@ -1222,6 +1224,10 @@ def stop() -> str:
     """Stop smart listening."""
     global _running, _thread
     _running = False
+    try:
+        sd.stop()
+    except Exception:
+        pass
     worker = _thread
     if worker and worker.is_alive():
         worker.join(timeout=2.0)

@@ -366,6 +366,34 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         sleep_mock.assert_called_once()
 
+    def test_wait_for_wake_word_closes_mic_between_wake_windows(self):
+        voice._stop_requested.clear()
+        voice._done_speaking.set()
+        voice._manual_wake_trigger.clear()
+        events = []
+        fake_audio = object()
+
+        class _MicWindow:
+            def __enter__(self):
+                events.append("enter")
+                return object()
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("exit")
+                return None
+
+        try:
+            with patch("voice._open_microphone_source", side_effect=[_MicWindow(), _MicWindow()]), \
+                 patch("voice._ensure_calibrated"), \
+                 patch("voice._capture_audio_window", return_value=fake_audio), \
+                 patch("voice._transcribe_wake_audio", side_effect=[None, "jarvis"]), \
+                 patch("voice._debug_log"):
+                voice.wait_for_wake_word()
+        finally:
+            voice._stop_requested.clear()
+
+        self.assertEqual(events, ["enter", "exit", "enter", "exit"])
+
     def test_capture_audio_window_records_fixed_window(self):
         source = object()
         fallback_audio = object()

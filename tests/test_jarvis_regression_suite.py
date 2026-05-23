@@ -1,5 +1,6 @@
 import unittest
 import json
+import os
 from unittest.mock import call, patch, MagicMock
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -3725,6 +3726,52 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertEqual(preferred["kind"], "microphone")
         self.assertEqual(preferred["device_index"], 3)
 
+    def test_meeting_record_chunk_uses_shared_audio_guard(self):
+        previous_rate = meeting_listener._actual_sample_rate
+        previous_device = meeting_listener._device_index
+        events = []
+
+        class _Guard:
+            def __enter__(self):
+                events.append("guard-enter")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("guard-exit")
+                return None
+
+        try:
+            meeting_listener._actual_sample_rate = 4
+            meeting_listener._device_index = 7
+            frames = meeting_listener.np.array([[1], [2], [3], [4]], dtype=meeting_listener.np.int16)
+            with patch("meeting_listener.audio_capture", return_value=_Guard()) as guard_mock, \
+                 patch("meeting_listener.sd.rec", return_value=frames) as rec_mock, \
+                 patch("meeting_listener.sd.wait") as wait_mock:
+                result = meeting_listener._record_chunk(1)
+        finally:
+            meeting_listener._actual_sample_rate = previous_rate
+            meeting_listener._device_index = previous_device
+
+        guard_mock.assert_called_once_with("smart-listen")
+        rec_mock.assert_called_once_with(4, samplerate=4, channels=1, dtype='int16', device=7)
+        wait_mock.assert_called_once()
+        self.assertEqual(events, ["guard-enter", "guard-exit"])
+        self.assertEqual(result.tolist(), [1, 2, 3, 4])
+
+    def test_meeting_stop_halts_sounddevice_stream(self):
+        previous_running = meeting_listener._running
+        previous_thread = meeting_listener._thread
+        try:
+            meeting_listener._running = True
+            meeting_listener._thread = None
+            with patch("meeting_listener.sd.stop") as stop_mock:
+                msg = meeting_listener.stop()
+        finally:
+            meeting_listener._running = previous_running
+            meeting_listener._thread = previous_thread
+
+        stop_mock.assert_called_once_with()
+        self.assertEqual(msg, "Smart listening stopped.")
+
     def test_caption_fallback_uses_structured_snapshot_line(self):
         snapshot = {
             "ok": True,
@@ -4872,6 +4919,24 @@ class LocalBetaTests(unittest.TestCase):
         self.assertEqual(failures, [])
 
 
+class RuntimeStatePathTests(unittest.TestCase):
+    def test_writable_data_path_uses_app_data_dir_for_frozen_seeded_files(self):
+        with TemporaryDirectory() as tmp:
+            seed = Path(tmp) / "bundle" / "memory.json"
+            data_dir = Path(tmp) / "appdata"
+            seed.parent.mkdir(parents=True)
+            seed.write_text('{"facts": ["seeded"]}', encoding="utf-8")
+
+            with patch.dict(os.environ, {"JARVIS_DATA_DIR": str(data_dir)}), patch.object(
+                runtime_state.sys, "frozen", True, create=True
+            ):
+                path = runtime_state.writable_data_path("memory.json", seed_from=seed)
+
+            self.assertEqual(path, data_dir / "memory.json")
+            self.assertEqual(path.read_text(encoding="utf-8"), '{"facts": ["seeded"]}')
+            self.assertEqual(seed.read_text(encoding="utf-8"), '{"facts": ["seeded"]}')
+
+
 class MemoryConsolidationTests(unittest.TestCase):
     def test_consolidate_memory_builds_tiers_and_context(self):
         with TemporaryDirectory() as tmp:
@@ -5007,6 +5072,26 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
 
         window._ensure_voice_worker_running.assert_called_once_with()
         trigger_mock.assert_called_once_with()
+
+    def test_smart_listen_pause_resume_controls_voice_worker(self):
+        worker = SimpleNamespace(
+            isRunning=unittest.mock.Mock(return_value=True),
+            stop=unittest.mock.Mock(),
+            wait=unittest.mock.Mock(),
+        )
+        window = SimpleNamespace(
+            voice_worker=worker,
+            _restart_voice_worker_to_standby=unittest.mock.Mock(return_value=True),
+        )
+
+        ui.JarvisWindow._pause_voice_worker_for_smart_listen(window)
+        resumed = ui.JarvisWindow._resume_voice_worker_after_smart_listen(window)
+
+        worker.stop.assert_called_once_with()
+        worker.wait.assert_called_once_with(4000)
+        window._restart_voice_worker_to_standby.assert_called_once_with()
+        self.assertTrue(resumed)
+        self.assertFalse(window._voice_paused_for_smart_listen)
 
 
 class LiveAssistRenderingTests(unittest.TestCase):

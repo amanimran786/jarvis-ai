@@ -14,11 +14,16 @@ from brains.brain_ollama import ask_local
 from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED, SONNET
 import evals
 from provider_priority import ask_with_priority
+import runtime_state
 import skills
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-ROOT = REPO_ROOT / "training" / "model_evals"
+ROOT = runtime_state.writable_data_path(
+    "training",
+    "model_evals",
+    seed_from=REPO_ROOT / "training" / "model_evals",
+)
 RUNS_DIR = ROOT / "runs"
 STATE_FILE = ROOT / "promotion.json"
 

@@ -13,8 +13,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import runtime_state
 
-VAULT_ROOT = Path(__file__).resolve().parent / "vault"
+_BUNDLED_VAULT_ROOT = Path(__file__).resolve().parent / "vault"
+VAULT_ROOT = runtime_state.writable_data_path("vault", seed_from=_BUNDLED_VAULT_ROOT)
 RAW_DIR = VAULT_ROOT / "raw"
 WIKI_DIR = VAULT_ROOT / "wiki"
 INDEXES_DIR = VAULT_ROOT / "indexes"

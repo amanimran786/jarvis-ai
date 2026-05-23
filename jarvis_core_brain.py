@@ -22,7 +22,9 @@ import os
 import threading
 import time
 
-_VAULT_ROOT = os.path.join(os.path.dirname(__file__), "vault", "wiki", "brain")
+import vault
+
+_VAULT_ROOT = str(vault.VAULT_ROOT / "wiki" / "brain")
 
 _BRAIN_FILES = {
     "identity":   "10 Identity.md",

@@ -2099,6 +2099,70 @@ def _dispatch_single_intent(query: str) -> str | None:
     return None
 
 
+def _is_current_activity_query(lower: str) -> bool:
+    """Detect questions about Jarvis's current runtime activity.
+
+    These must be grounded in runtime state, not answered by the LLM from
+    episodic memory, because memory can mention prior message tests.
+    """
+    text = (lower or "").strip()
+    if not text:
+        return False
+    return bool(re.search(
+        r"\b(?:what\s+are\s+you\s+doing|what\s+were\s+you\s+doing|"
+        r"what\s+are\s+you\s+working\s+on|what\s+were\s+you\s+working\s+on|"
+        r"who\s+(?:are|were)\s+you\s+(?:talking|speaking)\s+(?:to|with)|"
+        r"what\s+(?:are|were)\s+you\s+(?:talking|speaking)\s+about|"
+        r"are\s+you\s+(?:talking|speaking)\s+(?:to|with)\s+.+|"
+        r"how\s+exactly\s+(?:are|were)\s+you\s+(?:talking|speaking))\b",
+        text,
+        re.IGNORECASE,
+    ))
+
+
+def _current_activity_reply(lower: str) -> str:
+    """Return a truthful status answer for current-activity questions."""
+    try:
+        snap = meeting_listener.status_snapshot()
+    except Exception:
+        snap = {}
+
+    running = bool(snap.get("running"))
+    degraded = bool(snap.get("degraded_reasons") or snap.get("last_error"))
+    last_transcript = str(snap.get("last_transcript") or "").strip()
+    last_suggestion = str(snap.get("last_suggestion") or "").strip()
+    source = (
+        snap.get("active_source_name")
+        or (snap.get("preferred_source") or {}).get("device_name")
+        or (snap.get("preferred") or {}).get("device_name")
+        or "unknown audio source"
+    )
+
+    talking_query = bool(re.search(r"\b(?:talking|speaking)\b", lower or "", re.IGNORECASE))
+    if talking_query:
+        if running:
+            if degraded:
+                return (
+                    f"I'm not talking to anyone. Smart Listen is running on {source}, "
+                    "but it is degraded, so I should not treat that audio as a real conversation."
+                    + (f" Last transcript fragment: \"{last_transcript[:180]}\"." if last_transcript else "")
+                )
+            return (
+                f"I'm not personally talking to anyone. Smart Listen is monitoring {source} for call assistance."
+                + (f" Last transcript fragment: \"{last_transcript[:180]}\"." if last_transcript else "")
+            )
+        return "I'm not talking to anyone right now. I only send or reply to Messages after you explicitly confirm."
+
+    if running:
+        status = f"I'm responding to your current request. Smart Listen is also active on {source}"
+        if degraded:
+            status += " but degraded"
+        if last_suggestion:
+            status += f"; latest suggestion: \"{last_suggestion[:160]}\""
+        return status + "."
+    return "I'm responding to your current request. No external conversation or background action is active."
+
+
 def _looks_like_email_read_query(query: str) -> bool:
     lower = (query or "").lower()
     if re.search(r"\b(?:inbox|unread|read|check|show|list)\b", lower):
@@ -3219,6 +3283,9 @@ def route_stream(user_input: str) -> tuple:
         _fast = _dispatch_single_intent(user_input)
         if _fast is not None:
             return _s(_fast), "Status"
+
+    if _is_current_activity_query(lower):
+        return _s(_current_activity_reply(lower)), "Status"
 
     # ── 1. Fast-path: zero-latency unambiguous commands ───────────────────────
 

@@ -5,7 +5,10 @@ import tempfile
 import threading
 from datetime import date, datetime
 
-MEMORY_FILE = os.path.join(os.path.dirname(__file__), "memory.json")
+import runtime_state
+
+_BUNDLED_MEMORY_FILE = os.path.join(os.path.dirname(__file__), "memory.json")
+MEMORY_FILE = str(runtime_state.writable_data_path("memory.json", seed_from=_BUNDLED_MEMORY_FILE))
 
 _DEFAULTS = {
     "facts": [],

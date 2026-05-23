@@ -22,6 +22,28 @@ class MessagesContactTests(unittest.TestCase):
         self.assertEqual(result, "5107530173")
         self.assertEqual(messages.get_last_contact_options(), [])
 
+    def test_lookup_contact_auto_resolves_duplicate_rows_with_same_handle(self):
+        applescript_output = (
+            "__MULTI__\n"
+            "Fiza Imran\tphone\t_$!<Home>!$_\t(510) 555-0123\n"
+            "Fiza Imran\tphone\t_$!<Phone>!$_\t510-555-0123"
+        )
+        with patch("messages._run_applescript", return_value=(applescript_output, "")):
+            result = messages.lookup_contact("Fiza Imran")
+        self.assertEqual(result, "5105550123")
+        self.assertEqual(messages.get_last_contact_options(), [])
+
+    def test_lookup_contact_auto_resolves_duplicate_rows_with_us_country_code(self):
+        applescript_output = (
+            "__MULTI__\n"
+            "Fiza Imran\tphone\t_$!<Phone>!$_\t+1 (510) 555-0123\n"
+            "Fiza Imran\tphone\t_$!<Home>!$_\t510-555-0123"
+        )
+        with patch("messages._run_applescript", return_value=(applescript_output, "")):
+            result = messages.lookup_contact("Fiza Imran")
+        self.assertEqual(result, "+15105550123")
+        self.assertEqual(messages.get_last_contact_options(), [])
+
     def test_lookup_contact_only_exposes_reachable_duplicate_choices(self):
         applescript_output = "__MULTI__\nAman Imran\tphone\t_$!<Home>!$_\t(510) 753-0173\nAman Imran\temail\t_$!<Work>!$_\taman@example.com\nAman Imran"
         with patch("messages._run_applescript", return_value=(applescript_output, "")):
