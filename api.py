@@ -2949,7 +2949,7 @@ async def root_web_hud(request: Request):
       <div class="chip-row" id="chipRow">
         <button class="chip" onclick="sendChip('what\\'s on my calendar today?')">📅 Calendar</button>
         <button class="chip" onclick="sendChip('summarize my inbox')">📧 Email</button>
-        <button class="chip" onclick="sendChip('any new messages?')">💬 Messages</button>
+        <button class="chip" onclick="sendChip('show my recent messages')">💬 Messages</button>
         <button class="chip" onclick="focusChip('search the web for ')">🔍 Search</button>
         <button class="chip" onclick="sendChip('what is your current status and mode?')">⚡ Status</button>
         <button class="chip" onclick="sendChip('what do you remember about me?')">🧠 Memory</button>
