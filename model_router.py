@@ -842,18 +842,20 @@ def smart_stream(
     Only escalates when the task genuinely requires it.
     """
     # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
+    # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
+    # a generator function and break all callers that expect a (stream, label) tuple.
+    # Instead return a (stream, label) tuple just like every other path does.
     if _is_mobile_web_active():
         _mobile_system = (
             extra_system + "\n\n" if extra_system else ""
         ) + "You are Jarvis on the user's MacBook, accessed via mobile. Be concise."
-        yield from ask_stream(
+        return ask_stream(
             user_input,
             GPT_MINI,
             system_extra=_mobile_system,
             track_context=False,
             bypass_local=True,
-        )
-        return
+        ), GPT_MINI
 
     # ── Always-on identity snapshot (replaces per-query vault search for identity facts) ──
     _brain_ctx = _core_brain.core_context()

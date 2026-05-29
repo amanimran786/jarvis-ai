@@ -2807,8 +2807,16 @@ def route_stream(user_input: str) -> tuple:
     # ── 0a. Contact alias learning ────────────────────────────────────────────
     # Patterns: "my mom is [redacted]", "mom's number is 5105550125",
     # "remember mom as [redacted]", "save mom as 5105550125"
+    # Requires "my <word>" prefix OR explicit remember/save/add verb to avoid
+    # false-positive matches on conversational "X is Y" sentences.
+    _RELATIONSHIP_WORDS = {"mom","mother","ammi","dad","father","abu","abbu","wife","husband",
+                           "sister","brother","bhai","apa","girlfriend","boyfriend","partner",
+                           "grandma","grandpa","nana","nani","boss","roommate","bestie"}
     _alias_learn = re.match(
-        r"(?:my\s+)?(\w+)(?:'?s)?\s+(?:is|number\s+is|contact\s+is|phone\s+is)\s+(.+)",
+        r"my\s+(\w+)(?:'?s)?\s+(?:is|number\s+is|contact\s+is|phone\s+is)\s+(.+)",
+        lower.strip(),
+    ) or re.match(
+        r"(\w+)(?:'?s)?\s+(?:number\s+is|phone\s+is|contact\s+is)\s+(.+)",
         lower.strip(),
     ) or re.match(
         r"(?:remember|save|add)\s+(\w+)\s+(?:as|is)\s+(.+)",
@@ -2817,11 +2825,8 @@ def route_stream(user_input: str) -> tuple:
     if _alias_learn:
         alias_key = _alias_learn.group(1).strip()
         alias_val = _alias_learn.group(2).strip()
-        # Only learn short relationship aliases (mom, dad, wife, etc.) not real names
-        _RELATIONSHIP_WORDS = {"mom","mother","dad","father","wife","husband","sister","brother",
-                               "girlfriend","boyfriend","partner","grandma","grandpa","grandma","nan",
-                               "boss","friend","roommate"}
-        if alias_key in _RELATIONSHIP_WORDS or len(alias_key) <= 8:
+        # Only fire for known relationship words OR explicit "my X is" form
+        if alias_key in _RELATIONSHIP_WORDS:
             phone_match = re.search(r"[\d]{10}", alias_val.replace("-","").replace(" ","").replace("+","").replace("(","").replace(")",""))
             phone_val = phone_match.group(0) if phone_match else ""
             name_val = alias_val if not phone_val else alias_val
