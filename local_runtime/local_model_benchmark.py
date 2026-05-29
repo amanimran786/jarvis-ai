@@ -13,10 +13,12 @@ DEFAULT_PROMPTS = [
 
 
 APPLE_SILICON_RECOMMENDATIONS = [
-    {"model": "qwen2.5-coder:7b", "fit": "coding-heavy", "notes": "Strong code quality per watt, good on consumer Apple Silicon."},
-    {"model": "llama3.1:8b", "fit": "general assistant", "notes": "Balanced quality and speed for local daily use."},
-    {"model": "mistral:7b", "fit": "fast low-latency", "notes": "Good responsiveness for interactive assistant loops."},
-    {"model": "qwen2.5:14b", "fit": "higher reasoning", "notes": "Better reasoning if memory budget allows a larger quantized model."},
+    {"model": "gemma4:e4b", "fit": "default fast general", "notes": "Google Gemma 4 E4B — frontier quality at 9.6GB, currently Jarvis default."},
+    {"model": "qwen3:8b", "fit": "general reasoning", "notes": "Qwen3 8B — strong reasoning/instruction following, 5.2GB, newly installed."},
+    {"model": "qwen2.5-coder:7b", "fit": "coding-heavy", "notes": "Strong code quality per watt, Jarvis coder lane default."},
+    {"model": "deepseek-r1:14b", "fit": "deep reasoning", "notes": "Best local chain-of-thought for complex multi-step problems."},
+    {"model": "gemma4:31b", "fit": "high reasoning workstation", "notes": "19GB — best local quality when memory allows."},
+    {"model": "qwen3.6:35b", "fit": "MoE general strong", "notes": "35B MoE — frontier local quality, sparse activation keeps it fast."},
 ]
 
 
