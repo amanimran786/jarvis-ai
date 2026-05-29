@@ -3363,6 +3363,15 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"], "chat_busy")
 
+    def test_web_hud_keeps_stream_parser_javascript_valid(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.text
+        self.assertIn(r"buffer.split('\n')", html)
+        self.assertNotIn("buffer.split('\n')", html)
+        self.assertIn("data.model", html)
+
     def test_mobile_web_stream_falls_back_and_caches_claude_failure(self):
         api._claude_mobile_ok = True
         api._claude_mobile_retry_after = 0.0
