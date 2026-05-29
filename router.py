@@ -2804,6 +2804,41 @@ def route_stream(user_input: str) -> tuple:
                 yield f"Email search unavailable: {exc}"
         return _email_search_gen(), "Gmail"
 
+    # ── 0a. Contact alias learning ────────────────────────────────────────────
+    # Patterns: "my mom is [redacted]", "mom's number is 5105550125",
+    # "remember mom as [redacted]", "save mom as 5105550125"
+    _alias_learn = re.match(
+        r"(?:my\s+)?(\w+)(?:'?s)?\s+(?:is|number\s+is|contact\s+is|phone\s+is)\s+(.+)",
+        lower.strip(),
+    ) or re.match(
+        r"(?:remember|save|add)\s+(\w+)\s+(?:as|is)\s+(.+)",
+        lower.strip(),
+    )
+    if _alias_learn:
+        alias_key = _alias_learn.group(1).strip()
+        alias_val = _alias_learn.group(2).strip()
+        # Only learn short relationship aliases (mom, dad, wife, etc.) not real names
+        _RELATIONSHIP_WORDS = {"mom","mother","dad","father","wife","husband","sister","brother",
+                               "girlfriend","boyfriend","partner","grandma","grandpa","grandma","nan",
+                               "boss","friend","roommate"}
+        if alias_key in _RELATIONSHIP_WORDS or len(alias_key) <= 8:
+            phone_match = re.search(r"[\d]{10}", alias_val.replace("-","").replace(" ","").replace("+","").replace("(","").replace(")",""))
+            phone_val = phone_match.group(0) if phone_match else ""
+            name_val = alias_val if not phone_val else alias_val
+            # If it looks like a number, resolve it; otherwise use as name
+            if re.match(r"^[\d\s\-\+\(\)]+$", alias_val) and phone_val:
+                msg.save_contact_alias(alias_key, phone_val, phone_val)
+                return _s(f"Got it — I'll message {alias_key} at {phone_val} from now on."), "Messages"
+            else:
+                # Name given — try to resolve it in Contacts to get the phone
+                resolved = msg.lookup_contact(alias_val)
+                if resolved and not resolved.startswith("__"):
+                    msg.save_contact_alias(alias_key, alias_val, resolved)
+                    return _s(f"Got it — {alias_key} is {alias_val}. I'll use that from now on."), "Messages"
+                else:
+                    msg.save_contact_alias(alias_key, alias_val, "")
+                    return _s(f"Saved: {alias_key} = {alias_val}. If they have a number in Contacts I'll find it, otherwise ask me for their number."), "Messages"
+
     # ── 0. Pending message state ──────────────────────────────────────────────
     if _is_message_cancel_query(lower):
         # If there's no message state but there IS a pending email draft, cancel that instead
