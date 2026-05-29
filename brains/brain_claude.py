@@ -8,6 +8,37 @@ from brains import _postprocess
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 
+def _get_client() -> "anthropic.Anthropic":
+    """Return a live client, re-resolving the key if it wasn't set at import time.
+
+    Falls back to reading .env directly so processes launched from environments
+    that pre-set ANTHROPIC_API_KEY='' (e.g. CI, Claude Code sandbox) still work.
+    """
+    global client
+    if client is not None:
+        return client
+    import os
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        # env var is absent or empty — read .env directly
+        try:
+            from dotenv import dotenv_values
+            from pathlib import Path
+            for candidate in (
+                Path(__file__).resolve().parent.parent / ".env",
+                Path.home() / "jarvis-ai" / ".env",
+            ):
+                if candidate.is_file():
+                    key = (dotenv_values(candidate).get("ANTHROPIC_API_KEY") or "").strip()
+                    if key:
+                        break
+        except Exception:
+            pass
+    if key:
+        client = anthropic.Anthropic(api_key=key)
+    return client
+
+
 def ask_claude(
     user_input: str,
     model: str = HAIKU,
@@ -42,7 +73,8 @@ def ask_claude_stream(
     system_extra: str = "",
     track_context: bool = False,
 ):
-    if client is None:
+    _client = _get_client()
+    if _client is None:
         raise RuntimeError("Anthropic API key is not configured.")
 
     system_base = system if system is not None else (SYSTEM_PROMPT + mem.get_context())
@@ -57,7 +89,7 @@ def ask_claude_stream(
 
     full_reply = ""
     final_message = None
-    with client.messages.stream(
+    with _client.messages.stream(
         model=model,
         max_tokens=2048,
         system=effective_system,
