@@ -6,6 +6,7 @@ Looks up contacts by name from the Contacts app.
 import subprocess
 import re
 import sqlite3
+import json
 from pathlib import Path
 
 _AMBIGUOUS_CONTACT = "__AMBIGUOUS_CONTACT__"
@@ -19,6 +20,46 @@ _last_applescript_error = ""
 _last_chat_db_access_error = ""
 _messages_history_access_prompt_shown = False
 MESSAGES_CHAT_DB = Path.home() / "Library" / "Messages" / "chat.db"
+
+# ── Contact alias table ────────────────────────────────────────────────────────
+# Nicknames / relationships not in Contacts: "mom", "dad", "wife", custom aliases.
+# Stored in contact_aliases.json next to this repo.
+_ALIASES_PATH = Path(__file__).resolve().parent / "contact_aliases.json"
+
+
+def _load_aliases() -> dict[str, dict]:
+    try:
+        return json.loads(_ALIASES_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def _save_aliases(table: dict) -> None:
+    try:
+        _ALIASES_PATH.write_text(json.dumps(table, indent=2) + "\n")
+    except Exception:
+        pass
+
+
+def save_contact_alias(alias: str, name: str, phone: str) -> None:
+    """Persist alias → {name, phone} so Jarvis remembers nicknames like 'mom'."""
+    table = _load_aliases()
+    table[alias.lower().strip()] = {"name": name, "phone": phone}
+    _save_aliases(table)
+
+
+def resolve_alias(name: str) -> dict | None:
+    """Return {'name': ..., 'phone': ...} if name matches a known alias, else None."""
+    key = name.lower().strip()
+    table = _load_aliases()
+    # Exact alias match
+    if key in table:
+        return table[key]
+    # First-word match ("mom" in "message mom how are you" etc.)
+    first = key.split()[0] if key else ""
+    if first and first in table:
+        return table[first]
+    return None
 
 
 def messages_history_access_status(db_path: Path | None = None) -> dict[str, str | bool]:
@@ -322,6 +363,11 @@ def lookup_contact(name: str) -> str | None:
       - None                if no match AND no fuzzy suggestions found
     """
     global _last_fuzzy_matches, _last_contact_choices
+
+    # ── Alias table first: "mom", "dad", custom nicknames ────────────────────
+    alias = resolve_alias(name)
+    if alias and alias.get("phone"):
+        return alias["phone"]
 
     for field, comparator, search_term in _contact_search_specs(name):
         script = f"""
