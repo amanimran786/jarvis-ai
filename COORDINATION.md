@@ -14,6 +14,12 @@ Update this file when picking up or finishing a task. Commit the update so the o
 
 ## Active Tasks
 
+### [DONE] Mobile web fallback cooldown takeover
+**Completed by Codex 2026-05-28**
+- Took over the in-progress mobile web routing patch after Claude/Antigravity work.
+- `api.py`: mobile web streams try Claude Haiku first, cache hard Claude failures for 10 minutes, and fall back to `GPT_MINI` without touching global mode.
+- `tests/test_jarvis_regression_suite.py`: added API surface coverage for Claude failure fallback, cooldown skip, and retry after cooldown.
+
 ### [DONE] GRPO training support + package upgrades + Whisper upgrade + Apple Foundation fix
 **Completed by Claude 2026-05-11**
 - `local_runtime/local_mlx_dpo.py`: GRPO fully implemented in `run_preference_training()`.

@@ -2719,6 +2719,8 @@ class ApiSurfaceTests(unittest.TestCase):
     def tearDown(self):
         api._API_TOKEN = ""
         api._CHAT_LOCK_TIMEOUT_SECONDS = 3.0
+        api._claude_mobile_ok = True
+        api._claude_mobile_retry_after = 0.0
         import task_runtime as _tr
         _tr.reset_for_tests()
 
@@ -3360,6 +3362,50 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"], "chat_busy")
+
+    def test_mobile_web_stream_falls_back_and_caches_claude_failure(self):
+        api._claude_mobile_ok = True
+        api._claude_mobile_retry_after = 0.0
+
+        with patch("api.time.time", return_value=100.0), \
+             patch("brains.brain_claude._get_client", return_value=object()), \
+             patch("brains.brain_claude.ask_claude_stream", side_effect=RuntimeError("credits exhausted")), \
+             patch("brains.brain.ask_stream", return_value=iter(["fallback response"])) as openai_stream:
+            stream, model = api._mobile_web_stream("hello from mobile")
+            response = "".join(stream)
+
+        self.assertEqual(model, config.GPT_MINI)
+        self.assertEqual(response, "fallback response")
+        self.assertFalse(api._claude_mobile_ok)
+        self.assertEqual(api._claude_mobile_retry_after, 700.0)
+        openai_stream.assert_called_once_with(
+            "hello from mobile",
+            model=config.GPT_MINI,
+            bypass_local=True,
+            track_context=False,
+        )
+
+        with patch("api.time.time", return_value=101.0), \
+             patch("brains.brain_claude._get_client", side_effect=AssertionError("Claude should be cooling down")), \
+             patch("brains.brain.ask_stream", return_value=iter(["cached fallback"])):
+            stream, model = api._mobile_web_stream("second mobile request")
+
+        self.assertEqual(model, config.GPT_MINI)
+        self.assertEqual("".join(stream), "cached fallback")
+
+    def test_mobile_web_stream_retries_claude_after_cooldown(self):
+        api._claude_mobile_ok = False
+        api._claude_mobile_retry_after = 50.0
+
+        with patch("api.time.time", return_value=60.0), \
+             patch("brains.brain_claude._get_client", return_value=object()), \
+             patch("brains.brain_claude.ask_claude_stream", return_value=iter(["haiku response"])), \
+             patch("brains.brain.ask_stream", side_effect=AssertionError("OpenAI fallback should not run")):
+            stream, model = api._mobile_web_stream("retry mobile request")
+
+        self.assertEqual(model, config.HAIKU)
+        self.assertEqual("".join(stream), "haiku response")
+        self.assertTrue(api._claude_mobile_ok)
 
 
 class BenchmarkCoverageTests(unittest.TestCase):

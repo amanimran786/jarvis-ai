@@ -604,33 +604,45 @@ class RemoteActionRequest(BaseModel):
 
 # ── Mobile web stream helper ───────────────────────────────────────────────────
 
+# Cache: if Claude fails with a hard error (credits, auth), skip it for 10 min.
+_claude_mobile_ok: bool = True
+_claude_mobile_retry_after: float = 0.0
+_CLAUDE_MOBILE_COOLDOWN = 600.0  # seconds
+
+
 def _mobile_web_stream(message: str):
     """Return (stream_iterator, model_label) for a mobile_web /chat request.
 
-    Strategy: try Claude Haiku first (fast, high quality). If that fails for any
-    reason (no credits, auth error, network, etc.) fall back to OpenAI GPT-4o-mini.
-    Both paths bypass route_stream() so DEFAULT_MODE=open-source is irrelevant here.
-    Thread-safe: no global state mutated.
+    Strategy: try Claude Haiku first; on hard failure (credits/auth/429) back
+    off for 10 minutes and route straight to GPT-4o-mini. No global mode touched.
+    Thread-safe: flag reads/writes are atomic on CPython's GIL.
     """
-    # ── 1. Claude Haiku attempt ────────────────────────────────────────────────
-    try:
-        from brains.brain_claude import ask_claude_stream as _cs, _get_client
-        if _get_client() is not None:
-            gen = _cs(message, model=HAIKU, track_context=False)
-            # Probe: consume the first token to surface auth/credit errors early
-            # before we commit to this generator in the caller.
-            first = next(gen)
-            return itertools.chain([first], gen), HAIKU
-    except StopIteration:
-        # Empty response from Claude — fall through to OpenAI
-        pass
-    except Exception as exc:
-        log.warning("[mobile_web] Claude Haiku unavailable (%s), falling back to GPT-4o-mini", exc)
+    global _claude_mobile_ok, _claude_mobile_retry_after
 
-    # ── 2. OpenAI GPT-4o-mini fallback ────────────────────────────────────────
     from config import GPT_MINI
-    from brains.brain import ask_stream as _os
-    return _os(message, model=GPT_MINI, bypass_local=True, track_context=False), GPT_MINI
+    from brains.brain import ask_stream as _openai_stream
+
+    # ── 1. Claude Haiku attempt (skip if recently failed) ─────────────────────
+    if _claude_mobile_ok or time.time() >= _claude_mobile_retry_after:
+        try:
+            from brains.brain_claude import ask_claude_stream as _cs, _get_client
+            if _get_client() is not None:
+                gen = _cs(message, model=HAIKU, track_context=False)
+                first = next(gen)  # probe — surfaces credit/auth errors immediately
+                _claude_mobile_ok = True  # reset on success
+                return itertools.chain([first], gen), HAIKU
+        except StopIteration:
+            _claude_mobile_ok = True
+        except Exception as exc:
+            _claude_mobile_ok = False
+            _claude_mobile_retry_after = time.time() + _CLAUDE_MOBILE_COOLDOWN
+            log.warning(
+                "[mobile_web] Claude unavailable (%s) — using GPT-4o-mini for next %.0fs",
+                exc, _CLAUDE_MOBILE_COOLDOWN,
+            )
+
+    # ── 2. OpenAI GPT-4o-mini ─────────────────────────────────────────────────
+    return _openai_stream(message, model=GPT_MINI, bypass_local=True, track_context=False), GPT_MINI
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
