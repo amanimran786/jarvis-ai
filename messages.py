@@ -366,8 +366,16 @@ def lookup_contact(name: str) -> str | None:
 
     # ── Alias table first: "mom", "dad", custom nicknames ────────────────────
     alias = resolve_alias(name)
-    if alias and alias.get("phone"):
-        return alias["phone"]
+    if alias:
+        if alias.get("phone"):
+            return alias["phone"]
+        # Alias has a real name but no phone yet — search Contacts by real name
+        if alias.get("name") and alias["name"].lower() != name.lower():
+            result = lookup_contact(alias["name"])
+            if result and not result.startswith("__"):
+                # Found it — save the phone for next time
+                save_contact_alias(name, alias["name"], result)
+                return result
 
     for field, comparator, search_term in _contact_search_specs(name):
         script = f"""
