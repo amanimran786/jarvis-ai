@@ -112,13 +112,53 @@ def unmute() -> str:
 
 
 def set_brightness(level: int) -> str:
-    """Set screen brightness 0–100. Requires: brew install brightness"""
+    """Set screen brightness 0–100 using Quartz key events (Apple Silicon safe).
+
+    Falls back to the 'brightness' CLI for older Intel Macs.
+    Requires Accessibility permission for the app/terminal running Jarvis.
+    """
     level = max(0, min(100, level))
-    fraction = level / 100
-    result = subprocess.run(["brightness", str(fraction)], capture_output=True)
-    if result.returncode != 0:
-        return "Brightness control requires 'brew install brightness'. I couldn't change it."
-    return f"Brightness set to {level}%."
+
+    # Primary: Quartz CGEventPost (works on Apple Silicon M-series, all displays)
+    try:
+        import Quartz
+        import time as _t
+        STEPS = 16  # macOS has 16 brightness steps
+        target = round(level / 100 * STEPS)
+
+        # Drive to minimum first (press F1 / brightness-down STEPS+2 times)
+        for _ in range(STEPS + 2):
+            e = Quartz.CGEventCreateKeyboardEvent(None, 145, True)   # key down
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+            e = Quartz.CGEventCreateKeyboardEvent(None, 145, False)  # key up
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+        _t.sleep(0.05)
+
+        # Step up to target level (press F2 / brightness-up)
+        for _ in range(target):
+            e = Quartz.CGEventCreateKeyboardEvent(None, 144, True)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+            e = Quartz.CGEventCreateKeyboardEvent(None, 144, False)
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, e)
+
+        return f"Brightness set to {level}%."
+    except Exception:
+        pass
+
+    # Fallback: 'brightness' CLI (Intel Macs / external DDC displays)
+    try:
+        fraction = level / 100
+        result = subprocess.run(["brightness", str(fraction)], capture_output=True, timeout=3)
+        if result.returncode == 0:
+            return f"Brightness set to {level}%."
+    except Exception:
+        pass
+
+    return (
+        "Brightness control requires Accessibility permission. "
+        "Go to System Settings → Privacy & Security → Accessibility → "
+        "add Terminal (or Jarvis.app) and enable it."
+    )
 
 
 def take_screenshot() -> str:
