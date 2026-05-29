@@ -25,6 +25,7 @@ Endpoints:
 """
 
 import json
+import itertools
 import os
 import hmac
 import hashlib
@@ -601,6 +602,37 @@ class RemoteActionRequest(BaseModel):
     action: str
 
 
+# ── Mobile web stream helper ───────────────────────────────────────────────────
+
+def _mobile_web_stream(message: str):
+    """Return (stream_iterator, model_label) for a mobile_web /chat request.
+
+    Strategy: try Claude Haiku first (fast, high quality). If that fails for any
+    reason (no credits, auth error, network, etc.) fall back to OpenAI GPT-4o-mini.
+    Both paths bypass route_stream() so DEFAULT_MODE=open-source is irrelevant here.
+    Thread-safe: no global state mutated.
+    """
+    # ── 1. Claude Haiku attempt ────────────────────────────────────────────────
+    try:
+        from brains.brain_claude import ask_claude_stream as _cs, _get_client
+        if _get_client() is not None:
+            gen = _cs(message, model=HAIKU, track_context=False)
+            # Probe: consume the first token to surface auth/credit errors early
+            # before we commit to this generator in the caller.
+            first = next(gen)
+            return itertools.chain([first], gen), HAIKU
+    except StopIteration:
+        # Empty response from Claude — fall through to OpenAI
+        pass
+    except Exception as exc:
+        log.warning("[mobile_web] Claude Haiku unavailable (%s), falling back to GPT-4o-mini", exc)
+
+    # ── 2. OpenAI GPT-4o-mini fallback ────────────────────────────────────────
+    from config import GPT_MINI
+    from brains.brain import ask_stream as _os
+    return _os(message, model=GPT_MINI, bypass_local=True, track_context=False), GPT_MINI
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -609,23 +641,43 @@ def chat(req: ChatRequest):
     source = (req.source or "api").strip() or "api"
     client_meta = req.meta or {}
     if req.stream:
+        # mobile_web bypasses _CHAT_LOCK — it goes direct to cloud, no TTS/voice
+        # gating needed, and the lock must not be held across a slow HTTP stream.
+        if source == "mobile_web":
+            def generate_mobile():
+                start_seq = usage_tracker.current_seq()
+                stream, model = _mobile_web_stream(req.message)
+                chunks = []
+                for chunk in stream:
+                    if chunk:
+                        chunks.append(chunk)
+                        yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
+                response = "".join(chunks)
+                usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
+                stream_source = "mobile_web_stream"
+                context_stats = ctx.record_request_stats(model, source=stream_source)
+                interaction = evals.log_interaction(
+                    req.message, response, model,
+                    source=stream_source,
+                    context={**context_stats, "client_meta": client_meta},
+                )
+                evals.maybe_log_automatic_failure(interaction)
+                try:
+                    semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
+                except Exception:
+                    pass
+                _record_turn(req.message, response)
+                yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(generate_mobile(), media_type="text/event-stream")
+
         if not _acquire_chat_lock():
             return JSONResponse(status_code=409, content=_chat_busy_payload())
 
         def generate():
             try:
                 start_seq = usage_tracker.current_seq()
-                if source == "mobile_web":
-                    # Bypass route_stream() entirely — call Claude Haiku directly.
-                    # Lazy import so the client is resolved after .env is loaded.
-                    # Thread-safe: no global state touched.
-                    from brains.brain_claude import ask_claude_stream as _mobile_claude_stream
-                    stream = _mobile_claude_stream(
-                        req.message, model=HAIKU, track_context=True
-                    )
-                    model = HAIKU
-                else:
-                    stream, model = route_stream(req.message)
+                stream, model = route_stream(req.message)
                 chunks = []
                 for chunk in stream:
                     if chunk:
@@ -665,14 +717,7 @@ def chat(req: ChatRequest):
     try:
         start_seq = usage_tracker.current_seq()
         if source == "mobile_web":
-            # Bypass route_stream() entirely — call Claude Haiku directly.
-            # Lazy import so the client is resolved after .env is loaded.
-            # Thread-safe: no global state touched.
-            from brains.brain_claude import ask_claude_stream as _mobile_claude_stream
-            stream = _mobile_claude_stream(
-                req.message, model=HAIKU, track_context=True
-            )
-            model = HAIKU
+            stream, model = _mobile_web_stream(req.message)
         else:
             stream, model = route_stream(req.message)
         response = "".join(stream)
