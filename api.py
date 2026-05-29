@@ -615,6 +615,22 @@ class RemoteActionRequest(BaseModel):
     action: str
 
 
+class RemoteClickRequest(BaseModel):
+    x: float   # 0.0–1.0 relative to screen width
+    y: float   # 0.0–1.0 relative to screen height
+    double: bool = False
+
+
+class RemoteScrollRequest(BaseModel):
+    dx: float = 0.0   # horizontal scroll delta (-1.0 to 1.0)
+    dy: float = 0.0   # vertical scroll delta (-1.0 to 1.0)
+
+
+class RemoteTypeRequest(BaseModel):
+    text: str
+    submit: bool = False  # press Return after typing
+
+
 # ── Mobile web stream helper ───────────────────────────────────────────────────
 
 # Cache: if Claude fails with a hard error (credits, auth), skip it for 10 min.
@@ -1406,6 +1422,117 @@ def remote_action(request: Request, req: RemoteActionRequest):
         else:
             return JSONResponse(status_code=400, content={"ok": False, "error": "unknown_action"})
         return {"ok": True, "message": msg}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.get("/remote/screen/frame")
+def remote_screen_frame(request: Request):
+    """Return a compressed JPEG screenshot suitable for live screen streaming.
+
+    Scaled to 50%, JPEG quality 60 — ~140KB per frame, ~280ms capture.
+    Query param ?token= accepted for <img src> embedding (no Authorization header).
+    """
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import io
+        from PIL import Image
+        from desktop.screen_capture import capture_screenshot_temp
+        temp_path = capture_screenshot_temp("png")
+        img = Image.open(temp_path).convert("RGB")
+        os.unlink(temp_path)
+        w, h = img.size
+        img_small = img.resize((w // 2, h // 2), Image.LANCZOS)
+        buf = io.BytesIO()
+        img_small.save(buf, format="JPEG", quality=60, optimize=True)
+        buf.seek(0)
+        # Expose actual frame dimensions in headers for JS click mapping
+        headers = {
+            "X-Frame-Width": str(w // 2),
+            "X-Frame-Height": str(h // 2),
+            "X-Screen-Width": str(w),
+            "X-Screen-Height": str(h),
+            "Cache-Control": "no-store",
+        }
+        return StreamingResponse(buf, media_type="image/jpeg", headers=headers)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/click")
+def remote_click(request: Request, req: RemoteClickRequest):
+    """Send a mouse click at a relative position (x: 0.0–1.0, y: 0.0–1.0)."""
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import Quartz
+        from Quartz import (
+            CGEventCreateMouseEvent, CGEventPost, CGMainDisplayID, CGDisplayBounds,
+            kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft,
+            kCGHIDEventTap, kCGEventMouseMoved,
+        )
+        bounds = CGDisplayBounds(CGMainDisplayID())
+        sw, sh = bounds.size.width, bounds.size.height
+        px = max(0.0, min(1.0, req.x)) * sw
+        py = max(0.0, min(1.0, req.y)) * sh
+        point = Quartz.CGPoint(px, py)
+
+        # Move cursor to location first
+        move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, point, kCGMouseButtonLeft)
+        CGEventPost(kCGHIDEventTap, move)
+
+        # Click down + up (repeat for double-click)
+        clicks = 2 if req.double else 1
+        for _ in range(clicks):
+            down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, point, kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, down)
+            up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, point, kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, up)
+
+        return {"ok": True, "x": px, "y": py}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/scroll")
+def remote_scroll(request: Request, req: RemoteScrollRequest):
+    """Send a scroll wheel event. dy > 0 = scroll up, dy < 0 = scroll down."""
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import Quartz
+        from Quartz import CGEventCreateScrollWheelEvent, CGEventPost, kCGHIDEventTap
+        SCALE = 12
+        scroll_y = int(req.dy * SCALE)
+        scroll_x = int(req.dx * SCALE)
+        # kCGScrollEventUnitLine = 1
+        event = CGEventCreateScrollWheelEvent(None, 1, 2, scroll_y, scroll_x)
+        CGEventPost(kCGHIDEventTap, event)
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/type")
+def remote_type(request: Request, req: RemoteTypeRequest):
+    """Type text on the Mac as keyboard input. Optionally press Return after."""
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        safe_text = req.text.replace('"', '\\"').replace('\\', '\\\\')[:500]
+        script = f'tell application "System Events" to keystroke "{safe_text}"'
+        subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
+        if req.submit:
+            subprocess.run(
+                ["osascript", "-e", 'tell application "System Events" to key code 36'],
+                capture_output=True, timeout=3,
+            )
+        return {"ok": True, "typed": req.text[:40]}
     except Exception as e:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
@@ -2631,9 +2758,104 @@ async def root_web_hud(request: Request):
       grid-template-columns: 1fr 1fr;
       gap: 10px;
     }
+
+    /* ── Full-screen MacBook Screen Viewer ─────────────────────────────── */
+    #screenViewer {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #000;
+      z-index: 9999;
+      flex-direction: column;
+      touch-action: none;
+    }
+    #screenViewer.active { display: flex; }
+
+    #screenCanvas {
+      flex: 1;
+      width: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+      touch-action: none;
+      display: block;
+    }
+
+    #screenBar {
+      flex-shrink: 0;
+      background: rgba(2, 10, 16, 0.95);
+      border-top: 1px solid rgba(0, 212, 255, 0.25);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    #screenInput {
+      flex: 1;
+      background: rgba(3, 18, 28, 0.9);
+      color: #a8e6ff;
+      border: 1px solid rgba(0, 212, 255, 0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    #screenInput:focus { border-color: #00d4ff; }
+
+    .screen-btn {
+      background: rgba(0, 212, 255, 0.1);
+      color: #00d4ff;
+      border: 1px solid rgba(0, 212, 255, 0.3);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .screen-btn:active { background: rgba(0, 212, 255, 0.25); }
+
+    #screenFps {
+      font-size: 10px;
+      color: rgba(0,212,255,0.4);
+      position: absolute;
+      top: 6px; right: 10px;
+      pointer-events: none;
+    }
+
+    #screenClickFeedback {
+      position: fixed;
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(0,212,255,0.5);
+      border: 2px solid #00d4ff;
+      pointer-events: none;
+      z-index: 10000;
+      transform: translate(-50%,-50%) scale(0);
+      transition: transform 0.15s ease, opacity 0.3s ease;
+      opacity: 0;
+    }
+    #screenClickFeedback.pop {
+      transform: translate(-50%,-50%) scale(1);
+      opacity: 1;
+    }
   </style>
 </head>
 <body>
+
+  <!-- Full-Screen Mac Screen Viewer -->
+  <div id="screenViewer">
+    <span id="screenFps"></span>
+    <img id="screenCanvas" alt="MacBook Screen" draggable="false" />
+    <div id="screenBar">
+      <button class="screen-btn" onclick="closeScreenView()">✕</button>
+      <input id="screenInput" type="text" placeholder="Command Jarvis…" autocomplete="off"
+             onkeydown="if(event.key==='Enter'){sendScreenCommand();}" />
+      <button class="screen-btn" onclick="sendScreenCommand()">Send</button>
+      <button class="screen-btn" id="screenLiveBtn" onclick="toggleScreenLive()">⏸</button>
+    </div>
+  </div>
+  <div id="screenClickFeedback"></div>
 
   <!-- Auth Gate -->
   <div id="authGate" class="auth-gate" style="display: none;">
@@ -2731,6 +2953,7 @@ async def root_web_hud(request: Request):
         <button class="chip" onclick="focusChip('search the web for ')">🔍 Search</button>
         <button class="chip" onclick="sendChip('what is your current status and mode?')">⚡ Status</button>
         <button class="chip" onclick="sendChip('what do you remember about me?')">🧠 Memory</button>
+        <button class="chip" onclick="openScreenView()" style="background:rgba(0,255,136,0.12);border-color:rgba(0,255,136,0.4);color:#00ff88;">🖥️ Screen</button>
       </div>
 
       <!-- Input Area -->
@@ -3304,6 +3527,189 @@ async def root_web_hud(request: Request):
       inputField.style.height = 'auto';
       inputField.style.height = (inputField.scrollHeight - 4) + 'px';
     });
+
+    // ── Full-Screen MacBook Screen Viewer ────────────────────────────────────
+    let _screenLive = false;
+    let _screenTimer = null;
+    let _screenLastTs = 0;
+    let _screenW = 1, _screenH = 1;   // actual frame dimensions from headers
+    const screenViewer  = document.getElementById('screenViewer');
+    const screenCanvas  = document.getElementById('screenCanvas');
+    const screenFps     = document.getElementById('screenFps');
+    const screenLiveBtn = document.getElementById('screenLiveBtn');
+    const clickFeedback = document.getElementById('screenClickFeedback');
+
+    async function fetchFrame() {
+      const ts = Date.now();
+      const url = `/remote/screen/frame?token=${token}&t=${ts}`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        // Grab real dimensions from headers before reading body
+        const fw = parseInt(resp.headers.get('X-Frame-Width') || '0');
+        const fh = parseInt(resp.headers.get('X-Frame-Height') || '0');
+        const sw = parseInt(resp.headers.get('X-Screen-Width') || '0');
+        const sh = parseInt(resp.headers.get('X-Screen-Height') || '0');
+        if (sw > 0) { _screenW = sw; _screenH = sh; }
+        const blob = await resp.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        const old = screenCanvas.src;
+        screenCanvas.src = objectUrl;
+        if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
+        const elapsed = Date.now() - ts;
+        screenFps.textContent = elapsed + 'ms';
+      } catch(e) { /* network hiccup — keep looping */ }
+    }
+
+    function startScreenLive() {
+      if (_screenTimer) return;
+      _screenLive = true;
+      screenLiveBtn.textContent = '⏸';
+      fetchFrame();
+      _screenTimer = setInterval(fetchFrame, 1200);
+    }
+
+    function stopScreenLive() {
+      _screenLive = false;
+      screenLiveBtn.textContent = '▶';
+      if (_screenTimer) { clearInterval(_screenTimer); _screenTimer = null; }
+    }
+
+    function toggleScreenLive() {
+      _screenLive ? stopScreenLive() : startScreenLive();
+    }
+
+    function openScreenView() {
+      screenViewer.classList.add('active');
+      document.body.style.overflow = 'hidden';
+      // Force landscape on supporting devices
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock('landscape').catch(() => {});
+      }
+      startScreenLive();
+    }
+
+    function closeScreenView() {
+      stopScreenLive();
+      screenViewer.classList.remove('active');
+      document.body.style.overflow = '';
+      if (screen.orientation && screen.orientation.unlock) {
+        screen.orientation.unlock();
+      }
+    }
+
+    // Map a tap on the <img> to Mac screen coordinates and send a click
+    screenCanvas.addEventListener('click', async (e) => {
+      const rect = screenCanvas.getBoundingClientRect();
+      // The image is letterboxed with object-fit:contain — compute actual render size
+      const imgAspect = _screenW / _screenH;
+      const boxAspect = rect.width / rect.height;
+      let renderW, renderH, offsetX, offsetY;
+      if (imgAspect > boxAspect) {
+        renderW = rect.width;
+        renderH = rect.width / imgAspect;
+        offsetX = 0;
+        offsetY = (rect.height - renderH) / 2;
+      } else {
+        renderH = rect.height;
+        renderW = rect.height * imgAspect;
+        offsetX = (rect.width - renderW) / 2;
+        offsetY = 0;
+      }
+      const relX = (e.clientX - rect.left - offsetX) / renderW;
+      const relY = (e.clientY - rect.top  - offsetY) / renderH;
+      if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
+
+      // Visual tap feedback
+      clickFeedback.style.left = e.clientX + 'px';
+      clickFeedback.style.top  = e.clientY + 'px';
+      clickFeedback.classList.add('pop');
+      setTimeout(() => clickFeedback.classList.remove('pop'), 350);
+
+      await fetch('/remote/click', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ x: relX, y: relY, double: false })
+      });
+      // Refresh screen ~400ms after click to show result
+      setTimeout(fetchFrame, 400);
+    });
+
+    // Double-tap to double-click
+    let _lastTap = 0;
+    screenCanvas.addEventListener('touchend', async (e) => {
+      const now = Date.now();
+      if (now - _lastTap < 300) {
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        const rect = screenCanvas.getBoundingClientRect();
+        const imgAspect = _screenW / _screenH;
+        const boxAspect = rect.width / rect.height;
+        let renderW, renderH, offsetX, offsetY;
+        if (imgAspect > boxAspect) {
+          renderW = rect.width; renderH = rect.width / imgAspect;
+          offsetX = 0; offsetY = (rect.height - renderH) / 2;
+        } else {
+          renderH = rect.height; renderW = rect.height * imgAspect;
+          offsetX = (rect.width - renderW) / 2; offsetY = 0;
+        }
+        const relX = (t.clientX - rect.left - offsetX) / renderW;
+        const relY = (t.clientY - rect.top  - offsetY) / renderH;
+        if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
+          await fetch('/remote/click', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ x: relX, y: relY, double: true })
+          });
+          setTimeout(fetchFrame, 400);
+        }
+      }
+      _lastTap = now;
+    });
+
+    // Two-finger swipe to scroll
+    let _touchStartY = 0, _touchStartX = 0;
+    screenCanvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        _touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        _touchStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      }
+    }, { passive: true });
+    screenCanvas.addEventListener('touchmove', async (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const dy = (cy - _touchStartY) / 40;
+        const dx = (cx - _touchStartX) / 40;
+        if (Math.abs(dy) > 0.3 || Math.abs(dx) > 0.3) {
+          _touchStartY = cy; _touchStartX = cx;
+          fetch('/remote/scroll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+            body: JSON.stringify({ dy, dx })
+          });
+        }
+      }
+    }, { passive: false });
+
+    async function sendScreenCommand() {
+      const inp = document.getElementById('screenInput');
+      const msg = inp.value.trim();
+      if (!msg) return;
+      inp.value = '';
+      const resp = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ message: msg, stream: false, source: 'mobile_web' })
+      });
+      const data = await resp.json();
+      // Briefly flash response in fps display
+      screenFps.textContent = (data.response || '').slice(0, 60);
+      setTimeout(() => { screenFps.textContent = ''; }, 4000);
+      // Refresh screen to show any changes
+      setTimeout(fetchFrame, 600);
+    }
 
     // ── Progressive Web App (PWA) Service Worker Registration ─────────────────
     if ('serviceWorker' in navigator) {
