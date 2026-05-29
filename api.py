@@ -702,10 +702,16 @@ def chat(req: ChatRequest):
         if source == "mobile_web":
             def generate_mobile():
                 session_id = req.session_id or "mobile_default"
+                # Route on the raw message — history as system_extra only.
+                # Prepending history to message would contaminate fast-path routing
+                # (e.g. "calendar" in prior turn triggers calendar dispatch for all future turns).
                 history_prefix = _mobile_history_prefix(session_id)
-                effective_message = (history_prefix + " " + req.message).strip() if history_prefix else req.message
+                combined_system = (
+                    _MOBILE_SYSTEM_EXTRA
+                    + ("\n\n" + history_prefix if history_prefix else "")
+                )
                 start_seq = usage_tracker.current_seq()
-                stream, model = _mobile_web_stream(effective_message, system_extra=_MOBILE_SYSTEM_EXTRA)
+                stream, model = _mobile_web_stream(req.message, system_extra=combined_system)
                 chunks = []
                 for chunk in stream:
                     if chunk:
@@ -779,8 +785,11 @@ def chat(req: ChatRequest):
         if source == "mobile_web":
             session_id = req.session_id or "mobile_default"
             history_prefix = _mobile_history_prefix(session_id)
-            effective_message = (history_prefix + " " + req.message).strip() if history_prefix else req.message
-            stream, model = _mobile_web_stream(effective_message, system_extra=_MOBILE_SYSTEM_EXTRA)
+            combined_system = (
+                _MOBILE_SYSTEM_EXTRA
+                + ("\n\n" + history_prefix if history_prefix else "")
+            )
+            stream, model = _mobile_web_stream(req.message, system_extra=combined_system)
         else:
             stream, model = route_stream(req.message)
         response = "".join(stream)
