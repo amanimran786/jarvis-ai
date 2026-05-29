@@ -2590,7 +2590,7 @@ async def root_web_hud(request: Request):
       
       <div class="stat-card">
         <div class="stat-label">Model Fleet</div>
-        <div id="activeModelVal" class="stat-value">claude-sonnet</div>
+        <div id="activeModelVal" class="stat-value">open-source</div>
       </div>
       
       <div class="stat-card">
@@ -2913,9 +2913,7 @@ async def root_web_hud(request: Request):
         const data = await resp.json();
         if (data) {
           document.getElementById('statusLabel').textContent = 'ONLINE';
-          if (data.model) {
-            document.getElementById('activeModelVal').textContent = data.model;
-          }
+          document.getElementById('activeModelVal').textContent = data.model || data.mode || 'online';
           if (data.uptime) {
             document.getElementById('uptimeVal').textContent = data.uptime;
           }
@@ -3118,7 +3116,7 @@ async def root_web_hud(request: Request):
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
+          const lines = buffer.split('\\n');
           buffer = lines.pop();
 
           for (const line of lines) {
@@ -3131,6 +3129,9 @@ async def root_web_hud(request: Request):
               } else {
                 try {
                   const data = JSON.parse(dataStr);
+                  if (data.model) {
+                    document.getElementById('activeModelVal').textContent = data.model;
+                  }
                   if (data.chunk) {
                     fullResponse += data.chunk;
                     bubble.innerHTML = `<p>${parseMarkdown(fullResponse)}</p>`;
