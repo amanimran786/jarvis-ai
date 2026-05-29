@@ -21,6 +21,7 @@ Mode commands:
 import re
 import time as _time
 import threading as _threading
+from contextlib import contextmanager
 
 from config import GPT_MINI
 from config import (
@@ -70,6 +71,25 @@ _forced_provider = ""
 _forced_label = ""
 
 _current_mode = DEFAULT_MODE
+
+# Thread-local override: when set, smart_stream skips local models and uses
+# GPT_MINI directly. Used by mobile_web requests so route_stream() does full
+# tool dispatch but the conversational LLM is fast cloud, not slow Ollama.
+_mobile_tl = _threading.local()
+
+
+@contextmanager
+def mobile_web_override():
+    """Thread-safe context: force GPT_MINI for this request's smart_stream calls."""
+    _mobile_tl.active = True
+    try:
+        yield
+    finally:
+        _mobile_tl.active = False
+
+
+def _is_mobile_web_active() -> bool:
+    return getattr(_mobile_tl, "active", False)
 
 _RUNTIME_VOICE_TERMS = (
     "voice",
@@ -821,6 +841,20 @@ def smart_stream(
     Strategy: local → mini → haiku → sonnet → opus
     Only escalates when the task genuinely requires it.
     """
+    # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
+    if _is_mobile_web_active():
+        _mobile_system = (
+            extra_system + "\n\n" if extra_system else ""
+        ) + "You are Jarvis on the user's MacBook, accessed via mobile. Be concise."
+        yield from ask_stream(
+            user_input,
+            GPT_MINI,
+            system_extra=_mobile_system,
+            track_context=False,
+            bypass_local=True,
+        )
+        return
+
     # ── Always-on identity snapshot (replaces per-query vault search for identity facts) ──
     _brain_ctx = _core_brain.core_context()
     grounding_extra = (

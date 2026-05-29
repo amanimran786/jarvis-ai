@@ -116,6 +116,7 @@ _PUBLIC_PATHS = {
 _active_pins: dict[str, dict] = {}           # pin_string -> {"token": token, "expires_at": timestamp}
 _pin_failures: dict[str, int] = {}           # client_ip -> count
 _pin_lockout_until: dict[str, float] = {}    # client_ip -> lockout_timestamp
+_pin_lock = threading.Lock()                 # guards all three dicts (M1: race-free brute-force counter)
 
 
 def _default_chat_lock_timeout_seconds() -> float:
@@ -143,13 +144,24 @@ def _allowed_hostnames() -> set[str]:
         allowed.update(ip.lower() for ip in hw.local_ipv4_addresses())
     elif host:
         allowed.add(host)
-    
-    # Allow custom permanent domains from .env
+
+    # Allow custom permanent domain from .env
     custom = os.getenv("JARVIS_CLOUDFLARE_DOMAIN", "").strip().lower()
     if custom:
         custom_clean = custom.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
         allowed.add(custom_clean)
-        
+
+    # Allow only OUR active tunnel URL — not the *.trycloudflare.com wildcard.
+    # The wildcard would accept any other Cloudflare quick-tunnel as a valid origin.
+    try:
+        from tunnel_manager import get_tunnel_url
+        tu = get_tunnel_url()
+        if tu:
+            tunnel_host = tu.replace("https://", "").replace("http://", "").split("/")[0].lower()
+            allowed.add(tunnel_host)
+    except Exception:
+        pass
+
     return allowed
 
 
@@ -395,8 +407,8 @@ def _submit_webhook_task(
 async def _guard_requests(request: Request, call_next):
     host = _host_without_port(request.headers.get("host", ""))
     allowed = _allowed_hostnames()
-    is_tunnel = host.endswith(".trycloudflare.com")
-    if host and host not in allowed and not is_tunnel:
+    # M2: removed wildcard *.trycloudflare.com — only our registered tunnel host is in allowed
+    if host and host not in allowed:
         return JSONResponse(status_code=400, content={"ok": False, "error": "host_not_allowed"})
     if request.url.path not in _PUBLIC_PATHS and not _token_authorized(request):
         return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
@@ -409,6 +421,7 @@ class ChatRequest(BaseModel):
     message: str
     stream: bool = False
     source: str = "api"
+    session_id: str = "mobile_default"
     meta: dict | None = None
 
 
@@ -609,40 +622,71 @@ _claude_mobile_ok: bool = True
 _claude_mobile_retry_after: float = 0.0
 _CLAUDE_MOBILE_COOLDOWN = 600.0  # seconds
 
+_MOBILE_SYSTEM_EXTRA = (
+    "You are Jarvis running on the user's MacBook, accessed via mobile web. "
+    "You have access to: Calendar (read/add events), Gmail (read inbox, send email), "
+    "iMessage (read/send messages), Web search, Reminders, Notes, Weather, "
+    "System controls (volume, brightness, screenshots), and Memory (remember facts). "
+    "When asked what you can do, list these capabilities confidently. "
+    "When asked for your security token or API token, respond: "
+    "The Jarvis API token is in Settings > API Token on the desktop app, "
+    "or check the .env file for JARVIS_API_TOKEN. "
+    "Be concise — this is a mobile interface."
+)
 
-def _mobile_web_stream(message: str):
+# Per-session conversation history for mobile web: session_id -> list of (role, text) tuples
+# Capped at 8 turns per session. Not persisted across process restarts.
+_mobile_sessions: dict[str, list[tuple[str, str]]] = {}
+_MOBILE_MAX_TURNS = 8
+
+
+def _mobile_history_prefix(session_id: str) -> str:
+    """Return a plain-text conversation history prefix for the given session, or ''."""
+    history = _mobile_sessions.get(session_id)
+    if not history:
+        return ""
+    lines = []
+    for role, text in history:
+        label = "User" if role == "user" else "Jarvis"
+        lines.append(f"{label}: {text}")
+    return "Prior conversation:\n" + "\n".join(lines) + "\n\nCurrent message:"
+
+
+def _mobile_history_append(session_id: str, user_text: str, assistant_text: str) -> None:
+    """Append a turn to the session history, evicting oldest turns beyond the cap."""
+    history = _mobile_sessions.setdefault(session_id, [])
+    history.append(("user", user_text))
+    history.append(("assistant", assistant_text))
+    # Keep last _MOBILE_MAX_TURNS * 2 entries (each turn = 2 entries)
+    if len(history) > _MOBILE_MAX_TURNS * 2:
+        _mobile_sessions[session_id] = history[-(  _MOBILE_MAX_TURNS * 2):]
+
+
+def _mobile_web_stream(message: str, system_extra: str = ""):
     """Return (stream_iterator, model_label) for a mobile_web /chat request.
 
-    Strategy: try Claude Haiku first; on hard failure (credits/auth/429) back
-    off for 10 minutes and route straight to GPT-4o-mini. No global mode touched.
-    Thread-safe: flag reads/writes are atomic on CPython's GIL.
+    Routes through the full Jarvis router (calendar, email, messages, web search,
+    reminders, etc.) using a thread-local override that forces GPT-4o-mini for any
+    LLM calls inside the router — bypasses slow local Ollama without touching globals.
+
+    Falls back to direct GPT-4o-mini if route_stream itself raises.
+    Thread-safe: thread-local + CPython GIL for the Claude failure cache bools.
     """
     global _claude_mobile_ok, _claude_mobile_retry_after
 
     from config import GPT_MINI
     from brains.brain import ask_stream as _openai_stream
 
-    # ── 1. Claude Haiku attempt (skip if recently failed) ─────────────────────
-    if _claude_mobile_ok or time.time() >= _claude_mobile_retry_after:
-        try:
-            from brains.brain_claude import ask_claude_stream as _cs, _get_client
-            if _get_client() is not None:
-                gen = _cs(message, model=HAIKU, track_context=False)
-                first = next(gen)  # probe — surfaces credit/auth errors immediately
-                _claude_mobile_ok = True  # reset on success
-                return itertools.chain([first], gen), HAIKU
-        except StopIteration:
-            _claude_mobile_ok = True
-        except Exception as exc:
-            _claude_mobile_ok = False
-            _claude_mobile_retry_after = time.time() + _CLAUDE_MOBILE_COOLDOWN
-            log.warning(
-                "[mobile_web] Claude unavailable (%s) — using GPT-4o-mini for next %.0fs",
-                exc, _CLAUDE_MOBILE_COOLDOWN,
-            )
+    # ── 1. Full Jarvis routing (calendar, email, messages, search, etc.) ───────
+    try:
+        with model_router.mobile_web_override():
+            stream, model = route_stream(message)
+        return stream, model
+    except Exception as exc:
+        log.warning("[mobile_web] route_stream failed (%s), falling back to GPT-4o-mini", exc)
 
-    # ── 2. OpenAI GPT-4o-mini ─────────────────────────────────────────────────
-    return _openai_stream(message, model=GPT_MINI, bypass_local=True, track_context=False), GPT_MINI
+    # ── 2. Direct GPT-4o-mini fallback ────────────────────────────────────────
+    return _openai_stream(message, model=GPT_MINI, bypass_local=True, track_context=False, system_extra=system_extra), GPT_MINI
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -657,14 +701,18 @@ def chat(req: ChatRequest):
         # gating needed, and the lock must not be held across a slow HTTP stream.
         if source == "mobile_web":
             def generate_mobile():
+                session_id = req.session_id or "mobile_default"
+                history_prefix = _mobile_history_prefix(session_id)
+                effective_message = (history_prefix + " " + req.message).strip() if history_prefix else req.message
                 start_seq = usage_tracker.current_seq()
-                stream, model = _mobile_web_stream(req.message)
+                stream, model = _mobile_web_stream(effective_message, system_extra=_MOBILE_SYSTEM_EXTRA)
                 chunks = []
                 for chunk in stream:
                     if chunk:
                         chunks.append(chunk)
                         yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
                 response = "".join(chunks)
+                _mobile_history_append(session_id, req.message, response)
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 stream_source = "mobile_web_stream"
                 context_stats = ctx.record_request_stats(model, source=stream_source)
@@ -729,10 +777,15 @@ def chat(req: ChatRequest):
     try:
         start_seq = usage_tracker.current_seq()
         if source == "mobile_web":
-            stream, model = _mobile_web_stream(req.message)
+            session_id = req.session_id or "mobile_default"
+            history_prefix = _mobile_history_prefix(session_id)
+            effective_message = (history_prefix + " " + req.message).strip() if history_prefix else req.message
+            stream, model = _mobile_web_stream(effective_message, system_extra=_MOBILE_SYSTEM_EXTRA)
         else:
             stream, model = route_stream(req.message)
         response = "".join(stream)
+        if source == "mobile_web":
+            _mobile_history_append(session_id, req.message, response)
         usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
         context_stats = ctx.record_request_stats(model, source=source)
         interaction = evals.log_interaction(
@@ -1115,22 +1168,21 @@ def deny_task(task_id: str):
 
 
 def create_pairing_pin() -> str:
-    """
-    Programmatically generate a temporary 6-digit numeric pairing PIN.
-    """
-    import random
+    """Generate a cryptographically random 6-digit numeric pairing PIN."""
+    # secrets.randbelow is CSPRNG — safe for auth tokens
     for _ in range(20):
-        pin = f"{random.randint(100000, 999999)}"
+        pin = f"{100000 + secrets.randbelow(900000)}"
         if pin not in _active_pins or _active_pins[pin]["expires_at"] < time.time():
             break
     else:
-        pin = f"{random.randint(100000, 999999)}"
-    
+        pin = f"{100000 + secrets.randbelow(900000)}"
+
     _active_pins[pin] = {
         "token": _API_TOKEN,
         "expires_at": time.time() + 300.0  # 5 minutes
     }
-    log.info(f"[Bridge] Generated temporary pairing PIN: {pin}")
+    # Do NOT log the PIN value — it is a short-lived credential
+    log.info("[Bridge] Temporary pairing PIN generated (not logged for security)")
     return pin
 
 
@@ -1155,37 +1207,39 @@ def authenticate_pairing_pin(request: Request, pin: str):
     """
     client_ip = request.client.host if request.client else "unknown"
     now = time.time()
-    
-    if _pin_lockout_until.get(client_ip, 0) > now:
-        remaining = int(_pin_lockout_until[client_ip] - now)
-        return JSONResponse(
-            status_code=429,
-            content={"ok": False, "error": "rate_limit_lockout", "lockout_seconds": remaining}
-        )
-    
-    expired = [k for k, v in _active_pins.items() if v["expires_at"] < now]
-    for k in expired:
-        _active_pins.pop(k, None)
-        
     pin_clean = "".join(c for c in (pin or "") if c.isdigit())
-    if pin_clean in _active_pins:
-        token = _active_pins[pin_clean]["token"]
-        _active_pins.pop(pin_clean, None)
-        _pin_failures[client_ip] = 0
-        log.info(f"[Bridge] TV paired successfully from IP {client_ip}")
-        return {"ok": True, "token": token}
-    else:
+
+    with _pin_lock:  # M1: atomic read-modify-write — no race on brute-force counter
+        if _pin_lockout_until.get(client_ip, 0) > now:
+            remaining = int(_pin_lockout_until[client_ip] - now)
+            return JSONResponse(
+                status_code=429,
+                content={"ok": False, "error": "rate_limit_lockout", "lockout_seconds": remaining}
+            )
+
+        # Evict expired PINs
+        expired = [k for k, v in _active_pins.items() if v["expires_at"] < now]
+        for k in expired:
+            _active_pins.pop(k, None)
+
+        if pin_clean in _active_pins:
+            token = _active_pins[pin_clean]["token"]
+            _active_pins.pop(pin_clean, None)   # one-time use
+            _pin_failures[client_ip] = 0
+            log.info(f"[Bridge] TV paired successfully from IP {client_ip}")
+            return {"ok": True, "token": token}
+
         failures = _pin_failures.get(client_ip, 0) + 1
         _pin_failures[client_ip] = failures
-        
+
         if failures >= 5:
             _pin_lockout_until[client_ip] = now + 900.0
-            log.warning(f"[Bridge] IP {client_ip} triggered brute-force lockout on PIN pairing.")
+            log.warning("[Bridge] IP %s triggered brute-force lockout on PIN pairing.", client_ip)
             return JSONResponse(
                 status_code=429,
                 content={"ok": False, "error": "rate_limit_lockout", "lockout_seconds": 900}
             )
-        
+
         remaining_attempts = 5 - failures
         return JSONResponse(
             status_code=400,
@@ -2070,6 +2124,47 @@ async def root_web_hud(request: Request):
       color: var(--white-dim);
     }
 
+    /* Quick-action chips */
+    .chip-row {
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      padding: 8px 16px 4px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex-shrink: 0;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      background: rgba(3, 13, 20, 0.85);
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .chip-row::-webkit-scrollbar { display: none; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      min-height: 36px;
+      padding: 0 14px;
+      font-size: 12px;
+      font-family: inherit;
+      font-weight: 500;
+      color: #00d4ff;
+      background: rgba(0, 212, 255, 0.08);
+      border: 1px solid rgba(0, 212, 255, 0.35);
+      border-radius: 18px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .chip:active {
+      background: rgba(0, 212, 255, 0.2);
+      border-color: rgba(0, 212, 255, 0.7);
+      box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+    }
+
     /* Input Bar */
     .input-bar {
       padding: 14px 20px;
@@ -2619,6 +2714,16 @@ async def root_web_hud(request: Request):
         </div>
       </div>
       
+      <!-- Quick-Action Chips -->
+      <div class="chip-row" id="chipRow">
+        <button class="chip" onclick="sendChip('what\\'s on my calendar today?')">📅 Calendar</button>
+        <button class="chip" onclick="sendChip('summarize my inbox')">📧 Email</button>
+        <button class="chip" onclick="sendChip('any new messages?')">💬 Messages</button>
+        <button class="chip" onclick="focusChip('search the web for ')">🔍 Search</button>
+        <button class="chip" onclick="sendChip('what is your current status and mode?')">⚡ Status</button>
+        <button class="chip" onclick="sendChip('what do you remember about me?')">🧠 Memory</button>
+      </div>
+
       <!-- Input Area -->
       <div class="input-bar">
         <button id="micBtn" class="control-btn mic-btn" title="Smart Listen">🎤</button>
@@ -2993,16 +3098,35 @@ async def root_web_hud(request: Request):
       window.speechSynthesis.speak(utterance);
     }
 
+    // 7a. Quick-action chip helpers
+    function sendChip(message) {
+      inputField.value = message;
+      sendMessage();
+    }
+    function focusChip(prefix) {
+      inputField.value = prefix;
+      inputField.focus();
+      // Place cursor at end
+      const len = inputField.value.length;
+      inputField.setSelectionRange(len, len);
+    }
+
     // 7. Markdown parsing
     function parseMarkdown(text) {
       // Escape HTML
       let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      // Handle block code
+      // Handle block code (must come before inline code)
       html = html.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, (match, lang, code) => {
         return `<pre><code>${code.trim()}</code></pre>`;
       });
-      // Handle inline code
+      // Handle inline code (must come before bold/italic to protect content)
       html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Bold: **text** or __text__
+      html = html.replace(/\\*\\*([^\\*]+)\\*\\*/g, '<strong>$1</strong>');
+      html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      // Italic: *text* or _text_ (single, not already consumed by bold)
+      html = html.replace(/\\*([^\\*<>]+)\\*/g, '<em>$1</em>');
+      html = html.replace(/_([^_<>]+)_/g, '<em>$1</em>');
       // Newlines
       html = html.replace(/\\n/g, '<br>');
       return html;
@@ -3474,8 +3598,10 @@ async def reject_pending():
 </body></html>""")
 
 
-# Add /pending to public paths so no Bearer token needed from phone browser
-_PUBLIC_PATHS.update({"/pending", "/pending/approve", "/pending/reject"})
+# /pending is readable without auth (view-only), but approve/reject require auth
+# since they write modified Python files to disk — unauthenticated code writes
+# through the tunnel would be a critical vulnerability.
+_PUBLIC_PATHS.add("/pending")
 
 
 @app.get("/self/review")

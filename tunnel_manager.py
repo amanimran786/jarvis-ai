@@ -50,6 +50,12 @@ def start_tunnel(port: int) -> str | None:
         tunnel_name = os.getenv("JARVIS_CLOUDFLARE_TUNNEL_NAME", "").strip()
         custom_domain = os.getenv("JARVIS_CLOUDFLARE_DOMAIN", "").strip()
 
+        # M5: validate tunnel_name before passing to subprocess — rejects argument injection
+        # like "--credentials-file /etc/passwd" masquerading as a tunnel name.
+        if tunnel_name and not re.fullmatch(r"[a-zA-Z0-9_-]{1,63}", tunnel_name):
+            log.error("[Tunnel] Invalid JARVIS_CLOUDFLARE_TUNNEL_NAME — must be alphanumeric/dash/underscore, max 63 chars. Falling back to Quick Tunnel.")
+            tunnel_name = ""
+
         if tunnel_name and custom_domain:
             log.info(f"[Tunnel] Starting configured permanent Cloudflare Tunnel '{tunnel_name}' for domain '{custom_domain}'")
             try:
