@@ -164,10 +164,11 @@ _LOCAL_MODEL_CONTEXT_TOKENS = {
     "qwen2.5-coder:7b": 32768,
     "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
     "qwen3-coder:30b": 262144,
+    "qwen3.6:35b": 262144,
 }
 
 # Escalation order when the requested model can't fit the prompt.
-_LOCAL_FALLBACK_ORDER = ("qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-r1:14b")
+_LOCAL_FALLBACK_ORDER = ("qwen3.6:35b", "qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-r1:14b")
 
 
 def _model_context_limit(model: str) -> int:
@@ -279,6 +280,53 @@ def ask_local_structured(
         return ""
 
 
+def _prune_prompt(user_input: str, system_base: str, system_extra: str = "") -> str:
+    """Prune the SYSTEM_PROMPT dynamically to save tokens based on query intent."""
+    user_lower = user_input.lower()
+    extra_lower = (system_extra or "").lower()
+    
+    # Message compose keywords
+    compose_keywords = {"compose", "write an email", "send message", "text", "imessage", "email", "reply to", "draft", "message"}
+    is_compose = any(kw in user_lower or kw in extra_lower for kw in compose_keywords)
+    
+    # Coding / terminal console keywords
+    code_keywords = {"code", "run", "test", "git", "install", "cli", "terminal", "python", "file", "fix", "directory", "test suite", "sh", "bash", "compile", "script", "repo", "diff", "patch"}
+    is_code = any(kw in user_lower or kw in extra_lower for kw in code_keywords)
+    
+    pruned = system_base
+    
+    # Section 1: Voice output rules
+    if is_code:
+        pruned = re.sub(
+            r"Voice output rules — TTS reads every response aloud:.*?(?=Honesty rules:)",
+            "",
+            pruned,
+            flags=re.DOTALL
+        )
+        
+    # Section 2: Terminal console rules
+    if not is_code:
+        pruned = re.sub(
+            r"Terminal console:.*?(?=Message composition:)",
+            "",
+            pruned,
+            flags=re.DOTALL
+        )
+        
+    # Section 3: Message composition rules
+    if not is_compose:
+        pruned = re.sub(
+            r"Message composition:.*$",
+            "",
+            pruned,
+            flags=re.DOTALL
+        )
+        
+    # Clean up double newlines
+    pruned = re.sub(r"\n{3,}", "\n\n", pruned).strip()
+    return pruned
+
+
 def ask_local_stream(
     user_input: str,
     model: str = LOCAL_DEFAULT,
@@ -298,7 +346,8 @@ def ask_local_stream(
     elif word_count > 6 and _REASONING_BOOST not in system_extra:
         system_extra = _REASONING_BOOST + "\n\n" + system_extra
 
-    system_base = SYSTEM_PROMPT + mem.get_context()
+    pruned_prompt = _prune_prompt(user_input, SYSTEM_PROMPT, system_extra)
+    system_base = pruned_prompt + mem.get_context()
     if track_context:
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)

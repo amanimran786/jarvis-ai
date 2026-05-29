@@ -60,6 +60,34 @@ def _score_ocr_text(text: str) -> int:
 
 
 def _quick_ocr_probe(path: str, prompt: str) -> dict[str, object]:
+    from local_runtime.local_ocr import recognize_text, _VISION_AVAILABLE
+    if _VISION_AVAILABLE:
+        try:
+            results = recognize_text(path)
+            if results:
+                sample = "\n".join([r["text"] for r in results if r.get("text")])
+                signal = _ocr_signal(sample)
+                visual_prompt = _prompt_prefers_visual(prompt)
+                text_prompt = _prompt_prefers_text(prompt)
+                prefer_ocr = False
+
+                if signal["chars"] >= 120 and signal["words"] >= 18:
+                    prefer_ocr = True
+                elif signal["lines"] >= 4 and signal["letters"] >= 80:
+                    prefer_ocr = True
+                elif text_prompt and signal["chars"] >= 48:
+                    prefer_ocr = True
+                elif visual_prompt and signal["chars"] < 80:
+                    prefer_ocr = False
+
+                return {
+                    "sample_text": sample,
+                    "prefer_ocr": prefer_ocr,
+                    "signal": signal,
+                }
+        except Exception:
+            pass
+
     sample = _run_tesseract(path, "6", timeout_seconds=3)
     signal = _ocr_signal(sample)
     visual_prompt = _prompt_prefers_visual(prompt)
@@ -199,6 +227,17 @@ def _preprocess_for_ocr(path: str) -> str:
 
 
 def _extract_ocr_text(path: str) -> str:
+    from local_runtime.local_ocr import recognize_text, _VISION_AVAILABLE
+    if _VISION_AVAILABLE:
+        try:
+            results = recognize_text(path)
+            if results:
+                ocr_lines = [r["text"] for r in results if r.get("text")]
+                if ocr_lines:
+                    return "\n".join(ocr_lines)
+        except Exception:
+            pass
+
     candidates = []
     original_passes = ("6", "11")
     for psm in original_passes:

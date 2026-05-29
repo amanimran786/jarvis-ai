@@ -256,7 +256,7 @@ PROVIDER_PRIORITY_OPUS = _env_csv(
 
 # Mode: "cloud" | "local" | "auto" | "open-source"
 # open-source = local/open tooling only, with no closed-model dependency on the core path
-DEFAULT_MODE = "open-source"
+DEFAULT_MODE = os.getenv("DEFAULT_MODE", "open-source").strip().lower()
 MAX_CONVERSATION_TURNS = 8
 
 # ── MLX local training (Apple Silicon only) ──────────────────────────────────

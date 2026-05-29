@@ -1,0 +1,18 @@
+{
+  "name": "J.A.R.V.I.S. Unified Brain",
+  "short_name": "J.A.R.V.I.S.",
+  "description": "MacBook Desktop Intelligence Runtime and Unified Remote Controller",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#01080e",
+  "theme_color": "#01080e",
+  "icons": [
+    {
+      "src": "/assets/icon_1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

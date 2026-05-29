@@ -108,7 +108,18 @@ def _glow(widget, color=C_CYAN, radius=12):
     return None
 
 
-def _glass_panel_css(border=C_BORDER, fill="rgba(2, 16, 24, 210)", radius=10):
+def _font(size: int, weight=QFont.Weight.Normal, mono: bool = False) -> QFont:
+    font = QFont()
+    font.setPointSize(size)
+    font.setWeight(weight)
+    if mono:
+        font.setFamilies(["SF Mono", "Consolas", "Courier New", "monospace"])
+    else:
+        font.setFamilies(["SF Pro Display", "SF Pro Text", "Inter", "Segoe UI", "sans-serif"])
+    return font
+
+
+def _glass_panel_css(border=C_BORDER, fill="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(6, 26, 42, 220), stop:1 rgba(2, 12, 20, 240))", radius=10):
     return f"""
         background-color: {fill};
         border: 1px solid {border};
@@ -122,19 +133,20 @@ def _mic_chip_css(
     text: str,
     *,
     border_width: int = 1,
-    radius: int = 10,
-    padding: str = "4px 10px",
+    radius: int = 12,
+    padding: str = "4px 12px",
     min_width: int = 0,
 ) -> str:
     min_width_rule = f"min-width: {min_width}px;" if min_width else ""
     return f"""
         QLabel {{
-            background: {fill};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(3, 18, 28, 140), stop:1 rgba(1, 8, 14, 180));
             color: {text};
             border: {border_width}px solid {border};
             border-radius: {radius}px;
             padding: {padding};
             letter-spacing: 1px;
+            margin: 2px;
             {min_width_rule}
         }}
     """
@@ -789,16 +801,25 @@ class JarvisOrb(QWidget):
         for particle in self._particles:
             particle["a"] = (particle["a"] + particle["v"] * spd) % math.tau
 
-        # Waveform bars — smooth towards random targets when speaking
-        if self._state == self.STATE_SPEAKING:
-            if self._tick_n % 3 == 0:
-                for i in range(len(self._bar_target)):
-                    self._bar_target[i] = random.uniform(0.2, 1.0)
-        else:
+        # Waveform bars — smooth towards live mic or generated speech waveforms
+        if self._state == self.STATE_LISTENING:
+            try:
+                import voice
+                mic_level = voice.get_mic_level()
+            except Exception:
+                mic_level = 0.0
             for i in range(len(self._bar_target)):
-                self._bar_target[i] = 0.05 + 0.1 * abs(math.sin(
-                    self._wave_phase + i * 0.3
-                ))
+                # Waveform ripples react organically to microphone input
+                self._bar_target[i] = mic_level * random.uniform(0.3, 1.4) + 0.05 * abs(math.sin(self._wave_phase + i * 0.3))
+        elif self._state == self.STATE_SPEAKING:
+            # High-fidelity organic speech wave simulations
+            for i in range(len(self._bar_target)):
+                base_wave = abs(math.sin(self._wave_phase * 1.5 + i * 0.4))
+                self._bar_target[i] = 0.08 + 0.85 * base_wave * random.uniform(0.5, 1.0)
+        else:
+            # Idle gentle breathing ripple
+            for i in range(len(self._bar_target)):
+                self._bar_target[i] = 0.03 + 0.07 * abs(math.sin(self._wave_phase * 0.4 + i * 0.2))
 
         for i in range(len(self._bars)):
             self._bars[i] += (self._bar_target[i] - self._bars[i]) * 0.25
@@ -1009,7 +1030,7 @@ class JarvisOrb(QWidget):
         # ── 9. J.A.R.V.I.S text ──────────────────────────────────────────
         text_alpha = int(160 + 80 * pulse)
         p.setPen(QColor(0, 220, 255, text_alpha))
-        font = QFont("Courier New", max(8, int(self._sz * 0.065)), QFont.Weight.Bold)
+        font = _font(max(8, int(self._sz * 0.065)), QFont.Weight.Bold, mono=True)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 3)
         p.setFont(font)
         p.drawText(QRectF(cx - r, cy - 14, r * 2, 28),
@@ -1018,7 +1039,7 @@ class JarvisOrb(QWidget):
         # ── 10. Status text below name ────────────────────────────────────
         state_text = {"idle": "ONLINE", "listening": "LISTENING",
                       "speaking": "SPEAKING"}.get(self._state, "")
-        small_font = QFont("Courier New", max(6, int(self._sz * 0.042)))
+        small_font = _font(max(6, int(self._sz * 0.042)), mono=True)
         small_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
         p.setFont(small_font)
         p.setPen(QColor(0, 180, 255, int(100 + 80 * pulse)))
@@ -1270,9 +1291,19 @@ class SignalBars(QWidget):
             self._timer.start()
 
     def _tick(self):
+        try:
+            from voice import get_mic_level
+            level = get_mic_level()
+        except Exception:
+            level = 0.0
+
         for i in range(len(self._targets)):
-            if random.random() < 0.35:
-                self._targets[i] = random.uniform(0.12, self._intensity)
+            if level > 0.001 and self._intensity >= 0.35:
+                # Mic has active voice level, animate bars organically to it
+                self._targets[i] = level * random.uniform(0.5, 1.8)
+            else:
+                if random.random() < 0.35:
+                    self._targets[i] = random.uniform(0.05, self._intensity)
             self._bars[i] += (self._targets[i] - self._bars[i]) * 0.28
         self.update()
 
@@ -1324,7 +1355,7 @@ class TelemetryPanel(QFrame):
         layout.setSpacing(8)
 
         title_lbl = QLabel(title)
-        title_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        title_lbl.setFont(_font(8, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
         layout.addWidget(title_lbl)
 
@@ -1356,13 +1387,13 @@ class TelemetryPanel(QFrame):
         text_block.setSpacing(2)
 
         label_lbl = QLabel(label)
-        label_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        label_lbl.setFont(_font(7, QFont.Weight.Bold))
         label_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 1px;")
         text_block.addWidget(label_lbl)
 
         value_lbl = QLabel(value)
         value_lbl.setWordWrap(True)
-        value_lbl.setFont(QFont("Courier New", 8))
+        value_lbl.setFont(_font(8, mono=True))
         value_lbl.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
         text_block.addWidget(value_lbl)
 
@@ -1406,12 +1437,12 @@ class MissionObjectiveCard(QFrame):
         left.setSpacing(2)
 
         title = QLabel("PRESENT OBJECTIVE")
-        title.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        title.setFont(_font(7, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {C_AMBER}; background: transparent; letter-spacing: 2px;")
         left.addWidget(title)
 
         self._objective = QLabel("Awaiting command")
-        self._objective.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._objective.setFont(_font(9, QFont.Weight.Bold))
         self._objective.setWordWrap(True)
         self._objective.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
         left.addWidget(self._objective)
@@ -1420,7 +1451,7 @@ class MissionObjectiveCard(QFrame):
         self._status = QLabel("READY")
         self._status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status.setMinimumWidth(72)
-        self._status.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._status.setFont(_font(8, QFont.Weight.Bold))
         self._status.setStyleSheet(
             _glass_panel_css(border=C_GREEN, fill="rgba(0, 255, 136, 0.10)", radius=6)
             + f"color: {C_GREEN}; padding: 5px 8px; letter-spacing: 1px;"
@@ -1634,7 +1665,7 @@ class MessageBubble(QFrame):
         label_row.addWidget(dot)
 
         sender_lbl = QLabel("YOU" if is_user else "J.A.R.V.I.S")
-        sender_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        sender_lbl.setFont(_font(8, QFont.Weight.Bold))
         sender_lbl.setStyleSheet(
             f"color: {'#FF6B00' if is_user else C_CYAN}; background: transparent; letter-spacing: 2px;"
         )
@@ -1642,7 +1673,7 @@ class MessageBubble(QFrame):
 
         if model and not is_user:
             model_lbl = QLabel(f"[ {model.upper()} ]")
-            model_lbl.setFont(QFont("Courier New", 7))
+            model_lbl.setFont(_font(7))
             model_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
             label_row.addWidget(model_lbl)
 
@@ -1653,24 +1684,24 @@ class MessageBubble(QFrame):
         msg = QLabel(text)
         msg.setWordWrap(True)
         msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        msg.setFont(QFont("Courier New", 12))
+        msg.setFont(_font(11))
 
         if is_user:
             msg.setStyleSheet("""
-                color: #FFD9B8;
-                background: rgba(34, 15, 2, 220);
-                border: 1px solid #FF6B00;
-                border-radius: 10px;
+                color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255, 107, 0, 0.15), stop:1 rgba(255, 107, 0, 0.05));
+                border: 1px solid rgba(255, 107, 0, 0.4);
+                border-radius: 12px;
                 padding: 10px 14px;
             """)
             layout.setAlignment(Qt.AlignmentFlag.AlignRight)
             self.setStyleSheet("background: transparent;")
         else:
             msg.setStyleSheet(f"""
-                color: {C_TEXT};
-                background: rgba(3, 18, 28, 220);
-                border: 1px solid {C_BORDER};
-                border-radius: 10px;
+                color: #D8F6FF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
+                border: 1px solid rgba(0, 212, 255, 0.25);
+                border-radius: 12px;
                 padding: 10px 14px;
             """)
             layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
@@ -1829,14 +1860,14 @@ class JarvisWindow(QMainWindow):
         title_block.setSpacing(1)
 
         title = QLabel("J.A.R.V.I.S")
-        title.setFont(QFont("Courier New", 16, QFont.Weight.Bold))
+        title.setFont(_font(16, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 4px;")
         _glow(title, C_CYAN, 14)
 
         subtitle = QLabel("Just A Rather Very Intelligent System")
         self._subtitle = subtitle
         self._base_subtitle_text = subtitle.text()
-        subtitle.setFont(QFont("Courier New", 7))
+        subtitle.setFont(_font(7))
         subtitle.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 1px;")
 
         title_block.addWidget(title)
@@ -1853,14 +1884,14 @@ class JarvisWindow(QMainWindow):
         status_row.setSpacing(5)
         self._status_dot = PulseDot(C_GREEN)
         self._status_label = QLabel("ONLINE")
-        self._status_label.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._status_label.setFont(_font(9, QFont.Weight.Bold))
         self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")
         status_row.addWidget(self._status_dot)
         status_row.addWidget(self._status_label)
         status_block.addLayout(status_row)
 
         self._voice_hint_label = QLabel(WAKE_PROMPT)
-        self._voice_hint_label.setFont(QFont("Courier New", 7))
+        self._voice_hint_label.setFont(_font(7))
         self._voice_hint_label.setWordWrap(False)
         self._voice_hint_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._voice_hint_label.setFixedWidth(190)
@@ -1868,7 +1899,7 @@ class JarvisWindow(QMainWindow):
         self._voice_hint_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
 
         self._mic_chip = QLabel("● MIC STANDBY")
-        self._mic_chip.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._mic_chip.setFont(_font(9, QFont.Weight.Bold))
         self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._mic_chip.setMinimumHeight(34)
         self._mic_chip.setStyleSheet(
@@ -1890,7 +1921,7 @@ class JarvisWindow(QMainWindow):
         status_block.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignRight)
 
         self._vision_chip = QLabel("◌ VISION CHECKING")
-        self._vision_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._vision_chip.setFont(_font(7, QFont.Weight.Bold))
         self._vision_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._vision_chip.setMinimumHeight(22)
         self._vision_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 185)", C_TEXT_DIM))
@@ -1898,7 +1929,7 @@ class JarvisWindow(QMainWindow):
         status_block.addWidget(self._vision_chip, alignment=Qt.AlignmentFlag.AlignRight)
 
         mode_lbl = QLabel(f"MODE: {model_router.get_mode().upper()}")
-        mode_lbl.setFont(QFont("Courier New", 7))
+        mode_lbl.setFont(_font(7))
         mode_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
         self._mode_lbl = mode_lbl
         status_block.addWidget(mode_lbl, alignment=Qt.AlignmentFlag.AlignRight)
@@ -1914,17 +1945,25 @@ class JarvisWindow(QMainWindow):
         # Overlay launch button
         self.overlay_btn = QPushButton("⬡ ASSIST")
         self.overlay_btn.setFixedHeight(28)
-        self.overlay_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.overlay_btn.setFont(_font(8, QFont.Weight.Bold))
         self.overlay_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
                 color: {C_CYAN};
-                border: 1px solid {C_CYAN};
-                border-radius: 3px;
+                border: 1px solid rgba(0, 212, 255, 0.35);
+                border-radius: 8px;
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
-            QPushButton:hover {{ background: {C_BLUE}; }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
+                border-color: {C_CYAN};
+            }}
         """)
         self.overlay_btn.setToolTip("Toggle Meeting Assist overlay (Cmd+Opt+O)")
         self.overlay_btn.clicked.connect(_overlay_mod.toggle)
@@ -1932,20 +1971,24 @@ class JarvisWindow(QMainWindow):
 
         self.devices_btn = QPushButton("◎ DEVICES")
         self.devices_btn.setFixedHeight(28)
-        self.devices_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.devices_btn.setFont(_font(8, QFont.Weight.Bold))
         self.devices_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
                 color: {C_TEXT_DIM};
-                border: 1px solid {C_BORDER};
-                border-radius: 3px;
+                border: 1px solid rgba(13, 79, 112, 0.35);
+                border-radius: 8px;
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                color: {C_CYAN};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
                 border-color: {C_CYAN};
-                background: {C_BLUE};
             }}
         """)
         self.devices_btn.setToolTip("Show nearby devices and bridge actions")
@@ -1954,7 +1997,7 @@ class JarvisWindow(QMainWindow):
 
         self.visibility_btn = QPushButton("UNDETECTABLE")
         self.visibility_btn.setFixedHeight(28)
-        self.visibility_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.visibility_btn.setFont(_font(8, QFont.Weight.Bold))
         self.visibility_btn.setToolTip("Toggle whether Jarvis appears in screenshots and screen sharing")
         self.visibility_btn.clicked.connect(self._toggle_visibility_mode)
         action_row.addWidget(self.visibility_btn)
@@ -1962,7 +2005,7 @@ class JarvisWindow(QMainWindow):
 
         self.beta_btn = QPushButton("β LIVE BETA")
         self.beta_btn.setFixedHeight(28)
-        self.beta_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.beta_btn.setFont(_font(8, QFont.Weight.Bold))
         self.beta_btn.setToolTip("Toggle live beta logging and feedback loop")
         self.beta_btn.clicked.connect(self._toggle_live_beta)
         action_row.addWidget(self.beta_btn)
@@ -1970,18 +2013,22 @@ class JarvisWindow(QMainWindow):
 
         self.compact_btn = QPushButton("▁")
         self.compact_btn.setFixedSize(28, 28)
-        self.compact_btn.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+        self.compact_btn.setFont(_font(10, QFont.Weight.Bold))
         self.compact_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(13, 79, 112, 0.08), stop:1 rgba(13, 79, 112, 0.02));
                 color: {C_TEXT_DIM};
-                border: 1px solid {C_BORDER};
-                border-radius: 3px;
+                border: 1px solid rgba(13, 79, 112, 0.35);
+                border-radius: 8px;
             }}
             QPushButton:hover {{
-                color: {C_CYAN};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.15), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
                 border-color: {C_CYAN};
-                background: {C_BLUE};
             }}
         """)
         self.compact_btn.setToolTip("Toggle compact meeting bar")
@@ -2125,39 +2172,42 @@ class JarvisWindow(QMainWindow):
 
         self.input_field = EnterLineEdit()
         self.input_field.setPlaceholderText("ENTER COMMAND...")
-        self.input_field.setFont(QFont("Courier New", 12))
+        self.input_field.setFont(_font(11))
         self.input_field.setStyleSheet(f"""
             QTextEdit {{
-                background: {C_BG};
+                background: rgba(2, 10, 16, 200);
                 color: {C_TEXT};
-                border: 1px solid {C_BORDER};
-                border-radius: 2px;
+                border: 1px solid rgba(13, 79, 112, 0.4);
+                border-radius: 10px;
                 padding: 7px 12px;
                 letter-spacing: 1px;
             }}
             QTextEdit:focus {{
                 border: 1px solid {C_CYAN};
+                background: rgba(2, 10, 16, 240);
             }}
         """)
         self.input_field.submitted.connect(self._send_text)
 
         self.send_btn = QPushButton("▶")
         self.send_btn.setFixedSize(40, 40)
-        self.send_btn.setFont(QFont("Courier New", 13, QFont.Weight.Bold))
+        self.send_btn.setFont(_font(13, QFont.Weight.Bold))
         self.send_btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
                 color: {C_CYAN};
-                border: 1px solid {C_CYAN};
-                border-radius: 2px;
+                border: 1px solid rgba(0, 212, 255, 0.35);
+                border-radius: 8px;
             }}
             QPushButton:hover {{
-                background: {C_BLUE};
-                color: white;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
             }}
             QPushButton:pressed {{
-                background: {C_CYAN};
+                background: rgba(0, 212, 255, 0.3);
                 color: {C_BG};
+                border-color: {C_CYAN};
             }}
         """)
         _glow(self.send_btn, C_CYAN, 10)
@@ -2189,7 +2239,7 @@ class JarvisWindow(QMainWindow):
 
         sh = QHBoxLayout()
         lbl = QLabel("🎧  SMART LISTEN  —  ACTIVE")
-        lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        lbl.setFont(_font(8, QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
         self._listen_status = PulseDot(C_GREEN)
         sh.addWidget(lbl)
@@ -2199,12 +2249,12 @@ class JarvisWindow(QMainWindow):
 
         self.suggest_label = QLabel("Listening to call...")
         self.suggest_label.setWordWrap(True)
-        self.suggest_label.setFont(QFont("Courier New", 11))
+        self.suggest_label.setFont(_font(10))
         self.suggest_label.setStyleSheet(f"""
             color: {C_TEXT};
-            background: {C_PANEL};
-            border: 1px solid {C_BORDER};
-            border-radius: 2px;
+            background: rgba(2, 10, 16, 200);
+            border: 1px solid rgba(13, 79, 112, 0.4);
+            border-radius: 10px;
             padding: 8px 12px;
         """)
         self.suggest_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -2212,7 +2262,7 @@ class JarvisWindow(QMainWindow):
 
         self.transcript_label = QLabel("")
         self.transcript_label.setWordWrap(True)
-        self.transcript_label.setFont(QFont("Courier New", 8))
+        self.transcript_label.setFont(_font(8))
         self.transcript_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
         sl.addWidget(self.transcript_label)
 
@@ -2237,7 +2287,7 @@ class JarvisWindow(QMainWindow):
         dh = QHBoxLayout()
         dh.setSpacing(6)
         dlbl = QLabel("◎  NEARBY DEVICES  —  BRIDGE")
-        dlbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        dlbl.setFont(_font(8, QFont.Weight.Bold))
         dlbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
         dh.addWidget(dlbl)
         dh.addStretch()
@@ -2253,15 +2303,15 @@ class JarvisWindow(QMainWindow):
         self.device_summary.setReadOnly(True)
         self.device_summary.setMinimumHeight(140)
         self.device_summary.setMaximumHeight(220)
-        self.device_summary.setFont(QFont("Courier New", 9))
+        self.device_summary.setFont(_font(9, mono=True))
         self.device_summary.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.device_summary.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.device_summary.setStyleSheet(f"""
             QTextEdit {{
-                background: {C_PANEL};
+                background: rgba(2, 10, 16, 200);
                 color: {C_TEXT};
-                border: 1px solid {C_BORDER};
-                border-radius: 2px;
+                border: 1px solid rgba(13, 79, 112, 0.4);
+                border-radius: 10px;
                 padding: 8px 10px;
             }}
         """)
@@ -2290,6 +2340,11 @@ class JarvisWindow(QMainWindow):
         self.device_bridge_btn.clicked.connect(self._copy_bridge_url)
         self.device_action_row.addWidget(self.device_bridge_btn)
 
+        self.device_pin_btn = self._hud_btn("PIN")
+        self.device_pin_btn.setToolTip("Generate remote pairing PIN")
+        self.device_pin_btn.clicked.connect(self._generate_pairing_pin)
+        self.device_action_row.addWidget(self.device_pin_btn)
+
         self.device_page_btn = self._hud_btn("TAB")
         self.device_page_btn.setToolTip("Copy current browser page URL")
         self.device_page_btn.clicked.connect(self._copy_current_page_url)
@@ -2315,32 +2370,44 @@ class JarvisWindow(QMainWindow):
         btn.setFixedSize(40, 40)
         btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
-                border: 1px solid {C_BORDER};
-                border-radius: 2px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
+                border: 1px solid rgba(0, 212, 255, 0.25);
+                border-radius: 8px;
+                color: {C_CYAN};
                 font-size: 15px;
             }}
             QPushButton:hover {{
-                background: {C_BLUE};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
                 border-color: {C_CYAN};
             }}
         """)
         return btn
 
     def _visibility_btn_css(self, color: str) -> str:
+        c = QColor(color)
+        r, g, b = c.red(), c.green(), c.blue()
         return f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.08), stop:1 rgba({r}, {g}, {b}, 0.02));
                 color: {color};
-                border: 1px solid {color};
-                border-radius: 3px;
+                border: 1px solid rgba({r}, {g}, {b}, 0.35);
+                border-radius: 8px;
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                background: {C_BLUE};
-                border-color: {C_CYAN};
-                color: {C_CYAN};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.20), stop:1 rgba({r}, {g}, {b}, 0.05));
+                border-color: rgba({r}, {g}, {b}, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba({r}, {g}, {b}, 0.3);
+                border-color: {color};
             }}
         """
 
@@ -2393,19 +2460,25 @@ class JarvisWindow(QMainWindow):
         if btn is None:
             return
         btn.setText("◉ DEVICES" if visible else "◎ DEVICES")
+        color = C_CYAN if visible else C_TEXT_DIM
+        border_rgba = "rgba(0, 212, 255, 0.35)" if visible else "rgba(13, 79, 112, 0.35)"
         btn.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
-                color: {C_CYAN if visible else C_TEXT_DIM};
-                border: 1px solid {C_CYAN if visible else C_BORDER};
-                border-radius: 3px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
+                color: {color};
+                border: 1px solid {border_rgba};
+                border-radius: 8px;
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
             QPushButton:hover {{
-                color: {C_CYAN};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
                 border-color: {C_CYAN};
-                background: {C_BLUE};
             }}
         """)
 
@@ -2503,6 +2576,19 @@ class JarvisWindow(QMainWindow):
             terminal.set_clipboard(page["url"])
         title = page.get("title") or "Current page"
         self._add_message(handled_msg or f"Copied page URL for {title}: {page['url']}", "jarvis", "Browser")
+
+    def _generate_pairing_pin(self):
+        try:
+            pin = api.create_pairing_pin()
+            terminal.set_clipboard(pin)
+            self._add_message(
+                f"Generated a temporary 6-digit pairing PIN: **{pin}** (copied to clipboard).\n"
+                f"Enter this code on your TV or other device within the next 5 minutes to securely pair.",
+                "jarvis",
+                "Hardware"
+            )
+        except Exception as e:
+            self._add_message(f"Failed to generate pairing PIN: {str(e)}", "jarvis", "Hardware")
 
     # ── Resize: keep HUD background covering full window ──────────────────────
 
@@ -3422,11 +3508,28 @@ class JarvisWindow(QMainWindow):
         enabled = live_beta.is_enabled()
         label = "β LIVE BETA" if enabled else "β BETA OFF"
         color = C_CYAN if enabled else C_TEXT_DIM
+        c = QColor(color)
+        r, g, b = c.red(), c.green(), c.blue()
         self.beta_btn.setText(label)
-        self.beta_btn.setStyleSheet(
-            f"QPushButton {{ background: transparent; color: {color}; border: 1px solid {color}; border-radius: 3px; padding: 0 10px; letter-spacing: 1px; }}"
-            f"QPushButton:hover {{ color: {C_CYAN}; border-color: {C_CYAN}; background: {C_BLUE}; }}"
-        )
+        self.beta_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.08), stop:1 rgba({r}, {g}, {b}, 0.02));
+                color: {color};
+                border: 1px solid rgba({r}, {g}, {b}, 0.35);
+                border-radius: 8px;
+                padding: 0 10px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.20), stop:1 rgba({r}, {g}, {b}, 0.05));
+                border-color: rgba({r}, {g}, {b}, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba({r}, {g}, {b}, 0.3);
+                border-color: {color};
+            }}
+        """)
 
     def _toggle_live_beta(self):
         enabled = not live_beta.is_enabled()
@@ -3774,15 +3877,22 @@ class OrbShellWindow(JarvisWindow):
         r, g, b = c.red(), c.green(), c.blue()
         return f"""
             QPushButton {{
-                background: transparent;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.08), stop:1 rgba({r}, {g}, {b}, 0.02));
                 color: {color};
-                border: 1px solid {color};
-                border-radius: 10px;
+                border: 1px solid rgba({r}, {g}, {b}, 0.35);
+                border-radius: 8px;
                 padding: 0 10px;
                 letter-spacing: 1px;
             }}
-            QPushButton:hover {{ background: rgba({r},{g},{b},0.14); }}
-            QPushButton:pressed {{ background: rgba({r},{g},{b},0.28); }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba({r}, {g}, {b}, 0.20), stop:1 rgba({r}, {g}, {b}, 0.05));
+                border-color: rgba({r}, {g}, {b}, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba({r}, {g}, {b}, 0.3);
+                border-color: {color};
+            }}
         """
 
     def _call_status_css(self, tone: str) -> str:
@@ -3828,7 +3938,7 @@ class OrbShellWindow(JarvisWindow):
 
         self._top_chip = QLabel("JARVIS ORBITAL SHELL")
         self._top_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._top_chip.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._top_chip.setFont(_font(8, QFont.Weight.Bold))
         self._top_chip.setStyleSheet(
             _glass_panel_css(fill="rgba(3, 18, 28, 150)", radius=12) +
             f"color: {C_CYAN}; padding: 6px 12px; letter-spacing: 2px;"
@@ -3847,7 +3957,7 @@ class OrbShellWindow(JarvisWindow):
 
         self._mode_lbl = QLabel(f"MODE {model_router.get_mode().upper()}")
         self._mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._mode_lbl.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._mode_lbl.setFont(_font(7, QFont.Weight.Bold))
         self._mode_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 2px;")
         orb_layout.addWidget(self._mode_lbl)
         self._default_top_chip_text = "JARVIS ORBITAL SHELL"
@@ -3860,7 +3970,7 @@ class OrbShellWindow(JarvisWindow):
         self._status_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._status_dot = PulseDot(C_GREEN)
         self._status_label = QLabel("ONLINE")
-        self._status_label.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._status_label.setFont(_font(8, QFont.Weight.Bold))
         self._status_label.setStyleSheet(f"color: {C_GREEN}; background: transparent; letter-spacing: 2px;")
         self._status_row.addWidget(self._status_dot)
         self._status_row.addWidget(self._status_label)
@@ -3872,13 +3982,13 @@ class OrbShellWindow(JarvisWindow):
         self._voice_hint_label = QLabel(WAKE_PROMPT)
         self._voice_hint_label.setWordWrap(True)
         self._voice_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._voice_hint_label.setFont(QFont("Courier New", 7))
+        self._voice_hint_label.setFont(_font(7))
         self._voice_hint_label.setStyleSheet("color: " + C_TEXT_DIM + "; background: transparent;")
         orb_layout.addWidget(self._voice_hint_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._mic_chip = QLabel("● MIC STANDBY")
         self._mic_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._mic_chip.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        self._mic_chip.setFont(_font(9, QFont.Weight.Bold))
         self._mic_chip.setMinimumHeight(34)
         self._mic_chip.setStyleSheet(
             _mic_chip_css(
@@ -3899,7 +4009,7 @@ class OrbShellWindow(JarvisWindow):
 
         self._vision_chip = QLabel("◌ VISION CHECKING")
         self._vision_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._vision_chip.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._vision_chip.setFont(_font(7, QFont.Weight.Bold))
         self._vision_chip.setStyleSheet(_mic_chip_css(C_BORDER, "rgba(3, 18, 28, 165)", C_TEXT_DIM))
         self._vision_chip.setToolTip("Jarvis is checking local vision health.")
         orb_layout.addWidget(self._vision_chip, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -3913,7 +4023,7 @@ class OrbShellWindow(JarvisWindow):
         self._peek_label = QLabel("Ambient mode active. Hover or double-click for controls.")
         self._peek_label.setWordWrap(True)
         self._peek_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._peek_label.setFont(QFont("Courier New", 8))
+        self._peek_label.setFont(_font(8))
         self._peek_label.setStyleSheet(
             _glass_panel_css(fill="rgba(3, 18, 28, 125)", radius=12) +
             f"color: {C_TEXT_DIM}; padding: 8px 10px;"
@@ -3930,14 +4040,14 @@ class OrbShellWindow(JarvisWindow):
         tray_header.setSpacing(6)
         tray_header.addWidget(QLabel(""))
         hdr = QLabel("TACTICAL PANEL")
-        hdr.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        hdr.setFont(_font(8, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
         tray_header.addWidget(hdr)
         tray_header.addStretch()
 
         self._pin_btn = QPushButton("PIN")
         self._pin_btn.setFixedSize(44, 24)
-        self._pin_btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+        self._pin_btn.setFont(_font(7, QFont.Weight.Bold))
         self._pin_btn.setStyleSheet(self._action_btn_css(C_TEXT_DIM))
         self._pin_btn.clicked.connect(self._toggle_tray_lock)
         tray_header.addWidget(self._pin_btn)
@@ -3948,14 +4058,14 @@ class OrbShellWindow(JarvisWindow):
         self.suggest_label.setPlainText("Awaiting input...")
         self.suggest_label.setMinimumHeight(110)
         self.suggest_label.setMaximumHeight(220)
-        self.suggest_label.setFont(QFont("Courier New", 10))
+        self.suggest_label.setFont(_font(10))
         self.suggest_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.suggest_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.suggest_label.setStyleSheet(f"""
             QTextEdit {{
-                background: rgba(2, 12, 20, 215);
+                background: rgba(2, 10, 16, 200);
                 color: {C_TEXT};
-                border: 1px solid {C_BORDER};
+                border: 1px solid rgba(13, 79, 112, 0.4);
                 border-radius: 10px;
                 padding: 6px 8px;
             }}
@@ -3964,13 +4074,13 @@ class OrbShellWindow(JarvisWindow):
 
         self.transcript_label = QLabel("No live transcript yet.")
         self.transcript_label.setWordWrap(True)
-        self.transcript_label.setFont(QFont("Courier New", 8))
+        self.transcript_label.setFont(_font(8))
         self.transcript_label.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
         tray.addWidget(self.transcript_label)
 
         self._call_status_label = QLabel("Meeting: scanning...\nAudio: checking route...\nPrivacy: checking...\nScreen scan: checking...")
         self._call_status_label.setWordWrap(True)
-        self._call_status_label.setFont(QFont("Courier New", 8))
+        self._call_status_label.setFont(_font(8))
         self._call_status_label.setStyleSheet(
             _glass_panel_css(fill="rgba(3, 18, 28, 155)", radius=10) +
             f"color: {C_TEXT_DIM}; padding: 8px 10px;"
@@ -4010,24 +4120,25 @@ class OrbShellWindow(JarvisWindow):
         input_row.setSpacing(8)
         self.input_field = EnterLineEdit()
         self.input_field.setPlaceholderText("Type to Jarvis...")
-        self.input_field.setFont(QFont("Courier New", 11))
+        self.input_field.setFont(_font(11))
         self.input_field.setStyleSheet(f"""
             QTextEdit {{
-                background: rgba(0, 8, 14, 220);
+                background: rgba(2, 10, 16, 200);
                 color: {C_TEXT};
-                border: 1px solid {C_BORDER};
+                border: 1px solid rgba(13, 79, 112, 0.4);
                 border-radius: 10px;
                 padding: 8px 12px;
                 letter-spacing: 1px;
             }}
             QTextEdit:focus {{
                 border: 1px solid {C_CYAN};
+                background: rgba(2, 10, 16, 240);
             }}
         """)
         self.input_field.submitted.connect(self._send_text)
         self.send_btn = QPushButton("SEND")
         self.send_btn.setFixedHeight(36)
-        self.send_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self.send_btn.setFont(_font(8, QFont.Weight.Bold))
         self.send_btn.setStyleSheet(self._action_btn_css(C_CYAN))
         self.send_btn.clicked.connect(self._send_text)
         input_row.addWidget(self.input_field, stretch=1)
@@ -4531,7 +4642,8 @@ def run():
             background-color: rgba(2, 16, 24, 235);
             border: 1px solid {C_CYAN};
             padding: 6px 8px;
-            font-family: "Courier New";
+            font-family: "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+            font-size: 11px;
         }}
         QScrollBar:horizontal {{
             height: 0px;

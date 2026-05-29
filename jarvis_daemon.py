@@ -29,7 +29,8 @@ def _resolve_host_port(host: str | None = None, port: int | None = None) -> tupl
 def _wait_for_api_ready(host: str, port: int, timeout: float = 8.0) -> bool:
     deadline = time.monotonic() + timeout
     last_error = ""
-    url = f"http://{host}:{port}/status"
+    test_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    url = f"http://{test_host}:{port}/status"
     while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen(url, timeout=0.5) as resp:
@@ -124,6 +125,12 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
         if not _wait_for_api_ready(actual_host, actual_port):
             runtime_state.mark_error(f"API did not become ready at http://{actual_host}:{actual_port}")
             return _BOOT_THREAD
+
+        try:
+            import tunnel_manager
+            tunnel_manager.start_tunnel(actual_port)
+        except Exception as e:
+            print(f"[Tunnel] Failed to initialize secure global tunnel: {e}")
         port_file = runtime_state.port_file_path()
         port_file.write_text(str(actual_port), encoding="utf-8")
         try:

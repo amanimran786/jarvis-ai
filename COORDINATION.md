@@ -80,11 +80,12 @@ Update this file when picking up or finishing a task. Commit the update so the o
 **Acceptance:** `test_mem0_layer.py` all pass with live Qdrant
 **Status:** Open
 
-### [CODEX] Resolve qwen3 Ollama model tag
-**Goal:** Run `ollama list` and confirm actual tag — `qwen3:35b` vs `qwen3:35b-a3b`
-**File:** `config.py` LOCAL_DEFAULT, `brains/brain_ollama.py`
-**Acceptance:** Config tag matches `ollama list` output, keepalive starts without 404
-**Status:** Open
+### [DONE] Resolve qwen3 Ollama model tag
+**Completed by Claude & Systems Architect 2026-05-29**
+- Confirmed `qwen3.6:35b` is the installed MoE model on user's machine.
+- Integrated `qwen3.6:35b` into `brains/brain_ollama.py` context limits (262,144 tokens) and first in fallback escalation order.
+- Prioritized `LOCAL_QWEN3_6` (`qwen3.6:35b`) inside `model_router.py` general query selection to leverage this MoE model.
+- Added comprehensive unit tests in `tests/test_qwen3_routing.py` confirming escalation, routing, and context limits. All 19 routing and OCR tests pass.
 
 ### [DONE] Benchmark run — all 7 categories
 **Completed by Codex 2026-05-04 / verified Claude 2026-05-05**
