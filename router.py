@@ -4625,6 +4625,22 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
     devices = hw.list_devices()
 
     if any(p in lower for p in [
+        "pair my tv", "generate a pairing pin", "give me a pairing code", "pairing code", "pair a tv", "pair tv"
+    ]):
+        import api
+        import terminal
+        try:
+            pin = api.create_pairing_pin()
+            terminal.set_clipboard(pin)
+            spoken_digits = " ".join(list(pin))
+            return _s(
+                f"Your temporary pairing code is {spoken_digits}. "
+                f"I have copied the PIN {pin} to your clipboard, sir. Enter it in your TV or remote device browser within the next five minutes."
+            ), "Hardware"
+        except Exception as e:
+            return _s(f"I encountered an error generating a pairing PIN, sir: {str(e)}"), "Hardware"
+
+    if any(p in lower for p in [
         "bridge status", "jarvis bridge", "lan status", "same wifi bridge", "local network bridge",
         "what is my bridge url", "what's my bridge url", "copy bridge url", "show bridge url"
     ]):
@@ -4639,9 +4655,18 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         ips = bridge.get("ips", [])
         local_only = bridge.get("local_only", True)
         primary = bridge.get("primary_url") or (urls[0] if urls else "http://127.0.0.1:8765")
+        token = os.getenv("JARVIS_API_TOKEN", "")
+        if token:
+            primary_with_token = f"{primary}/?token={token}"
+        else:
+            primary_with_token = primary
+        
+        import terminal
+        terminal.set_clipboard(primary_with_token)
+        
         mode = "local-only" if local_only else "LAN-enabled"
         ip_text = f" Local IPs: {', '.join(ips)}." if ips else ""
-        return _s(f"Bridge status: {mode}. Primary URL: {primary}.{ip_text}"), "Hardware"
+        return _s(f"Bridge status: {mode}. I have copied your secure mobile pairing URL to the clipboard: {primary_with_token}.{ip_text}"), "Hardware"
 
     if any(p in lower for p in [
         "open bluetooth settings", "bluetooth settings", "pair a device",

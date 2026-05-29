@@ -1921,7 +1921,8 @@ class ProductionReadinessTests(unittest.TestCase):
              patch("capability_evals.status", return_value={"coverage_score": 1.0, "live_command": "pytest golden"}), \
              patch("security_roe.status", return_value={"mode": "defensive-only"}), \
              patch("production_readiness._which", return_value="/Users/truthseeker/.local/bin/jarvis"), \
-             patch("production_readiness._path_exists", return_value=True):
+             patch("production_readiness._path_exists", return_value=True), \
+             patch("production_readiness.DEFAULT_MODE", "open-source"):
             payload = production_readiness.contract()
 
         self.assertTrue(payload["ok"])

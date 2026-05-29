@@ -292,6 +292,17 @@ def _run_headless():
         cli.print_jarvis_message(f"Voice input unavailable: {reason}")
         cli.print_jarvis_message("Tip: Launch with ./venv/bin/python main.py for GUI mode.")
         return
+
+    if "--no-mic" in sys.argv or os.getenv("JARVIS_NO_MIC") == "1":
+        import time
+        cli.print_jarvis_message("Microphone voice loop is disabled (API-only mode active).")
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        return
+
     speak("Online.")
     cli.print_status_bar()
     while True:

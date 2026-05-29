@@ -441,9 +441,9 @@ def _best_local(text: str) -> str:
             if deep and _has_model(deep, available):
                 return deep
 
-    # 5. General tasks — prefer mid-size Qwen lanes if installed.
+    # 5. General tasks — prefer Qwen3.6 MoE or mid-size Qwen lanes if installed.
     #    Do not promote Gemma4 26B/31B here; those are eval/deep lanes.
-    for general in (LOCAL_QWEN3_STRONG, LOCAL_QWEN3_MID):
+    for general in (LOCAL_QWEN3_6, LOCAL_QWEN3_STRONG, LOCAL_QWEN3_MID):
         if general and _has_model(general, available):
             return general
 

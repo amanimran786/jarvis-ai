@@ -31,9 +31,12 @@ import hashlib
 import secrets
 import threading
 import time
+import logging
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
+
+log = logging.getLogger("api")
 from pydantic import BaseModel
 
 from router import route_stream, record_turn as _record_turn
@@ -99,7 +102,15 @@ def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
 _API_TOKEN = ""
-_PUBLIC_PATHS = {"/status", "/webhooks/trigger", "/webhooks/github"}
+_PUBLIC_PATHS = {
+    "/", "/status", "/webhooks/trigger", "/webhooks/github", "/bridge/pair",
+    "/manifest.json", "/service-worker.js", "/assets/icon_1024.png"
+}
+
+# TV / Remote Device Pairing PIN Registry
+_active_pins: dict[str, dict] = {}           # pin_string -> {"token": token, "expires_at": timestamp}
+_pin_failures: dict[str, int] = {}           # client_ip -> count
+_pin_lockout_until: dict[str, float] = {}    # client_ip -> lockout_timestamp
 
 
 def _default_chat_lock_timeout_seconds() -> float:
@@ -127,6 +138,13 @@ def _allowed_hostnames() -> set[str]:
         allowed.update(ip.lower() for ip in hw.local_ipv4_addresses())
     elif host:
         allowed.add(host)
+    
+    # Allow custom permanent domains from .env
+    custom = os.getenv("JARVIS_CLOUDFLARE_DOMAIN", "").strip().lower()
+    if custom:
+        custom_clean = custom.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+        allowed.add(custom_clean)
+        
     return allowed
 
 
@@ -139,6 +157,11 @@ def _token_authorized(request: Request) -> bool:
         supplied = bearer[7:].strip()
     else:
         supplied = request.headers.get("X-Jarvis-Token", "").strip()
+    
+    # Fallback to query parameter (needed for streaming media/images)
+    if not supplied:
+        supplied = request.query_params.get("token", "").strip()
+        
     return bool(supplied) and hmac.compare_digest(supplied, expected)
 
 
@@ -366,7 +389,9 @@ def _submit_webhook_task(
 @app.middleware("http")
 async def _guard_requests(request: Request, call_next):
     host = _host_without_port(request.headers.get("host", ""))
-    if host and host not in _allowed_hostnames():
+    allowed = _allowed_hostnames()
+    is_tunnel = host.endswith(".trycloudflare.com")
+    if host and host not in allowed and not is_tunnel:
         return JSONResponse(status_code=400, content={"ok": False, "error": "host_not_allowed"})
     if request.url.path not in _PUBLIC_PATHS and not _token_authorized(request):
         return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
@@ -560,6 +585,18 @@ class OsintDomainTyposRequest(BaseModel):
     registered_only: bool = True
 
 
+class RemoteVolumeRequest(BaseModel):
+    level: int
+
+
+class RemoteBrightnessRequest(BaseModel):
+    level: int
+
+
+class RemoteActionRequest(BaseModel):
+    action: str
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @app.post("/chat")
@@ -697,6 +734,15 @@ def status(refresh: bool = False):
         "provider_routing": provider_router.runtime_policy(),
         "call_assist": call_assist,
     }
+
+
+@app.get("/auth/verify")
+def auth_verify(request: Request):
+    """Token validity probe — returns 200 if token is correct, 401 otherwise."""
+    if not _token_authorized(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"ok": False, "error": "unauthorized"})
+    return {"ok": True}
 
 
 @app.get("/runtime/state")
@@ -987,9 +1033,237 @@ def deny_task(task_id: str):
     return {"ok": True, "task": task}
 
 
+def create_pairing_pin() -> str:
+    """
+    Programmatically generate a temporary 6-digit numeric pairing PIN.
+    """
+    import random
+    for _ in range(20):
+        pin = f"{random.randint(100000, 999999)}"
+        if pin not in _active_pins or _active_pins[pin]["expires_at"] < time.time():
+            break
+    else:
+        pin = f"{random.randint(100000, 999999)}"
+    
+    _active_pins[pin] = {
+        "token": _API_TOKEN,
+        "expires_at": time.time() + 300.0  # 5 minutes
+    }
+    log.info(f"[Bridge] Generated temporary pairing PIN: {pin}")
+    return pin
+
+
+@app.post("/bridge/pin")
+def generate_pairing_pin(request: Request):
+    """
+    Generate a temporary 6-digit numeric pairing PIN.
+    Only authorized MacBook local calls can trigger this.
+    """
+    if not _token_authorized(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    pin = create_pairing_pin()
+    return {"ok": True, "pin": pin, "expires_in": 300}
+
+
+@app.get("/bridge/pair")
+def authenticate_pairing_pin(request: Request, pin: str):
+    """
+    Authenticate a remote device (e.g. Smart TV) using a 6-digit PIN.
+    Swaps the PIN for the actual secure JARVIS_API_TOKEN.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.time()
+    
+    if _pin_lockout_until.get(client_ip, 0) > now:
+        remaining = int(_pin_lockout_until[client_ip] - now)
+        return JSONResponse(
+            status_code=429,
+            content={"ok": False, "error": "rate_limit_lockout", "lockout_seconds": remaining}
+        )
+    
+    expired = [k for k, v in _active_pins.items() if v["expires_at"] < now]
+    for k in expired:
+        _active_pins.pop(k, None)
+        
+    pin_clean = "".join(c for c in (pin or "") if c.isdigit())
+    if pin_clean in _active_pins:
+        token = _active_pins[pin_clean]["token"]
+        _active_pins.pop(pin_clean, None)
+        _pin_failures[client_ip] = 0
+        log.info(f"[Bridge] TV paired successfully from IP {client_ip}")
+        return {"ok": True, "token": token}
+    else:
+        failures = _pin_failures.get(client_ip, 0) + 1
+        _pin_failures[client_ip] = failures
+        
+        if failures >= 5:
+            _pin_lockout_until[client_ip] = now + 900.0
+            log.warning(f"[Bridge] IP {client_ip} triggered brute-force lockout on PIN pairing.")
+            return JSONResponse(
+                status_code=429,
+                content={"ok": False, "error": "rate_limit_lockout", "lockout_seconds": 900}
+            )
+        
+        remaining_attempts = 5 - failures
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "invalid_pin", "remaining_attempts": remaining_attempts}
+        )
+
+
 @app.get("/bridge/status")
 def bridge_status():
     return hw.bridge_status(api_host=get_host(), api_port=get_port())
+
+
+def get_system_telemetry() -> dict:
+    import subprocess
+    import re
+    
+    battery_info = "Unknown"
+    try:
+        out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=1.5)
+        pct_match = re.search(r"(\d+)%", out)
+        if pct_match:
+            battery_info = f"{pct_match.group(1)}%"
+            if "charging" in out.lower() or "ac power" in out.lower():
+                battery_info += " (Charging)"
+    except Exception:
+        pass
+
+    cpu_info = "Unknown"
+    try:
+        out = subprocess.check_output(["sysctl", "-n", "vm.loadavg"], text=True, timeout=1.0)
+        load_match = re.findall(r"\d+\.\d+", out)
+        if load_match:
+            cpu_info = f"{load_match[0]} (1m load)"
+    except Exception:
+        pass
+
+    memory_info = "Unknown"
+    try:
+        total_bytes = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip())
+        total_gb = total_bytes / (1024**3)
+        vm = subprocess.check_output(["vm_stat"], text=True)
+        page_size = 4096
+        free_pages = 0
+        for line in vm.splitlines():
+            if "page size of" in line:
+                page_size = int(re.search(r"page size of (\d+) bytes", line).group(1))
+            elif "Pages free:" in line:
+                free_pages = int(re.search(r"Pages free:\s+(\d+)\.", line).group(1))
+        
+        used_gb = total_gb - (free_pages * page_size / (1024**3))
+        memory_info = f"{used_gb:.1f} / {total_gb:.0f} GB ({int(used_gb/total_gb*100)}%)"
+    except Exception:
+        pass
+
+    return {
+        "battery": battery_info,
+        "cpu": cpu_info,
+        "memory": memory_info,
+        "os": "macOS (Apple Silicon)"
+    }
+
+
+@app.get("/remote/screenshot")
+def remote_screenshot(request: Request):
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    from desktop.screen_capture import capture_screenshot_temp
+    try:
+        temp_path = capture_screenshot_temp("jpg")
+        if os.path.exists(temp_path):
+            def iterfile():
+                with open(temp_path, mode="rb") as f:
+                    yield from f
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            return StreamingResponse(iterfile(), media_type="image/jpeg")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Screenshot file not created")
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/remote/telemetry")
+def remote_telemetry(request: Request):
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        data = get_system_telemetry()
+        return {"ok": True, "telemetry": data}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/volume")
+def remote_volume(request: Request, req: RemoteVolumeRequest):
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import tools
+        msg = tools.set_volume(req.level)
+        return {"ok": True, "message": msg}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/brightness")
+def remote_brightness(request: Request, req: RemoteBrightnessRequest):
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        import tools
+        msg = tools.set_brightness(req.level)
+        return {"ok": True, "message": msg}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
+
+@app.post("/remote/action")
+def remote_action(request: Request, req: RemoteActionRequest):
+    if not _token_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        action = req.action.lower().strip()
+        import subprocess
+        if action == "lock":
+            import tools
+            msg = tools.lock_screen()
+        elif action == "mute":
+            import tools
+            msg = tools.mute()
+        elif action == "unmute":
+            import tools
+            msg = tools.unmute()
+        elif action == "play_pause":
+            subprocess.run(["osascript", "-e", "tell application \"Spotify\" to playpause"], capture_output=True)
+            subprocess.run(["osascript", "-e", "tell application \"Music\" to playpause"], capture_output=True)
+            msg = "Media playback toggled."
+        elif action == "next_track":
+            subprocess.run(["osascript", "-e", "tell application \"Spotify\" to next track"], capture_output=True)
+            subprocess.run(["osascript", "-e", "tell application \"Music\" to next track"], capture_output=True)
+            msg = "Skipped to next track."
+        elif action == "prev_track":
+            subprocess.run(["osascript", "-e", "tell application \"Spotify\" to previous track"], capture_output=True)
+            subprocess.run(["osascript", "-e", "tell application \"Music\" to previous track"], capture_output=True)
+            msg = "Returned to previous track."
+        else:
+            return JSONResponse(status_code=400, content={"ok": False, "error": "unknown_action"})
+        return {"ok": True, "message": msg}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
 @app.get("/context")
@@ -1321,6 +1595,1703 @@ def run_local_beta(req: LocalBetaRunRequest):
         suite=req.suite,
     )
     return {"ok": result.get("ok", False), "message": local_beta.result_text(result), "result": result}
+
+
+@app.get("/manifest.json")
+def get_manifest():
+    return FileResponse("manifest.json", media_type="application/json")
+
+
+@app.get("/service-worker.js")
+def get_service_worker():
+    return FileResponse("service-worker.js", media_type="application/javascript")
+
+
+@app.get("/assets/icon_1024.png")
+def get_pwa_icon():
+    icon_path = os.path.join(os.path.dirname(__file__), "assets", "icon_1024.png")
+    if os.path.exists(icon_path):
+        return FileResponse(icon_path, media_type="image/png")
+    return JSONResponse(status_code=404, content={"ok": False, "error": "icon_not_found"})
+
+
+@app.get("/")
+async def root_web_hud(request: Request):
+    """Serve a breathtaking, responsive 2026 glassmorphic mobile web HUD for iPhone & iPad sync."""
+    from fastapi.responses import HTMLResponse
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="J.A.R.V.I.S">
+  <link rel="apple-touch-icon" href="/assets/icon_1024.png">
+  <link rel="manifest" href="/manifest.json">
+  <title>J.A.R.V.I.S — Unified Brain</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    :root {
+      --bg: #01080e;
+      --cyan: #00d4ff;
+      --cyan-dim: #0088cc;
+      --cyan-glow: rgba(0, 212, 255, 0.25);
+      --orange: #ff6b00;
+      --orange-glow: rgba(255, 107, 0, 0.35);
+      --border: rgba(13, 79, 112, 0.35);
+      --glass-fill: rgba(3, 18, 28, 0.75);
+      --glass-border: rgba(0, 212, 255, 0.15);
+      --text: #a8e6ff;
+      --text-dim: #4a8fa8;
+      --white-dim: #d8f6ff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* Breathtaking background animated grid & scanlines */
+    body::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: 
+        radial-gradient(circle at 50% 30%, rgba(0, 212, 255, 0.12) 0%, transparent 60%),
+        linear-gradient(rgba(0, 180, 220, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 180, 220, 0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 24px 24px, 24px 24px;
+      z-index: -2;
+    }
+
+    body::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 100%;
+      background: linear-gradient(0deg, transparent 0%, rgba(0, 212, 255, 0.03) 10%, rgba(0, 212, 255, 0.08) 50%, rgba(0, 212, 255, 0.03) 90%, transparent 100%);
+      background-size: 100% 400px;
+      animation: scanline 12s linear infinite;
+      z-index: -1;
+      pointer-events: none;
+    }
+
+    @keyframes scanline {
+      0% { background-position-y: -400px; }
+      100% { background-position-y: 100%; }
+    }
+
+    /* Header */
+    header {
+      height: 70px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: rgba(3, 13, 20, 0.85);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      z-index: 10;
+      flex-shrink: 0;
+    }
+
+    .brand-block {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: bold;
+      color: var(--cyan);
+      background: rgba(0, 212, 255, 0.1);
+      animation: pulse-logo 4s infinite alternate;
+    }
+
+    @keyframes pulse-logo {
+      0% { box-shadow: 0 0 4px var(--cyan-glow); }
+      100% { box-shadow: 0 0 14px rgba(0, 212, 255, 0.5); }
+    }
+
+    .brand-title {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-name {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--cyan);
+      text-shadow: 0 0 8px var(--cyan-glow);
+    }
+
+    .brand-sub {
+      font-size: 8px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .status-block {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0, 255, 136, 0.08);
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #00ff88;
+      letter-spacing: 1px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: #00ff88;
+      box-shadow: 0 0 8px #00ff88;
+      animation: blink-dot 1.5s infinite alternate;
+    }
+
+    @keyframes blink-dot {
+      0% { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+
+    .sidebar-toggle {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .sidebar-toggle:hover, .sidebar-toggle:active {
+      border-color: var(--cyan);
+      color: #fff;
+      background: rgba(0, 212, 255, 0.08);
+    }
+
+    /* Layout Wrapper */
+    .layout-body {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 70px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Diagnostics Drawer */
+    .diagnostics-drawer {
+      width: 280px;
+      background: rgba(2, 10, 16, 0.95);
+      border-right: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 20px;
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      transform: translateX(-100%);
+      z-index: 5;
+    }
+
+    .diagnostics-drawer.open {
+      transform: translateX(0);
+      position: relative;
+    }
+
+    .drawer-header {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--cyan);
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .stat-card {
+      background: rgba(3, 18, 28, 0.5);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .stat-label {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 13px;
+      color: var(--white-dim);
+      font-weight: 600;
+    }
+
+    /* Main Chat Container */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      padding-bottom: 60px;
+    }
+
+    /* Message Area */
+    .message-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    /* Custom Scrollbar */
+    .message-area::-webkit-scrollbar {
+      width: 4px;
+    }
+    .message-area::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .message-area::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    /* Message Bubble Capsules */
+    .message-wrap {
+      display: flex;
+      width: 100%;
+      margin: 4px 0;
+    }
+
+    .message-wrap.user {
+      justify-content: flex-end;
+    }
+
+    .message-wrap.jarvis {
+      justify-content: flex-start;
+    }
+
+    .bubble {
+      max-width: 82%;
+      padding: 12px 16px;
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .message-wrap.user .bubble {
+      background: linear-gradient(135deg, rgba(255, 107, 0, 0.15), rgba(255, 107, 0, 0.05));
+      border: 1px solid rgba(255, 107, 0, 0.4);
+      border-radius: 16px 16px 2px 16px;
+      color: #ffffff;
+    }
+
+    .message-wrap.jarvis .bubble {
+      background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(0, 212, 255, 0.02));
+      border: 1px solid rgba(0, 212, 255, 0.25);
+      border-radius: 16px 16px 16px 2px;
+      color: var(--white-dim);
+    }
+
+    .bubble p {
+      margin-bottom: 8px;
+    }
+    .bubble p:last-child {
+      margin-bottom: 0;
+    }
+
+    .bubble pre {
+      background: rgba(1, 8, 14, 0.85);
+      border: 1px solid rgba(0, 212, 255, 0.15);
+      border-radius: 8px;
+      padding: 10px;
+      overflow-x: auto;
+      font-family: SF Mono, Consolas, Monaco, monospace;
+      font-size: 11px;
+      margin: 8px 0;
+    }
+
+    .bubble code {
+      font-family: SF Mono, Consolas, Monaco, monospace;
+      font-size: 12px;
+      background: rgba(0, 212, 255, 0.1);
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: #00d4ff;
+    }
+
+    .bubble pre code {
+      background: none;
+      padding: 0;
+      color: var(--white-dim);
+    }
+
+    /* Input Bar */
+    .input-bar {
+      padding: 14px 20px;
+      background: rgba(3, 13, 20, 0.85);
+      border-top: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      background: rgba(1, 8, 14, 0.8);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .input-wrapper:focus-within {
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    .input-field {
+      flex: 1;
+      background: none;
+      border: none;
+      color: #ffffff;
+      font-size: 14px;
+      outline: none;
+      padding: 8px 6px;
+      resize: none;
+      max-height: 80px;
+      font-family: inherit;
+    }
+
+    .control-btn {
+      background: none;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      color: var(--text-dim);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      transition: all 0.2s ease;
+    }
+
+    .control-btn:hover, .control-btn:active {
+      color: #fff;
+    }
+
+    .mic-btn {
+      border: 1px solid var(--border);
+      background: rgba(13, 79, 112, 0.1);
+    }
+
+    .mic-btn.active {
+      background: var(--orange-glow);
+      border-color: var(--orange);
+      color: #ffffff;
+      animation: pulse-mic 1s infinite alternate;
+    }
+
+    @keyframes pulse-mic {
+      0% { box-shadow: 0 0 4px var(--orange-glow); }
+      100% { box-shadow: 0 0 12px rgba(255, 107, 0, 0.6); }
+    }
+
+    .send-btn {
+      background: var(--cyan);
+      color: #01080e;
+      border: none;
+    }
+
+    .send-btn:hover, .send-btn:active {
+      background: #ffffff;
+      box-shadow: 0 0 12px var(--cyan);
+    }
+
+    /* Auth Gate Overlay */
+    .auth-gate {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(1, 8, 14, 0.85);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 20px;
+    }
+
+    .auth-card {
+      width: 100%;
+      max-width: 400px;
+      background: linear-gradient(135deg, rgba(3, 18, 28, 0.95), rgba(1, 8, 14, 0.98));
+      border: 1px solid var(--glass-border);
+      box-shadow: 0 8px 32px 0 rgba(0, 212, 255, 0.2);
+      border-radius: 16px;
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      text-align: center;
+    }
+
+    .auth-logo {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 2px solid var(--cyan);
+      box-shadow: 0 0 15px var(--cyan-glow);
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: bold;
+      color: var(--cyan);
+      background: rgba(0, 212, 255, 0.1);
+    }
+
+    .auth-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--cyan);
+    }
+
+    .auth-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    .auth-input {
+      background: rgba(1, 8, 14, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: #ffffff;
+      padding: 12px 16px;
+      font-size: 14px;
+      outline: none;
+      text-align: center;
+      letter-spacing: 1px;
+    }
+
+    .auth-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    .auth-submit {
+      background: var(--cyan);
+      color: #01080e;
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 1px;
+      transition: all 0.2s ease;
+    }
+
+    .auth-submit:hover, .auth-submit:active {
+      background: #ffffff;
+      box-shadow: 0 0 15px var(--cyan);
+    }
+
+    /* Responsive Media Queries */
+    @media (min-width: 768px) {
+      /* On iPads and large viewports, keep drawer open */
+      .diagnostics-drawer {
+        position: relative;
+        transform: translateX(0);
+      }
+    }
+
+    .pin-container {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 10px 0;
+    }
+
+    .pin-input {
+      width: 48px;
+      height: 54px;
+      background: rgba(1, 8, 14, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: #ffffff;
+      font-size: 24px;
+      font-weight: bold;
+      text-align: center;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+
+    .pin-input:focus {
+      border-color: var(--cyan) !important;
+      box-shadow: 0 0 12px var(--cyan-glow) !important;
+    }
+
+    .auth-toggle-btn {
+      background: none;
+      border: none;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: underline;
+      letter-spacing: 0.5px;
+      transition: color 0.2s ease;
+      margin-top: 10px;
+    }
+
+    .auth-toggle-btn:hover {
+      color: #ffffff;
+      text-shadow: 0 0 8px var(--cyan);
+    }
+
+    .auth-error-msg {
+      color: #ff4a4a;
+      font-size: 12px;
+      text-align: center;
+      display: none;
+      margin-top: -5px;
+      text-shadow: 0 0 5px rgba(255, 74, 74, 0.3);
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-8px); }
+      40%, 80% { transform: translateX(8px); }
+    }
+
+    /* Holographic Control Deck */
+    .control-deck {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 60px; /* collapsed height */
+      background: linear-gradient(0deg, rgba(3, 18, 28, 0.96), rgba(1, 8, 14, 0.98));
+      border-top: 1px solid var(--glass-border);
+      border-radius: 20px 20px 0 0;
+      box-shadow: 0 -8px 32px rgba(0, 212, 255, 0.15);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      z-index: 90;
+      transition: height 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .control-deck.expanded {
+      height: 480px; /* expanded height */
+    }
+
+    .deck-handle {
+      height: 60px;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(0, 212, 255, 0.05);
+    }
+
+    .deck-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-shadow: 0 0 8px var(--cyan-glow);
+    }
+
+    .deck-toggle-icon {
+      font-size: 18px;
+      color: var(--cyan);
+      transition: transform 0.3s ease;
+    }
+
+    .control-deck.expanded .deck-toggle-icon {
+      transform: rotate(180deg);
+    }
+
+    .deck-content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Grid layout of remote modules */
+    .deck-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    @media (max-width: 480px) {
+      .deck-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .deck-card {
+      background: rgba(3, 18, 28, 0.5);
+      border: 1px solid rgba(0, 212, 255, 0.08);
+      border-radius: 12px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card-header {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      border-bottom: 1px solid rgba(0, 212, 255, 0.05);
+      padding-bottom: 6px;
+    }
+
+    /* Sensor Telemetry Rows */
+    .sensor-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+    }
+    
+    .sensor-val {
+      font-weight: 600;
+      color: #ffffff;
+      text-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
+    }
+
+    /* Screenshare Feed widget */
+    .screen-feed-container {
+      position: relative;
+      width: 100%;
+      height: 120px;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      border: 1px solid rgba(0, 212, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #screenFeedImg {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      opacity: 0.85;
+      transition: opacity 0.3s ease;
+    }
+
+    #screenFeedImg.loading {
+      opacity: 0.3;
+    }
+
+    .feed-controls {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 5px;
+    }
+
+    .deck-btn {
+      flex: 1;
+      background: rgba(0, 212, 255, 0.08);
+      border: 1px solid rgba(0, 212, 255, 0.2);
+      border-radius: 8px;
+      color: var(--cyan);
+      padding: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      transition: all 0.2s ease;
+    }
+
+    .deck-btn:hover, .deck-btn:active {
+      background: var(--cyan);
+      color: #01080e;
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
+    /* Sliders styling */
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .slider-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .deck-slider {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(13, 79, 112, 0.35);
+      outline: none;
+    }
+
+    .deck-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--cyan);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    /* Actions Matrix styling */
+    .actions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Auth Gate -->
+  <div id="authGate" class="auth-gate" style="display: none;">
+    <div class="auth-card" id="authCard">
+      <div class="auth-logo">J</div>
+      <h2 class="auth-title">SECURITY GATEWAY</h2>
+      
+      <!-- Token Pane -->
+      <div id="tokenPane" style="display: flex; flex-direction: column; gap: 20px; width: 100%;">
+        <p class="auth-desc">Connect with your J.A.R.V.I.S Security Token. You can copy this link directly from the MacBook desktop shell.</p>
+        <input type="password" id="authTokenInput" class="auth-input" placeholder="Paste Security Token Here">
+        <button id="authSubmitBtn" class="auth-submit">AUTHENTICATE SYSTEM</button>
+      </div>
+      
+      <!-- PIN Pane -->
+      <div id="pinPane" style="display: none; flex-direction: column; gap: 20px; width: 100%;">
+        <p class="auth-desc">Connect a remote device (e.g. Smart TV) using a temporary 6-digit pairing code generated on your MacBook.</p>
+        <div class="pin-container">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="0">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="1">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="2">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="3">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="4">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="5">
+        </div>
+        <div id="pinErrorMsg" class="auth-error-msg"></div>
+        <div style="font-size: 11px; color: var(--text-dim);">The pairing PIN expires after 5 minutes.</div>
+      </div>
+
+      <button id="authToggleBtn" class="auth-toggle-btn">Pair with 6-Digit PIN</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand-block">
+      <div class="brand-logo">J</div>
+      <div class="brand-title">
+        <span class="brand-name">J.A.R.V.I.S</span>
+        <span class="brand-sub">Unified Brain Server</span>
+      </div>
+    </div>
+    <div class="status-block">
+      <div id="ttsToggle" class="control-btn" style="border: 1px solid var(--border); font-size: 14px; width: 32px; height: 32px;" title="Toggle Speech Feedback">🔊</div>
+      <div class="status-badge">
+        <div class="status-dot"></div>
+        <span id="statusLabel">ONLINE</span>
+      </div>
+      <button id="sidebarToggle" class="sidebar-toggle">⬡</button>
+    </div>
+  </header>
+
+  <!-- Layout Body -->
+  <div class="layout-body">
+    <!-- Diagnostics Sidebar -->
+    <div id="sidebar" class="diagnostics-drawer">
+      <div class="drawer-header">Tactical Matrix</div>
+      
+      <div class="stat-card">
+        <div class="stat-label">Model Fleet</div>
+        <div id="activeModelVal" class="stat-value">claude-sonnet</div>
+      </div>
+      
+      <div class="stat-card">
+        <div class="stat-label">Uptime</div>
+        <div id="uptimeVal" class="stat-value">-- : -- : --</div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-label">Active Threads</div>
+        <div id="threadsVal" class="stat-value">3 Active</div>
+      </div>
+      
+      <div class="stat-card">
+        <div class="stat-label">System Memory</div>
+        <div id="memoryVal" class="stat-value">Connected</div>
+      </div>
+    </div>
+
+    <!-- Main Chat Window -->
+    <div class="chat-container">
+      <div id="messageArea" class="message-area">
+        <div class="message-wrap jarvis">
+          <div class="bubble">
+            <p>Unified brain online, operator. I am synchronized with your MacBook runtime. How shall we proceed?</p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Input Area -->
+      <div class="input-bar">
+        <button id="micBtn" class="control-btn mic-btn" title="Smart Listen">🎤</button>
+        <div class="input-wrapper">
+          <textarea id="inputField" class="input-field" placeholder="Send a message..." rows="1"></textarea>
+        </div>
+        <button id="sendBtn" class="control-btn send-btn">➤</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Holographic Control Deck -->
+  <div id="controlDeck" class="control-deck">
+    <!-- Clickable Handle Bar -->
+    <div class="deck-handle" id="deckHandle">
+      <div class="deck-title">
+        <span>⬡</span> REMOTE SYSTEMS DECK
+      </div>
+      <div class="deck-toggle-icon" id="deckToggleIcon">▲</div>
+    </div>
+    
+    <!-- Expanded Deck Content -->
+    <div class="deck-content">
+      <!-- 2-Column Grid -->
+      <div class="deck-grid">
+        
+        <!-- MacBook Screen Live Feed -->
+        <div class="deck-card" style="grid-column: span 1;">
+          <div class="card-header">MacBook Live Feed</div>
+          <div class="screen-feed-container">
+            <img id="screenFeedImg" src="" alt="MacBook Screen Feed">
+          </div>
+          <div class="feed-controls">
+            <button id="refreshFeedBtn" class="deck-btn">Refresh</button>
+            <button id="autoFeedBtn" class="deck-btn">Auto-Stream</button>
+          </div>
+        </div>
+
+        <!-- System Sensors Telemetry -->
+        <div class="deck-card">
+          <div class="card-header">macOS Telemetry</div>
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 5px;">
+            <div class="sensor-row">
+              <span style="color: var(--text-dim);">Battery</span>
+              <span id="telBattery" class="sensor-val">--</span>
+            </div>
+            <div class="sensor-row">
+              <span style="color: var(--text-dim);">CPU Load</span>
+              <span id="telCpu" class="sensor-val">--</span>
+            </div>
+            <div class="sensor-row">
+              <span style="color: var(--text-dim);">Memory Usage</span>
+              <span id="telMemory" class="sensor-val">--</span>
+            </div>
+            <div class="sensor-row">
+              <span style="color: var(--text-dim);">Host OS</span>
+              <span id="telOs" class="sensor-val" style="font-size: 11px;">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audio Volume & Brightness Controls -->
+        <div class="deck-card">
+          <div class="card-header">hardware Actuators</div>
+          <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px;">
+            <div class="slider-group">
+              <div class="slider-label">
+                <span>System Volume</span>
+                <span id="volVal">50%</span>
+              </div>
+              <input type="range" id="volSlider" class="deck-slider" min="0" max="100" value="50">
+            </div>
+            <div class="slider-group">
+              <div class="slider-label">
+                <span>Screen Brightness</span>
+                <span id="brightVal">50%</span>
+              </div>
+              <input type="range" id="brightSlider" class="deck-slider" min="0" max="100" value="50">
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick System Actions -->
+        <div class="deck-card">
+          <div class="card-header">Tactical Overrides</div>
+          <div class="actions-grid" style="margin-top: 5px;">
+            <button id="actLockBtn" class="deck-btn" style="border-color: rgba(255, 74, 74, 0.4); color: #ff6b6b;">Lock Mac</button>
+            <button id="actMuteBtn" class="deck-btn">Mute Audio</button>
+            <button id="actPlayBtn" class="deck-btn">Play/Pause</button>
+            <button id="actNextBtn" class="deck-btn">Next Track</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // System Configurations
+    let token = localStorage.getItem('jarvis_auth_token') || '';
+    let ttsEnabled = localStorage.getItem('jarvis_tts_enabled') !== 'false';
+    let recognition = null;
+    let isListening = false;
+
+    const authGate = document.getElementById('authGate');
+    const authTokenInput = document.getElementById('authTokenInput');
+    const authSubmitBtn = document.getElementById('authSubmitBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    const inputField = document.getElementById('inputField');
+    const messageArea = document.getElementById('messageArea');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const ttsToggle = document.getElementById('ttsToggle');
+
+    // TV / Remote Pairing Elements
+    const tokenPane = document.getElementById('tokenPane');
+    const pinPane = document.getElementById('pinPane');
+    const authToggleBtn = document.getElementById('authToggleBtn');
+    const authCard = document.getElementById('authCard');
+    const pinErrorMsg = document.getElementById('pinErrorMsg');
+    const pinInputs = document.querySelectorAll('.pin-input');
+
+    let pairingMode = 'token'; // 'token' or 'pin'
+
+    authToggleBtn.addEventListener('click', () => {
+      if (pairingMode === 'token') {
+        pairingMode = 'pin';
+        tokenPane.style.display = 'none';
+        pinPane.style.display = 'flex';
+        authToggleBtn.textContent = 'Use Security Token';
+        pinInputs[0].focus();
+      } else {
+        pairingMode = 'token';
+        tokenPane.style.display = 'flex';
+        pinPane.style.display = 'none';
+        authToggleBtn.textContent = 'Pair with 6-Digit PIN';
+        authTokenInput.focus();
+      }
+      pinErrorMsg.style.display = 'none';
+    });
+
+    // Wire up PIN input autotabbing, backspace, and paste handlers
+    pinInputs.forEach((input, index) => {
+      // Shift focus forward on digit input
+      input.addEventListener('input', (e) => {
+        const val = e.target.value.replace(/[^0-9]/g, '');
+        e.target.value = val;
+        
+        if (val && index < 5) {
+          pinInputs[index + 1].focus();
+        }
+        
+        // If all 6 digits are filled, automatically submit
+        checkAndSubmitPin();
+      });
+
+      // Handle backspace (shift focus backward)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !e.target.value && index > 0) {
+          pinInputs[index - 1].focus();
+        }
+      });
+
+      // Handle pasting
+      input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const data = (e.clipboardData || window.clipboardData).getData('text');
+        const digits = data.replace(/[^0-9]/g, '').substring(0, 6).split('');
+        
+        digits.forEach((digit, idx) => {
+          if (pinInputs[idx]) {
+            pinInputs[idx].value = digit;
+          }
+        });
+        
+        if (digits.length > 0) {
+          const focusIdx = Math.min(digits.length, 5);
+          pinInputs[focusIdx].focus();
+        }
+        
+        checkAndSubmitPin();
+      });
+    });
+
+    async function checkAndSubmitPin() {
+      const pin = Array.from(pinInputs).map(i => i.value).join('');
+      if (pin.length !== 6) return;
+
+      pinErrorMsg.style.display = 'none';
+      
+      try {
+        const resp = await fetch(`/bridge/pair?pin=${pin}`);
+        const data = await resp.json();
+        
+        if (data.ok && data.token) {
+          token = data.token;
+          localStorage.setItem('jarvis_auth_token', token);
+          checkAuth();
+          // Clear inputs
+          pinInputs.forEach(i => i.value = '');
+        } else {
+          handlePinFailure(data.error, data.remaining_attempts, data.lockout_seconds);
+        }
+      } catch (err) {
+        handlePinFailure('network_error');
+      }
+    }
+
+    function handlePinFailure(error, remainingAttempts, lockoutSeconds) {
+      // Shake the card
+      authCard.style.animation = 'none';
+      void authCard.offsetWidth; // trigger reflow
+      authCard.style.animation = 'shake 0.4s ease';
+
+      // Clear all inputs and focus on first
+      pinInputs.forEach(i => i.value = '');
+      pinInputs[0].focus();
+
+      pinErrorMsg.style.display = 'block';
+      if (error === 'rate_limit_lockout' || lockoutSeconds) {
+        const mins = Math.ceil((lockoutSeconds || 900) / 60);
+        pinErrorMsg.textContent = `Brute-force detected! Locked out for ${mins} minutes.`;
+      } else if (error === 'invalid_pin') {
+        pinErrorMsg.textContent = `Invalid code. ${remainingAttempts} attempts remaining.`;
+      } else {
+        pinErrorMsg.textContent = 'Connection error. Please try again.';
+      }
+    }
+
+    // UI Updates
+    ttsToggle.textContent = ttsEnabled ? '🔊' : '🔇';
+
+    // 1. Authentication Check & URL Token Grab
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      token = urlToken;
+      localStorage.setItem('jarvis_auth_token', urlToken);
+      // Clean query string
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({path: cleanUrl}, '', cleanUrl);
+    }
+
+    async function checkAuth() {
+      if (!token) {
+        authGate.style.display = 'flex';
+        return;
+      }
+      // Validate token against server before hiding auth gate
+      try {
+        const resp = await fetch('/auth/verify', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (resp.status === 401) {
+          // Stale token — clear and re-prompt
+          token = '';
+          localStorage.removeItem('jarvis_auth_token');
+          authGate.style.display = 'flex';
+          return;
+        }
+      } catch (e) {
+        // Network error — still show app, status will show OFFLINE
+      }
+      authGate.style.display = 'none';
+      pollSystemStatus();
+      clearInterval(window._statusPoll);
+      window._statusPoll = setInterval(pollSystemStatus, 15000);
+    }
+
+    authSubmitBtn.addEventListener('click', () => {
+      const inputVal = authTokenInput.value.trim();
+      if (inputVal) {
+        token = inputVal;
+        localStorage.setItem('jarvis_auth_token', inputVal);
+        checkAuth();
+      }
+    });
+
+    // 2. Poll System Status
+    async function pollSystemStatus() {
+      try {
+        const resp = await fetch('/status', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (resp.status === 401) {
+          token = '';
+          localStorage.removeItem('jarvis_auth_token');
+          checkAuth();
+          return;
+        }
+        const data = await resp.json();
+        if (data) {
+          document.getElementById('statusLabel').textContent = 'ONLINE';
+          if (data.model) {
+            document.getElementById('activeModelVal').textContent = data.model;
+          }
+          if (data.uptime) {
+            document.getElementById('uptimeVal').textContent = data.uptime;
+          }
+        }
+      } catch (e) {
+        document.getElementById('statusLabel').textContent = 'OFFLINE';
+      }
+    }
+
+    // 3. Floating Sidebar Toggle
+    sidebarToggle.addEventListener('click', () => {
+      sidebar.classList.toggle('open');
+    });
+
+    // 4. TTS Feedback Toggle
+    ttsToggle.addEventListener('click', () => {
+      ttsEnabled = !ttsEnabled;
+      localStorage.setItem('jarvis_tts_enabled', ttsEnabled);
+      ttsToggle.textContent = ttsEnabled ? '🔊' : '🔇';
+    });
+
+    // 5. Speech Recognition Setup (Browser STT)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.classList.add('active');
+        inputField.placeholder = "Listening...";
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        micBtn.classList.remove('active');
+        inputField.placeholder = "Send a message...";
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        inputField.value = transcript;
+        sendMessage();
+      };
+    } else {
+      micBtn.style.display = 'none';
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (!recognition) return;
+      if (isListening) {
+        recognition.stop();
+      } else {
+        recognition.start();
+      }
+    });
+
+    // 6. Speech Synthesis (Browser TTS)
+    function speakText(text) {
+      if (!ttsEnabled || !window.speechSynthesis) return;
+      // Strip markdown code fences before speaking
+      const plainText = text.replace(/```[\\s\\S]*?```/g, "").replace(/`[^`]+`/g, "");
+      
+      // Stop previous utterance
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(plainText);
+      const voices = window.speechSynthesis.getVoices();
+      // Prefer standard Daniel or Google UK English voices
+      const englishVoice = voices.find(v => v.name.includes('Daniel') || v.name.includes('Google UK English')) || voices.find(v => v.lang.startsWith('en'));
+      if (englishVoice) {
+        utterance.voice = englishVoice;
+      }
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // 7. Markdown parsing
+    function parseMarkdown(text) {
+      // Escape HTML
+      let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // Handle block code
+      html = html.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, (match, lang, code) => {
+        return `<pre><code>${code.trim()}</code></pre>`;
+      });
+      // Handle inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      // Newlines
+      html = html.replace(/\\n/g, '<br>');
+      return html;
+    }
+
+    // 8a. Toast notification helper
+    function showToast(msg, type = 'error') {
+      let toast = document.getElementById('jarvisToast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'jarvisToast';
+        toast.style.cssText = [
+          'position:fixed', 'top:80px', 'left:50%', 'transform:translateX(-50%)',
+          'background:rgba(3,18,28,0.97)', 'border:1px solid rgba(0,212,255,0.4)',
+          'color:#00d4ff', 'padding:12px 20px', 'border-radius:10px',
+          'font-size:13px', 'font-weight:600', 'z-index:9999',
+          'max-width:90vw', 'text-align:center',
+          'box-shadow:0 4px 20px rgba(0,212,255,0.3)',
+          'transition:opacity 0.3s ease', 'pointer-events:none'
+        ].join(';');
+        document.body.appendChild(toast);
+      }
+      if (type === 'warn') toast.style.borderColor = 'rgba(255,165,0,0.6)', toast.style.color = '#ffa500';
+      else if (type === 'ok') toast.style.borderColor = 'rgba(0,255,100,0.4)', toast.style.color = '#00ff88';
+      else toast.style.borderColor = 'rgba(0,212,255,0.4)', toast.style.color = '#00d4ff';
+      toast.textContent = msg;
+      toast.style.opacity = '1';
+      clearTimeout(toast._hideTimer);
+      toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+    }
+
+    // 8. Chat Operations
+    let _isSending = false;
+    async function sendMessage() {
+      if (_isSending) { showToast('⏳ Still sending\u2026 please wait', 'warn'); return; }
+      const message = inputField.value.trim();
+      if (!message) return;
+
+      _isSending = true;
+      sendBtn.disabled = true;
+      sendBtn.style.opacity = '0.6';
+      sendBtn.innerHTML = '⏳';
+
+      inputField.value = '';
+      inputField.style.height = 'auto';
+
+      // Append User message
+      const userWrap = document.createElement('div');
+      userWrap.className = 'message-wrap user';
+      userWrap.innerHTML = `<div class="bubble"><p>${parseMarkdown(message)}</p></div>`;
+      messageArea.appendChild(userWrap);
+      messageArea.scrollTop = messageArea.scrollHeight;
+
+      // Create empty Jarvis stream bubble
+      const jarvisWrap = document.createElement('div');
+      jarvisWrap.className = 'message-wrap jarvis';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.innerHTML = `<p class="streaming-cursor">...</p>`;
+      jarvisWrap.appendChild(bubble);
+      messageArea.appendChild(jarvisWrap);
+      messageArea.scrollTop = messageArea.scrollHeight;
+
+      try {
+        const response = await fetch('/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ message: message, stream: true, source: 'mobile_web' })
+        });
+
+        if (response.status === 401) {
+          token = '';
+          localStorage.removeItem('jarvis_auth_token');
+          jarvisWrap.remove(); userWrap.remove();
+          checkAuth();
+          showToast('🔒 Session expired — please re-authenticate');
+          return;
+        }
+
+        if (response.status === 409) {
+          // Chat lock busy — restore message and auto-retry in 2s
+          jarvisWrap.remove(); userWrap.remove();
+          inputField.value = message;
+          showToast('⏳ Jarvis is busy — retrying in 2 seconds…', 'warn');
+          setTimeout(() => {
+            _isSending = false;
+            sendBtn.disabled = false;
+            sendBtn.style.opacity = '1';
+            sendBtn.innerHTML = '➤';
+            sendMessage();
+          }, 2000);
+          return;
+        }
+
+        if (!response.ok) {
+          bubble.innerHTML = `<p style="color:#ff6644">⚠ Server error ${response.status}. Please try again.</p>`;
+          messageArea.scrollTop = messageArea.scrollHeight;
+          showToast(`⚠ Error ${response.status} — try again`, 'warn');
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullResponse = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            if (trimmed.startsWith('data: ')) {
+              const dataStr = trimmed.slice(6);
+              if (dataStr === '[DONE]') {
+                break;
+              } else {
+                try {
+                  const data = JSON.parse(dataStr);
+                  if (data.chunk) {
+                    fullResponse += data.chunk;
+                    bubble.innerHTML = `<p>${parseMarkdown(fullResponse)}</p>`;
+                    messageArea.scrollTop = messageArea.scrollHeight;
+                  }
+                } catch (err) {}
+              }
+            }
+          }
+        }
+        
+        // Final Speech Feedback
+        speakText(fullResponse);
+
+      } catch (err) {
+        bubble.innerHTML = `<p style="color:#ff6644">📡 Network error — check your connection.</p>`;
+        messageArea.scrollTop = messageArea.scrollHeight;
+        showToast('📡 Connection lost', 'warn');
+      } finally {
+        _isSending = false;
+        sendBtn.disabled = false;
+        sendBtn.style.opacity = '1';
+        sendBtn.innerHTML = '➤';
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Auto-expand textarea
+    inputField.addEventListener('input', () => {
+      inputField.style.height = 'auto';
+      inputField.style.height = (inputField.scrollHeight - 4) + 'px';
+    });
+
+    // ── Progressive Web App (PWA) Service Worker Registration ─────────────────
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then((reg) => console.log('[PWA] ServiceWorker registered:', reg.scope))
+          .catch((err) => console.warn('[PWA] ServiceWorker registration failed:', err));
+      });
+    }
+
+    // ── Holographic Control Deck JS Logic ────────────────────────────────────
+    const controlDeck = document.getElementById('controlDeck');
+    const deckHandle = document.getElementById('deckHandle');
+    
+    // Toggle Deck Expand/Collapse
+    deckHandle.addEventListener('click', () => {
+      controlDeck.classList.toggle('expanded');
+      // If expanded and we don't have telemetry, trigger a fetch
+      if (controlDeck.classList.contains('expanded')) {
+        fetchTelemetry();
+        if (autoStreamActive) {
+          startScreenStream();
+        } else {
+          refreshScreenFeed();
+        }
+      } else {
+        stopScreenStream();
+      }
+    });
+
+    // 1. Telemetry Sensor Loop
+    const telBattery = document.getElementById('telBattery');
+    const telCpu = document.getElementById('telCpu');
+    const telMemory = document.getElementById('telMemory');
+    const telOs = document.getElementById('telOs');
+
+    async function fetchTelemetry() {
+      if (!token) return;
+      try {
+        const resp = await fetch('/remote/telemetry', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data && data.telemetry) {
+            const tel = data.telemetry;
+            telBattery.textContent = tel.battery || '--';
+            telCpu.textContent = tel.cpu || '--';
+            telMemory.textContent = tel.memory || '--';
+            telOs.textContent = tel.os || '--';
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch system telemetry:', err);
+      }
+    }
+
+    // Poll telemetry every 10 seconds when active
+    setInterval(() => {
+      if (token && controlDeck.classList.contains('expanded')) {
+        fetchTelemetry();
+      }
+    }, 10000);
+
+    // 2. Volume & Brightness Sliders (with debounce)
+    const volSlider = document.getElementById('volSlider');
+    const volVal = document.getElementById('volVal');
+    const brightSlider = document.getElementById('brightSlider');
+    const brightVal = document.getElementById('brightVal');
+
+    function setupDebouncedSlider(slider, valLabel, endpointPath, fieldName) {
+      let debounceTimeout = null;
+      
+      slider.addEventListener('input', (e) => {
+        const value = e.target.value;
+        valLabel.textContent = value + '%';
+        
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(async () => {
+          if (!token) return;
+          try {
+            const body = {};
+            body[fieldName] = parseInt(value);
+            await fetch(endpointPath, {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(body)
+            });
+          } catch (err) {
+            console.warn(`Failed to update slider at ${endpointPath}:`, err);
+          }
+        }, 200);
+      });
+    }
+
+    setupDebouncedSlider(volSlider, volVal, '/remote/volume', 'level');
+    setupDebouncedSlider(brightSlider, brightVal, '/remote/brightness', 'level');
+
+    // 3. System Override Actions
+    async function triggerSystemAction(actionName) {
+      if (!token) return;
+      try {
+        const resp = await fetch('/remote/action', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ action: actionName })
+        });
+        const data = await resp.json();
+        if (data && data.message) {
+          // Speak feedback on click!
+          if (ttsEnabled && window.speechSynthesis) {
+            const utterance = new SpeechSynthesisUtterance(data.message);
+            window.speechSynthesis.speak(utterance);
+          }
+        }
+      } catch (err) {
+        console.warn(`Action ${actionName} failed:`, err);
+      }
+    }
+
+    document.getElementById('actLockBtn').addEventListener('click', () => triggerSystemAction('lock'));
+    document.getElementById('actMuteBtn').addEventListener('click', () => triggerSystemAction('mute'));
+    document.getElementById('actPlayBtn').addEventListener('click', () => triggerSystemAction('play_pause'));
+    document.getElementById('actNextBtn').addEventListener('click', () => triggerSystemAction('next_track'));
+
+    // 4. MacBook Screenshare Live Feed
+    const screenFeedImg = document.getElementById('screenFeedImg');
+    const refreshFeedBtn = document.getElementById('refreshFeedBtn');
+    const autoFeedBtn = document.getElementById('autoFeedBtn');
+    
+    let autoStreamActive = false;
+    let streamInterval = null;
+
+    function refreshScreenFeed() {
+      if (!token) return;
+      screenFeedImg.classList.add('loading');
+      
+      // Load directly using token parameter
+      const imgUrl = `/remote/screenshot?token=${token}&t=${Date.now()}`;
+      
+      const tempImg = new Image();
+      tempImg.onload = () => {
+        screenFeedImg.src = imgUrl;
+        screenFeedImg.classList.remove('loading');
+      };
+      tempImg.onerror = () => {
+        screenFeedImg.classList.remove('loading');
+      };
+      tempImg.src = imgUrl;
+    }
+
+    refreshFeedBtn.addEventListener('click', () => {
+      refreshScreenFeed();
+    });
+
+    function startScreenStream() {
+      autoStreamActive = true;
+      autoFeedBtn.textContent = 'Stop Stream';
+      autoFeedBtn.style.background = 'var(--orange)';
+      autoFeedBtn.style.color = '#ffffff';
+      autoFeedBtn.style.borderColor = 'var(--orange)';
+      
+      refreshScreenFeed();
+      streamInterval = setInterval(() => {
+        if (controlDeck.classList.contains('expanded')) {
+          refreshScreenFeed();
+        } else {
+          stopScreenStream();
+        }
+      }, 2500); // 2.5 second refresh screenshare
+    }
+
+    function stopScreenStream() {
+      autoStreamActive = false;
+      autoFeedBtn.textContent = 'Auto-Stream';
+      autoFeedBtn.style.background = '';
+      autoFeedBtn.style.color = '';
+      autoFeedBtn.style.borderColor = '';
+      
+      clearInterval(streamInterval);
+      streamInterval = null;
+    }
+
+    autoFeedBtn.addEventListener('click', () => {
+      if (autoStreamActive) {
+        stopScreenStream();
+      } else {
+        startScreenStream();
+      }
+    });
+
+    // Init
+    checkAuth();
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/pending")

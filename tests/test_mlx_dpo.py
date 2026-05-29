@@ -34,13 +34,14 @@ class MlxDpoStatusTests(unittest.TestCase):
         self.assertIsInstance(result, bool)
 
     def test_list_algorithms_includes_dpo_orpo_ipo(self):
-        """list_algorithms should return supported preference algorithms."""
+        """list_algorithms should return supported preference algorithms including GRPO."""
         algos = local_mlx_dpo.list_algorithms()
         self.assertIsInstance(algos, list)
         self.assertIn("dpo", algos)
         self.assertIn("orpo", algos)
         self.assertIn("ipo", algos)
-        self.assertEqual(len(algos), 3)
+        self.assertIn("grpo", algos)
+        self.assertEqual(len(algos), 4)
 
 
 class MlxDpoFormatConversionTests(unittest.TestCase):
@@ -218,16 +219,18 @@ class MlxDpoTrainingTests(unittest.TestCase):
             self.assertEqual(result["pair_count"], 1)
             self.assertIsNone(result["adapter_path"])
 
-    def test_run_preference_training_rejects_grpo_until_local_backend_exists(self):
+    def test_run_preference_training_accepts_grpo_algorithm(self):
+        """GRPO is now a fully implemented algorithm — dry_run should succeed."""
         result = local_mlx_dpo.run_preference_training(
             "qwen2.5-coder:7b",
             algorithm="grpo",
             dry_run=True,
         )
 
-        self.assertFalse(result["ok"])
-        self.assertIn("grpo", result["error"].lower())
-        self.assertIn("not implemented", result["error"].lower())
+        # GRPO is implemented: dry_run should succeed (ok=True) or fail only due
+        # to missing Apple Silicon / mlx-lm-lora, not because GRPO is unsupported.
+        if not result["ok"]:
+            self.assertNotIn("not implemented", result.get("error", "").lower())
 
     def test_run_preference_training_fails_gracefully_when_unavailable(self):
         """Should return error when mlx-lm-lora is unavailable."""

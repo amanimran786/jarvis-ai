@@ -31,6 +31,14 @@ except Exception:
 _openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 _recognizer = sr.Recognizer()
 
+# Real-time microphone audio amplitude/decibel tracker (normalized between 0.0 and 1.0)
+_mic_level = 0.0
+
+def get_mic_level() -> float:
+    """Return the current thread-safe microphone amplitude level (0.0 to 1.0)."""
+    global _mic_level
+    return _mic_level
+
 WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis", "okay jarvis"}
 _last_tts_engine = ""
 MANUAL_PROMPT_WINDOW_SECONDS = 8.0
@@ -62,6 +70,7 @@ _MIC_RECENT_FAILURES: dict[str, float] = {}
 _MIC_OPEN_LOCK = threading.Lock()
 _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
+_active_mic_label = ""
 
 
 @contextmanager
@@ -301,7 +310,7 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 @contextmanager
 def _open_microphone_source():
     """Open a live microphone stream, skipping candidates that fail to provide one."""
-    global _mic_failure_cooldown_until, _mic_last_failure_detail
+    global _mic_failure_cooldown_until, _mic_last_failure_detail, _active_mic_label
     last_error: Exception | None = None
     with audio_capture("voice-microphone"), _MIC_OPEN_LOCK:
         now = _time.monotonic()
@@ -319,12 +328,36 @@ def _open_microphone_source():
                 if getattr(source, "stream", None) is None:
                     raise RuntimeError(f"{label} opened without a live input stream")
                 _debug_log(f"[Mic] Using input device: {label}")
+                _active_mic_label = label
                 _clear_mic_candidate_failure(label)
                 _mic_failure_cooldown_until = 0.0
                 _mic_last_failure_detail = ""
                 try:
+                    # Securely tap source.stream.read to extract real-time RMS audio levels
+                    _stream = getattr(source, "stream", None)
+                    if _stream is not None and callable(getattr(_stream, "read", None)):
+                        original_read = _stream.read
+                        def _wrapped_read(*args, **kwargs):
+                            chunk = original_read(*args, **kwargs)
+                            try:
+                                import struct
+                                import math
+                                count = len(chunk) // 2
+                                if count > 0:
+                                    shorts = struct.unpack(f"<{count}h", chunk)
+                                    sum_squares = sum(x*x for x in shorts)
+                                    rms = math.sqrt(sum_squares / count)
+                                    global _mic_level
+                                    _mic_level = min(1.0, rms / 8000.0)
+                            except Exception:
+                                pass
+                            return chunk
+                        source.stream.read = _wrapped_read
+
                     yield source
                 finally:
+                    global _mic_level
+                    _mic_level = 0.0
                     microphone.__exit__(None, None, None)
                 return
             except Exception as exc:
@@ -351,11 +384,46 @@ def _open_microphone_source():
 
 def _capture_audio_window(source, *, duration: float, reason: str):
     """
-    Record a fixed window of audio instead of waiting for speech_recognition's
-    phrase gate to decide that the user started talking.
+    Record audio from source with a hard timeout to prevent PortAudio/CoreAudio blocking/freezes.
     """
     _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
-    return _recognizer.record(source, duration=duration)
+    
+    result = []
+    exception_holder = []
+    
+    def record_target():
+        try:
+            audio_data = _recognizer.record(source, duration=duration)
+            result.append(audio_data)
+        except Exception as e:
+            exception_holder.append(e)
+            
+    record_thread = threading.Thread(target=record_target, daemon=True)
+    record_thread.start()
+    
+    # We wait for duration + 3.0 seconds (e.g. 6s for wake word, 11s for prompt)
+    timeout = duration + 3.0
+    record_thread.join(timeout=timeout)
+    
+    if record_thread.is_alive():
+        _debug_log(f"[Mic] Stream freeze detected for {reason}! PyAudio read blocked for > {timeout:.1f}s.")
+        # Try to force terminate PyAudio / close stream to clean up
+        try:
+            if getattr(source, "stream", None) is not None:
+                source.stream.close()
+            if getattr(source, "audio", None) is not None:
+                source.audio.terminate()
+        except Exception:
+            pass
+        raise RuntimeError(f"Audio stream frozen or dead during record for {reason}")
+        
+    if exception_holder:
+        raise exception_holder[0]
+        
+    if not result:
+        raise RuntimeError(f"No audio captured from stream for {reason}")
+        
+    return result[0]
 
 # Prevents mic from picking up Jarvis's own TTS output.
 # Cleared while Jarvis is speaking; listen() blocks until set again.
@@ -386,7 +454,26 @@ def _ensure_calibrated(source) -> None:
         if _calibrated_threshold is not None and (now - _calibrated_at) < _CALIBRATION_TTL:
             _recognizer.energy_threshold = _calibrated_threshold
             return
-        _recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            
+        # Run calibration with a timeout thread to prevent PortAudio freezes
+        exception_holder = []
+        def calibrate_target():
+            try:
+                _recognizer.adjust_for_ambient_noise(source, duration=0.3)
+            except Exception as e:
+                exception_holder.append(e)
+                
+        cal_thread = threading.Thread(target=calibrate_target, daemon=True)
+        cal_thread.start()
+        cal_thread.join(timeout=2.0)  # should take 0.3s; 2.0s is extremely safe
+        
+        if cal_thread.is_alive():
+            _debug_log("[Mic] Calibration freeze detected! Audio stream read blocked during calibrate.")
+            raise RuntimeError("Audio stream frozen during calibration")
+            
+        if exception_holder:
+            raise exception_holder[0]
+            
         _calibrated_threshold = _recognizer.energy_threshold
         _calibrated_at = _time.monotonic()
 
@@ -700,8 +787,10 @@ def listen() -> str | None:
                 duration=MANUAL_PROMPT_WINDOW_SECONDS,
                 reason="manual prompt",
             )
-    except RuntimeError as exc:
-        _debug_log(f"[Mic] {exc}")
+    except Exception as exc:
+        _debug_log(f"[Mic] listen failed: {exc}")
+        if _active_mic_label:
+            _mark_mic_candidate_failed(_active_mic_label)
         return None
 
     # Transcribe in memory — no temp file write/read
@@ -799,8 +888,10 @@ def wait_for_wake_word() -> None:
                     duration=WAKE_WORD_WINDOW_SECONDS,
                     reason="wake word",
                 )
-        except RuntimeError as exc:
-            _debug_log(f"[Mic] {exc}")
+        except Exception as exc:
+            _debug_log(f"[Mic] wait_for_wake_word failed: {exc}")
+            if _active_mic_label:
+                _mark_mic_candidate_failed(_active_mic_label)
             _time.sleep(_MIC_OPEN_RETRY_SECONDS)
             continue
         text = _transcribe_wake_audio(audio)

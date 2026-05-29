@@ -624,6 +624,14 @@ def bridge_status(api_host: str = "127.0.0.1", api_port: int = 8765) -> dict:
     else:
         urls = [f"http://{host}:{api_port}"]
 
+    try:
+        import tunnel_manager
+        public_url = tunnel_manager.get_tunnel_url()
+        if public_url:
+            urls.insert(0, public_url)
+    except Exception:
+        pass
+
     return {
         "enabled": lan_enabled,
         "host": host,

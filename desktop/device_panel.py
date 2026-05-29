@@ -28,6 +28,10 @@ def copy_bridge_url() -> str:
     url = bridge.primary_bridge_url()
     if not url:
         return "No bridge URL is available yet."
+    import os
+    token = os.getenv("JARVIS_API_TOKEN", "")
+    if token:
+        url = f"{url}/?token={token}"
     terminal.set_clipboard(url)
     return f"Copied {url}"
 
