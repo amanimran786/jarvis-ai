@@ -463,6 +463,16 @@ class VaultIngestRequest(BaseModel):
     auto_build: bool = True
 
 
+class VaultSearchRequest(BaseModel):
+    query: str
+    topn: int = 3
+
+
+class VaultReadRequest(BaseModel):
+    path: str
+    max_chars: int = 4000
+
+
 class SkillCreateRequest(BaseModel):
     query: str
     tool: str = "chat"
@@ -1615,6 +1625,20 @@ def get_hook_status(hours: int = 24):
 @app.get("/vault")
 def get_vault_status():
     return vault.status()
+
+
+@app.post("/vault/search")
+def search_vault(req: VaultSearchRequest):
+    bounded_topn = max(1, min(int(req.topn or 3), 10))
+    results = vault.search(req.query, topn=bounded_topn)
+    return {"ok": True, "query": req.query, "results": results, "count": len(results)}
+
+
+@app.post("/vault/read")
+def read_vault(req: VaultReadRequest):
+    bounded_max_chars = max(200, min(int(req.max_chars or 4000), 12000))
+    result = vault.read(req.path, max_chars=bounded_max_chars)
+    return {"ok": bool(result.get("ok")), "result": result}
 
 
 @app.post("/vault/build")

@@ -30,7 +30,10 @@ Each fact dict:
 from __future__ import annotations
 
 import threading
+import logging
 from typing import Any
+
+log = logging.getLogger("jarvis.extractor")
 
 # ── Extraction prompt ──────────────────────────────────────────────────────────
 
@@ -81,20 +84,18 @@ def _write_extractions(facts: list[dict]) -> None:
             elif ftype == "decision":
                 vault_capture.log_decision(
                     title=content[:80],
-                    context="Extracted from conversation",
                     decision=content,
-                    rationale="",
-                    outcome="pending",
+                    why="Extracted from conversation",
                 )
             elif ftype == "preference":
                 # Append to 30 Preferences under a catch-all heading
                 vault_capture.append_to_note(
-                    note_title="30 Preferences",
-                    heading="## Captured Preferences",
+                    "30 Preferences",
+                    "Captured Preferences",
                     content=f"- {content}",
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("vault extraction write failed for type=%s: %s", ftype, exc)
 
 
 # ── Extractor ─────────────────────────────────────────────────────────────────
