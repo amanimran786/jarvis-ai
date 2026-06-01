@@ -81,6 +81,22 @@ class WriteExtractionsTests(unittest.TestCase):
                 {"type": "task", "content": "Research Qwen3 benchmarks", "confidence": "high"}
             ])
             mock_m0.add_async.assert_called()
+            mock_vc.add_task.assert_called_once_with("Research Qwen3 benchmarks")
+
+    def test_decision_routes_to_vault_capture_with_supported_signature(self):
+        mock_vc = MagicMock()
+        mock_m0 = MagicMock()
+        with patch.dict("sys.modules", {"vault_capture": mock_vc, "mem0_layer": mock_m0}):
+            import importlib
+            importlib.reload(jex)
+            jex._write_extractions([
+                {"type": "decision", "content": "Use Obsidian as Jarvis's durable memory layer.", "confidence": "high"}
+            ])
+            mock_vc.log_decision.assert_called_once_with(
+                title="Use Obsidian as Jarvis's durable memory layer.",
+                decision="Use Obsidian as Jarvis's durable memory layer.",
+                why="Extracted from conversation",
+            )
 
     def test_preference_appended_to_note(self):
         mock_vc = MagicMock()
@@ -92,6 +108,11 @@ class WriteExtractionsTests(unittest.TestCase):
                 {"type": "preference", "content": "Aman prefers brief spoken answers", "confidence": "high"}
             ])
             mock_m0.add_async.assert_called()
+            mock_vc.append_to_note.assert_called_once_with(
+                "30 Preferences",
+                "Captured Preferences",
+                content="- Aman prefers brief spoken answers",
+            )
 
 
 class JsonParsingTests(unittest.TestCase):

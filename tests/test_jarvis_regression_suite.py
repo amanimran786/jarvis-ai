@@ -2740,6 +2740,47 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("training_action", payload["policy"])
 
+    def test_vault_search_endpoint_returns_citation_results(self):
+        fake_results = [
+            {
+                "path": "wiki/brain/10 Identity.md",
+                "title": "Identity",
+                "score": 42,
+                "excerpt": "Aman builds Jarvis as a local-first assistant.",
+                "citation": {
+                    "label": "wiki/brain/10 Identity.md > Identity",
+                    "line_start": 1,
+                },
+            }
+        ]
+        with patch("api.vault.search", return_value=fake_results) as search_mock:
+            response = self.client.post("/vault/search", json={"query": "Aman Jarvis", "topn": 2})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["citation"]["label"], "wiki/brain/10 Identity.md > Identity")
+        search_mock.assert_called_once_with("Aman Jarvis", topn=2)
+
+    def test_vault_read_endpoint_returns_note_content(self):
+        fake_result = {
+            "ok": True,
+            "path": "wiki/brain/10 Identity.md",
+            "title": "Identity",
+            "content": "# Identity\n\nAman builds Jarvis.",
+            "truncated": False,
+            "citation": {"label": "wiki/brain/10 Identity.md > Identity"},
+        }
+        with patch("api.vault.read", return_value=fake_result) as read_mock:
+            response = self.client.post("/vault/read", json={"path": "wiki/brain/10 Identity.md", "max_chars": 1200})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["result"]["title"], "Identity")
+        read_mock.assert_called_once_with("wiki/brain/10 Identity.md", max_chars=1200)
+
     def test_context_budget_endpoint(self):
         response = self.client.get("/context-budget")
         self.assertEqual(response.status_code, 200)

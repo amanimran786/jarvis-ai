@@ -882,6 +882,90 @@ class VaultStatusTests(unittest.TestCase):
         self.assertIn("raw/notes.md > My Section", result)
         self.assertIn("Relevant content", result)
 
+    def test_status_reports_stale_index_when_note_is_newer(self):
+        import vault
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            patches = [
+                patch.object(vault, "VAULT_ROOT", root),
+                patch.object(vault, "RAW_DIR", root / "raw"),
+                patch.object(vault, "WIKI_DIR", root / "wiki"),
+                patch.object(vault, "INDEXES_DIR", root / "indexes"),
+                patch.object(vault, "OUTPUTS_DIR", root / "outputs"),
+                patch.object(vault, "TEMPLATES_DIR", root / "templates"),
+                patch.object(vault, "INDEX_FILE", root / "indexes" / "index.json"),
+            ]
+            for ctx in patches:
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "10 Identity.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text("# Identity\n\nAman builds Jarvis.\n" + ("Local-first memory.\n" * 30), encoding="utf-8")
+            vault.refresh_index()
+            future = (root / "indexes" / "index.json").stat().st_mtime + 10
+            os.utime(note, (future, future))
+
+            status = vault.status()
+
+        self.assertTrue(status["index_needs_refresh"])
+        self.assertGreater(status["latest_doc_mtime"], status["index_mtime"])
+
+    def test_read_rejects_path_traversal(self):
+        import vault
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            patches = [
+                patch.object(vault, "VAULT_ROOT", root),
+                patch.object(vault, "RAW_DIR", root / "raw"),
+                patch.object(vault, "WIKI_DIR", root / "wiki"),
+                patch.object(vault, "INDEXES_DIR", root / "indexes"),
+                patch.object(vault, "OUTPUTS_DIR", root / "outputs"),
+                patch.object(vault, "TEMPLATES_DIR", root / "templates"),
+                patch.object(vault, "INDEX_FILE", root / "indexes" / "index.json"),
+            ]
+            for ctx in patches:
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+
+            result = vault.read("../outside.md")
+
+        self.assertFalse(result["ok"])
+        self.assertIn("inside the vault", result["error"])
+
+    def test_read_returns_text_note_under_vault(self):
+        import vault
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "vault"
+            patches = [
+                patch.object(vault, "VAULT_ROOT", root),
+                patch.object(vault, "RAW_DIR", root / "raw"),
+                patch.object(vault, "WIKI_DIR", root / "wiki"),
+                patch.object(vault, "INDEXES_DIR", root / "indexes"),
+                patch.object(vault, "OUTPUTS_DIR", root / "outputs"),
+                patch.object(vault, "TEMPLATES_DIR", root / "templates"),
+                patch.object(vault, "INDEX_FILE", root / "indexes" / "index.json"),
+            ]
+            for ctx in patches:
+                ctx.start()
+                self.addCleanup(ctx.stop)
+            vault.init_vault()
+            note = root / "wiki" / "brain" / "10 Identity.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(
+                "# Identity\n\nAman builds Jarvis.\n" + ("Local-first memory.\n" * 30),
+                encoding="utf-8",
+            )
+
+            result = vault.read("wiki/brain/10 Identity.md", max_chars=20)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["path"], "wiki/brain/10 Identity.md")
+        self.assertEqual(result["title"], "Identity")
+        self.assertIn("# Identity", result["content"])
+        self.assertTrue(result["truncated"])
+
 
 class VaultMutationTests(unittest.TestCase):
 

@@ -305,6 +305,31 @@ def load_index() -> dict:
         return refresh_index()
 
 
+def _mtime_or_none(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime if path.exists() else None
+    except OSError:
+        return None
+
+
+def _latest_doc_mtime() -> float | None:
+    mtimes: list[float] = []
+    for path in _iter_docs():
+        try:
+            mtimes.append(path.stat().st_mtime)
+        except OSError:
+            continue
+    return max(mtimes) if mtimes else None
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def _score_text(query: str, title: str, keywords: list[str], text: str) -> int:
     lower = query.lower()
     score = 0
@@ -376,6 +401,46 @@ def search(query: str, topn: int = 3) -> list[dict]:
     return ranked[:topn]
 
 
+def read(path: str, max_chars: int = 4000) -> dict:
+    requested = (path or "").strip().strip("/")
+    if not requested:
+        return {"ok": False, "error": "Missing vault path."}
+
+    requested_path = Path(requested)
+    if requested_path.is_absolute() or ".." in requested_path.parts:
+        return {"ok": False, "error": "Vault path must stay inside the vault."}
+    if requested_path.suffix.lower() not in _TEXT_EXTENSIONS:
+        return {"ok": False, "error": "Only text notes can be read through the vault API."}
+
+    root = VAULT_ROOT.resolve()
+    target = (VAULT_ROOT / requested_path).resolve()
+    if not _is_relative_to(target, root):
+        return {"ok": False, "error": "Vault path must stay inside the vault."}
+    if not target.exists() or not target.is_file():
+        return {"ok": False, "error": f"Vault note not found: {requested}."}
+
+    bounded_max = max(200, min(int(max_chars or 4000), 12000))
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "error": f"Could not read vault note: {exc}"}
+
+    rel = str(target.relative_to(root))
+    return {
+        "ok": True,
+        "path": rel,
+        "title": _extract_title(target, raw),
+        "content": raw[:bounded_max],
+        "truncated": len(raw) > bounded_max,
+        "citation": {
+            "path": rel,
+            "title": _extract_title(target, raw),
+            "line_start": 1,
+            "label": f"{rel} > {_extract_title(target, raw)}",
+        },
+    }
+
+
 def should_query(query: str, tool: str | None = None) -> bool:
     lower = (query or "").lower()
     if tool in {"deep_research", "knowledge"}:
@@ -423,12 +488,22 @@ def status() -> dict:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             manifest = {}
+    index_mtime = _mtime_or_none(INDEX_FILE)
+    latest_doc_mtime = _latest_doc_mtime()
+    manifest_mtime = _mtime_or_none(manifest_path)
     return {
         "root": str(VAULT_ROOT),
         "doc_count": index.get("doc_count", 0),
         "wiki_page_count": manifest.get("page_count", 0),
         "indexed_files": [doc["path"] for doc in index.get("docs", [])[:10]],
         "citation_ready": True,
+        "index_mtime": index_mtime,
+        "latest_doc_mtime": latest_doc_mtime,
+        "manifest_mtime": manifest_mtime,
+        "index_needs_refresh": bool(
+            latest_doc_mtime is not None
+            and (index_mtime is None or latest_doc_mtime > index_mtime)
+        ),
     }
 
 
