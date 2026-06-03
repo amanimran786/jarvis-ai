@@ -27,6 +27,38 @@ import runtime_state
 logger = logging.getLogger("brain_daemon")
 
 
+def _sync_repo_map_metadata(repo_map: Path, synced_at: datetime) -> None:
+    """Update Repo Map metadata without damaging Obsidian frontmatter."""
+    content = repo_map.read_text(encoding="utf-8")
+    lines = content.splitlines()
+
+    # Repair older daemon damage where the opening YAML delimiter was replaced
+    # with "# Repo Map (synced ...)" but the closing delimiter remained.
+    if lines and lines[0].startswith("# Repo Map (synced ") and "---" in lines[1:]:
+        lines[0] = "---"
+        content = "\n".join(lines)
+        if repo_map.read_text(encoding="utf-8").endswith("\n"):
+            content += "\n"
+
+    if not content.startswith("---\n"):
+        return
+
+    parts = content.split("---\n", 2)
+    if len(parts) != 3:
+        return
+
+    metadata = parts[1].splitlines()
+    updated = synced_at.strftime("%Y-%m-%d")
+    for idx, line in enumerate(metadata):
+        if line.startswith("updated:"):
+            metadata[idx] = f"updated: {updated}"
+            break
+    else:
+        metadata.append(f"updated: {updated}")
+
+    repo_map.write_text("---\n" + "\n".join(metadata) + "\n---\n" + parts[2], encoding="utf-8")
+
+
 class BrainAgent(ABC):
     """Base class for background brain agents."""
 
@@ -70,8 +102,7 @@ class BrainAgent(ABC):
         """Main loop: sleep interval, run_once, handle exceptions."""
         while not self._stop_event.is_set():
             try:
-                time.sleep(self.interval_seconds)
-                if self._stop_event.is_set():
+                if self._stop_event.wait(self.interval_seconds):
                     break
 
                 start_time = time.time()
@@ -204,15 +235,7 @@ class VaultSynthAgent(BrainAgent):
             # Update Repo Map header with timestamp if brain changed recently
             repo_map = vault_root / "indexes" / "Repo Map.md"
             if recently_modified and repo_map.exists():
-                content = repo_map.read_text()
-                lines = content.split("\n", 1)
-                if lines:
-                    new_header = f"# Repo Map (synced {datetime.now().strftime('%Y-%m-%d %H:%M')})"
-                    if len(lines) > 1:
-                        new_content = new_header + "\n" + lines[1]
-                    else:
-                        new_content = new_header
-                    repo_map.write_text(new_content)
+                _sync_repo_map_metadata(repo_map, datetime.now())
 
             summary = f"Brain indexed: {file_count} files, {match_count} key matches"
             return {"ok": True, "summary": summary, "duration_ms": 0}

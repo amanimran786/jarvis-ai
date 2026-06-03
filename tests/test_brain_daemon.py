@@ -7,10 +7,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch, MagicMock, call
 
-# Mock problematic imports before importing brain_daemon
 import sys
-sys.modules['PyQt6'] = MagicMock()
-sys.modules['PyQt6.QtWidgets'] = MagicMock()
+try:
+    import PyQt6  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules['PyQt6'] = MagicMock()
+    sys.modules['PyQt6.QtWidgets'] = MagicMock()
 
 import brain_daemon
 
@@ -33,6 +35,21 @@ class BrainAgentBaseTests(unittest.TestCase):
         # Daemon thread may take a moment to notice the event
         # Just verify stop() doesn't crash
         agent._thread.join(timeout=2)
+
+    def test_agent_stop_wakes_sleeping_loop(self):
+        """Agent.stop() should wake long interval sleeps instead of waiting for timeout."""
+        agent = brain_daemon.MemoryAgent()
+        agent.interval_seconds = 60
+
+        with patch.object(agent, 'run_once', return_value={"ok": True, "summary": "test"}):
+            agent.start()
+            time.sleep(0.05)
+            start = time.monotonic()
+            agent.stop()
+            elapsed = time.monotonic() - start
+
+        self.assertLess(elapsed, 1.0)
+        self.assertFalse(agent._thread.is_alive())
 
     def test_agent_status_returns_correct_structure(self):
         """Agent status dict has all required keys."""
@@ -147,6 +164,47 @@ class VaultSynthAgentTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("indexed", result["summary"])
         self.assertIn("8 key matches", result["summary"])  # 3 + 5
+
+    def test_repo_map_sync_preserves_frontmatter(self):
+        """Repo Map sync updates metadata without replacing the YAML delimiter."""
+        with TemporaryDirectory() as tmp:
+            repo_map = Path(tmp) / "Repo Map.md"
+            repo_map.write_text(
+                "---\n"
+                "type: brain_meta\n"
+                "updated: 2026-04-21\n"
+                "---\n\n"
+                "# Repo Map\n\n"
+                "Body stays here.\n",
+                encoding="utf-8",
+            )
+
+            brain_daemon._sync_repo_map_metadata(repo_map, datetime(2026, 6, 3, 12, 34))
+
+            content = repo_map.read_text(encoding="utf-8")
+            self.assertTrue(content.startswith("---\n"))
+            self.assertIn("updated: 2026-06-03", content)
+            self.assertIn("\n# Repo Map\n", content)
+
+    def test_repo_map_sync_repairs_old_synced_header_damage(self):
+        """Repo Map sync repairs prior daemon output that broke frontmatter."""
+        with TemporaryDirectory() as tmp:
+            repo_map = Path(tmp) / "Repo Map.md"
+            repo_map.write_text(
+                "# Repo Map (synced 2026-05-29 19:41)\n"
+                "type: brain_meta\n"
+                "updated: 2026-04-21\n"
+                "---\n\n"
+                "# Repo Map\n",
+                encoding="utf-8",
+            )
+
+            brain_daemon._sync_repo_map_metadata(repo_map, datetime(2026, 6, 3, 12, 34))
+
+            content = repo_map.read_text(encoding="utf-8")
+            self.assertTrue(content.startswith("---\n"))
+            self.assertNotIn("# Repo Map (synced", content.splitlines()[0])
+            self.assertIn("updated: 2026-06-03", content)
 
     def test_vault_synth_agent_handles_missing_vault(self):
         """VaultSynthAgent handles missing vault gracefully."""

@@ -79,17 +79,25 @@ _mobile_tl = _threading.local()
 
 
 @contextmanager
-def mobile_web_override():
+def mobile_web_override(system_extra: str = ""):
     """Thread-safe context: force GPT_MINI for this request's smart_stream calls."""
+    previous_active = getattr(_mobile_tl, "active", False)
+    previous_system_extra = getattr(_mobile_tl, "system_extra", "")
     _mobile_tl.active = True
+    _mobile_tl.system_extra = system_extra or ""
     try:
         yield
     finally:
-        _mobile_tl.active = False
+        _mobile_tl.active = previous_active
+        _mobile_tl.system_extra = previous_system_extra
 
 
 def _is_mobile_web_active() -> bool:
     return getattr(_mobile_tl, "active", False)
+
+
+def _mobile_web_system_extra() -> str:
+    return getattr(_mobile_tl, "system_extra", "")
 
 _RUNTIME_VOICE_TERMS = (
     "voice",
@@ -846,8 +854,12 @@ def smart_stream(
     # a generator function and break all callers that expect a (stream, label) tuple.
     # Instead return a (stream, label) tuple just like every other path does.
     if _is_mobile_web_active():
+        mobile_extra = _mobile_web_system_extra()
+        merged_extra = extra_system
+        if mobile_extra:
+            merged_extra = merged_extra + ("\n\n" if merged_extra else "") + mobile_extra
         _mobile_system = (
-            extra_system + "\n\n" if extra_system else ""
+            merged_extra + "\n\n" if merged_extra else ""
         ) + "You are Jarvis on the user's MacBook, accessed via mobile. Be concise."
         return ask_stream(
             user_input,

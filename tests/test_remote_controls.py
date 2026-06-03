@@ -66,11 +66,24 @@ class TestRemoteControls(unittest.TestCase):
         # The temp file should have been deleted by the clean generator
         self.assertFalse(os.path.exists(dummy_path))
 
-    def test_query_parameter_authorization_fallback(self):
-        # Test query parameter token check (used by direct HTML img elements)
-        resp = self.client.get("/remote/telemetry?token=jarvis-test-remote-token")
+    @patch("desktop.screen_capture.capture_screenshot_temp")
+    def test_query_parameter_authorization_limited_to_media_gets(self, mock_capture):
+        # Query tokens are only allowed for browser image/frame GETs.
+        import tempfile
+        fd, dummy_path = tempfile.mkstemp(suffix=".jpg")
+        with os.fdopen(fd, 'wb') as tmp:
+            tmp.write(b"fake jpeg data")
+
+        mock_capture.return_value = dummy_path
+
+        resp = self.client.get("/remote/screenshot?token=jarvis-test-remote-token")
         self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.json()["ok"])
+
+        resp = self.client.get("/remote/telemetry?token=jarvis-test-remote-token")
+        self.assertEqual(resp.status_code, 401)
+
+        resp = self.client.post("/remote/action?token=jarvis-test-remote-token", json={"action": "lock"})
+        self.assertEqual(resp.status_code, 401)
 
     @patch("tools.set_volume")
     def test_authorized_volume(self, mock_set_volume):

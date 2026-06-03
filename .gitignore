@@ -66,9 +66,16 @@ build/
 assets/icon.iconset/
 
 # Runtime logs
+jarvis.log
 routing_log*.jsonl
 runtime/*.sqlite3
 runtime/*.sqlite3-*
+
+# Local UI patch scratch files
+patch_ui*.py
+rebuild_ui.py
+ui_clean.py
+ui_diff.txt
 
 # Graphify build artifacts
 graphify-out/.graphify_*
