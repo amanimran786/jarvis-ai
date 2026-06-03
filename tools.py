@@ -210,3 +210,9 @@ def eval_math(expr: str) -> str:
         return str(round(result, 6)).rstrip("0").rstrip(".")
     except Exception:
         return ""
+
+
+def get_current_time() -> str:
+    """Return the current local time in a mobile-friendly human format."""
+    from datetime import datetime
+    return datetime.now().strftime("%-I:%M %p, %A %B %-d")

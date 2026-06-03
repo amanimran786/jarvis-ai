@@ -34,7 +34,7 @@ import threading
 import time
 import logging
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 
 log = logging.getLogger("api")
@@ -175,9 +175,11 @@ def _token_authorized(request: Request) -> bool:
     else:
         supplied = request.headers.get("X-Jarvis-Token", "").strip()
     
-    # Fallback to query parameter (needed for streaming media/images)
+    # Query-token auth is only for browser image/frame GETs where headers cannot
+    # be attached. Mutating endpoints must use Bearer or X-Jarvis-Token.
     if not supplied:
-        supplied = request.query_params.get("token", "").strip()
+        if request.method == "GET" and request.url.path in {"/remote/screenshot", "/remote/screen/frame"}:
+            supplied = request.query_params.get("token", "").strip()
         
     return bool(supplied) and hmac.compare_digest(supplied, expected)
 
@@ -704,11 +706,11 @@ def _mobile_web_stream(message: str, system_extra: str = ""):
 
     # ── 1. Full Jarvis routing (calendar, email, messages, search, etc.) ───────
     try:
-        with model_router.mobile_web_override():
+        with model_router.mobile_web_override(system_extra=system_extra):
             stream, model = route_stream(message)
 
             def _wrap(gen):
-                with model_router.mobile_web_override():
+                with model_router.mobile_web_override(system_extra=system_extra):
                     yield from gen
 
         return _wrap(stream), model
@@ -1208,18 +1210,22 @@ def deny_task(task_id: str):
 
 def create_pairing_pin() -> str:
     """Generate a cryptographically random 6-digit numeric pairing PIN."""
-    # secrets.randbelow is CSPRNG — safe for auth tokens
-    for _ in range(20):
-        pin = f"{100000 + secrets.randbelow(900000)}"
-        if pin not in _active_pins or _active_pins[pin]["expires_at"] < time.time():
-            break
-    else:
-        pin = f"{100000 + secrets.randbelow(900000)}"
+    token = (_API_TOKEN or "").strip()
+    if not token:
+        raise RuntimeError("Jarvis API token is not initialized; start the API before generating a pairing PIN.")
+    with _pin_lock:
+        # secrets.randbelow is CSPRNG — safe for auth tokens
+        for _ in range(20):
+            pin = f"{100000 + secrets.randbelow(900000)}"
+            if pin not in _active_pins or _active_pins[pin]["expires_at"] < time.time():
+                break
+        else:
+            pin = f"{100000 + secrets.randbelow(900000)}"
 
-    _active_pins[pin] = {
-        "token": _API_TOKEN,
-        "expires_at": time.time() + 300.0  # 5 minutes
-    }
+        _active_pins[pin] = {
+            "token": token,
+            "expires_at": time.time() + 300.0  # 5 minutes
+        }
     # Do NOT log the PIN value — it is a short-lived credential
     log.info("[Bridge] Temporary pairing PIN generated (not logged for security)")
     return pin
@@ -2981,6 +2987,7 @@ async def root_web_hud(request: Request):
         <button class="chip" onclick="focusChip('search the web for ')">🔍 Search</button>
         <button class="chip" onclick="sendChip('what is your current status and mode?')">⚡ Status</button>
         <button class="chip" onclick="sendChip('what do you remember about me?')">🧠 Memory</button>
+        <button class="chip" onclick="sendChip('what is the weather like right now?')">🌤️ Weather</button>
         <button class="chip" onclick="openScreenView()" style="background:rgba(0,255,136,0.12);border-color:rgba(0,255,136,0.4);color:#00ff88;">🖥️ Screen</button>
       </div>
 
@@ -3081,9 +3088,18 @@ async def root_web_hud(request: Request):
     </div>
   </div>
 
-  <script>
+    <script>
     // System Configurations
     let token = localStorage.getItem('jarvis_auth_token') || '';
+    let mobileSessionId = localStorage.getItem('jarvis_mobile_session_id') || '';
+    if (!mobileSessionId) {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        mobileSessionId = window.crypto.randomUUID();
+      } else {
+        mobileSessionId = 'mobile-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+      }
+      localStorage.setItem('jarvis_mobile_session_id', mobileSessionId);
+    }
     let ttsEnabled = localStorage.getItem('jarvis_tts_enabled') !== 'false';
     let recognition = null;
     let isListening = false;
@@ -3219,11 +3235,12 @@ async def root_web_hud(request: Request):
 
     // 1. Authentication Check & URL Token Grab
     const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get('token');
+    const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+    const urlToken = hashParams.get('token') || params.get('token');
     if (urlToken) {
       token = urlToken;
       localStorage.setItem('jarvis_auth_token', urlToken);
-      // Clean query string
+      // Clean query string / hash fragment
       const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
       window.history.replaceState({path: cleanUrl}, '', cleanUrl);
     }
@@ -3457,7 +3474,7 @@ async def root_web_hud(request: Request):
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
           },
-          body: JSON.stringify({ message: message, stream: true, source: 'mobile_web' })
+          body: JSON.stringify({ message: message, stream: true, source: 'mobile_web', session_id: mobileSessionId })
         });
 
         if (response.status === 401) {
@@ -3729,7 +3746,7 @@ async def root_web_hud(request: Request):
       const resp = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ message: msg, stream: false, source: 'mobile_web' })
+        body: JSON.stringify({ message: msg, stream: false, source: 'mobile_web', session_id: mobileSessionId })
       });
       const data = await resp.json();
       // Briefly flash response in fps display
