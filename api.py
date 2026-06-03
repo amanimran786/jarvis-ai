@@ -696,10 +696,9 @@ def _mobile_web_stream(message: str, system_extra: str = ""):
     LLM calls inside the router — bypasses slow local Ollama without touching globals.
 
     Falls back to direct GPT-4o-mini if route_stream itself raises.
-    Thread-safe: thread-local + CPython GIL for the Claude failure cache bools.
+    Thread-safe: the mobile override is thread-local and is kept active while
+    the deferred stream generator is consumed.
     """
-    global _claude_mobile_ok, _claude_mobile_retry_after
-
     from config import GPT_MINI
     from brains.brain import ask_stream as _openai_stream
 
@@ -707,7 +706,12 @@ def _mobile_web_stream(message: str, system_extra: str = ""):
     try:
         with model_router.mobile_web_override():
             stream, model = route_stream(message)
-        return stream, model
+
+            def _wrap(gen):
+                with model_router.mobile_web_override():
+                    yield from gen
+
+        return _wrap(stream), model
     except Exception as exc:
         log.warning("[mobile_web] route_stream failed (%s), falling back to GPT-4o-mini", exc)
 
@@ -4374,13 +4378,27 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     if os.getenv("JARVIS_QUIET_BOOT", "").lower() not in {"1", "true", "yes"}:
         print(f"[API] Jarvis API running at http://{_host}:{_port}")
 
-    # Pre-load the reasoning model in the background so first query is instant
+    # Pre-load local models after the API is already serving. Keep this
+    # sequential so boot does not try to load text, vision, STT, and TTS at once.
     import model_router as _mr
     if _mr.is_open_source_mode():
-        from brains.brain_ollama import warm_model_cache, warm_vision_cache
-        warm_thread = threading.Thread(target=warm_model_cache, daemon=True, name="OllamaWarm")
+        def _warm_local_caches():
+            try:
+                delay = float(os.getenv("JARVIS_LOCAL_WARMUP_DELAY_SECONDS", "8"))
+            except ValueError:
+                delay = 8.0
+            if delay > 0:
+                time.sleep(delay)
+            try:
+                from brains.brain_ollama import warm_model_cache, warm_vision_cache
+                warm_model_cache()
+                if os.getenv("JARVIS_WARM_VISION_ON_BOOT", "1").lower() not in {"0", "false", "no", "off"}:
+                    time.sleep(3)
+                    warm_vision_cache()
+            except Exception as exc:
+                log.warning("[Ollama] deferred cache warm failed (non-fatal): %s", exc)
+
+        warm_thread = threading.Thread(target=_warm_local_caches, daemon=True, name="OllamaWarm")
         warm_thread.start()
-        vision_warm_thread = threading.Thread(target=warm_vision_cache, daemon=True, name="OllamaVisionWarm")
-        vision_warm_thread.start()
 
     return t
