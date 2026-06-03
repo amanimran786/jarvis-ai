@@ -22,7 +22,7 @@ import conversation_context as ctx
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QTextEdit, QLabel, QFileDialog, QInputDialog,
-    QScrollArea, QFrame, QSizePolicy
+    QScrollArea, QFrame, QSizePolicy, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import (
     Qt, QObject, QThread, pyqtSignal, QTimer, QPropertyAnimation,
@@ -88,6 +88,8 @@ C_PANEL     = "#021018"       # message panel bg
 C_WHITE_DIM = "#D8F6FF"       # highlight text
 C_WARNING   = "#FFAA00"       # processing state
 C_AMBER     = "#F8C24A"       # objective / mission accent
+C_PURPLE_NEON = "#B142FF"     # deep purple edge glow
+C_DEEP_BLUE = "#0A1128"       # dark sci-fi glass background
 
 END_CONVERSATION = {"that's all", "that's it", "done", "thank you", "thanks", "stop listening"}
 QUIT_PHRASES = {"quit", "exit", "goodbye", "bye", "shut down"}
@@ -1338,83 +1340,424 @@ class SignalBars(QWidget):
         p.end()
 
 
-class TelemetryPanel(QFrame):
-    """Small holographic side panel with live system metrics."""
-
-    def __init__(self, title: str, parent=None):
+class CPUGraphWidget(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self._value_labels = {}
-        self._dot_widgets = {}
-        self.setObjectName("TelemetryPanel")
-        self.setMinimumWidth(168)
-        self.setMaximumWidth(196)
-        self.setStyleSheet(_glass_panel_css(fill="rgba(3, 18, 28, 205)", radius=12))
+        self.setMinimumHeight(45)
+        self.setMaximumHeight(50)
+        self._history = [0.1, 0.2, 0.15, 0.3, 0.45, 0.35, 0.5, 0.6, 0.4, 0.3, 0.2, 0.1, 0.15, 0.2, 0.35, 0.5, 0.7, 0.65, 0.5, 0.4, 0.3, 0.25, 0.2, 0.1]
+
+    def add_value(self, val: float):
+        self._history.pop(0)
+        self._history.append(max(0.05, min(1.0, val)))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        count = len(self._history)
+        gap = 3
+        bar_w = max(2.0, (w - (count - 1) * gap) / count)
+        base_y = h
+
+        p.setPen(Qt.PenStyle.NoPen)
+        for idx, level in enumerate(self._history):
+            norm_level = max(0.05, min(1.0, level))
+            bar_h = int(norm_level * (h - 2))
+            x = idx * (bar_w + gap)
+
+            grad = QLinearGradient(x, base_y - bar_h, x, base_y)
+            grad.setColorAt(0.0, QColor(0, 212, 255, 255))
+            grad.setColorAt(0.5, QColor(0, 150, 255, 180))
+            grad.setColorAt(1.0, QColor(0, 60, 150, 40))
+            p.setBrush(QBrush(grad))
+            p.drawRoundedRect(QRectF(x, base_y - bar_h, bar_w, bar_h), 1.5, 1.5)
+        p.end()
+
+class MemoryDonutWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(85, 85)
+        self._value = 0.32
+        self._inner_text = "5.1"
+
+    def set_value(self, val: float):
+        self._value = val
+        self.update()
+
+    def set_inner_text(self, text: str):
+        self._inner_text = text
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        rect = QRectF(6, 6, w - 12, h - 12)
+
+        pen = QPen(QColor(15, 25, 45, 255))
+        pen.setWidth(6)
+        p.setPen(pen)
+        p.drawArc(rect, 0, 360 * 16)
+
+        norm_level = max(0.01, min(1.0, self._value))
+        span_angle = int(-norm_level * 360 * 16)
+
+        active_pen = QPen(QColor(0, 212, 255))
+        active_pen.setWidth(6)
+        active_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(active_pen)
+        p.drawArc(rect, 90 * 16, span_angle)
+
+        p.setPen(QColor(255, 255, 255))
+        p.setFont(_font(14, QFont.Weight.Bold))
+        text_rect = QRectF(0, h * 0.22, w, h * 0.35)
+        p.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, self._inner_text)
+
+        p.setPen(QColor(C_TEXT_DIM))
+        p.setFont(_font(7, QFont.Weight.Bold))
+        sub_rect = QRectF(0, h * 0.52, w, h * 0.25)
+        p.drawText(sub_rect, Qt.AlignmentFlag.AlignCenter, "USED")
+
+        p.end()
+
+class VoiceSpectrumWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(24)
+        self.setMaximumHeight(28)
+        self._bars = [0.3, 0.4, 0.6, 0.8, 0.9, 0.7, 0.5, 0.6, 0.8, 0.95, 0.85, 0.6, 0.4, 0.5, 0.7, 0.5, 0.3]
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._timer.start(100)
+
+    def _animate(self):
+        import random
+        for idx in range(len(self._bars)):
+            self._bars[idx] = max(0.1, min(1.0, self._bars[idx] + random.uniform(-0.15, 0.15)))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        count = len(self._bars)
+        gap = 4
+        bar_w = max(2.5, (w - (count - 1) * gap) / count)
+        base_y = h / 2
+
+        p.setPen(Qt.PenStyle.NoPen)
+        for idx, level in enumerate(self._bars):
+            bar_h = max(2, int(level * (h - 2)))
+            x = idx * (bar_w + gap)
+            y = base_y - bar_h / 2
+
+            ratio = idx / count
+            if ratio < 0.4:
+                color = QColor(0, 212, 255)
+            elif ratio < 0.7:
+                color = QColor(12, 215, 181)
+            else:
+                color = QColor(177, 66, 255)
+
+            p.setBrush(QBrush(color))
+            p.drawRoundedRect(QRectF(x, y, bar_w, bar_h), bar_w/2, bar_w/2)
+        p.end()
+
+class SystemOverviewPanel(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("SystemOverviewPanel")
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(280)
+
+        self.setStyleSheet("QFrame#SystemOverviewPanel { background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(6, 15, 30, 110), stop:1 rgba(10, 20, 42, 140)); border: 1px solid rgba(0, 212, 255, 0.25); border-radius: 20px; }")
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(25)
+        shadow.setColor(QColor(0, 212, 255, 60))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
 
-        title_lbl = QLabel(title)
-        title_lbl.setFont(_font(8, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
-        layout.addWidget(title_lbl)
+        title_lbl = QLabel("SYSTEM OVERVIEW")
+        title_lbl.setFont(_font(10, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 2px;")
+        layout.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        divider = QFrame()
-        divider.setFixedHeight(1)
-        divider.setStyleSheet(
-            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 transparent, stop:0.25 {C_CYAN}, stop:0.75 {C_CYAN}, stop:1 transparent);"
-        )
-        layout.addWidget(divider)
+        # CPU Sub-Card
+        cpu_card = QFrame()
+        cpu_card.setStyleSheet("QFrame { background-color: rgba(2, 6, 16, 120); border: 1px solid rgba(0, 212, 255, 0.12); border-radius: 12px; }")
+        cpu_layout = QVBoxLayout(cpu_card)
+        cpu_layout.setContentsMargins(10, 8, 10, 8)
+        cpu_layout.setSpacing(4)
 
-        self._rows = QVBoxLayout()
-        self._rows.setSpacing(8)
-        layout.addLayout(self._rows)
+        cpu_header = QHBoxLayout()
+        cpu_title = QLabel("CPU STATUS")
+        cpu_title.setFont(_font(8, QFont.Weight.Bold))
+        cpu_title.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 1px;")
+        cpu_icon = QLabel("⌗")
+        cpu_icon.setFont(_font(9, QFont.Weight.Bold))
+        cpu_icon.setStyleSheet(f"color: {C_CYAN}; background: transparent;")
+        cpu_header.addWidget(cpu_title)
+        cpu_header.addStretch()
+        cpu_header.addWidget(cpu_icon)
+        cpu_layout.addLayout(cpu_header)
+
+        cpu_val_layout = QHBoxLayout()
+        self.cpu_val = QLabel("0%")
+        self.cpu_val.setFont(_font(24, QFont.Weight.Bold))
+        self.cpu_val.setStyleSheet("color: white; background: transparent;")
+        cpu_sub = QLabel("LOAD")
+        cpu_sub.setFont(_font(8, QFont.Weight.Bold))
+        cpu_sub.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        cpu_val_layout.addWidget(self.cpu_val)
+        cpu_val_layout.addWidget(cpu_sub)
+        cpu_val_layout.addStretch()
+        cpu_layout.addLayout(cpu_val_layout)
+
+        self.cpu_graph = CPUGraphWidget()
+        cpu_layout.addWidget(self.cpu_graph)
+
+        cpu_footer = QHBoxLayout()
+        self.cpu_speed = QLabel("3.8 GHz")
+        self.cpu_speed.setFont(_font(8, QFont.Weight.Medium))
+        self.cpu_speed.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        self.cpu_temp = QLabel("🌡 48°C")
+        self.cpu_temp.setFont(_font(8, QFont.Weight.Medium))
+        self.cpu_temp.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        cpu_footer.addWidget(self.cpu_speed)
+        cpu_footer.addStretch()
+        cpu_footer.addWidget(self.cpu_temp)
+        cpu_layout.addLayout(cpu_footer)
+
+        layout.addWidget(cpu_card)
+
+        # Memory Sub-Card
+        mem_card = QFrame()
+        mem_card.setStyleSheet("QFrame { background-color: rgba(2, 6, 16, 120); border: 1px solid rgba(0, 212, 255, 0.12); border-radius: 12px; }")
+        mem_layout = QVBoxLayout(mem_card)
+        mem_layout.setContentsMargins(10, 8, 10, 8)
+        mem_layout.setSpacing(4)
+
+        mem_header = QHBoxLayout()
+        mem_title = QLabel("MEMORY USAGE")
+        mem_title.setFont(_font(8, QFont.Weight.Bold))
+        mem_title.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 1px;")
+        mem_icon = QLabel("▤")
+        mem_icon.setFont(_font(9, QFont.Weight.Bold))
+        mem_icon.setStyleSheet(f"color: {C_CYAN}; background: transparent;")
+        mem_header.addWidget(mem_title)
+        mem_header.addStretch()
+        mem_header.addWidget(mem_icon)
+        mem_layout.addLayout(mem_header)
+
+        mem_val_layout = QHBoxLayout()
+        self.mem_val = QLabel("0%")
+        self.mem_val.setFont(_font(22, QFont.Weight.Bold))
+        self.mem_val.setStyleSheet("color: white; background: transparent;")
+        mem_sub = QLabel("USED")
+        mem_sub.setFont(_font(8, QFont.Weight.Bold))
+        mem_sub.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        mem_val_layout.addWidget(self.mem_val)
+        mem_val_layout.addWidget(mem_sub)
+        mem_val_layout.addStretch()
+        mem_layout.addLayout(mem_val_layout)
+
+        self.mem_donut = MemoryDonutWidget()
+        mem_layout.addWidget(self.mem_donut, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        mem_footer = QHBoxLayout()
+        self.mem_raw_val = QLabel("0.0 GB of 0.0 GB")
+        self.mem_raw_val.setFont(_font(8, QFont.Weight.Medium))
+        self.mem_raw_val.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        self.mem_speed = QLabel("3200 MHz")
+        self.mem_speed.setFont(_font(8, QFont.Weight.Medium))
+        self.mem_speed.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        mem_footer.addWidget(self.mem_raw_val)
+        mem_footer.addStretch()
+        mem_footer.addWidget(self.mem_speed)
+        mem_layout.addLayout(mem_footer)
+
+        layout.addWidget(mem_card)
         layout.addStretch()
 
-    def add_metric(self, key: str, label: str, value: str = "--", color: str = C_CYAN):
-        row = QWidget()
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(6)
+    def update_telemetry(self, sys_tel: dict):
+        cpu_str = sys_tel.get("cpu", "0%")
+        cpu_match = re.search(r"\d+(?:\.\d+)?", cpu_str)
+        if cpu_match:
+            load = float(cpu_match.group(0))
+            self.cpu_val.setText(f"{load:.2f}")
+            val = max(0.0, min(1.0, load / max(1, os.cpu_count() or 1)))
+            self.cpu_graph.add_value(val)
+            speed = 2.4 + (val * 1.8)
+            temp = 42 + int(val * 35)
+            self.cpu_speed.setText(f"{speed:.1f} GHz")
+            self.cpu_temp.setText(f"{temp} C")
+        else:
+            self.cpu_val.setText(str(cpu_str))
 
-        dot = PulseDot(color, animated=False)
-        dot.setFixedSize(8, 8)
-        row_layout.addWidget(dot, alignment=Qt.AlignmentFlag.AlignTop)
-        self._dot_widgets[key] = dot
+        mem_str = sys_tel.get("memory", "")
+        if "(" in mem_str:
+            parts = mem_str.split("(")
+            raw = parts[0].strip()
+            pct = parts[1].replace(")", "").strip()
 
-        text_block = QVBoxLayout()
-        text_block.setContentsMargins(0, 0, 0, 0)
-        text_block.setSpacing(2)
+            raw_parts = raw.split("/")
+            if len(raw_parts) == 2:
+                used = raw_parts[0].strip()
+                total = raw_parts[1].strip()
+                if not used.lower().endswith("gb"):
+                    used = f"{used} GB"
+                formatted_raw = f"{used} of {total}"
+                self.mem_raw_val.setText(formatted_raw)
+                self.mem_donut.set_inner_text(raw_parts[0].strip())
 
-        label_lbl = QLabel(label)
-        label_lbl.setFont(_font(7, QFont.Weight.Bold))
-        label_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; letter-spacing: 1px;")
-        text_block.addWidget(label_lbl)
+            self.mem_val.setText(pct.split('.')[0] + "%")
+            try:
+                val = float(pct.replace('%', '')) / 100.0
+                self.mem_donut.set_value(val)
+            except ValueError:
+                pass
 
-        value_lbl = QLabel(value)
-        value_lbl.setWordWrap(True)
-        value_lbl.setFont(_font(8, mono=True))
-        value_lbl.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
-        text_block.addWidget(value_lbl)
+class DataHubPanel(QFrame):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("DataHubPanel")
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(280)
 
-        self._value_labels[key] = value_lbl
-        row_layout.addLayout(text_block, stretch=1)
-        self._rows.addWidget(row)
+        self.setStyleSheet("QFrame#DataHubPanel { background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(6, 15, 30, 110), stop:1 rgba(10, 20, 42, 140)); border: 1px solid rgba(177, 66, 255, 0.25); border-radius: 20px; }")
 
-    def set_metric(self, key: str, value: str, color: str | None = None):
-        label = self._value_labels.get(key)
-        if label is not None:
-            label.setText(value)
-            label.setToolTip(value)
-            if color:
-                label.setStyleSheet(f"color: {color}; background: transparent;")
-            else:
-                label.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent;")
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(25)
+        shadow.setColor(QColor(177, 66, 255, 60))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
 
-        dot = self._dot_widgets.get(key)
-        if dot is not None and color:
-            dot.set_color(color)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
+        title_lbl = QLabel("DATA HUB")
+        title_lbl.setFont(_font(10, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 2px;")
+        layout.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Assistant Insights Sub-Card
+        insights_card = QFrame()
+        insights_card.setStyleSheet("QFrame { background-color: rgba(2, 6, 16, 120); border: 1px solid rgba(177, 66, 255, 0.12); border-radius: 12px; }")
+        insights_layout = QVBoxLayout(insights_card)
+        insights_layout.setContentsMargins(10, 8, 10, 8)
+        insights_layout.setSpacing(4)
+
+        insights_title = QLabel("ASSISTANT INSIGHTS")
+        insights_title.setFont(_font(8, QFont.Weight.Bold))
+        insights_title.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 1px;")
+        insights_layout.addWidget(insights_title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.status_val = QLabel("STANDBY")
+        self.status_val.setFont(_font(18, QFont.Weight.Bold))
+        self.status_val.setStyleSheet(f"color: {C_CYAN}; background: transparent;")
+        insights_layout.addWidget(self.status_val, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.status_sub = QLabel("AWAITING WAKE WORD...")
+        self.status_sub.setFont(_font(8, QFont.Weight.Medium))
+        self.status_sub.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        insights_layout.addWidget(self.status_sub, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.spectrum = VoiceSpectrumWidget()
+        insights_layout.addWidget(self.spectrum)
+
+        layout.addWidget(insights_card)
+
+        # Clock Sub-Card
+        clock_card = QFrame()
+        clock_card.setStyleSheet("QFrame { background-color: rgba(2, 6, 16, 120); border: 1px solid rgba(177, 66, 255, 0.12); border-radius: 12px; }")
+        clock_layout = QVBoxLayout(clock_card)
+        clock_layout.setContentsMargins(10, 10, 10, 10)
+        clock_layout.setSpacing(2)
+
+        self.clock_val = QLabel("--:--")
+        self.clock_val.setFont(_font(30, QFont.Weight.Bold))
+        self.clock_val.setStyleSheet("color: white; background: transparent;")
+        clock_layout.addWidget(self.clock_val, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.date_val = QLabel("---")
+        self.date_val.setFont(_font(8, QFont.Weight.Medium))
+        self.date_val.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent; text-transform: uppercase;")
+        clock_layout.addWidget(self.date_val, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(clock_card)
+
+        # Core Services Sub-Card
+        tools_card = QFrame()
+        tools_card.setStyleSheet("QFrame { background-color: rgba(2, 6, 16, 120); border: 1px solid rgba(177, 66, 255, 0.12); border-radius: 12px; }")
+        tools_layout = QVBoxLayout(tools_card)
+        tools_layout.setContentsMargins(10, 8, 10, 8)
+        tools_layout.setSpacing(6)
+
+        tools_title = QLabel("CORE SERVICES")
+        tools_title.setFont(_font(8, QFont.Weight.Bold))
+        tools_title.setStyleSheet(f"color: {C_WHITE_DIM}; background: transparent; letter-spacing: 1px;")
+        tools_layout.addWidget(tools_title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        r1 = QHBoxLayout()
+        r1_lbl = QLabel("• BRAIN LINK")
+        r1_lbl.setFont(_font(8, QFont.Weight.Bold))
+        r1_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        r1_val = QLabel("SYNCED")
+        r1_val.setFont(_font(8, QFont.Weight.Bold))
+        r1_val.setStyleSheet(f"color: {C_GREEN}; background: transparent;")
+        r1.addWidget(r1_lbl)
+        r1.addStretch()
+        r1.addWidget(r1_val)
+        tools_layout.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        r2_lbl = QLabel("• STEALTH STACK")
+        r2_lbl.setFont(_font(8, QFont.Weight.Bold))
+        r2_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        r2_val = QLabel("ENGAGED")
+        r2_val.setFont(_font(8, QFont.Weight.Bold))
+        r2_val.setStyleSheet(f"color: {C_CYAN}; background: transparent;")
+        r2.addWidget(r2_lbl)
+        r2.addStretch()
+        r2.addWidget(r2_val)
+        tools_layout.addLayout(r2)
+
+        r3 = QHBoxLayout()
+        r3_lbl = QLabel("• LOCAL RUNTIME")
+        r3_lbl.setFont(_font(8, QFont.Weight.Bold))
+        r3_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        r3_val = QLabel("DEEPSEEK")
+        r3_val.setFont(_font(8, QFont.Weight.Bold))
+        r3_val.setStyleSheet(f"color: {C_PURPLE_NEON}; background: transparent;")
+        r3.addWidget(r3_lbl)
+        r3.addStretch()
+        r3.addWidget(r3_val)
+        tools_layout.addLayout(r3)
+
+        layout.addWidget(tools_card)
+        layout.addStretch()
+
+    def update_time(self):
+        now = datetime.now()
+        self.clock_val.setText(now.strftime("%H:%M"))
+        self.date_val.setText(now.strftime("%a, %b %d, %Y"))
+
+    def set_status(self, text: str, color: str):
+        if "standby" in text.lower() or "awaiting" in text.lower():
+            self.status_val.setText("STANDBY")
+            self.status_sub.setText("AWAITING WAKE WORD...")
+        else:
+            self.status_val.setText("ACTIVE")
+            self.status_sub.setText("PROCESSING...")
+        self.status_val.setStyleSheet(f"color: {color}; background: transparent;")
 
 class MissionObjectiveCard(QFrame):
     """Compact objective strip under the orb, inspired by flight-HUD panels."""
@@ -1725,8 +2068,8 @@ class JarvisWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("J.A.R.V.I.S")
-        self.setMinimumSize(620, 500)
-        self.resize(740, 900)
+        self.setMinimumSize(1000, 560)
+        self.resize(1000, 720)
         self._session_started = datetime.now()
         self.setWindowFlags(
             Qt.WindowType.Window |
@@ -1755,7 +2098,9 @@ class JarvisWindow(QMainWindow):
         self._voice_runtime_detail = ""
         self._voice_runtime_tooltip = ""
         self._voice_status_raw = "AWAITING WAKE WORD"
+        self._latest_sys_telemetry = {}
         self._build_ui()
+        threading.Thread(target=self._poll_sys_telemetry_loop, daemon=True, name="SysTelemetryPoll").start()
         self._live_updates = LiveUpdateBridge(self)
         self._bind_live_update_signals()
         self._start_voice()
@@ -2048,18 +2393,13 @@ class JarvisWindow(QMainWindow):
         # ── Orb panel ────────────────────────────────────────────────────────
         orb_panel = QWidget()
         self._orb_panel = orb_panel
-        orb_panel.setFixedHeight(340)
+        orb_panel.setFixedHeight(390)
         orb_panel.setStyleSheet("background: transparent;")
         orb_layout = QHBoxLayout(orb_panel)
         orb_layout.setContentsMargins(14, 10, 14, 10)
         orb_layout.setSpacing(16)
 
-        self._left_telemetry = TelemetryPanel("SYSTEM MATRIX")
-        self._left_telemetry.add_metric("mode", "OPERATING MODE")
-        self._left_telemetry.add_metric("status", "CURRENT STATE")
-        self._left_telemetry.add_metric("memory", "MEMORY NODES")
-        self._left_telemetry.add_metric("recent", "RECENT FAILURES")
-        self._left_telemetry.add_metric("beta", "LIVE BETA")
+        self._left_telemetry = SystemOverviewPanel()
         orb_layout.addWidget(self._left_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         center_stack = QVBoxLayout()
@@ -2077,11 +2417,7 @@ class JarvisWindow(QMainWindow):
         center_stack.addWidget(self._mission_card, alignment=Qt.AlignmentFlag.AlignCenter)
         orb_layout.addLayout(center_stack, stretch=1)
 
-        self._right_telemetry = TelemetryPanel("TACTICAL FEED")
-        self._right_telemetry.add_metric("uptime", "SESSION UPTIME")
-        self._right_telemetry.add_metric("messages", "MESSAGE COUNT")
-        self._right_telemetry.add_metric("workers", "ACTIVE THREADS")
-        self._right_telemetry.add_metric("clock", "LOCAL CLOCK")
+        self._right_telemetry = DataHubPanel()
         orb_layout.addWidget(self._right_telemetry, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addWidget(orb_panel)
 
@@ -3057,6 +3393,16 @@ class JarvisWindow(QMainWindow):
             if speaking:
                 self._orb.set_state(JarvisOrb.STATE_SPEAKING)
 
+    def _poll_sys_telemetry_loop(self):
+        import time
+        while True:
+            try:
+                import api
+                self._latest_sys_telemetry = api.get_system_telemetry()
+            except Exception:
+                pass
+            time.sleep(5)
+
     def _refresh_telemetry(self):
         if not hasattr(self, "_left_telemetry"):
             return
@@ -3072,17 +3418,12 @@ class JarvisWindow(QMainWindow):
         uptime = f"{uptime_seconds // 60:02d}m {uptime_seconds % 60:02d}s"
         status = self._status_label.text().replace("AWAITING WAKE WORD", "STANDBY")
 
-        self._left_telemetry.set_metric("mode", model_router.get_mode().upper(), C_CYAN)
-        self._left_telemetry.set_metric("status", status, self._status_color_for_text(status))
-        self._left_telemetry.set_metric("memory", f"{facts} facts / {focus} focus", C_WHITE_DIM)
-        self._left_telemetry.set_metric("recent", f"{recent_failures} in 24h", C_WARNING if recent_failures else C_GREEN)
-        beta_label = "ON" if live_beta.is_enabled() else "OFF"
-        self._left_telemetry.set_metric("beta", beta_label, C_CYAN if live_beta.is_enabled() else C_TEXT_DIM)
+        sys_tel = getattr(self, "_latest_sys_telemetry", {})
+        if sys_tel:
+            self._left_telemetry.update_telemetry(sys_tel)
 
-        self._right_telemetry.set_metric("uptime", uptime, C_WHITE_DIM)
-        self._right_telemetry.set_metric("messages", str(message_count), C_CYAN)
-        self._right_telemetry.set_metric("workers", str(active_workers), C_WARNING if active_workers else C_GREEN)
-        self._right_telemetry.set_metric("clock", datetime.now().strftime("%H:%M:%S"), C_WHITE_DIM)
+        self._right_telemetry.update_time()
+        self._right_telemetry.set_status(status, self._status_color_for_text(status))
 
     def _status_color_for_text(self, text: str) -> str:
         upper = (text or "").upper()
