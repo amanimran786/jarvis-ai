@@ -3412,6 +3412,28 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn(r"buffer.split('\n')", html)
         self.assertNotIn("buffer.split('\n')", html)
         self.assertIn("data.model", html)
+        self.assertIn("jarvis_mobile_session_id", html)
+        self.assertIn("window.location.hash", html)
+        self.assertIn("session_id: mobileSessionId", html)
+
+    def test_bridge_url_uses_hash_token_not_query_token(self):
+        with patch.dict(os.environ, {"JARVIS_API_TOKEN": "bridge-token"}, clear=False), \
+             patch("runtime_state.snapshot", return_value={"api_host": "127.0.0.1", "api_port": 8765}), \
+             patch("hardware.bridge_status", return_value={
+                 "urls": ["http://127.0.0.1:8765"],
+                 "ips": [],
+                 "local_only": True,
+                 "primary_url": "http://127.0.0.1:8765",
+             }), \
+             patch("terminal.set_clipboard") as set_clipboard:
+            stream, label = router.route_stream("copy bridge url")
+            response = "".join(stream)
+
+        self.assertEqual(label, "Hardware")
+        copied = set_clipboard.call_args.args[0]
+        self.assertIn("/#token=bridge-token", copied)
+        self.assertNotIn("/?token=bridge-token", copied)
+        self.assertIn("/#token=bridge-token", response)
 
     def test_mobile_web_stream_keeps_override_active_for_deferred_router_stream(self):
         def deferred_stream():
@@ -3425,6 +3447,20 @@ class ApiSurfaceTests(unittest.TestCase):
 
         self.assertEqual(model, config.GPT_MINI)
         self.assertEqual(response, "mobile override active")
+
+    def test_mobile_web_stream_merges_session_context_into_router_llm_call(self):
+        with patch("model_router.ask_stream", return_value=iter(["ok"])) as ask_stream:
+            stream, model = api._mobile_web_stream(
+                "second turn",
+                system_extra="Prior conversation:\nUser: first turn\nJarvis: first answer",
+            )
+            response = "".join(stream)
+
+        self.assertEqual(model, config.GPT_MINI)
+        self.assertEqual(response, "ok")
+        system_extra = ask_stream.call_args.kwargs["system_extra"]
+        self.assertIn("Prior conversation:", system_extra)
+        self.assertIn("User: first turn", system_extra)
 
     def test_mobile_web_stream_uses_direct_gpt_fallback_when_router_fails(self):
         with patch("api.route_stream", side_effect=RuntimeError("router failed")), \

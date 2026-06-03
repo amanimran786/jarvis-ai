@@ -10,12 +10,12 @@ import shlex
 import subprocess
 
 # ── Clean shutdown — reap all multiprocessing children before exit ────────────
+_SHUTDOWN_LOCK = threading.RLock()
+_SHUTDOWN_DONE = False
+
+
 def _reap_children() -> None:
     """Terminate any live multiprocessing child processes (resource_tracker, etc.)."""
-    try:
-        brain_daemon.stop()
-    except Exception:
-        pass
     children = multiprocessing.active_children()
     for child in children:
         try:
@@ -36,14 +36,41 @@ def _reap_children() -> None:
             pass
 
 
+def _shutdown_runtime(reason: str = "") -> None:
+    """Stop Jarvis background services and child processes exactly once."""
+    global _SHUTDOWN_DONE
+    with _SHUTDOWN_LOCK:
+        if _SHUTDOWN_DONE:
+            return
+        _SHUTDOWN_DONE = True
+
+        for stop_call in (
+            lambda: jarvis_watcher.stop(),
+            lambda: brain_daemon.stop(),
+            lambda: __import__("tunnel_manager").stop_tunnel(),
+            lambda: __import__("brains.brain_ollama", fromlist=["stop_keepalive"]).stop_keepalive(),
+        ):
+            try:
+                stop_call()
+            except Exception:
+                pass
+
+        _reap_children()
+
+        try:
+            runtime_state.mark_stopped(reason)
+        except Exception:
+            pass
+
+
 def _signal_shutdown(signum, frame) -> None:
-    _reap_children()
+    _shutdown_runtime(f"signal:{signum}")
     sys.exit(0)
 
 
-atexit.register(_reap_children)
+atexit.register(_shutdown_runtime)
 signal.signal(signal.SIGTERM, _signal_shutdown)
-# SIGINT already raises KeyboardInterrupt which unwinds normally through atexit.
+signal.signal(signal.SIGINT, _signal_shutdown)
 
 
 # Fix Qt cocoa plugin path before any PyQt6 import.
@@ -474,4 +501,8 @@ if __name__ == "__main__":
     # Required for frozen app builds (PyInstaller) so multiprocessing child
     # processes do not re-enter full application startup.
     multiprocessing.freeze_support()
-    _run()
+    try:
+        _run()
+    except KeyboardInterrupt:
+        _shutdown_runtime("keyboard_interrupt")
+        raise SystemExit(0)

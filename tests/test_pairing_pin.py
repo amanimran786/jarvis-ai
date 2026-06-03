@@ -1,5 +1,6 @@
 import time
 import unittest
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import HTTPException
 import api
@@ -12,6 +13,7 @@ class TestPairingPIN(unittest.TestCase):
 
     def setUp(self):
         # Reset the registries before each test
+        api._API_TOKEN = "jarvis-test-pairing-token"
         api._active_pins.clear()
         api._pin_failures.clear()
         api._pin_lockout_until.clear()
@@ -81,6 +83,18 @@ class TestPairingPIN(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["token"], api._API_TOKEN)
+
+    def test_create_pairing_pin_requires_initialized_api_token(self):
+        api._API_TOKEN = ""
+        with self.assertRaisesRegex(RuntimeError, "token is not initialized"):
+            api.create_pairing_pin()
+
+    def test_generate_pairing_pin_unauthorized_raises_401(self):
+        request = MagicMock()
+        with patch("api._token_authorized", return_value=False):
+            with self.assertRaises(api.HTTPException) as ctx:
+                api.generate_pairing_pin(request)
+        self.assertEqual(ctx.exception.status_code, 401)
 
 
 if __name__ == "__main__":
