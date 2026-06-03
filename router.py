@@ -1743,6 +1743,22 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     if payload.lower().startswith("to "):
         payload = payload[3:].strip()
 
+    # Handle "send X a message [and] BODY" — not caught by prefix_match because
+    # the recipient comes before "a message", not after "send ... to".
+    # e.g. "send mom a message and introduce yourself in Urdu"
+    #   → recipient="mom", body="introduce yourself in Urdu"
+    if not payload:
+        send_name_msg = re.match(
+            r"^send\s+(?:my\s+)?([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,2})\s+a\s+(?:text\s+)?message(?:\s+and\s+|\s+)(.+)$",
+            cleaned_text,
+            flags=re.IGNORECASE,
+        )
+        if send_name_msg:
+            _snm_recipient = _normalize_contact_phrase(send_name_msg.group(1).strip().strip(",;:"))
+            _snm_body = send_name_msg.group(2).strip().strip("\"'")
+            if _snm_recipient and _snm_body and _looks_like_contact_name(_snm_recipient):
+                return _snm_recipient, _snm_body
+
     intro_name = re.match(
         r"^(?:my\s+)?(?:dad|father|mom|mother|parent|brother|sister)\s*,?\s+"
         r"(?:his|her|their)\s+name\s+is\s+(.+?)"
@@ -1797,12 +1813,24 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
     )
 
     _SPOKEN_BODY_DELIMITER = re.compile(
-        r"\s+(but\s+ask\s+(?:him|her|them)|ask\s+(?:him|her|them)|and\s+(?:ask|tell|introduce|say|send|let|check|see|find|remind|text|message)|telling(?:\s+(?:him|her|them))?|saying|that|to)\s+",
+        # "to" alone is too ambiguous (matches "I wanted to come") —
+        # only treat "to" as a delimiter when followed by a clear infinitive verb.
+        r"\s+(but\s+ask\s+(?:him|her|them)|ask\s+(?:him|her|them)|and\s+(?:ask|tell|introduce|say|send|let|check|see|find|remind|text|message)|telling(?:\s+(?:him|her|them))?|saying|that|to\s+(?:say|tell|ask|check|call|make|get|give|let|go|see|find|do|pick|drop|buy|send|bring|meet|talk|text|wish|invite|remind|tell))\s+",
         flags=re.IGNORECASE,
     )
 
+    _TRAILING_CONJUNCTIONS = ("to say", "to tell", "to ask", "saying", "telling", "but", "and", "that")
+
     def _clean_recipient(raw_recipient: str) -> str:
-        return _normalize_contact_phrase((raw_recipient or "").strip().strip(",;:"))
+        candidate = (raw_recipient or "").strip().strip(",;:")
+        # Strip trailing conjunction words that can bleed into the recipient
+        # when the body is introduced without a comma, e.g. "Zubaida but I'm late".
+        lower_cand = candidate.lower()
+        for conj in sorted(_TRAILING_CONJUNCTIONS, key=len, reverse=True):
+            if lower_cand.endswith(" " + conj):
+                candidate = candidate[: -(len(conj) + 1)].rstrip()
+                break
+        return _normalize_contact_phrase(candidate)
 
     def _clean_body(raw_body: str) -> str:
         body = (raw_body or "").strip().strip("\"'")
@@ -1860,10 +1888,12 @@ def _parse_message_compose(text: str) -> tuple[str, str] | None:
                 return recipient, body
 
     # Explicit spoken lead-ins without a comma, including multi-word contacts.
+    # "to" as a delimiter is restricted to "to <infinitive_verb>" so "I wanted to come"
+    # doesn't mistakenly split the recipient from the body.
     match = re.match(
         r"^(?:(?:message|text)\s+|(?:send (?:a )?(?:text\s+message|message|text) to|send to)\s+)"
         r"([A-Za-z0-9@\.]+(?:\s+[A-Za-z0-9@\.]+){0,2})\s+"
-        r"(telling(?:\s+(?:him|her|them))?|saying|that|to)\s+(.+)$",
+        r"(telling(?:\s+(?:him|her|them))?|saying|that|to\s+(?:say|tell|ask|check|call|make|get|give|let|go|see|find|do|pick|drop|buy|send|bring|meet|talk|text|wish|invite|remind))\s+(.+)$",
         cleaned_text,
         flags=re.IGNORECASE,
     )
@@ -2084,7 +2114,7 @@ def _dispatch_single_intent(query: str) -> str | None:
         try:
             return gs.get_todays_events()
         except Exception:
-            return "Calendar is unavailable. You may need to re-authorize Google access."
+            return "Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."
     if hint == "email" and _is_email_digest_query(query):
         try:
             import jarvis_agents as _ja
@@ -3164,7 +3194,7 @@ def route_stream(user_input: str) -> tuple:
                 return _s(_format_next_event(_next_ev)), "Calendar"
             return _s("No upcoming meetings in the next 24 hours."), "Calendar"
         except Exception:
-            return _s("Calendar is unavailable. You may need to re-authorize Google access."), "Calendar"
+            return _s("Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."), "Calendar"
 
     # ── Incoming message relay: "Farhan replied: hey man" ────────────────────
     _incoming_match = _is_incoming_message_relay(user_input)
@@ -4697,7 +4727,7 @@ def _route_hardware(lower: str, user_input: str, modifier_system: str = ""):
         primary = bridge.get("primary_url") or (urls[0] if urls else "http://127.0.0.1:8765")
         token = os.getenv("JARVIS_API_TOKEN", "")
         if token:
-            primary_with_token = f"{primary}/?token={token}"
+            primary_with_token = f"{primary}/#token={token}"
         else:
             primary_with_token = primary
         
