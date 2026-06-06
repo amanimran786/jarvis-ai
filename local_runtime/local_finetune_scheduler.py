@@ -817,8 +817,9 @@ class OvernightTrainer:
         """
         self.logger.info(f"Starting training with pack: {pack_path}")
 
-        # Use default model from config (e.g., "qwen2.5-coder:7b")
-        model_tag = config.LOCAL_CODER
+        # Serving defaults may use Ollama-only models; keep MLX training on an
+        # explicitly supported fine-tuning base.
+        model_tag = config.MLX_TRAINING_MODEL
 
         result = local_mlx_training.run_sft(
             model_tag,

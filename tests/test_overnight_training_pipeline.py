@@ -67,13 +67,15 @@ def test_run_training_adds_examples_count():
         trainer = local_finetune_scheduler.OvernightTrainer()
         trainer.logger = MagicMock()
 
-        with patch("local_runtime.local_finetune_scheduler.config.LOCAL_CODER", "qwen2.5-coder:7b"):
+        with patch("local_runtime.local_finetune_scheduler.config.MLX_TRAINING_MODEL", "qwen3:8b"):
             with patch("local_runtime.local_finetune_scheduler.local_mlx_training.run_sft") as mock_run:
                 mock_run.return_value = {"ok": True, "duration_sec": 1.25}
                 result = trainer.run_training(pack_path)
 
     assert result["ok"] is True
     assert result["examples_count"] == 2
+    mock_run.assert_called_once()
+    assert mock_run.call_args.args[0] == "qwen3:8b"
 
 
 def test_status_repairs_stale_state_from_successful_log():
