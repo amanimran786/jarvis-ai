@@ -397,6 +397,177 @@ class TrainingPackAgent(BrainAgent):
             }
 
 
+# ── Proactive notification helpers ────────────────────────────────────────────
+
+_speak_callback = None  # set by main.py via set_speak_callback(speak)
+
+
+def set_speak_callback(fn) -> None:
+    """Wire TTS so CalendarAlert and EmailAlert can speak aloud."""
+    global _speak_callback
+    _speak_callback = fn
+
+
+def _speak(text: str) -> None:
+    """Speak via TTS if wired, else log."""
+    if _speak_callback:
+        try:
+            _speak_callback(text)
+        except Exception as exc:
+            logger.warning("[BrainDaemon] TTS error: %s", exc)
+    else:
+        logger.info("[BrainDaemon] alert (no TTS): %s", text)
+
+
+def _notify(title: str, message: str) -> None:
+    """Send a macOS notification banner as a non-blocking fire-and-forget."""
+    try:
+        safe_title = json.dumps(str(title))
+        safe_message = json.dumps(str(message))
+        subprocess.Popen(
+            [
+                "osascript",
+                "-e",
+                f"display notification {safe_message} with title {safe_title} sound name \"Glass\"",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        logger.debug("[BrainDaemon] osascript notify failed: %s", exc)
+
+
+class CalendarAlertAgent(BrainAgent):
+    """Every 5 minutes: alert once when a calendar event is ≤15 min away."""
+
+    def __init__(self):
+        super().__init__("CalendarAlert", 300)   # 5 minutes
+        self._alerted_ids: set[str] = set()
+
+    def run_once(self) -> dict:
+        try:
+            import google_services as gs
+            from datetime import timezone, timedelta
+            events_text = gs.get_todays_events()
+            if not events_text or "unavailable" in events_text.lower():
+                return {"ok": True, "summary": "calendar unavailable, skipped"}
+
+            # Parse events — get_todays_events() returns plain text; use the
+            # raw calendar API directly for structured data when available.
+            try:
+                service = gs._get_calendar_service()
+                now_utc = datetime.now(timezone.utc)
+                window_end = now_utc + timedelta(minutes=15)
+                result = service.events().list(
+                    calendarId="primary",
+                    timeMin=now_utc.isoformat(),
+                    timeMax=window_end.isoformat(),
+                    singleEvents=True,
+                    orderBy="startTime",
+                    maxResults=5,
+                ).execute()
+                items = result.get("items", [])
+            except Exception:
+                items = []
+
+            alerted = 0
+            for event in items:
+                event_id = event.get("id", "")
+                summary = event.get("summary", "Untitled event")
+                start = event.get("start", {})
+                # Skip all-day events (they have "date" not "dateTime")
+                if "dateTime" not in start:
+                    continue
+                if event_id in self._alerted_ids:
+                    continue
+                from datetime import datetime as _dt
+                start_dt = _dt.fromisoformat(start["dateTime"])
+                if start_dt.tzinfo is None:
+                    from datetime import timezone as _tz
+                    start_dt = start_dt.replace(tzinfo=_tz.utc)
+                mins_away = int((start_dt - now_utc).total_seconds() / 60)
+                if mins_away < 0:
+                    continue
+                label = f"in {mins_away} minute{'s' if mins_away != 1 else ''}" if mins_away > 0 else "now"
+                msg = f"Heads up — {summary} starts {label}."
+                _speak(msg)
+                _notify("Jarvis — Calendar", msg)
+                self._alerted_ids.add(event_id)
+                alerted += 1
+
+            return {"ok": True, "summary": f"alerted {alerted} events"}
+        except Exception as exc:
+            return {"ok": False, "summary": f"error: {exc}"}
+
+
+class EmailAlertAgent(BrainAgent):
+    """Every 30 minutes: speak new unread emails since last check."""
+
+    def __init__(self):
+        super().__init__("EmailAlert", 1800)   # 30 minutes
+        self._seen_ids: set[str] = set()
+        self._first_run: bool = True   # don't alert on the very first poll (startup)
+
+    def run_once(self) -> dict:
+        try:
+            import google_services as gs
+            emails = gs.get_unread_emails(max_results=10)
+            if not emails or (isinstance(emails, str) and "unavailable" in emails.lower()):
+                return {"ok": True, "summary": "email unavailable, skipped"}
+
+            # get_unread_emails returns formatted text; use raw API for IDs
+            try:
+                service = gs._get_gmail_service()
+                resp = service.users().messages().list(
+                    userId="me", labelIds=["INBOX", "UNREAD"], maxResults=10
+                ).execute()
+                messages = resp.get("messages", [])
+            except Exception:
+                messages = []
+
+            if self._first_run:
+                # Seed seen IDs without alerting
+                self._seen_ids = {m["id"] for m in messages}
+                self._first_run = False
+                return {"ok": True, "summary": f"seeded {len(self._seen_ids)} message IDs"}
+
+            new_msgs = [m for m in messages if m["id"] not in self._seen_ids]
+            if not new_msgs:
+                return {"ok": True, "summary": "no new emails"}
+
+            # Fetch sender names for new messages
+            senders = []
+            for m in new_msgs[:3]:
+                try:
+                    detail = service.users().messages().get(
+                        userId="me", id=m["id"], format="metadata",
+                        metadataHeaders=["From"]
+                    ).execute()
+                    headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+                    from_raw = headers.get("From", "Unknown")
+                    # Extract just the name part: "Alice <alice@x.com>" → "Alice"
+                    import re
+                    name_match = re.match(r'^([^<"]+)', from_raw)
+                    senders.append(name_match.group(1).strip() if name_match else from_raw.split("@")[0])
+                except Exception:
+                    pass
+
+            count = len(new_msgs)
+            if senders:
+                names = ", ".join(senders[:3])
+                suffix = " and others" if count > 3 else ""
+                msg = f"You have {count} new email{'s' if count != 1 else ''} from {names}{suffix}."
+            else:
+                msg = f"You have {count} new email{'s' if count != 1 else ''}."
+
+            _speak(msg)
+            _notify("Jarvis — Email", msg)
+            self._seen_ids.update(m["id"] for m in new_msgs)
+            return {"ok": True, "summary": f"alerted {count} new emails"}
+        except Exception as exc:
+            return {"ok": False, "summary": f"error: {exc}"}
+
+
 class BrainDaemon:
     """Manages all brain agents."""
 
@@ -407,6 +578,8 @@ class BrainDaemon:
             KnowledgeFeedAgent(),
             EvalAgent(),
             TrainingPackAgent(),
+            CalendarAlertAgent(),
+            EmailAlertAgent(),
         ]
         self._running = False
 
@@ -420,7 +593,7 @@ class BrainDaemon:
             agent.start()
 
         self._running = True
-        logger.info("BrainDaemon started with 5 agents")
+        logger.info("BrainDaemon started with %s agents", len(self.agents))
 
     def stop(self) -> None:
         """Stop all agents."""

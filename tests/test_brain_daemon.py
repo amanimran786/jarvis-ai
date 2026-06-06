@@ -429,9 +429,9 @@ class BrainDaemonTests(unittest.TestCase):
     """Tests for BrainDaemon."""
 
     def test_brain_daemon_starts_all_agents(self):
-        """BrainDaemon has 5 agents ready to start."""
+        """BrainDaemon has 7 agents ready to start."""
         daemon = brain_daemon.BrainDaemon()
-        self.assertEqual(len(daemon.agents), 5)
+        self.assertEqual(len(daemon.agents), 7)
         # Just verify all agents are present; don't actually start threads
         self.assertFalse(daemon.is_running())
 
@@ -451,7 +451,7 @@ class BrainDaemonTests(unittest.TestCase):
 
         self.assertIn("running", status)
         self.assertIn("agents", status)
-        self.assertEqual(len(status["agents"]), 5)
+        self.assertEqual(len(status["agents"]), 7)
 
         agent_names = [a["name"] for a in status["agents"]]
         self.assertIn("MemoryAgent", agent_names)
@@ -459,6 +459,8 @@ class BrainDaemonTests(unittest.TestCase):
         self.assertIn("KnowledgeFeedAgent", agent_names)
         self.assertIn("EvalAgent", agent_names)
         self.assertIn("TrainingPackAgent", agent_names)
+        self.assertIn("CalendarAlert", agent_names)
+        self.assertIn("EmailAlert", agent_names)
 
     def test_brain_daemon_is_running_reflects_state(self):
         """BrainDaemon.is_running() returns correct state."""

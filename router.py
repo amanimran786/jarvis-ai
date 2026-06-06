@@ -853,6 +853,7 @@ _last_message_send_result: dict | None = None
 _pending_message_draft: dict | None = None
 _pending_email_draft: dict | None = None
 _pending_email_recipient: dict | None = None
+_pending_email_reply: dict | None = None  # {sender, from_address, subject} set during reply flow
 _fuzzy_contact_suggestions: list[str] = []
 _pending_resolved_address: str = ""  # pre-resolved address set alongside pending recipient
 _last_assistant_reply: str = ""
@@ -973,9 +974,26 @@ def _sanitize_email_text(text: str) -> str:
 
 
 def _clear_pending_email_draft():
-    global _pending_email_draft, _pending_email_recipient
+    global _pending_email_draft, _pending_email_recipient, _pending_email_reply
     _pending_email_draft = None
     _pending_email_recipient = None
+    _pending_email_reply = None
+
+
+def _set_pending_email_reply(sender: str, from_address: str, subject: str):
+    global _pending_email_reply
+    _pending_email_reply = {
+        "sender": sender.strip(),
+        "from_address": from_address.strip(),
+        "subject": subject.strip(),
+    }
+
+
+def _has_pending_email_reply() -> bool:
+    return bool(
+        _pending_email_reply
+        and _pending_email_reply.get("from_address")
+    )
 
 
 def _has_pending_email_draft() -> bool:
@@ -2195,10 +2213,13 @@ def _current_activity_reply(lower: str) -> str:
 
 def _looks_like_email_read_query(query: str) -> bool:
     lower = (query or "").lower()
-    if re.search(r"\b(?:inbox|unread|read|check|show|list)\b", lower):
+    # "inbox" or "unread" alone is unambiguous; "read/check/show/list" require an email noun co-present
+    if re.search(r"\b(?:inbox|unread)\b", lower):
+        return True
+    if re.search(r"\b(?:read|check|show|list)\b", lower) and re.search(r"\b(?:emails?|mail)\b", lower):
         return True
     # "what emails do I have", "any emails", "got any mail", etc.
-    if re.search(r"\b(?:what|any|got|have|do i have|got any)\b.*\b(?:emails?|mail|messages?)\b", lower):
+    if re.search(r"\b(?:what|any|got|have|do i have|got any)\b.*\b(?:emails?|mail)\b", lower):
         return True
     if re.search(r"\b(?:emails?|mail)\b.*\b(?:have|got|today|new|latest|recent)\b", lower):
         return True
@@ -2671,7 +2692,7 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 def route_stream(user_input: str) -> tuple:
-    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions
+    global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions, _pending_email_reply
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
@@ -2692,12 +2713,38 @@ def route_stream(user_input: str) -> tuple:
         recipient_only = _parse_message_recipient_only(user_input)
 
     # ── 0. Pending email state ────────────────────────────────────────────────
-    if _is_email_cancel_query(lower) and (_has_pending_email_draft() or _has_pending_email_recipient() or "email" in lower):
-        if not (_has_pending_email_draft() or _has_pending_email_recipient()):
+    if _is_email_cancel_query(lower) and (
+        _has_pending_email_draft() or _has_pending_email_recipient()
+        or _has_pending_email_reply() or "email" in lower
+    ):
+        if not (_has_pending_email_draft() or _has_pending_email_recipient() or _has_pending_email_reply()):
             return _s("No active email draft."), "Gmail"
-        previous = (_pending_email_draft or _pending_email_recipient or {}).get("recipient", "email")
+        previous = (
+            (_pending_email_draft or _pending_email_recipient or {}).get("recipient")
+            or (_pending_email_reply or {}).get("sender")
+            or "email"
+        )
         _clear_pending_email_draft()
         return _s(f"Canceled the email draft to {previous}."), "Gmail"
+
+    # ── 0a. Pending email reply: user provides body after "reply to X" ────────
+    if _has_pending_email_reply():
+        reply = _pending_email_reply or {}
+        if _is_email_cancel_query(lower) or _is_message_cancel_query(lower):
+            _clear_pending_email_draft()
+            return _s(f"Canceled the reply to {reply.get('sender', 'that sender')}."), "Gmail"
+        interrupt_route = _pending_draft_interrupt_route(user_input, lower)
+        if interrupt_route is not None:
+            return interrupt_route
+        body = _sanitize_email_text(user_input)
+        if not body or body.lower() in {"yes", "yeah", "yep", "confirm", "send", "send it"}:
+            return _s(f"What would you like to say to {reply.get('sender', 'them')}?"), "Gmail"
+        _r_sender = reply["sender"]
+        _r_addr = reply["from_address"]
+        _r_subject = reply["subject"]
+        _clear_pending_email_draft()  # clears _pending_email_reply
+        _set_pending_email_draft(_r_sender, _r_addr, _r_subject, body)
+        return _s(_email_confirmation_prompt()), "Gmail"
 
     if _has_pending_email_draft():
         if _is_email_cancel_query(lower) or _is_message_cancel_query(lower):
@@ -2791,6 +2838,17 @@ def route_stream(user_input: str) -> tuple:
         _set_pending_email_recipient(email_recipient_only, to_address)
         return _s(f"What would you like the email to say to {email_recipient_only}?"), "Gmail"
 
+    # ── Email read fast-path: "read my emails" / "show my inbox" ────────────
+    if _looks_like_email_read_query(lower) and not _is_email_digest_query(lower) and not composed_email and not email_recipient_only:
+        try:
+            _inbox_emails = gs.get_unread_email_subjects(max_results=5)
+        except Exception:
+            return _s("Email is unavailable. You may need to re-authorize Google access."), "Gmail"
+        if not _inbox_emails:
+            return _s("Your inbox is clear."), "Gmail"
+        _lines = [f"From {e['sender']}: {e['subject']}" for e in _inbox_emails]
+        return _s(f"You have {len(_inbox_emails)} unread email(s).\n" + "\n".join(_lines)), "Gmail"
+
     # ── Email digest fast-path: "what are my emails about today?" ────────────
     if _is_email_digest_query(lower) and not composed_email and not email_recipient_only:
         try:
@@ -2812,7 +2870,7 @@ def route_stream(user_input: str) -> tuple:
         if _reply_info:
             _r_name, _r_addr, _r_subject = _reply_info
             _clear_message_state()
-            _set_pending_email_recipient(_r_name, _r_addr, _r_subject)
+            _set_pending_email_reply(_r_name, _r_addr, _r_subject)
             return _s(
                 f"Found email from {_r_name} — \"{_r_subject[4:]}\". "
                 f"What would you like to say back?"
