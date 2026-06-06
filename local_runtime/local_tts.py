@@ -13,6 +13,8 @@ DEFAULT_ENGINE = "say"
 DEFAULT_MACOS_VOICE = "Samantha"
 DEFAULT_RATE_WPM = 175
 MAX_TEXT_LENGTH = 4000
+SAY_SPEAK_TIMEOUT = 60
+SAY_LIST_TIMEOUT = 5
 _VOICE_CACHE: list[str] | None = None
 _PREFERRED_VOICES = [
     "Daniel",
@@ -35,6 +37,7 @@ def _available_voices() -> list[str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=SAY_LIST_TIMEOUT,
         )
         voices: list[str] = []
         for line in (proc.stdout or "").splitlines():
@@ -67,8 +70,15 @@ def _configured_enabled() -> bool:
     return LOCAL_TTS_ENABLED
 
 
+_SAY_HARDCODED = "/usr/bin/say"
+
+
 def _say_binary() -> str:
-    return shutil.which("say") or "/usr/bin/say"
+    # Frozen windowed apps have a minimal PATH; prefer the known macOS binary
+    # there so shutil.which() returning None does not make TTS look unavailable.
+    if getattr(sys, "frozen", False):
+        return _SAY_HARDCODED if os.path.exists(_SAY_HARDCODED) else (shutil.which("say") or _SAY_HARDCODED)
+    return shutil.which("say") or _SAY_HARDCODED
 
 
 def available() -> bool:
@@ -159,6 +169,7 @@ def speak(text: str) -> dict[str, Any]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=SAY_SPEAK_TIMEOUT,
         )
     except Exception as exc:
         return {

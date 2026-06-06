@@ -27,3 +27,4 @@ kokoro-onnx  # Local TTS — free, no API
 # ── Memory and retrieval (2026-04) ────────────────────────────────────────────
 mem0ai>=2.0,<3          # Cross-session episodic memory (Ollama-backed, local Qdrant)
 qdrant-client>=1.17,<2  # Vector store for mem0 (embedded local, no server needed)
+redis[hiredis]>=5,<7    # Redis Streams event bus for multi-agent task scheduling

@@ -1,0 +1,156 @@
+services:
+
+  # ─── Core inference ────────────────────────────────────────────────────────
+  # Optional Linux/container lane. On the M4 Pro Mac, prefer the host Ollama app
+  # at http://host.docker.internal:11434 so Jarvis keeps Apple acceleration.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: jarvis-ollama
+    profiles: ["container-ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_CONTEXT_LENGTH=64000
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Event bus / cache ─────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: jarvis-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Relational / audit / memory store ────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: jarvis-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jarvis_local_dev}
+      POSTGRES_DB: jarvis
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jarvis -d jarvis"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ─── Vector search ─────────────────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: jarvis-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── Event bus + agent scheduler ──────────────────────────────────────────
+  event_bus:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-event-bus
+    restart: unless-stopped
+    ports:
+      - "8766:8766"
+    environment:
+      - JARVIS_PORT=8766
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_DSN=postgresql://jarvis:${POSTGRES_PASSWORD:-jarvis_local_dev}@postgres:5432/jarvis
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "uvicorn", "infra.event_bus:app", "--host", "0.0.0.0", "--port", "8766"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8766/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── Main Jarvis API ───────────────────────────────────────────────────────
+  jarvis_api:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-api
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - JARVIS_PORT=8765
+      - REDIS_URL=redis://redis:6379
+      - POSTGRES_DSN=postgresql://jarvis:${POSTGRES_PASSWORD:-jarvis_local_dev}@postgres:5432/jarvis
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - EVENT_BUS_URL=http://event_bus:8766
+    command: ["python", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8765"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8765/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─── First specialist worker lane ─────────────────────────────────────────
+  backend_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-backend-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.backend_worker", "--agent", "backend_engineer"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+volumes:
+  ollama_models:
+  redis_data:
+  postgres_data:
+  qdrant_data:

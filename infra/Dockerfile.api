@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# redis + asyncpg for the event bus layer
+RUN pip install --no-cache-dir redis[hiredis] asyncpg psycopg2-binary
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1

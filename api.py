@@ -109,7 +109,7 @@ _API_TOKEN = ""
 # This is thread-safe: no global state is mutated.
 _PUBLIC_PATHS = {
     "/", "/status", "/webhooks/trigger", "/webhooks/github", "/bridge/pair",
-    "/manifest.json", "/service-worker.js", "/assets/icon_1024.png"
+    "/manifest.json", "/service-worker.js", "/assets/icon_1024.png",
 }
 
 # TV / Remote Device Pairing PIN Registry
@@ -643,6 +643,19 @@ class RemoteTypeRequest(BaseModel):
     submit: bool = False  # press Return after typing
 
 
+class OAIMessage(BaseModel):
+    role: str
+    content: str = ""
+
+
+class OAICompletionRequest(BaseModel):
+    model: str = "jarvis"
+    messages: list[OAIMessage] = []
+    stream: bool = False
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
 # ── Mobile web stream helper ───────────────────────────────────────────────────
 
 # Cache: if Claude fails with a hard error (credits, auth), skip it for 10 min.
@@ -931,7 +944,8 @@ def get_runtime_state(refresh: bool = False):
 
 @app.get("/agents")
 def list_agents():
-    return {"ok": True, "agents": task_runtime.list_agents()}
+    import agent_dispatch
+    return {"ok": True, "agents": agent_dispatch.list_agents()}
 
 
 @app.get("/agents/{agent_id}")
@@ -940,6 +954,159 @@ def get_agent(agent_id: str):
     if not agent:
         return JSONResponse(status_code=404, content={"ok": False, "error": "agent_not_found"})
     return {"ok": True, "agent": agent}
+
+
+class AgentRunRequest(BaseModel):
+    task: str
+    context: str = ""
+
+
+@app.post("/agents/{agent_name}/run")
+def run_agent(agent_name: str, req: AgentRunRequest, request: Request):
+    from infra.rbac import registry
+    import agent_dispatch
+    registry.enforce(request, agent_name)
+    try:
+        gen = agent_dispatch.dispatch(agent_name, req.task, req.context)
+    except RuntimeError as exc:
+        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+
+    def generate():
+        for chunk in gen:
+            if chunk:
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+class ManagerRunRequest(BaseModel):
+    goal:       str
+    session_id: str = ""
+    project_id: str = ""
+
+
+@app.post("/manager/run")
+def manager_run(req: ManagerRunRequest, request: Request):
+    """
+    Submit a broad goal to the Jarvis Manager.
+    Decomposes into agent tasks, applies security gates, and schedules via event bus.
+    Returns the full ExecutionPlan synchronously (decomposition + scheduling, not task results).
+    """
+    from infra.rbac import registry
+    from core.manager import manager as _manager
+    caller = registry.caller_from_request(request)
+    registry.check_rate_limit(caller)
+    try:
+        plan = _manager.run(req.goal, session_id=req.session_id, project_id=req.project_id)
+        return {"ok": True, "plan": plan.to_dict()}
+    except Exception as exc:
+        log.exception("manager_run error")
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.get("/manager/status/{session_id}")
+def manager_status(session_id: str, request: Request):
+    """Poll task statuses for a session. Queries event bus if reachable."""
+    from infra.rbac import registry
+    registry.caller_from_request(request)   # auth only — no role restriction
+    # Thin status endpoint: without storing the plan server-side we return event bus data
+    try:
+        import httpx
+        event_bus_url = os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
+        resp = httpx.get(f"{event_bus_url}/metrics", timeout=2.0)
+        if resp.status_code == 200:
+            return {"ok": True, "metrics": resp.json()}
+    except Exception:
+        pass
+    return {"ok": True, "metrics": {}, "note": "event_bus_unreachable"}
+
+
+@app.get("/v1/models")
+def oai_list_models():
+    """OpenAI-compatible model list — lets OpenClaw discover Jarvis as a provider."""
+    import time
+    return {
+        "object": "list",
+        "data": [{"id": "jarvis", "object": "model", "created": int(time.time()), "owned_by": "jarvis"}],
+    }
+
+
+@app.post("/v1/chat/completions")
+def oai_chat_completions(req: OAICompletionRequest):
+    """OpenAI-compatible chat endpoint — bridges OpenClaw → Jarvis → Ollama.
+
+    Extracts the last user message and routes through Jarvis's full intelligence
+    stack (memory, vault, tools, agent dispatch) before returning.
+    """
+    import time, uuid
+
+    # Extract last user message; prepend prior turns as plain context
+    user_msg = ""
+    history_lines: list[str] = []
+    for m in req.messages:
+        role = (m.role or "").lower()
+        content = (m.content or "").strip()
+        if not content:
+            continue
+        if role == "system":
+            history_lines.append(f"[System context: {content}]")
+        elif role == "assistant":
+            history_lines.append(f"Assistant: {content}")
+        elif role == "user":
+            user_msg = content  # keep updating — last user wins
+
+    if not user_msg:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": "No user message found", "type": "invalid_request_error"}},
+        )
+
+    # Prepend history as context prefix if there are prior turns
+    prior = "\n".join(history_lines[:-1]) if len(history_lines) > 1 else ""
+    routed_input = f"{prior}\n\n{user_msg}".strip() if prior else user_msg
+
+    cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+    created = int(time.time())
+
+    if req.stream:
+        def generate():
+            # Opening role delta
+            yield "data: " + json.dumps({
+                "id": cmpl_id, "object": "chat.completion.chunk",
+                "created": created, "model": req.model,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }) + "\n\n"
+
+            stream, _model = route_stream(routed_input)
+            for chunk in stream:
+                if chunk:
+                    yield "data: " + json.dumps({
+                        "id": cmpl_id, "object": "chat.completion.chunk",
+                        "created": created, "model": req.model,
+                        "choices": [{"index": 0, "delta": {"content": chunk}, "finish_reason": None}],
+                    }) + "\n\n"
+
+            yield "data: " + json.dumps({
+                "id": cmpl_id, "object": "chat.completion.chunk",
+                "created": created, "model": req.model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            }) + "\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
+    # Non-streaming
+    stream, _model = route_stream(routed_input)
+    response_text = "".join(chunk for chunk in stream if chunk)
+    return {
+        "id": cmpl_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": req.model,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": response_text}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
 
 
 @app.get("/extensions")

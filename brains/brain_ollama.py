@@ -448,6 +448,242 @@ def list_local_models() -> list[str]:
         return []
 
 
+# ── Agentic tool-calling loop ──────────────────────────────────────────────────
+
+_AGENT_TOOL_SCHEMAS: dict[str, dict] = {
+    "web_search": {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for current information, news, documentation, or facts.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "Search query"}},
+                "required": ["query"],
+            },
+        },
+    },
+    "read_file": {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the contents of a local file.",
+            "parameters": {
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "File path to read"}},
+                "required": ["path"],
+            },
+        },
+    },
+    "write_file": {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Write or overwrite content to a file inside the workspace directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {"type": "string", "description": "File path relative to the workspace directory"},
+                    "content": {"type": "string", "description": "Content to write to the file"}
+                },
+                "required": ["filepath", "content"],
+            },
+        },
+    },
+    "run_tests": {
+        "type": "function",
+        "function": {
+            "name": "run_tests",
+            "description": "Execute pytest securely within the workspace directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pytest_args": {"type": "string", "description": "Arguments to pass to pytest"}
+                },
+                "required": [],
+            },
+        },
+    },
+    "get_weather": {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a city or location.",
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string", "description": "City or location name"}},
+                "required": ["location"],
+            },
+        },
+    },
+    "memory_lookup": {
+        "type": "function",
+        "function": {
+            "name": "memory_lookup",
+            "description": "Look up facts and context from Jarvis long-term memory.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "What to recall from memory"}},
+                "required": ["query"],
+            },
+        },
+    },
+}
+
+_JARVIS_ROOT: "Path | None" = None  # type: ignore[name-defined]
+
+
+def _jarvis_root() -> "Any":
+    global _JARVIS_ROOT
+    if _JARVIS_ROOT is None:
+        from pathlib import Path
+        _JARVIS_ROOT = Path(__file__).resolve().parent.parent
+    return _JARVIS_ROOT
+
+
+def _execute_agent_tool(name: str, args: dict) -> str:
+    try:
+        if name == "web_search":
+            from tools import web_search
+            query = str(args.get("query", "")).strip()
+            return web_search(query, max_results=5, summarise=False) if query else "No query provided."
+
+        elif name == "read_file":
+            import os
+            raw = str(args.get("path", args.get("filepath", ""))).strip()
+            if not raw:
+                return "No path provided."
+            if os.getenv("JARVIS_WORKSPACE_CONFINED") == "1":
+                from tools import read_file
+                return read_file(raw)
+            else:
+                from pathlib import Path
+                root = _jarvis_root()
+                candidate = (root / raw).resolve()
+                if not str(candidate).startswith(str(root)):
+                    return "Access denied: path outside project root."
+                if not candidate.is_file():
+                    return f"File not found: {raw}"
+                return candidate.read_text(errors="replace")[:6000]
+
+        elif name == "write_file":
+            from tools import write_file
+            filepath = str(args.get("filepath", args.get("path", ""))).strip()
+            content = str(args.get("content", ""))
+            return write_file(filepath, content)
+
+        elif name == "run_tests":
+            from tools import run_tests
+            pytest_args = str(args.get("pytest_args", "")).strip()
+            return run_tests(pytest_args)
+
+        elif name == "get_weather":
+            from tools import get_weather
+            return get_weather(str(args.get("location", "")))
+
+        elif name == "memory_lookup":
+            context = mem.get_context()
+            return context if context else "No relevant memory found."
+
+        return f"Unknown tool: {name}"
+    except Exception as exc:
+        return f"Tool error ({name}): {exc}"
+
+
+def ask_local_with_tools(
+    user_input: str,
+    model: str = LOCAL_DEFAULT,
+    system_extra: str = "",
+    tools: "list[str] | None" = None,  # type: ignore[type-arg]
+    max_iterations: int = 6,
+):
+    """Agentic function-calling loop for local inference.
+
+    Model calls tools (web_search, read_file, get_weather, memory_lookup),
+    gets results, then streams the final synthesized answer — same pattern as
+    Claude/GPT tool use, fully local via Ollama.
+
+    Falls back to plain ask_local_stream when no callable tools are requested.
+    """
+    tool_names = [t for t in (tools or []) if t in _AGENT_TOOL_SCHEMAS]
+    if not tool_names:
+        yield from ask_local_stream(user_input, model=model, system_extra=system_extra)
+        return
+
+    model = get_best_available(model)
+    tool_schemas = [_AGENT_TOOL_SCHEMAS[t] for t in tool_names]
+
+    system = SYSTEM_PROMPT + mem.get_context()
+    if system_extra:
+        system += "\n\n" + system_extra
+
+    messages: list[dict] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_input},
+    ]
+
+    # ctx options: use the 64k window we configured for glm models
+    _opts = {"num_ctx": 64000} if "glm" in model.lower() else {}
+
+    last_msg = None
+    for _ in range(max_iterations):
+        response = _client().chat(
+            model=model,
+            messages=messages,
+            tools=tool_schemas,
+            stream=False,
+            options=_opts or None,
+        )
+        last_msg = response.message
+        tool_calls = last_msg.tool_calls or []
+
+        if not tool_calls:
+            break
+
+        # Append assistant's tool-call decision
+        messages.append({
+            "role": "assistant",
+            "content": last_msg.content or "",
+            "tool_calls": [
+                {"function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in tool_calls
+            ],
+        })
+
+        # Execute each tool and append results
+        for tc in tool_calls:
+            result = _execute_agent_tool(tc.function.name, tc.function.arguments)
+            messages.append({"role": "tool", "content": result})
+    else:
+        # Exhausted iterations — prompt for wrap-up
+        messages.append({"role": "user", "content": "Summarize your findings based on the results above."})
+
+    # Stream the final synthesis
+    stream = _client().chat(
+        model=model,
+        messages=messages,
+        stream=True,
+        options=_opts or None,
+    )
+    raw_buffer = ""
+    try:
+        for chunk in stream:
+            delta = chunk.message.content or ""
+            raw_buffer += delta
+            if any(raw_buffer.rstrip().endswith(c) for c in ('.', '!', '?')) and len(raw_buffer) > 40:
+                cleaned = _strip_markdown(raw_buffer)
+                if cleaned:
+                    yield cleaned
+                raw_buffer = ""
+    except Exception as exc:
+        yield f"Tool agent error: {exc}"
+        return
+    if raw_buffer:
+        cleaned = _strip_markdown(raw_buffer)
+        if cleaned:
+            yield cleaned
+
+
 _LOCAL_VISION_MODEL = os.getenv("LOCAL_VISION_MODEL", "").strip()
 _LOCAL_VISION_MODELS = ("llava:7b", "llava", "minicpm-v", "moondream", "llava-llama3")
 _LOCAL_EMBED_MODEL = os.getenv("LOCAL_EMBED_MODEL", "nomic-embed-text")

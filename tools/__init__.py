@@ -101,6 +101,24 @@ def set_volume(level: int) -> str:
     return f"Volume set to {level}."
 
 
+# ── Battery ───────────────────────────────────────────────────────────────────
+
+def get_battery() -> str:
+    """Return battery percentage and charging status."""
+    try:
+        out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=3)
+        import re
+        pct_match = re.search(r"(\d+)%", out)
+        charging = "charging" in out.lower() or "ac power" in out.lower()
+        if pct_match:
+            pct = int(pct_match.group(1))
+            status = "charging" if charging else "on battery"
+            return f"Battery at {pct}%, {status}."
+        return "Battery status unavailable."
+    except Exception as e:
+        return f"Battery check failed: {e}"
+
+
 def mute() -> str:
     subprocess.run(["osascript", "-e", "set volume with output muted"], check=True)
     return "Muted."
@@ -176,24 +194,6 @@ def lock_screen() -> str:
     return "Locking screen."
 
 
-# ── Battery ───────────────────────────────────────────────────────────────────
-
-def get_battery() -> str:
-    """Return battery percentage and charging status."""
-    try:
-        out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=3)
-        import re
-        pct_match = re.search(r"(\d+)%", out)
-        charging = "charging" in out.lower() or "ac power" in out.lower()
-        if pct_match:
-            pct = int(pct_match.group(1))
-            status = "charging" if charging else "on battery"
-            return f"Battery at {pct}%, {status}."
-        return "Battery status unavailable."
-    except Exception as e:
-        return f"Battery check failed: {e}"
-
-
 # ── Math eval ─────────────────────────────────────────────────────────────────
 
 def eval_math(expr: str) -> str:
@@ -216,3 +216,9 @@ def get_current_time() -> str:
     """Return the current local time in a mobile-friendly human format."""
     from datetime import datetime
     return datetime.now().strftime("%-I:%M %p, %A %B %-d")
+
+
+# ── Backend Engineer Workspace Tools ──────────────────────────────────────────
+
+from .fs_tools import read_file, write_file
+from .shell_tools import run_tests
