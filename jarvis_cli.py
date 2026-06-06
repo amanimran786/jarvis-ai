@@ -333,6 +333,10 @@ def stream_task(message: str, *, kind: str = "task", terse_mode: str = "full", i
     if task.get("status") == "waiting_approval":
         print(f"[task:{task_id}] waiting for approval")
         print(f"Reason            : {task.get('approval_reason') or 'approval required'}")
+        confidence = task.get("confidence") or {}
+        if confidence:
+            print(f"Confidence        : {confidence.get('score')} / threshold {confidence.get('threshold')}")
+        print(f"Autonomy          : {task.get('autonomy') or 'human_review'}")
         print(f"Use /approve {task_id} to start it or /deny {task_id} to cancel it.")
         return 0
     try:
@@ -388,6 +392,10 @@ def watch_task(task_id: str) -> int:
     if task.get("status") == "waiting_approval":
         print(f"{task_id}: waiting for approval")
         print(f"Reason            : {task.get('approval_reason') or 'approval required'}")
+        confidence = task.get("confidence") or {}
+        if confidence:
+            print(f"Confidence        : {confidence.get('score')} / threshold {confidence.get('threshold')}")
+        print(f"Autonomy          : {task.get('autonomy') or 'human_review'}")
         print(f"Use /approve {task_id} to start it or /deny {task_id} to cancel it.")
         return 0
 
@@ -633,7 +641,8 @@ def _print_agents() -> None:
     for agent in payload.get("agents", []):
         caps = ", ".join(agent.get("capabilities", []))
         lifecycle = agent.get("lifecycle_state") or agent.get("status")
-        print(f"{agent['id']}: {lifecycle} [{caps}]")
+        label = agent.get("label") or agent["id"]
+        print(f"{agent['id']}: {lifecycle} - {label} [{caps}]")
 
 
 def _print_tasks(status: str = "") -> None:
@@ -646,7 +655,13 @@ def _print_tasks(status: str = "") -> None:
         approval = ""
         if task.get("status") == "waiting_approval":
             approval = f" [{task.get('approval_reason') or 'approval required'}]"
-        print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{approval}")
+        confidence = task.get("confidence") or {}
+        confidence_text = ""
+        if confidence:
+            confidence_text = f" conf={confidence.get('score')}/{confidence.get('threshold')}"
+        autonomy = task.get("autonomy") or ""
+        autonomy_text = f" {autonomy}" if autonomy else ""
+        print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{autonomy_text}{confidence_text}{approval}")
 
 
 def _print_memory() -> None:
