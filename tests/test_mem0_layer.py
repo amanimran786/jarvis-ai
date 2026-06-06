@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import patch
 import os
+import sys
 
+sys.modules.pop("mem0_layer", None)
 import mem0_layer
 
 

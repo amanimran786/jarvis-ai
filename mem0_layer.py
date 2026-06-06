@@ -42,6 +42,8 @@ Usage from router (write path)
 
 from __future__ import annotations
 
+import fcntl
+import logging
 import os
 import atexit
 import importlib.util
@@ -60,6 +62,47 @@ _HISTORY_PATH = str(_MEM0_DIR / "history.db")
 _DEFAULT_COLLECTION_NAME = "jarvis_nomic_768_v2"
 
 _MEM0_DIR.mkdir(parents=True, exist_ok=True)
+
+# Process-level exclusive lock so only one Jarvis process owns the embedded
+# Qdrant DB. A second process degrades to no-op memory instead of crashing with
+# "already accessed" Qdrant errors.
+_QDRANT_LOCK_PATH = str(_MEM0_DIR / "qdrant.lock")
+_qdrant_lock_fd: int | None = None
+
+_log = logging.getLogger(__name__)
+
+
+def _acquire_qdrant_lock() -> bool:
+    global _qdrant_lock_fd
+    if _qdrant_lock_fd is not None:
+        return True
+    fd: int | None = None
+    try:
+        fd = os.open(_QDRANT_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _qdrant_lock_fd = fd
+        return True
+    except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return False
+
+
+def _release_qdrant_lock() -> None:
+    global _qdrant_lock_fd
+    fd = _qdrant_lock_fd
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    except OSError:
+        pass
+    _qdrant_lock_fd = None
+
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 _OLLAMA_BASE = os.getenv("OLLAMA_HOST", "http://localhost:11434")
@@ -130,16 +173,24 @@ def _get_instance() -> Any | None:
         if _init_attempted:
             return _memory_instance
         _init_attempted = True
+        if not _acquire_qdrant_lock():
+            _memory_instance = None
+            _available = False
+            _last_error = "Qdrant lock held by another process — running in no-op memory mode."
+            _log.warning("[mem0] %s", _last_error)
+            return _memory_instance
         try:
             from mem0 import Memory
             _memory_instance = Memory.from_config(_build_config())
             _available = True
             _last_error = ""
         except Exception as e:
+            _release_qdrant_lock()
             # Ollama not running, qdrant not installed, etc. — degrade silently.
             _memory_instance = None
             _available = False
             _last_error = str(e)
+            _log.warning("[mem0] init failed: %s", _last_error)
     return _memory_instance
 
 
@@ -261,6 +312,7 @@ def close() -> None:
     global _memory_instance
     m = _memory_instance
     if m is None:
+        _release_qdrant_lock()
         return
     try:
         vector_store = getattr(m, "vector_store", None)
@@ -277,6 +329,7 @@ def close() -> None:
     except Exception:
         pass
     _memory_instance = None
+    _release_qdrant_lock()
 
 
 atexit.register(close)

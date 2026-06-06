@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""
+scripts/ade-loop — Entrypoint executed inside the tmux session by `ade start`.
+
+Delegates to ade.loop.main().
+"""
+import sys
+from pathlib import Path
+
+# Ensure the repo root is on sys.path regardless of where tmux cwd lands
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from ade.loop import main
+
+if __name__ == "__main__":
+    main()

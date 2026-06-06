@@ -3464,10 +3464,41 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["error"], "auth_required")
 
+    def test_openai_compatible_models_requires_auth_when_token_enabled(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.get("/v1/models")
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "auth_required")
+
+    def test_openai_compatible_chat_requires_auth_when_token_enabled(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.post(
+            "/v1/chat/completions",
+            json={"model": "jarvis", "messages": [{"role": "user", "content": "hello"}]},
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"], "auth_required")
+
+    def test_openai_compatible_models_accepts_bearer_token(self):
+        api._API_TOKEN = "test-token"
+        response = self.client.get("/v1/models", headers={"Authorization": "Bearer test-token"})
+        self.assertEqual(response.status_code, 200)
+
     def test_protected_paths_accept_bearer_token(self):
         api._API_TOKEN = "test-token"
         response = self.client.get("/memory/status", headers={"Authorization": "Bearer test-token"})
         self.assertEqual(response.status_code, 200)
+
+    def test_manager_status_uses_event_bus_url_env(self):
+        api._API_TOKEN = ""
+        with patch.dict(os.environ, {"EVENT_BUS_URL": "http://event-bus.test:9999"}), \
+             patch("httpx.get") as get_mock:
+            get_mock.return_value.status_code = 200
+            get_mock.return_value.json.return_value = {"queue_depth": 0}
+            response = self.client.get("/manager/status/session-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["metrics"], {"queue_depth": 0})
+        get_mock.assert_called_once_with("http://event-bus.test:9999/metrics", timeout=2.0)
 
     def test_chat_returns_busy_instead_of_hanging_when_lock_is_held(self):
         api._CHAT_LOCK_TIMEOUT_SECONDS = 0.01

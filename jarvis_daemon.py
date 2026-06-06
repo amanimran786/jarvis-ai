@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
+import shutil
+import subprocess
 import time
 import threading
 import json
@@ -11,6 +14,8 @@ import api
 import runtime_state
 import task_runtime
 
+
+_log = logging.getLogger(__name__)
 
 _BOOT_LOCK = threading.Lock()
 _BOOT_THREAD: threading.Thread | None = None
@@ -69,6 +74,43 @@ def _is_another_instance_running() -> bool:
     except Exception:
         pass
     return False
+
+
+# ── Apple Foundation Model (apfel) startup probe ───────────────────────────────
+
+_APFEL_PORT = 11438
+_APFEL_PROBE_URL = f"http://localhost:{_APFEL_PORT}/v1/models"
+
+
+def _apfel_is_running() -> bool:
+    """Return True if apfel is already serving on its expected port."""
+    try:
+        with urllib.request.urlopen(_APFEL_PROBE_URL, timeout=1.5) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _maybe_start_apfel() -> None:
+    """Start apfel if enabled, installed, and not already running."""
+    if os.getenv("JARVIS_APPLE_FOUNDATION_ENABLED", "").lower() not in {"1", "true", "yes"}:
+        return
+    apfel_bin = shutil.which("apfel")
+    if not apfel_bin:
+        return
+    if _apfel_is_running():
+        return
+    try:
+        subprocess.Popen(
+            [apfel_bin, "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        _log.info("[AppleFoundation] Started apfel on :%d", _APFEL_PORT)
+        print(f"[AppleFoundation] Started apfel on :{_APFEL_PORT}")
+    except Exception as exc:
+        _log.warning("[AppleFoundation] Failed to start apfel: %s", exc)
 
 
 def start_daemon(host: str | None = None, port: int | None = None, reason: str = "bootstrap") -> threading.Thread:
@@ -154,6 +196,7 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
             thread_name=getattr(_BOOT_THREAD, "name", ""),
             reason=reason,
         )
+        _maybe_start_apfel()
         runtime_state.refresh_call_assist(force_refresh=True)
         return _BOOT_THREAD
 
