@@ -225,6 +225,7 @@ def _run_headless():
     from voice import speak, speak_stream, listen, wait_for_wake_word
     from desktop.cli_ui import CLISession, ThinkingIndicator
     jarvis_watcher.set_speak_callback(speak)
+    brain_daemon.set_speak_callback(speak)   # wire TTS for calendar/email alerts
 
     cli = CLISession(use_rich=True)
     cli.print_header()

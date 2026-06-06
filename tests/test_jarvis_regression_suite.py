@@ -72,6 +72,15 @@ class PromptModifierTests(unittest.TestCase):
 
 
 class LocalSttTests(unittest.TestCase):
+    def setUp(self):
+        self._voice_log_tmp = TemporaryDirectory()
+        self._previous_voice_log_path = voice._VOICE_LOG_PATH
+        voice._VOICE_LOG_PATH = Path(self._voice_log_tmp.name) / ".jarvis_voice.log"
+
+    def tearDown(self):
+        voice._VOICE_LOG_PATH = self._previous_voice_log_path
+        self._voice_log_tmp.cleanup()
+
     def test_voice_transcribe_prefers_local_before_openai(self):
         with TemporaryDirectory() as td:
             path = Path(td) / "sample.wav"
@@ -98,6 +107,15 @@ class LocalSttTests(unittest.TestCase):
 
 
 class LocalTtsTests(unittest.TestCase):
+    def setUp(self):
+        self._voice_log_tmp = TemporaryDirectory()
+        self._previous_voice_log_path = voice._VOICE_LOG_PATH
+        voice._VOICE_LOG_PATH = Path(self._voice_log_tmp.name) / ".jarvis_voice.log"
+
+    def tearDown(self):
+        voice._VOICE_LOG_PATH = self._previous_voice_log_path
+        self._voice_log_tmp.cleanup()
+
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
              patch("voice.TTS_BACKENDS", ("say", "elevenlabs", "openai")), \
@@ -109,6 +127,15 @@ class LocalTtsTests(unittest.TestCase):
 
 
 class LocalVisionFallbackTests(unittest.TestCase):
+    def setUp(self):
+        self._voice_log_tmp = TemporaryDirectory()
+        self._previous_voice_log_path = voice._VOICE_LOG_PATH
+        voice._VOICE_LOG_PATH = Path(self._voice_log_tmp.name) / ".jarvis_voice.log"
+
+    def tearDown(self):
+        voice._VOICE_LOG_PATH = self._previous_voice_log_path
+        self._voice_log_tmp.cleanup()
+
     def test_screenshot_describe_routes_text_heavy_shots_to_ocr_before_local_vision(self):
         with TemporaryDirectory() as td:
             shot = Path(td) / "shot.jpg"
@@ -1419,12 +1446,13 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(router._pending_email_draft["to"], "aman@example.com")
 
     def test_email_read_query_still_reads_inbox(self):
-        with patch("router.gs.get_unread_emails", return_value="No unread email.") as inbox_mock:
+        fake_emails = [{"sender": "Alice", "from_address": "alice@example.com", "subject": "Hi", "snippet": ""}]
+        with patch("router.gs.get_unread_email_subjects", return_value=fake_emails) as inbox_mock:
             stream, label = router.route_stream("check email")
             text = "".join(stream)
 
-        self.assertEqual(label, "Status")
-        self.assertIn("no unread email", text.lower())
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Alice", text)
         inbox_mock.assert_called_once()
 
     def test_google_auth_files_are_outside_repo_and_excluded_from_bundle(self):
@@ -1466,6 +1494,66 @@ class RouterTests(unittest.TestCase):
                 self.assertIn("Canceled the email draft", text)
                 self.assertFalse(router._has_pending_email_draft())
                 send_mock.assert_not_called()
+
+    def test_read_emails_fast_path(self):
+        fake_emails = [
+            {"sender": "Alice", "from_address": "alice@example.com", "subject": "Hello there", "snippet": ""},
+            {"sender": "Bob", "from_address": "bob@example.com", "subject": "Meeting notes", "snippet": ""},
+        ]
+        with patch("router.gs.get_unread_email_subjects", return_value=fake_emails) as inbox_mock:
+            stream, label = router.route_stream("read my emails")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Alice", text)
+        self.assertIn("Hello there", text)
+        self.assertIn("Bob", text)
+        inbox_mock.assert_called_once()
+
+    def test_read_emails_inbox_clear(self):
+        with patch("router.gs.get_unread_email_subjects", return_value=[]):
+            stream, label = router.route_stream("show my inbox")
+            text = "".join(stream)
+
+        self.assertEqual(label, "Gmail")
+        self.assertIn("inbox is clear", text.lower())
+
+    def test_email_reply_flow_three_turns(self):
+        """reply to X -> body -> confirm send wires through to send_email."""
+        fake_emails = [
+            {
+                "sender": "Carol",
+                "from_address": "carol@example.com",
+                "subject": "Project update",
+                "snippet": "",
+            }
+        ]
+        # Turn 1: intent
+        with patch("router.gs.get_unread_email_subjects", return_value=fake_emails):
+            stream, label = router.route_stream("reply to the email from Carol")
+            text = "".join(stream)
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Carol", text)
+        self.assertIn("Project update", text)
+        self.assertTrue(router._has_pending_email_reply())
+
+        # Turn 2: body
+        stream, label = router.route_stream("Sounds great, thanks!")
+        text = "".join(stream)
+        self.assertEqual(label, "Gmail")
+        self.assertIn("Email draft ready", text)
+        self.assertFalse(router._has_pending_email_reply())
+        self.assertTrue(router._has_pending_email_draft())
+        self.assertEqual(router._pending_email_draft["to"], "carol@example.com")
+
+        # Turn 3: confirm send
+        with patch("router.gs.send_email", return_value="Email sent to carol@example.com.") as send_mock:
+            stream, label = router.route_stream("confirm send")
+            text = "".join(stream)
+        self.assertEqual(label, "Gmail")
+        self.assertIn("carol@example.com", text)
+        send_mock.assert_called_once_with("carol@example.com", "Re: Project update", "Sounds great, thanks!")
+        self.assertFalse(router._has_pending_email_draft())
 
     def test_time_query_bypasses_pending_email_draft(self):
         router.route_stream("Email beta@example.com subject: Beta body: Ship it")
@@ -2354,7 +2442,10 @@ class RouterTests(unittest.TestCase):
         stream, label = router.route_stream("actually message mom hi")
         text = "".join(stream)
         self.assertEqual(label, "Messages")
-        self.assertIn('draft ready for mom: "hi"', text.lower())
+        # Draft confirmation includes the phone number when contact is resolved, e.g.
+        # 'draft ready for mom (+15105550125): "hi"' — match on the parts that are stable.
+        self.assertIn('draft ready for mom', text.lower())
+        self.assertIn('"hi"', text.lower())
         self.assertEqual(router._pending_msg_recipient, "")
         self.assertTrue(router._has_pending_message_draft())
 
@@ -5230,6 +5321,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
             suggest_label=_StubTextWidget(),
             _set_status=lambda value: setattr(window, "status_value", value),
             _set_meeting_toolbar_mode=unittest.mock.Mock(),
+            _pause_voice_worker_for_smart_listen=unittest.mock.Mock(),
             _apply_live_transcript_update=lambda text: None,
             _apply_live_suggestion_update=lambda text: None,
             _add_message=lambda *args, **kwargs: None,

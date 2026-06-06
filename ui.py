@@ -3201,6 +3201,8 @@ class JarvisWindow(QMainWindow):
         if hasattr(self, "_subtitle"):
             self._subtitle.setText(hint or "Smart Listen active")
         self._update_meeting_toolbar_layout()
+        if hasattr(self, "_add_message"):
+            self._add_message(suggestion, "jarvis", "Meeting")
 
     def _show_suggestion(self, suggestion: str):
         self._apply_live_suggestion_update(suggestion)
