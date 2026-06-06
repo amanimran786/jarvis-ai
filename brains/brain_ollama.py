@@ -138,6 +138,7 @@ def _strip_markdown(text: str) -> str:
     """Remove markdown artifacts because Jarvis responses are spoken aloud."""
     # Strip DeepSeek R1 internal thinking blocks — not for TTS
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    text = re.sub(r'(?is)\bThinking\.\.\..*?\.\.\.done thinking\.\s*', '', text)
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'\*(.+?)\*', r'\1', text)
     text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.M)
@@ -158,9 +159,11 @@ def _strip_markdown(text: str) -> str:
 # model never gets an over-filled prompt. Override at runtime via env if you
 # pull a model with a larger context (e.g. `LOCAL_MODEL_CTX_qwen3-coder=...`).
 _LOCAL_MODEL_CONTEXT_TOKENS = {
+    "glm-4.7-flash": 202752,
     "gemma4:e4b": 8192,
     "gemma3:4b": 8192,
     "llama3.1:8b": 8192,
+    "qwen3:8b": 40960,
     "qwen2.5-coder:7b": 32768,
     "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
     "qwen3-coder:30b": 262144,
@@ -168,7 +171,7 @@ _LOCAL_MODEL_CONTEXT_TOKENS = {
 }
 
 # Escalation order when the requested model can't fit the prompt.
-_LOCAL_FALLBACK_ORDER = ("qwen3.6:35b", "qwen3-coder:30b", "qwen2.5-coder:7b", "deepseek-r1:14b")
+_LOCAL_FALLBACK_ORDER = ("glm-4.7-flash", "qwen3:8b")
 
 
 def _model_context_limit(model: str) -> int:
@@ -376,7 +379,7 @@ def ask_local_stream(
             options=options if options else None,
         )
         raw_buffer = ""
-        in_think = False  # track DeepSeek R1 <think> blocks
+        in_think = False  # track local reasoning blocks
         for chunk in stream:
             prompt_eval_count = getattr(chunk, "prompt_eval_count", prompt_eval_count)
             eval_count = getattr(chunk, "eval_count", eval_count)
@@ -384,13 +387,14 @@ def ask_local_stream(
             full_reply += delta
             raw_buffer += delta
 
-            # Track think block state to yield keepalive during long reasoning
-            if "<think>" in raw_buffer and not in_think:
+            # Track think block state to yield keepalive during long reasoning.
+            if ("<think>" in raw_buffer or "Thinking..." in raw_buffer) and not in_think:
                 in_think = True
-            if "</think>" in raw_buffer and in_think:
+            if ("</think>" in raw_buffer or "...done thinking." in raw_buffer) and in_think:
                 in_think = False
-                # Think block done — strip it and flush the real answer start
+                # Think block done; strip it and flush the real answer start.
                 raw_buffer = re.sub(r'<think>.*?</think>', '', raw_buffer, flags=re.DOTALL)
+                raw_buffer = re.sub(r'(?is)\bThinking\.\.\..*?\.\.\.done thinking\.\s*', '', raw_buffer)
 
             # During think phase yield empty string as keepalive — keeps SSE
             # connection alive while DeepSeek R1 reasons internally

@@ -176,19 +176,14 @@ OPUS       = "claude-opus-4-6"
 # Local model tiers (Ollama — no restrictions, fully private)
 LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
 LOCAL_PREFER_TUNED = os.getenv("LOCAL_PREFER_TUNED", "0").strip().lower() in {"1", "true", "yes", "on"}
-LOCAL_DEFAULT        = os.getenv("LOCAL_DEFAULT_MODEL", "gemma4:e4b")
-# Gemma 4 MTP drafter for speculative decoding — 2x speed on coding tasks.
-# Check available tags: ollama list | grep gemma4
-# Common tags when released: gemma4:e4b-mtp  or  gemma4-mtp:e4b
-# Leave empty to disable speculative decoding (safe default).
+LOCAL_GLM_FLASH = os.getenv("LOCAL_GLM_FLASH_MODEL", "glm-4.7-flash")
+LOCAL_DEFAULT = os.getenv("LOCAL_DEFAULT_MODEL", LOCAL_GLM_FLASH)
+# Speculative decoding drafter. Leave empty unless a compatible drafter is
+# installed for the selected default model.
 LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")
-LOCAL_CODER     = os.getenv("LOCAL_CODER_MODEL", "qwen2.5-coder:7b")
-LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen3-coder:30b")
-# DeepSeek R1 has built-in chain-of-thought reasoning — pull it with:
-#   ollama pull deepseek-r1:14b   (8GB, best balance)
-#   ollama pull deepseek-r1:32b   (20GB, near-GPT4 level)
-# Falls back to gemma4 if not available.
-LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", "deepseek-r1:14b")
+LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", LOCAL_GLM_FLASH)
+LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", LOCAL_GLM_FLASH)
+LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", LOCAL_GLM_FLASH)
 
 # ── Qwen3 model fleet (2026-04) ───────────────────────────────────────────────
 # Qwen3 outperforms prior models at each size class.  Pull the ones that fit:

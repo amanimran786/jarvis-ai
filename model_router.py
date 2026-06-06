@@ -29,6 +29,7 @@ from config import (
     GEMINI_FLASH,
     GEMINI_PRO,
     LOCAL_DEFAULT,
+    LOCAL_GLM_FLASH,
     LOCAL_CODER,
     LOCAL_REASONING,
     LOCAL_TUNED,
@@ -450,38 +451,36 @@ def _best_local(text: str) -> str:
     if LOCAL_PREFER_TUNED and LOCAL_TUNED and _has_model(LOCAL_TUNED, available) and not is_code_task:
         return LOCAL_TUNED
 
-    # 3. Coding tasks — use heavyweight eval models here, where latency is worth it.
+    # 3. Coding tasks — GLM Flash is the primary manager/coder lane.
     if is_code_task:
         for coder in (
-            LOCAL_DEVSTRAL,
-            LOCAL_QWEN3_6,
+            LOCAL_GLM_FLASH,
             LOCAL_CODER_RECOMMENDED,
-            LOCAL_QWEN3_STRONG,
             LOCAL_CODER,
+            LOCAL_QWEN3_MID,
+            LOCAL_DEVSTRAL,
         ):
             if coder and _has_model(coder, available):
                 return coder
 
-    # 4. Deep reasoning — only use the big local models when the query earns it.
-    #    Keep everyday chat off these lanes so Jarvis does not feel sluggish.
+    # 4. Deep reasoning — GLM Flash has the primary long-context reasoning lane.
     if is_deep:
-        for deep in (LOCAL_REASONING, LOCAL_GEMMA4_STRONG, LOCAL_QWEN3_6, LOCAL_GEMMA4_MOE):
+        for deep in (LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
             if deep and _has_model(deep, available):
                 return deep
 
-    # 5. General tasks — prefer Qwen3.6 MoE or mid-size Qwen lanes if installed.
-    #    Do not promote Gemma4 26B/31B here; those are eval/deep lanes.
-    for general in (LOCAL_QWEN3_6, LOCAL_QWEN3_STRONG, LOCAL_QWEN3_MID):
+    # 5. General tasks — use GLM first, with Qwen3:8B as the lean fallback.
+    for general in (LOCAL_GLM_FLASH, LOCAL_DEFAULT, LOCAL_QWEN3_MID):
         if general and _has_model(general, available):
             return general
 
-    # 6. Fast/simple — phi4-mini > qwen3-fast > gemma4
-    for fast in (LOCAL_PHI4_MINI, LOCAL_QWEN3_FAST, LOCAL_DEFAULT):
+    # 6. Fast/simple — use the lightweight local fallback if present.
+    for fast in (LOCAL_QWEN3_MID, LOCAL_PHI4_MINI, LOCAL_QWEN3_FAST, LOCAL_DEFAULT):
         if fast and _has_model(fast, available):
             return fast
 
     # 7. Absolute fallback
-    fallback = [LOCAL_TUNED, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING]
+    fallback = [LOCAL_TUNED, LOCAL_GLM_FLASH, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING]
     for m in fallback:
         if m and _has_model(m, available):
             return m

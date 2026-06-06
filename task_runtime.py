@@ -26,6 +26,16 @@ _TASK_THREADS: dict[str, threading.Thread] = {}
 
 _TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled"}
 _WAITING_APPROVAL_STATUS = "waiting_approval"
+_DEFAULT_CONFIDENCE_THRESHOLD = float(os.getenv("JARVIS_AGENT_AUTO_CONFIDENCE_THRESHOLD", "0.74"))
+
+_DEBRIEF_CONTRACT = (
+    "\n\nJarvis managed-agent debrief contract:\n"
+    "- Act as the assigned specialist, while Jarvis remains the manager.\n"
+    "- If the task changes files, settings, data, or external state, include a Debrief section.\n"
+    "- Debrief must name files/actions touched, approval state, verification performed, and rollback or recall notes.\n"
+    "- If confidence drops, automation becomes unreliable, or sensitive/destructive work is needed, stop and ask for human review.\n"
+    "- Do not claim edits, tests, pushes, submissions, or deployments happened unless they actually happened.\n"
+)
 
 _TERSE_PREFIXES = {
     "lite": "CAVEMAN LITE",
@@ -101,6 +111,114 @@ def _sanitize_task_for_persistence(task: dict[str, Any]) -> dict[str, Any]:
 
 def _default_agents() -> list[dict[str, Any]]:
     return [
+        {
+            "id": "jarvis-manager",
+            "label": "Jarvis Manager",
+            "kind": "manager",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["triage", "delegation", "review", "approval_gates", "debrief"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "manager"},
+        },
+        {
+            "id": "backend-engineer",
+            "label": "Backend Engineer",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["python", "api", "runtime", "integration", "tests"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
+        },
+        {
+            "id": "frontend-designer",
+            "label": "Frontend Designer",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["ui", "visual_design", "desktop", "responsive_layout"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
+        },
+        {
+            "id": "ux-researcher",
+            "label": "UX Researcher",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["user_flows", "interaction_review", "copy", "friction_audit"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
+        },
+        {
+            "id": "security-reviewer",
+            "label": "Security Reviewer",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["security", "abuse_paths", "auth", "secrets", "permissions"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "reviewer", "review": "human_first_for_sensitive"},
+        },
+        {
+            "id": "qa-tester",
+            "label": "QA Tester",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["tests", "smoke", "regression", "packaged_app"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
+        },
+        {
+            "id": "researcher",
+            "label": "Researcher",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["web_research", "repo_research", "source_synthesis"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "cite_sources"},
+        },
+        {
+            "id": "devops-release",
+            "label": "DevOps Release",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["git", "github", "builds", "packaging", "release_notes"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "human_first_for_publish"},
+        },
+        {
+            "id": "memory-librarian",
+            "label": "Memory Librarian",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["memory", "vault", "obsidian", "retrieval", "summaries"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "write_policy_aware"},
+        },
         {
             "id": "chat-router",
             "label": "Chat Router",
@@ -260,15 +378,50 @@ def _choose_agent(kind: str, requested_agent_id: str = "") -> str:
     if requested_agent_id and requested_agent_id in _AGENTS:
         return requested_agent_id
     normalized = (kind or "chat").strip().lower()
+    if normalized in {"code", "coding", "fix", "implementation", "backend", "api", "runtime"}:
+        return "backend-engineer"
+    if normalized in {"ui", "frontend", "design", "desktop"}:
+        return "frontend-designer"
+    if normalized in {"ux", "user", "interaction", "copy"}:
+        return "ux-researcher"
+    if normalized in {"security", "auth", "permissions", "threat_model", "threat-model"}:
+        return "security-reviewer"
+    if normalized in {"qa", "test", "tests", "verification", "smoke"}:
+        return "qa-tester"
+    if normalized in {"research", "repo_research", "web_research"}:
+        return "researcher"
+    if normalized in {"release", "devops", "github", "build", "packaging"}:
+        return "devops-release"
     if normalized == "meeting":
         return "meeting-assist"
-    if normalized in {"knowledge", "memory", "vault"}:
+    if normalized in {"memory", "obsidian"}:
+        return "memory-librarian"
+    if normalized in {"knowledge", "vault"}:
         return "knowledge-vault"
     if normalized in {"skill", "skills", "skill_builder", "skill-builder"}:
         return "skill-builder"
     if normalized in {"bridge", "devices"}:
         return "bridge"
+    if normalized in {"task", "project", "plan", "manager"}:
+        return "jarvis-manager"
     return "chat-router"
+
+
+def _agent_role_preamble(agent_id: str) -> str:
+    labels = {
+        "jarvis-manager": "You are Jarvis Manager: triage, delegate, coordinate, review, and keep Aman in control.",
+        "backend-engineer": "You are Backend Engineer: make tight Python/API/runtime changes with narrow verification.",
+        "frontend-designer": "You are Frontend Designer: improve UI behavior, layout, controls, and visual polish.",
+        "ux-researcher": "You are UX Researcher: find interaction friction, clarify workflows, and improve user-facing copy.",
+        "security-reviewer": "You are Security Reviewer: inspect trust boundaries, secrets, auth, permissions, and abuse paths.",
+        "qa-tester": "You are QA Tester: reproduce, verify, smoke test, and report residual risk.",
+        "researcher": "You are Researcher: gather source-backed evidence and separate facts from uncertainty.",
+        "devops-release": "You are DevOps Release: handle builds, packaging, git hygiene, GitHub, and release notes.",
+        "memory-librarian": "You are Memory Librarian: organize Obsidian/vault/memory work without overwriting canonical notes carelessly.",
+        "knowledge-vault": "You are Knowledge Vault: ground responses in stored memory and vault notes.",
+        "skill-builder": "You are Skill Builder: propose and validate skills before mutation.",
+    }
+    return labels.get(agent_id, "You are a Jarvis specialist agent. Stay scoped, auditable, and conservative.")
 
 
 def _normalize_terse_mode(value: str = "") -> str:
@@ -286,7 +439,7 @@ def _task_prompt(prompt: str, terse_mode: str = "") -> str:
     return _task_prompt_for_kind(prompt, kind="chat", terse_mode=terse_mode)
 
 
-def _task_prompt_for_kind(prompt: str, *, kind: str = "chat", terse_mode: str = "") -> str:
+def _task_prompt_for_kind(prompt: str, *, kind: str = "chat", terse_mode: str = "", agent_id: str = "") -> str:
     normalized_kind = (kind or "chat").strip().lower() or "chat"
     base_prompt = prompt
     if normalized_kind in {"vault", "knowledge", "memory"}:
@@ -307,6 +460,9 @@ def _task_prompt_for_kind(prompt: str, *, kind: str = "chat", terse_mode: str = 
                 "unless the user has explicitly requested the separate create/promote skill command. "
                 f"{prompt}"
             )
+    if agent_id:
+        base_prompt = f"{_agent_role_preamble(agent_id)}\n\nTask:\n{base_prompt}"
+    base_prompt = f"{base_prompt}{_DEBRIEF_CONTRACT}"
     normalized = _normalize_terse_mode(terse_mode)
     if not normalized:
         return base_prompt
@@ -356,12 +512,124 @@ def _approval_reason_for_task(prompt: str, *, kind: str = "", source: str = "") 
     return ""
 
 
-def _task_requires_approval(prompt: str, *, kind: str = "", source: str = "", meta: dict[str, Any] | None = None) -> tuple[bool, str]:
+def _confidence_threshold(meta: dict[str, Any] | None = None) -> float:
+    meta = meta or {}
+    raw = meta.get("confidence_threshold")
+    if raw is None:
+        return max(0.0, min(1.0, _DEFAULT_CONFIDENCE_THRESHOLD))
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        return max(0.0, min(1.0, _DEFAULT_CONFIDENCE_THRESHOLD))
+
+
+def _estimate_task_confidence(prompt: str, *, kind: str = "", source: str = "", agent_id: str = "", meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    meta = meta or {}
+    if meta.get("confidence_score") is not None:
+        try:
+            score = max(0.0, min(1.0, float(meta["confidence_score"])))
+        except (TypeError, ValueError):
+            score = 0.55
+        return {
+            "score": score,
+            "threshold": _confidence_threshold(meta),
+            "source": "meta",
+            "factors": ["caller_supplied_confidence"],
+        }
+
+    text = (prompt or "").strip()
+    lower = text.lower()
+    normalized_kind = (kind or "").strip().lower()
+    score = 0.72
+    factors: list[str] = ["baseline"]
+
+    clear_action = bool(re.search(r"\b(fix|add|update|write|create|test|verify|review|inspect|research|summarize|list|show|explain|check)\b", lower))
+    if clear_action:
+        score += 0.08
+        factors.append("clear_action")
+    if len(text) >= 40:
+        score += 0.04
+        factors.append("specific_prompt")
+    if normalized_kind in {"qa", "test", "tests", "verification", "review", "research", "vault", "knowledge", "memory"}:
+        score += 0.05
+        factors.append("low_mutation_kind")
+    if normalized_kind in {"code", "coding", "fix", "implementation", "backend", "api", "runtime", "ui", "frontend", "design"}:
+        score += 0.02
+        factors.append("isolated_workspace_kind")
+
+    vague_markers = (
+        "whatever",
+        "anything",
+        "everything",
+        "all of it",
+        "make it better",
+        "fix it all",
+        "full take over",
+        "do everything",
+        "clean up everything",
+    )
+    if any(marker in lower for marker in vague_markers):
+        score -= 0.24
+        factors.append("vague_or_broad_scope")
+
+    sensitive_markers = (
+        "password",
+        "api key",
+        "secret",
+        "token",
+        "credential",
+        "private key",
+        "oauth",
+        "payment",
+        "submit application",
+        "social security",
+    )
+    if any(marker in lower for marker in sensitive_markers):
+        score -= 0.18
+        factors.append("sensitive_data_or_auth")
+
+    external_state_markers = (
+        "git push",
+        "push to github",
+        "deploy",
+        "release",
+        "merge pull request",
+        "submit",
+        "apply",
+        "send email",
+        "delete",
+        "remove",
+        "install",
+        "sudo",
+    )
+    if any(marker in lower for marker in external_state_markers):
+        score -= 0.26
+        factors.append("external_or_destructive_state")
+
+    if source in {"webhook", "github_webhook"}:
+        score -= 0.08
+        factors.append("remote_trigger")
+
+    return {
+        "score": round(max(0.0, min(1.0, score)), 2),
+        "threshold": _confidence_threshold(meta),
+        "source": "heuristic",
+        "factors": factors,
+    }
+
+
+def _task_requires_approval(prompt: str, *, kind: str = "", source: str = "", agent_id: str = "", meta: dict[str, Any] | None = None) -> tuple[bool, str, dict[str, Any]]:
     meta = meta or {}
     if meta.get("approval_required") is True:
-        return True, str(meta.get("approval_reason") or "explicit request")
+        confidence = _estimate_task_confidence(prompt, kind=kind, source=source, agent_id=agent_id, meta=meta)
+        return True, str(meta.get("approval_reason") or "explicit request"), confidence
     reason = _approval_reason_for_task(prompt, kind=kind, source=source)
-    return bool(reason), reason
+    confidence = _estimate_task_confidence(prompt, kind=kind, source=source, agent_id=agent_id, meta=meta)
+    if reason:
+        return True, reason, confidence
+    if confidence["score"] < confidence["threshold"]:
+        return True, "confidence below safe autonomy threshold", confidence
+    return False, "", confidence
 
 
 def list_agents() -> list[dict[str, Any]]:
@@ -532,10 +800,11 @@ def submit_task(
     created_at = _now()
     normalized_kind = (kind or "chat").strip().lower() or "chat"
     normalized_terse_mode = _normalize_terse_mode(terse_mode)
-    approval_required, approval_reason = _task_requires_approval(
+    approval_required, approval_reason, confidence = _task_requires_approval(
         prompt,
         kind=normalized_kind,
         source=source,
+        agent_id=chosen_agent_id,
         meta=meta,
     )
     workspace = worktree_manager.prepare_isolated_workspace(
@@ -549,7 +818,12 @@ def submit_task(
         "source": source or "api",
         "status": _WAITING_APPROVAL_STATUS if approval_required else "queued",
         "prompt": prompt,
-        "effective_prompt": _task_prompt_for_kind(prompt, kind=normalized_kind, terse_mode=normalized_terse_mode),
+        "effective_prompt": _task_prompt_for_kind(
+            prompt,
+            kind=normalized_kind,
+            terse_mode=normalized_terse_mode,
+            agent_id=chosen_agent_id,
+        ),
         "assigned_agent_id": chosen_agent_id,
         "created_at": created_at,
         "assigned_at": "",
@@ -564,6 +838,19 @@ def submit_task(
         "cancel_requested": False,
         "approval_required": approval_required,
         "approval_reason": approval_reason,
+        "confidence": _copy(confidence),
+        "autonomy": "human_review" if approval_required else "auto_edit",
+        "debrief_required": True,
+        "audit": {
+            "manager_agent_id": "jarvis-manager",
+            "assigned_agent_id": chosen_agent_id,
+            "approval_policy": "confidence_gated_human_in_the_loop",
+            "approval_reason": approval_reason,
+            "created_at": created_at,
+            "approved_at": "",
+            "denied_at": "",
+            "reversible_note": "Task output must include rollback or recall notes for any applied change.",
+        },
         "approved_at": "",
         "denied_at": "",
         "terse_mode": normalized_terse_mode,
@@ -584,6 +871,8 @@ def submit_task(
             terse_mode=normalized_terse_mode,
             approval_required=approval_required,
             approval_reason=approval_reason,
+            confidence=_copy(confidence),
+            autonomy=task["autonomy"],
         )
         if workspace.get("enabled"):
             _append_event(task_id, "workspace", workspace=_copy(workspace))
@@ -602,6 +891,11 @@ def approve_task(task_id: str) -> dict[str, Any] | None:
             return _copy(task)
         task["approval_required"] = False
         task["approved_at"] = _now()
+        task["autonomy"] = "human_approved"
+        audit = task.get("audit")
+        if isinstance(audit, dict):
+            audit["approved_at"] = task["approved_at"]
+            audit["approval_reason"] = task.get("approval_reason", "")
         _set_task_status(task_id, "queued", approved_at=task["approved_at"])
         _start_task_thread(task_id)
         return _copy(task)
@@ -617,6 +911,10 @@ def deny_task(task_id: str) -> dict[str, Any] | None:
             return _copy(task)
         task["denied_at"] = _now()
         task["cancel_requested"] = True
+        task["autonomy"] = "human_denied"
+        audit = task.get("audit")
+        if isinstance(audit, dict):
+            audit["denied_at"] = task["denied_at"]
         _set_task_status(task_id, "cancelled", finished_at=_now(), denied_at=task["denied_at"])
         return _copy(task)
 

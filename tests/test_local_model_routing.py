@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 import model_router
-from config import LOCAL_DEFAULT
+from config import LOCAL_DEFAULT, LOCAL_GLM_FLASH, LOCAL_QWEN3_MID
 
 
 def _best_local_with(models: set[str], prompt: str) -> str:
@@ -10,18 +10,18 @@ def _best_local_with(models: set[str], prompt: str) -> str:
         return model_router._best_local(prompt)
 
 
-def test_coding_tasks_prefer_installed_qwen36_before_baseline_coder():
+def test_coding_tasks_prefer_installed_glm_flash_before_legacy_coders():
     assert _best_local_with(
-        {"qwen3.6:35b", "qwen2.5-coder:7b", LOCAL_DEFAULT},
+        {LOCAL_GLM_FLASH, "qwen2.5-coder:7b", LOCAL_DEFAULT},
         "debug this python function",
-    ) == "qwen3.6:35b"
+    ) == LOCAL_GLM_FLASH
 
 
-def test_deep_reasoning_can_use_gemma4_workstation_lane():
+def test_deep_reasoning_uses_glm_flash_manager_lane():
     assert _best_local_with(
-        {"gemma4:31b", "gemma4:26b", LOCAL_DEFAULT},
+        {LOCAL_GLM_FLASH, "gemma4:31b", LOCAL_DEFAULT},
         "walk me through a detailed analysis of this architecture decision and evaluate tradeoffs carefully",
-    ) == "gemma4:31b"
+    ) == LOCAL_GLM_FLASH
 
 
 def test_simple_chat_stays_on_configured_default_not_big_eval_models():
@@ -31,11 +31,11 @@ def test_simple_chat_stays_on_configured_default_not_big_eval_models():
     ) == LOCAL_DEFAULT
 
 
-def test_coding_falls_back_to_existing_fast_coder_when_new_models_absent():
+def test_coding_falls_back_to_qwen8_when_glm_absent():
     assert _best_local_with(
-        {"qwen2.5-coder:7b", LOCAL_DEFAULT},
+        {LOCAL_QWEN3_MID},
         "fix this test failure",
-    ) == "qwen2.5-coder:7b"
+    ) == LOCAL_QWEN3_MID
 
 
 def test_prune_prompt_dynamics():
