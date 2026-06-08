@@ -99,11 +99,42 @@ _keepalive_model: str | None = None
 _keepalive_thread: threading.Thread | None = None
 _keepalive_stop = threading.Event()
 
+# Memory pressure threshold — skip keepalive ping (allow eviction) when available
+# RAM drops below this fraction. Prevents model weights from being pinned while
+# the system is swapping, which causes 120s+ timeouts on every request.
+_KEEPALIVE_MIN_FREE_RAM_FRACTION = float(os.getenv("JARVIS_KEEPALIVE_MIN_FREE_RAM", "0.12"))
+
+
+def _system_has_headroom() -> bool:
+    """Return True when there is enough free RAM to keep models pinned."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["sysctl", "-n", "kern.memorystatus_level"],
+            capture_output=True, text=True, timeout=2
+        )
+        # kern.memorystatus_level: 0–100, higher = more memory available
+        level = int(result.stdout.strip())
+        return level >= int(_KEEPALIVE_MIN_FREE_RAM_FRACTION * 100)
+    except Exception:
+        pass
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return vm.available / vm.total >= _KEEPALIVE_MIN_FREE_RAM_FRACTION
+    except Exception:
+        return True  # can't check — assume ok, don't break existing behaviour
+
 
 def _keepalive_loop() -> None:
     while not _keepalive_stop.wait(_KEEPALIVE_INTERVAL):
         model = _keepalive_model
         if not model:
+            continue
+        if not _system_has_headroom():
+            # RAM is tight — let Ollama evict the model naturally rather than
+            # pinging to keep it loaded. A cold reload (~20s) is far better
+            # than a 120s timeout caused by swapping under memory pressure.
             continue
         try:
             # keep_alive="5m" resets Ollama's internal eviction timer without generating tokens
