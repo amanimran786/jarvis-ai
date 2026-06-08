@@ -17,9 +17,12 @@ import worktree_manager
 
 
 _LOCK = threading.RLock()
-# Per-agent execution locks — agents with different IDs run concurrently; same agent serialized.
+# Per-agent execution locks — agents with different IDs run concurrently; same agent serializes.
 _AGENT_LOCKS: dict[str, threading.Lock] = {}
 _AGENT_LOCKS_MUTEX = threading.Lock()
+# Global concurrency cap — prevents overwhelming a single Ollama instance with too many parallel
+# model calls. Cloud providers (OpenAI/Gemini) are not affected by this limit in practice.
+_MODEL_SEMAPHORE = threading.Semaphore(int(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "6")))
 
 
 def _get_agent_lock(agent_id: str) -> threading.Lock:
@@ -311,6 +314,54 @@ def _default_agents() -> list[dict[str, Any]]:
             "last_heartbeat_at": _now(),
             "last_error": "",
             "meta": {"source": "task_runtime", "mode": "monitor"},
+        },
+        {
+            "id": "automation-engineer",
+            "label": "Automation Engineer",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["scripting", "ci_cd", "testing_automation", "workflow_automation"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
+        },
+        {
+            "id": "ai-evaluator",
+            "label": "AI Evaluator",
+            "kind": "monitor",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["model_evaluation", "output_scoring", "benchmark", "quality_rubric"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "monitor"},
+        },
+        {
+            "id": "ai-safety-agent",
+            "label": "AI Safety Agent",
+            "kind": "monitor",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["safety_review", "risk_assessment", "policy_enforcement", "guardrails"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "reviewer", "review": "human_first_for_sensitive"},
+        },
+        {
+            "id": "career-agent",
+            "label": "Career Agent",
+            "kind": "specialist",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["career_advice", "skill_gap_analysis", "job_market", "learning_paths"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "specialist", "review": "confidence_gated"},
         },
     ]
 
@@ -770,39 +821,40 @@ def _run_task(task_id: str) -> None:
 
     try:
         with _get_agent_lock(agent_id):
-            with _LOCK:
-                task = _TASKS[task_id]
-                if task.get("cancel_requested"):
-                    _set_task_status(task_id, "cancelled", finished_at=_now())
-                    return
-                _set_task_status(task_id, "running", started_at=_now())
-                prompt = task.get("effective_prompt") or task["prompt"]
-                original_prompt = task["prompt"]
-                source = task["source"]
-
-            start_seq = usage_tracker.current_seq()
-            agent_ctx = (
-                f"You are the '{agent_id}' agent in Jarvis, a local-first macOS AI runtime. "
-                "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked."
-            )
-            stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
-            chunks: list[str] = []
-            for index, chunk in enumerate(stream):
+            with _MODEL_SEMAPHORE:
                 with _LOCK:
                     task = _TASKS[task_id]
                     if task.get("cancel_requested"):
                         _set_task_status(task_id, "cancelled", finished_at=_now())
                         return
-                    if task["status"] != "streaming":
-                        _set_task_status(task_id, "streaming")
-                chunks.append(chunk)
-                _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+                    _set_task_status(task_id, "running", started_at=_now())
+                    prompt = task.get("effective_prompt") or task["prompt"]
+                    original_prompt = task["prompt"]
+                    source = task["source"]
 
-            response = "".join(chunks)
-            usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
-            context_stats = ctx.record_request_stats(model, source=f"task:{source}")
-            interaction = evals.log_interaction(original_prompt, response, model, source=f"task:{source}", context=context_stats)
-            evals.maybe_log_automatic_failure(interaction)
+                start_seq = usage_tracker.current_seq()
+                agent_ctx = (
+                    f"You are the '{agent_id}' agent in Jarvis, a local-first macOS AI runtime. "
+                    "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked."
+                )
+                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
+                chunks: list[str] = []
+                for index, chunk in enumerate(stream):
+                    with _LOCK:
+                        task = _TASKS[task_id]
+                        if task.get("cancel_requested"):
+                            _set_task_status(task_id, "cancelled", finished_at=_now())
+                            return
+                        if task["status"] != "streaming":
+                            _set_task_status(task_id, "streaming")
+                    chunks.append(chunk)
+                    _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+
+                response = "".join(chunks)
+                usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
+                context_stats = ctx.record_request_stats(model, source=f"task:{source}")
+                interaction = evals.log_interaction(original_prompt, response, model, source=f"task:{source}", context=context_stats)
+                evals.maybe_log_automatic_failure(interaction)
 
             with _LOCK:
                 _complete_task(
