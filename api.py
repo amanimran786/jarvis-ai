@@ -1778,6 +1778,78 @@ def manager_status(session_id: str, request: Request):
     return {"ok": True, "metrics": {}, "note": "event_bus_unreachable"}
 
 
+# --- Project Plan Mode ----------------------------------------------------------
+
+_PLAN_AGENTS = [
+    "backend_engineer", "researcher", "security_reviewer", "automation_engineer",
+    "devops_release", "frontend_designer", "ux_researcher", "qa_tester",
+    "ai_evaluator", "ai_safety_agent", "pipeline_monitor", "output_quality_checker",
+    "career_agent", "memory_librarian",
+]
+
+
+@app.post("/projects/plan")
+async def projects_plan(request: Request):
+    """
+    Generate an orchestration plan for a project goal.
+    Returns a list of tasks (agent_id, prompt, parallel_group) without executing them.
+    """
+    from infra.rbac import registry
+    from model_router import smart_stream
+    registry.caller_from_request(request)
+    body = await request.json()
+    goal = (body.get("goal") or "").strip()
+    if not goal:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "goal required"})
+
+    system = (
+        "You are the Jarvis project orchestrator. Given a project goal, decompose it into "
+        "a list of concrete tasks to assign to specialist agents. "
+        f"Available agents: {', '.join(_PLAN_AGENTS)}. "
+        "Return ONLY valid JSON — no markdown, no prose — in this exact shape:\n"
+        '{"tasks": [{"agent_id": "...", "prompt": "...", "group": 1}]}\n'
+        "Use group=1 for tasks that can run in parallel in the first wave, "
+        "group=2 for tasks that depend on group-1 output, etc. "
+        "Be specific and actionable in each prompt. Limit to 8 tasks max."
+    )
+    try:
+        stream, _ = smart_stream(goal, tool="chat", extra_system=system)
+        raw = "".join(stream)
+        # Extract JSON — strip any accidental markdown fences
+        import re as _re
+        m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+        plan = json.loads(m.group(0)) if m else {"tasks": []}
+        return {"ok": True, "plan": plan}
+    except Exception as exc:
+        log.exception("projects_plan error")
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.post("/projects/execute")
+async def projects_execute(request: Request):
+    """Dispatch a pre-approved plan (list of tasks) to the task runtime."""
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    body = await request.json()
+    tasks_in = body.get("tasks", [])
+    if not tasks_in:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "tasks required"})
+    dispatched = []
+    for item in tasks_in:
+        agent_id = item.get("agent_id", "")
+        prompt = item.get("prompt", "")
+        if not prompt:
+            continue
+        task = task_runtime.submit_task(
+            prompt,
+            kind="chat",
+            source="project",
+            assigned_agent_id=agent_id,
+        )
+        dispatched.append({"task_id": task["id"], "agent_id": agent_id})
+    return {"ok": True, "dispatched": dispatched}
+
+
 @app.get("/v1/models")
 def oai_list_models():
     """OpenAI-compatible model list — lets OpenClaw discover Jarvis as a provider."""
@@ -3694,7 +3766,12 @@ async def agent_dashboard(request: Request):
   .dot-yellow{{background:#ffd700}}
   @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.4}}}}
   .scroll-table{{overflow-x:auto}}
-  table{{width:100%;border-collapse:collapse;font-size:.82em}}
+  table{{width:100%;border-collapse:collapse;font-size:.82em;table-layout:fixed}}
+  #history-table td:nth-child(3){{width:auto}}
+  #history-table td:nth-child(1),#history-table th:nth-child(1){{width:72px}}
+  #history-table td:nth-child(2),#history-table th:nth-child(2){{width:150px}}
+  #history-table td:nth-child(4),#history-table th:nth-child(4){{width:100px}}
+  #history-table td:nth-child(5),#history-table th:nth-child(5){{width:90px}}
   th{{text-align:left;padding:8px 10px;color:#666;border-bottom:1px solid #1a1a3a;font-weight:500}}
   td{{padding:8px 10px;border-bottom:1px solid #111128;vertical-align:top}}
   .truncate{{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
@@ -3881,33 +3958,42 @@ async def agent_dashboard(request: Request):
 
 <!-- Project -->
 <div class="pane" id="pane-project">
-  <div class="card">
-    <div class="card-head"><strong>Assign a Project to the Agent Team</strong></div>
+  <!-- Step 1: Goal input -->
+  <div class="card" id="proj-card-goal">
+    <div class="card-head"><strong>🚀 Project Orchestration</strong><span style="font-size:.75em;color:#555;margin-left:8px">Plan → Review → Execute</span></div>
     <div style="padding:16px">
       <div class="form-group full" style="margin-bottom:12px">
         <label>Project Goal</label>
-        <textarea id="proj-goal" placeholder="Describe what you want to build or accomplish. The Manager will decompose it into tasks and assign each to the right agent." style="min-height:90px"></textarea>
+        <textarea id="proj-goal" placeholder="e.g. Audit the entire Jarvis pipeline, identify gaps, and produce a hardening report with code improvements." style="min-height:90px"></textarea>
       </div>
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em;color:#aaa">
-          <input type="checkbox" id="proj-cloud" checked style="accent-color:#7ec8e3"> Use cloud planning (fast decomposition)
-        </label>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary" id="proj-btn" onclick="runProject()">Run Project</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="proj-plan-btn" onclick="generatePlan()">⚡ Generate Plan</button>
+        <button class="btn btn-run" id="proj-run-btn" onclick="runProject()" style="display:none">▶ Run Without Plan</button>
         <span id="proj-status" style="font-size:.82em;color:#888"></span>
       </div>
     </div>
   </div>
 
-  <!-- Live plan cards -->
-  <div id="proj-plan" style="display:none;margin-top:16px">
-    <div style="font-size:.78em;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Decomposition Plan</div>
-    <div id="proj-plan-cards" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+  <!-- Step 2: Plan review (shown after generatePlan) -->
+  <div id="proj-plan-review" style="display:none;margin-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div>
+        <span style="font-size:.8em;text-transform:uppercase;letter-spacing:.08em;color:#7ec8e3">Orchestration Plan</span>
+        <span style="font-size:.75em;color:#555;margin-left:8px">Edit any task before executing</span>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-deny btn-sm" onclick="clearPlan()">✕ Clear</button>
+        <button class="btn btn-primary" id="proj-execute-btn" onclick="executePlan()">▶ Execute Plan</button>
+      </div>
+    </div>
+    <div id="proj-plan-cards" style="display:flex;flex-direction:column;gap:10px"></div>
   </div>
 
-  <!-- Per-agent output -->
-  <div id="proj-agents-output" style="margin-top:16px"></div>
+  <!-- Step 3: Live execution (shown after executePlan) -->
+  <div id="proj-execution" style="display:none;margin-top:16px">
+    <div style="font-size:.78em;text-transform:uppercase;letter-spacing:.08em;color:#555;margin-bottom:10px">Live Execution</div>
+    <div id="proj-agents-output" style="display:flex;flex-direction:column;gap:10px"></div>
+  </div>
 </div>
 
 <!-- Eval Log -->
@@ -3966,7 +4052,8 @@ async def agent_dashboard(request: Request):
     <div class="help-sec"><h3>📋 History</h3><p>All completed tasks. Click a row to expand the full output. Use Clear History to reset. Results persist until cleared or server restart.</p></div>
     <div class="help-sec"><h3>＋ Assign Work</h3><p>Send a task directly to one agent. Pick the agent, describe what you want, hit Assign. The output streams live into the result box. Leave agent blank to let the Manager route it to whoever's best suited.</p></div>
     <div class="help-sec"><h3>🤖 Agents (Virtual Office Floor)</h3><p>See all 15 agents in their department zones. Blue pulse = active, green = done, gold = waiting approval. The 🏋️ Eval Gym row lights up purple whenever an agent output is being quality-reviewed. Click any agent seat to jump directly to Assign Work for that agent.</p></div>
-    <div class="help-sec"><h3>🚀 Project</h3><p>Enter a big goal and watch the team execute it live. The Manager decomposes your goal into tasks and assigns each to the right specialist. Each agent runs and the AI Eval Lab scores their output. Watch the cards appear in real time — green dot = done + passed eval, purple = in evaluation.</p></div>
+    <div class="help-sec"><h3>🚀 Project</h3><p>Enter a goal and click <strong>Generate Plan</strong>. The LLM decomposes it into tasks per agent, grouped into parallel waves. Edit any task inline before hitting <strong>Execute Plan</strong>. Each dispatched task streams live output in the Active tab and in the execution panel. Use <strong>Run Without Plan</strong> to dispatch immediately via the Manager stream.</p></div>
+    <div class="help-sec"><h3>⌨️ Slash Commands</h3><p>In the Assign Work prompt box, type a command on its own line and press Enter: <code>/plan &lt;goal&gt;</code> — generate a project plan, <code>/project &lt;goal&gt;</code> — open project tab with goal pre-filled, <code>/status</code> — jump to active tasks, <code>/help</code> — show this dialog.</p></div>
     <div class="help-sec"><h3>📊 Eval Log</h3><p>Persistent history of every AI Evaluation Lab result across all project runs and direct agent evals. Filter by agent or verdict. Create custom rubrics to add extra criteria to any eval.</p></div>
     <div class="help-sec"><h3>🔍 Pipeline Monitor (top bar)</h3><p>Click to sweep all active tasks for stalls, short outputs, or garbage. Shows alert count or green if healthy. Alerts persist for 8s then reset.</p></div>
     <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('help-modal').classList.remove('open')">Got it</button>
@@ -4097,25 +4184,54 @@ async def agent_dashboard(request: Request):
       </div>`).join('');
   }}
 
+  const _liveStreams = {{}};  // task_id → EventSource
+
+  function _attachLiveStream(taskId) {{
+    if (_liveStreams[taskId]) return;
+    const el = document.getElementById('live-out-' + taskId);
+    if (!el) return;
+    const src = new EventSource(`/tasks/${{taskId}}/stream`);
+    _liveStreams[taskId] = src;
+    src.onmessage = (e) => {{
+      if (e.data === '[DONE]') {{ src.close(); delete _liveStreams[taskId]; return; }}
+      try {{
+        const d = JSON.parse(e.data);
+        if (d.chunk) el.textContent += d.chunk;
+        if (d.type === 'done') {{ src.close(); delete _liveStreams[taskId]; }}
+      }} catch {{}}
+    }};
+    src.onerror = () => {{ src.close(); delete _liveStreams[taskId]; }};
+  }}
+
   function renderActive(tasks) {{
     const el = document.getElementById('active-list');
     if (!tasks.length) {{ el.innerHTML = '<div class="empty">No active tasks</div>'; return; }}
-    el.innerHTML = tasks.map(t => `
+    el.innerHTML = tasks.map(t => {{
+      const isStreaming = t.status === 'running' || t.status === 'streaming';
+      return `
       <div class="card">
         <div class="card-head">
-          <div>
+          <div style="display:flex;align-items:center;gap:8px">
             <span class="tag tag-agent">${{t.assigned_agent_id || 'unassigned'}}</span>
             ${{statusTag(t.status)}}
+            ${{isStreaming ? '<span style="font-size:.7em;color:#7ec8e3;animation:pulse 1s infinite">● live</span>' : ''}}
           </div>
           <span style="font-size:.75em;color:#555">${{fmtTime(t.started_at || t.created_at)}}</span>
         </div>
-        <div class="card-body">${{escHtml(t.prompt || '')}}</div>
-        ${{t.result ? `<div class="card-body" style="border-top:1px solid #1a1a3a;color:#7ec8e3">${{escHtml(t.result.slice(0,400))}}${{t.result.length>400?'…':''}}</div>` : ''}}
+        <div class="card-body" style="color:#aaa;font-size:.82em">${{escHtml(t.prompt || '')}}</div>
+        <div style="background:#060610;border-top:1px solid #1a1a3a;padding:10px 14px;min-height:48px">
+          <div style="font-size:.65em;text-transform:uppercase;letter-spacing:.08em;color:#444;margin-bottom:4px">Live Output</div>
+          <pre id="live-out-${{t.id}}" style="white-space:pre-wrap;word-break:break-word;font-size:.78em;color:#7ec8e3;margin:0;max-height:220px;overflow-y:auto">${{escHtml(t.result || '')}}</pre>
+        </div>
         <div class="card-foot">
           <button class="btn btn-deny btn-sm" onclick="cancelTask('${{t.id}}')">Stop</button>
-          <span style="font-size:.75em;color:#555;margin-left:auto">${{t.id}}</span>
+          <span style="font-size:.72em;color:#444;margin-left:auto">${{t.id}}</span>
         </div>
-      </div>`).join('');
+      </div>`;
+    }}).join('');
+    // Attach SSE to any running/streaming tasks
+    tasks.filter(t => t.status === 'running' || t.status === 'streaming')
+         .forEach(t => setTimeout(() => _attachLiveStream(t.id), 50));
   }}
 
   function renderHistory(tasks) {{
@@ -4127,14 +4243,14 @@ async def agent_dashboard(request: Request):
     if (!shown.length) {{ tbody.innerHTML = '<tr><td colspan="5" class="empty">No completed tasks</td></tr>'; return; }}
     tbody.innerHTML = shown.map(t => {{
       const hasResult = t.result && t.result.trim().length > 0;
-      const resultPreview = hasResult ? escHtml(t.result.slice(0, 120)) + (t.result.length > 120 ? '…' : '') : '';
+      const resultPreview = hasResult ? escHtml(t.result.slice(0, 300)) + (t.result.length > 300 ? '…' : '') : '';
       return `
         <tr style="cursor:${{hasResult ? 'pointer' : 'default'}}" onclick="toggleResult('${{t.id}}')" title="${{hasResult ? 'Click to expand result' : ''}}">
-          <td style="font-size:.75em;color:#555">${{t.id.slice(-8)}}</td>
-          <td><span class="tag tag-agent" style="font-size:.75em">${{t.assigned_agent_id || '—'}}</span></td>
-          <td>
-            <div style="max-width:340px">${{escHtml((t.prompt||'').slice(0,80))}}</div>
-            ${{resultPreview ? `<div style="font-size:.72em;color:#5a8a5a;margin-top:3px">${{resultPreview}}</div>` : ''}}
+          <td style="font-size:.75em;color:#555;white-space:nowrap">${{t.id.slice(-8)}}</td>
+          <td style="white-space:nowrap"><span class="tag tag-agent" style="font-size:.75em">${{t.assigned_agent_id || '—'}}</span></td>
+          <td style="word-break:break-word;max-width:0;width:100%">
+            <div style="white-space:normal;line-height:1.4">${{escHtml((t.prompt||'').slice(0,200))}}</div>
+            ${{resultPreview ? `<div style="font-size:.72em;color:#5a8a5a;margin-top:4px;white-space:normal;line-height:1.4">${{resultPreview}}</div>` : ''}}
           </td>
           <td>${{statusTag(t.status)}}</td>
           <td style="font-size:.75em;color:#777">${{fmtTime(t.finished_at)}}</td>
@@ -4366,22 +4482,189 @@ async def agent_dashboard(request: Request):
     refresh();
   }}
 
+  // ---- Plan Mode -------------------------------------------------------
+
+  let _currentPlan = [];
+
+  async function generatePlan() {{
+    const goal = document.getElementById('proj-goal').value.trim();
+    const statusEl = document.getElementById('proj-status');
+    const btn = document.getElementById('proj-plan-btn');
+    if (!goal) {{ statusEl.textContent = 'Enter a project goal first.'; return; }}
+    btn.disabled = true;
+    statusEl.textContent = '⚡ Generating plan…';
+    document.getElementById('proj-plan-review').style.display = 'none';
+    document.getElementById('proj-execution').style.display = 'none';
+    try {{
+      const data = await apiFetch('/projects/plan', {{
+        method: 'POST',
+        headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ goal }}),
+      }});
+      if (!data.ok) {{ statusEl.textContent = `Error: ${{data.error}}`; return; }}
+      _currentPlan = data.plan?.tasks || [];
+      renderPlanReview(_currentPlan);
+      statusEl.textContent = `Plan ready — ${{_currentPlan.length}} task(s). Review and edit before executing.`;
+    }} catch(e) {{
+      statusEl.textContent = `Plan error: ${{e.message}}`;
+    }} finally {{
+      btn.disabled = false;
+    }}
+  }}
+
+  function renderPlanReview(tasks) {{
+    const groupColors = ['#1a3a5a','#1a3a2a','#3a2a1a','#3a1a3a','#1a2a3a'];
+    const reviewEl = document.getElementById('proj-plan-review');
+    const cards = document.getElementById('proj-plan-cards');
+    const groups = [...new Set(tasks.map(t => t.group || 1))].sort();
+    cards.innerHTML = groups.map(g => {{
+      const groupTasks = tasks.filter(t => (t.group||1) === g);
+      return `
+        <div style="margin-bottom:8px">
+          <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#555;margin-bottom:6px">
+            Wave ${{g}} ${{g===1?'— runs immediately':'— runs after wave '+(g-1)}} · ${{groupTasks.length}} agent(s) in parallel
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            ${{groupTasks.map((t, i) => {{
+              const idx = tasks.indexOf(t);
+              return `
+              <div style="background:#111120;border:1px solid ${{groupColors[(g-1)%groupColors.length]}};border-radius:8px;padding:10px 14px;display:flex;gap:10px;align-items:flex-start">
+                <span class="tag tag-agent" style="white-space:nowrap;flex-shrink:0">${{escHtml(t.agent_id||'?')}}</span>
+                <textarea data-plan-idx="${{idx}}" style="flex:1;background:transparent;border:none;color:#ccc;font-size:.8em;resize:vertical;min-height:44px;outline:none;font-family:inherit;line-height:1.5" oninput="_currentPlan[${{idx}}].prompt=this.value">${{escHtml(t.prompt||'')}}</textarea>
+              </div>`;
+            }}).join('')}}
+          </div>
+        </div>`;
+    }}).join('');
+    reviewEl.style.display = 'block';
+  }}
+
+  function clearPlan() {{
+    _currentPlan = [];
+    document.getElementById('proj-plan-review').style.display = 'none';
+    document.getElementById('proj-execution').style.display = 'none';
+    document.getElementById('proj-status').textContent = '';
+  }}
+
+  async function executePlan() {{
+    if (!_currentPlan.length) return;
+    const statusEl = document.getElementById('proj-status');
+    const execBtn = document.getElementById('proj-execute-btn');
+    execBtn.disabled = true;
+    statusEl.textContent = 'Dispatching…';
+    try {{
+      const data = await apiFetch('/projects/execute', {{
+        method: 'POST',
+        headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ tasks: _currentPlan }}),
+      }});
+      if (!data.ok) {{ statusEl.textContent = `Error: ${{data.error}}`; execBtn.disabled=false; return; }}
+      const dispatched = data.dispatched || [];
+      statusEl.textContent = `✓ ${{dispatched.length}} tasks dispatched`;
+      // Show execution panel with live stream per task
+      const execEl = document.getElementById('proj-execution');
+      const agentsOut = document.getElementById('proj-agents-output');
+      execEl.style.display = 'block';
+      agentsOut.innerHTML = dispatched.map(d => `
+        <div class="card" id="exec-card-${{d.task_id}}">
+          <div class="card-head">
+            <span class="tag tag-agent">${{escHtml(d.agent_id||'?')}}</span>
+            <span id="exec-status-${{d.task_id}}" class="tag tag-run" style="margin-left:8px">queued</span>
+          </div>
+          <pre id="exec-out-${{d.task_id}}" style="margin:0;padding:12px 16px;white-space:pre-wrap;word-break:break-word;font-size:.78em;color:#7ec8e3;background:#060610;max-height:280px;overflow-y:auto"></pre>
+        </div>`).join('');
+      // Poll task status and open streams
+      dispatched.forEach(d => _watchExecutedTask(d.task_id));
+      setTimeout(() => switchTab('active'), 1200);
+    }} catch(e) {{
+      statusEl.textContent = `Execute error: ${{e.message}}`;
+      execBtn.disabled = false;
+    }}
+  }}
+
+  function _watchExecutedTask(taskId) {{
+    // Poll until running, then open SSE
+    let polls = 0;
+    const iv = setInterval(async () => {{
+      polls++;
+      if (polls > 60) {{ clearInterval(iv); return; }}
+      try {{
+        const d = await apiFetch(`/tasks/${{taskId}}`);
+        const t = d.task || d;
+        const stEl = document.getElementById(`exec-status-${{taskId}}`);
+        if (stEl) stEl.textContent = t.status || '?';
+        if (t.status === 'running' || t.status === 'streaming') {{
+          clearInterval(iv);
+          const outEl = document.getElementById(`exec-out-${{taskId}}`);
+          if (!outEl) return;
+          const src = new EventSource(`/tasks/${{taskId}}/stream`);
+          src.onmessage = (e) => {{
+            if (e.data === '[DONE]') {{ src.close(); return; }}
+            try {{
+              const ev = JSON.parse(e.data);
+              if (ev.chunk) {{ outEl.textContent += ev.chunk; outEl.scrollTop = outEl.scrollHeight; }}
+              if (ev.type === 'done') {{
+                src.close();
+                if (stEl) {{ stEl.className = 'tag tag-done'; stEl.textContent = 'done'; }}
+              }}
+            }} catch {{}}
+          }};
+          src.onerror = () => src.close();
+        }} else if (['succeeded','failed','cancelled'].includes(t.status)) {{
+          clearInterval(iv);
+          if (stEl) {{ stEl.className = t.status==='succeeded'?'tag tag-done':'tag tag-fail'; stEl.textContent = t.status; }}
+          const outEl = document.getElementById(`exec-out-${{taskId}}`);
+          if (outEl && t.result) outEl.textContent = t.result.slice(0, 1000);
+        }}
+      }} catch {{}}
+    }}, 1500);
+  }}
+
+  // ---- Slash commands in Assign Work textarea --------------------------
+
+  function _initSlashCommands() {{
+    const ta = document.getElementById('assign-prompt');
+    if (!ta) return;
+    ta.addEventListener('keydown', (e) => {{
+      if (e.key !== 'Enter') return;
+      const val = ta.value;
+      if (!val.startsWith('/')) return;
+      e.preventDefault();
+      const [cmd, ...rest] = val.slice(1).split(' ');
+      const arg = rest.join(' ').trim();
+      if (cmd === 'plan' && arg) {{
+        document.getElementById('proj-goal').value = arg;
+        switchTab('project');
+        setTimeout(generatePlan, 100);
+        ta.value = '';
+      }} else if (cmd === 'project' && arg) {{
+        document.getElementById('proj-goal').value = arg;
+        switchTab('project');
+        ta.value = '';
+      }} else if (cmd === 'status') {{
+        switchTab('active');
+        ta.value = '';
+      }} else if (cmd === 'help') {{
+        document.getElementById('help-modal').classList.add('open');
+        ta.value = '';
+      }}
+    }});
+  }}
+
+  // ---- Legacy runProject (SSE stream path — kept for Run Without Plan) --------
+
   async function runProject() {{
     const goal = document.getElementById('proj-goal').value.trim();
-    const cloudPlan = document.getElementById('proj-cloud').checked;
     const statusEl = document.getElementById('proj-status');
-    const btnEl = document.getElementById('proj-btn');
-    const planEl = document.getElementById('proj-plan');
-    const planCards = document.getElementById('proj-plan-cards');
     const agentsOut = document.getElementById('proj-agents-output');
 
     if (!goal) {{ statusEl.textContent = 'Enter a project goal first.'; return; }}
 
-    btnEl.disabled = true;
+    const runBtn = document.getElementById('proj-run-btn');
+    if (runBtn) runBtn.disabled = true;
     statusEl.textContent = 'Decomposing…';
-    planEl.style.display = 'none';
-    planCards.innerHTML = '';
     agentsOut.innerHTML = '';
+    document.getElementById('proj-execution').style.display = 'block';
 
     const agentOutputs = {{}};  // task_id → DOM element
 
@@ -4389,11 +4672,11 @@ async def agent_dashboard(request: Request):
       const resp = await fetch('/manager/run-stream', {{
         method: 'POST',
         headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ goal, cloud_plan: cloudPlan }}),
+        body: JSON.stringify({{ goal, cloud_plan: false }}),
       }});
       if (!resp.ok) {{
         statusEl.textContent = `Error ${{resp.status}}`;
-        btnEl.disabled = false;
+        if(runBtn) runBtn.disabled = false;
         return;
       }}
 
@@ -4413,11 +4696,6 @@ async def agent_dashboard(request: Request):
           try {{ ev = JSON.parse(line.slice(6)); }} catch {{ continue; }}
 
           if (ev.type === 'plan') {{
-            planEl.style.display = 'block';
-            planCards.innerHTML = ev.tasks.map(t => `
-              <div class="tag tag-agent" style="padding:4px 10px;border-radius:6px" id="plan-${{t.agent}}-${{encodeURIComponent(t.title).slice(0,20)}}">
-                ${{escHtml(t.agent.replace(/_/g,' '))}} — ${{escHtml(t.title)}}
-              </div>`).join('');
             statusEl.textContent = `Plan ready: ${{ev.tasks.length}} task(s)`;
 
           }} else if (ev.type === 'start') {{
@@ -4485,18 +4763,18 @@ async def agent_dashboard(request: Request):
           }} else if (ev.type === 'complete') {{
             statusEl.textContent = 'All agents finished.';
             _gymAgents.clear();
-            btnEl.disabled = false;
+            if(runBtn) runBtn.disabled = false;
             setTimeout(() => refresh(), 1000);
           }}
         }}
       }}
       // Stream closed — re-enable button even if complete event was never sent (server error)
       _gymAgents.clear();
-      btnEl.disabled = false;
+      if(runBtn) runBtn.disabled = false;
     }} catch(e) {{
       statusEl.textContent = `Stream error: ${{e.message}}`;
       _gymAgents.clear();
-      btnEl.disabled = false;
+      if(runBtn) runBtn.disabled = false;
     }}
   }}
 
@@ -4507,6 +4785,7 @@ async def agent_dashboard(request: Request):
   function start() {{
     refresh();
     loadRubrics();
+    _initSlashCommands();
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(refresh, 5000);
   }}

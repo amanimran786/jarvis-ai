@@ -17,7 +17,16 @@ import worktree_manager
 
 
 _LOCK = threading.RLock()
-_EXECUTION_LOCK = threading.Lock()
+# Per-agent execution locks — agents with different IDs run concurrently; same agent serialized.
+_AGENT_LOCKS: dict[str, threading.Lock] = {}
+_AGENT_LOCKS_MUTEX = threading.Lock()
+
+
+def _get_agent_lock(agent_id: str) -> threading.Lock:
+    with _AGENT_LOCKS_MUTEX:
+        if agent_id not in _AGENT_LOCKS:
+            _AGENT_LOCKS[agent_id] = threading.Lock()
+        return _AGENT_LOCKS[agent_id]
 
 _AGENTS: dict[str, dict[str, Any]] = {}
 _TASKS: dict[str, dict[str, Any]] = {}
@@ -760,7 +769,7 @@ def _run_task(task_id: str) -> None:
         _touch_agent(agent_id, status="busy", current_task_id=task_id, last_error="")
 
     try:
-        with _EXECUTION_LOCK:
+        with _get_agent_lock(agent_id):
             with _LOCK:
                 task = _TASKS[task_id]
                 if task.get("cancel_requested"):
