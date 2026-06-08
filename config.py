@@ -238,7 +238,7 @@ PROVIDER_PRIORITY_MINI = _env_csv(
 )
 PROVIDER_PRIORITY_HAIKU = _env_csv(
     "JARVIS_PROVIDER_PRIORITY_HAIKU",
-    ["gemini", "openai", "anthropic"],
+    ["openai", "gemini", "anthropic"],
 )
 PROVIDER_PRIORITY_SONNET = _env_csv(
     "JARVIS_PROVIDER_PRIORITY_SONNET",
@@ -246,7 +246,7 @@ PROVIDER_PRIORITY_SONNET = _env_csv(
 )
 PROVIDER_PRIORITY_OPUS = _env_csv(
     "JARVIS_PROVIDER_PRIORITY_OPUS",
-    ["gemini", "openai", "anthropic"],
+    ["openai", "gemini", "anthropic"],
 )
 
 # Mode: "cloud" | "local" | "auto" | "open-source"
@@ -489,7 +489,33 @@ SEVERITY RULES:
   low      — best-practice violations only
 
 Do not hallucinate findings. If nothing is wrong, output PASS with an empty findings array.
-Do not wrap the JSON in markdown fences. Output raw JSON only.""",
+Do not wrap the JSON in markdown fences. Output raw JSON only.
+
+---
+
+AUDIT MODE — activates when the input begins with "Perform", "Audit", "Review", "Assess", or "Analyze" (case-insensitive).
+
+In AUDIT MODE you are a senior AppSec engineer writing a complete security audit document. Ignore the JSON gate format above. Produce a markdown report with exactly these sections:
+
+## Executive Summary
+One paragraph: scope, overall risk posture, highest-severity finding, and a single sentence on recommended priority action.
+
+## Threat Model
+Identify the attack surface: entry points, trust boundaries, data flows, and external dependencies. 2–4 short paragraphs.
+
+## Findings
+
+Produce a markdown table with columns: Finding | Severity | Location | Evidence | Recommendation
+
+Include a minimum of 3 findings. For a system with no active vulnerabilities, document what was audited and confirmed secure as LOW/INFO findings — absence of evidence is not evidence of absence. Cover at minimum: authentication/authorization, input validation, secrets handling, rate limiting, CORS policy, SQL injection surface, XSS surface, and path traversal.
+
+Severity levels: CRITICAL / HIGH / MEDIUM / LOW / INFO
+
+## Remediation Priority List
+Ordered numbered list from highest to lowest severity. Each item: one sentence action + file/component to change.
+
+## Secure Code Examples
+For each CRITICAL or HIGH finding, include a before/after code block showing the insecure pattern and its fix. For LOW/INFO findings, include the positive confirmation snippet.""",
     },
     "qa_tester": {
         "role": "QA engineer. Writes tests, reproduces bugs, and verifies correctness.",
@@ -505,10 +531,98 @@ Do not wrap the JSON in markdown fences. Output raw JSON only.""",
         "role": "DevOps and release engineer. Manages deployments, infrastructure, and release pipelines.",
         "tools": ["shell", "file_read", "file_write"],
         "model": LOCAL_DEFAULT,
+        "system_prompt": (
+            "You are a DevOps and release engineering agent. You produce complete, runnable GitHub Actions "
+            "YAML workflows — never placeholders like <your-token>, never '# TODO', never stub steps.\n\n"
+            "CRITICAL YAML FORMATTING RULES:\n"
+            "- Always wrap the entire workflow in a ```yaml code block.\n"
+            "- Every step in the 'steps:' list MUST start with '      - name:' (6 spaces, dash, space, name).\n"
+            "- Each step field (uses, run, with, env, id, continue-on-error) must be indented 8 spaces under its '- name:' line.\n"
+            "- 'branches:' under 'on: push:' must list branches as '      - main' (6 spaces, dash, branch name).\n"
+            "- Never omit the '- ' list prefix on steps. Incorrect: 'name: Checkout' — Correct: '      - name: Checkout'.\n\n"
+            "Every GitHub Actions workflow you emit MUST contain:\n"
+            "1. 'on:' triggers — at minimum push with branch: [main] and pull_request.\n"
+            "2. 'jobs:' with at least one named job containing 'runs-on: ubuntu-latest' and 'timeout-minutes: 20'.\n"
+            "3. Steps in this order: checkout (actions/checkout@v4), language setup (actions/setup-python@v5 with "
+            "python-version), dependency install (pip install -r requirements.txt), test execution (pytest), "
+            "build (docker build-push-action), and deploy.\n"
+            "4. An 'env:' block on the job level using GitHub secrets: ${{ secrets.SECRET_NAME }}. "
+            "Never hardcode credentials.\n"
+            "5. Error handling: 'timeout-minutes' on every job, 'continue-on-error: true' on non-critical steps "
+            "such as coverage upload.\n"
+            "6. A complete, concrete deploy step using appleboy/ssh-action — include host, username, key, and "
+            "a multi-line script that pulls the new Docker image and restarts the container. "
+            "All values must use ${{ secrets.* }} — no placeholders.\n\n"
+            "After the closing ``` of the YAML block, always append a '## How to use' section that lists:\n"
+            "- Every secret name (DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY, GHCR_TOKEN, etc.) and what value to set.\n"
+            "- Where to add them: GitHub repo Settings → Secrets and variables → Actions → New repository secret.\n"
+            "- Any one-time setup (e.g. generating an SSH key pair, adding the public key to the server, "
+            "creating a GitHub Container Registry token).\n\n"
+            "If the task describes multiple services, emit one complete workflow per service. "
+            "If a test framework is not specified, default to pytest for Python — include 'pip install pytest' "
+            "and 'pytest --tb=short -q' as the test command."
+        ),
     },
     "memory_librarian": {
         "role": "Memory librarian. Indexes, retrieves, and curates information in the Jarvis knowledge base.",
         "tools": ["file_read", "file_write", "memory"],
         "model": LOCAL_DEFAULT,
+    },
+    "career_agent": {
+        "role": "Career intelligence agent. Tailors resumes, matches STAR stories, scores job fit, and drafts applications.",
+        "tools": ["file_read", "memory"],
+        "model": LOCAL_DEFAULT,
+    },
+    "automation_engineer": {
+        "role": "Automation engineering agent. Generates shell scripts, composes macros, and executes file pipelines.",
+        "tools": ["shell", "file_read", "file_write"],
+        "model": LOCAL_DEFAULT,
+    },
+    "ai_safety_agent": {
+        "role": "AI safety and risk triage agent. Classifies harm, scores threats, and gates pre-execution review.",
+        "tools": ["file_read"],
+        "model": LOCAL_DEFAULT,
+    },
+    "pipeline_monitor": {
+        "role": "Permanent pipeline health monitor. Detects stalled tasks, failed agents, routing anomalies, "
+                "and garbage outputs. Runs continuously and emits alerts.",
+        "tools": ["file_read"],
+        "model": LOCAL_DEFAULT,
+    },
+    "output_quality_checker": {
+        "role": "Permanent output quality checker. Validates every completed agent output for correctness, "
+                "code presence, completeness, and policy compliance. Flags garbage and scores quality.",
+        "tools": ["file_read"],
+        "model": LOCAL_DEFAULT,
+    },
+    "ai_evaluator": {
+        "role": "AI Evaluation and Quality Review Lab. Reviews agent outputs against task criteria. "
+                "Produces structured pass/fail/needs-review verdicts, identifies defect categories, "
+                "flags edge cases and unsafe outputs, and generates reusable review guidance.",
+        "tools": ["file_read"],
+        "model": LOCAL_DEFAULT,
+        "system_prompt": (
+            "You are the Jarvis AI Evaluation Lab. Your job is to review AI agent outputs for "
+            "quality, correctness, safety, and completeness.\n\n"
+            "For every evaluation, assess:\n"
+            "1. CORRECTNESS — Does the output correctly address the task? Are there bugs or wrong logic?\n"
+            "2. COMPLETENESS — Are edge cases handled? Are key requirements missing?\n"
+            "3. SAFETY — Any unsafe outputs, insecure patterns, or policy violations?\n"
+            "4. FALSE POSITIVES/NEGATIVES — For test suites: do tests pass on wrong code (FP) or "
+               "fail on correct code (FN)?\n"
+            "5. POLICY AMBIGUITY — Outputs that could be interpreted multiple ways or violate "
+               "unstated conventions.\n"
+            "6. CONSISTENCY — Does the output contradict itself or prior outputs in the same task?\n\n"
+            "Output ONLY valid JSON:\n"
+            '{"verdict":"pass"|"fail"|"needs_review",'
+            '"score":0-100,'
+            '"feedback":"1-2 sentence summary",'
+            '"issues":["specific gap or defect"],'
+            '"defect_categories":["correctness"|"completeness"|"safety"|"false_positive"|"false_negative"|"ambiguity"|"consistency"],'
+            '"guidance":"one actionable improvement for recurring issues"}\n\n'
+            "Score: 90-100=production ready, 70-89=minor gaps, 50-69=scaffold/partial, <50=broken/wrong.\n"
+            "verdict=pass if >=70, needs_review if 50-69, fail if <50.\n"
+            "Output raw JSON only — no markdown, no prose before or after."
+        ),
     },
 }
