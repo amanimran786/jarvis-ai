@@ -297,6 +297,11 @@ class TaskResult(BaseModel):
     needs_review: bool = False
 
 
+class ApprovalDecision(BaseModel):
+    decision:  str = Field(..., pattern="^(approve|reject)$")
+    reason:    str = ""
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -360,12 +365,53 @@ async def pending_approvals():
     return [{"stream_id": mid, **fields} for mid, fields in raw]
 
 
+@app.get("/approvals/{stream_id}")
+async def get_approval(stream_id: str):
+    """Fetch a single pending approval item by stream_id."""
+    r = await get_redis()
+    raw = await r.xrange(STREAM_APPROVALS, min=stream_id, max=stream_id, count=1)
+    if not raw:
+        raise HTTPException(status_code=404, detail="approval not found")
+    mid, fields = raw[0]
+    return {"stream_id": mid, **fields}
+
+
+@app.post("/approvals/{stream_id}")
+async def decide_approval(stream_id: str, body: ApprovalDecision):
+    """
+    Human approves or rejects a pending task.
+
+    - approve: ACKs the approval item and publishes task.approved to STREAM_TASKS.
+    - reject:  ACKs the approval item and publishes task.rejected to STREAM_TASKS.
+    """
+    r = await get_redis()
+
+    # Look up the pending item so we can carry the task_id forward
+    raw = await r.xrange(STREAM_APPROVALS, min=stream_id, max=stream_id, count=1)
+    task_id = "unknown"
+    if raw:
+        _, fields = raw[0]
+        task_id = fields.get("task_id", "unknown")
+
+    event_type = "task.approved" if body.decision == "approve" else "task.rejected"
+    await r.xadd(STREAM_TASKS, {
+        "type":    event_type,
+        "task_id": task_id,
+        "reason":  body.reason,
+        "ts":      str(time.time()),
+    }, maxlen=5000, approximate=True)
+
+    await r.xack(STREAM_APPROVALS, "human", stream_id)
+    log.info("Approval %s for task %s: %s", body.decision, task_id, body.reason or "(no reason)")
+    return {"status": body.decision, "task_id": task_id}
+
+
 @app.delete("/approvals/{stream_id}")
-async def approve_task(stream_id: str):
-    """ACK an approval (human reviewed it)."""
+async def dismiss_approval(stream_id: str):
+    """ACK without a decision — removes from pending queue without status update."""
     r = await get_redis()
     await r.xack(STREAM_APPROVALS, "human", stream_id)
-    return {"status": "acknowledged"}
+    return {"status": "dismissed"}
 
 
 @app.get("/metrics")

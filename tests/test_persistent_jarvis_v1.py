@@ -411,6 +411,8 @@ class PersistentJarvisRuntimePersistenceTests(unittest.TestCase):
                 meta={"payload_meta": {"payload": {"secret": "value"}}},
             )
             task_id = str(task["id"])
+            if task.get("status") == "waiting_approval":
+                task_runtime.approve_task(task_id)
             completed = task_runtime.wait_for_task(task_id, timeout=2.0)
 
         self.assertIsNotNone(completed)

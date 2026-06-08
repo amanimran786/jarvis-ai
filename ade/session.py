@@ -55,6 +55,8 @@ def kill(session_name: str) -> None:
 
 
 def exists(session_name: str) -> bool:
+    if not available():
+        return False
     r = subprocess.run(
         ["tmux", "has-session", "-t", session_name],
         capture_output=True,
@@ -63,6 +65,8 @@ def exists(session_name: str) -> bool:
 
 
 def list_sessions() -> list[str]:
+    if not available():
+        return []
     r = subprocess.run(
         ["tmux", "list-sessions", "-F", "#{session_name}"],
         capture_output=True,
@@ -75,6 +79,8 @@ def list_sessions() -> list[str]:
 
 def session_pid(session_name: str) -> int | None:
     """Return the PID of the first window's active pane, or None."""
+    if not available():
+        return None
     r = subprocess.run(
         ["tmux", "list-panes", "-t", session_name, "-F", "#{pane_pid}"],
         capture_output=True,

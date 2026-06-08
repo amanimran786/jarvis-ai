@@ -279,13 +279,14 @@ class MemoryStore:
             flt = Filter(must=conditions) if conditions else None
 
             try:
-                hits = _qdrant().search(
+                resp = _qdrant().query_points(
                     collection_name=_collection(lyr),
-                    query_vector=vec,
+                    query=vec,
                     limit=top_k * 2,   # over-fetch to allow TTL filtering
                     query_filter=flt,
                     with_payload=True,
                 )
+                hits = resp.points
             except Exception as exc:
                 log.warning("recall(%s) search failed: %s", lyr, exc)
                 continue

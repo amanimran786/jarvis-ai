@@ -40,18 +40,16 @@ _mock_config.AGENT_ROSTER = {
         "system_prompt": "DevOps Prompt",
     },
 }
-sys.modules["config"] = _mock_config
-sys.modules["brains.brain_ollama"] = MagicMock()
 
-for _mod in [
+_AGENT_MODS = [
     "infra.memory",
     "agents.frontend_designer",
     "agents.ux_researcher",
     "agents.qa_tester",
     "agents.devops_release",
     "agents.agent_worker",
-]:
-    sys.modules.pop(_mod, None)
+]
+_STUB_MODS = ["config", "brains.brain_ollama"]
 
 import pytest
 from unittest.mock import MagicMock
@@ -59,8 +57,21 @@ from unittest.mock import MagicMock
 
 @pytest.fixture(autouse=True)
 def _restore_stubs():
+    # Save original sys.modules values for stub targets
+    _saved = {k: sys.modules.get(k) for k in _STUB_MODS}
     sys.modules["config"] = _mock_config
+    sys.modules["brains.brain_ollama"] = MagicMock()
+    for _mod in _AGENT_MODS:
+        sys.modules.pop(_mod, None)
     yield
+    # Restore: put originals back, or remove if they weren't there before
+    for k, v in _saved.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+    for _mod in _AGENT_MODS:
+        sys.modules.pop(_mod, None)
 
 
 def _make_payload(agent: str, task_id: str = "task-1") -> dict:
@@ -206,8 +217,7 @@ def test_devops_release_posts_agent_id_header():
 # ── agent_worker (generic) ────────────────────────────────────────────────────
 
 def test_agent_worker_dispatches_to_frontend_designer():
-    sys.modules.pop("agents.agent_worker", None)
-    from agents import agent_worker
+    import agents.agent_worker as aw
 
     event = (
         'data: {"type":"task","task_id":"t-fe","task":'
@@ -217,12 +227,10 @@ def test_agent_worker_dispatches_to_frontend_designer():
     response.text = event
     response.raise_for_status.return_value = None
 
-    sys.modules.pop("agents.frontend_designer", None)
+    mock_pt = MagicMock(return_value="nav done")
     with patch("httpx.get", return_value=response), \
-         patch("agents.agent_worker._load_process_task") as mock_load:
-        mock_pt = MagicMock(return_value="nav done")
-        mock_load.return_value = mock_pt
-        result = agent_worker.run_once("frontend_designer")
+         patch.object(aw, "_load_process_task", return_value=mock_pt) as mock_load:
+        result = aw.run_once("frontend_designer")
 
     assert result["ok"] is True
     assert result["status"] == "processed"

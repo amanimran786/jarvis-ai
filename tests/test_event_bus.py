@@ -257,12 +257,58 @@ class TestApprovals:
         assert items[0]["task_id"] == "t-devops"
         assert items[0]["stream_id"] == "500-0"
 
-    def test_approve_acks_stream_entry(self, client):
+    def test_get_single_approval_by_stream_id(self, client):
+        tc, r = client
+        r.xrange.return_value = [
+            ("600-0", {"task_id": "t-single", "output": "deploy script", "ts": "2.0"}),
+        ]
+        resp = tc.get("/approvals/600-0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["task_id"] == "t-single"
+        assert data["stream_id"] == "600-0"
+
+    def test_get_single_approval_404_when_missing(self, client):
+        tc, r = client
+        r.xrange.return_value = []
+        resp = tc.get("/approvals/999-0")
+        assert resp.status_code == 404
+
+    def test_approve_decision_acks_and_publishes_task_approved(self, client):
+        tc, r = client
+        r.xrange.return_value = [("700-0", {"task_id": "t-devops", "output": "ok"})]
+        resp = tc.post("/approvals/700-0", json={"decision": "approve", "reason": "looks good"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "approve"
+        assert data["task_id"] == "t-devops"
+        # xadd called with task.approved type
+        approved_call = r.xadd.call_args
+        assert approved_call[0][1]["type"] == "task.approved"
+        r.xack.assert_called_once_with(eb.STREAM_APPROVALS, "human", "700-0")
+
+    def test_reject_decision_publishes_task_rejected(self, client):
+        tc, r = client
+        r.xrange.return_value = [("800-0", {"task_id": "t-risky", "output": "rm -rf /"})]
+        resp = tc.post("/approvals/800-0", json={"decision": "reject", "reason": "destructive"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "reject"
+        rejected_call = r.xadd.call_args
+        assert rejected_call[0][1]["type"] == "task.rejected"
+        assert rejected_call[0][1]["reason"] == "destructive"
+
+    def test_invalid_decision_returns_422(self, client):
+        tc, r = client
+        resp = tc.post("/approvals/900-0", json={"decision": "maybe"})
+        assert resp.status_code == 422
+
+    def test_dismiss_acks_without_status_event(self, client):
         tc, r = client
         resp = tc.delete("/approvals/500-0")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "acknowledged"
+        assert resp.json()["status"] == "dismissed"
         r.xack.assert_called_once_with(eb.STREAM_APPROVALS, "human", "500-0")
+        r.xadd.assert_not_called()
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────

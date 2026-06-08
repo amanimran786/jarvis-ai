@@ -143,25 +143,28 @@ class _SimpleVaultIndex(VaultIndexer):
         current_size = 0
 
         for line in lines:
-            line_size = len(line) + 1  # +1 for newline
-            # If we hit a header and have accumulated text, flush current
-            if (line.startswith("##") or line.startswith("###")) and current:
-                chunk_text = "\n".join(current).strip()
-                if chunk_text:
-                    chunks.append(chunk_text)
-                current = [line]
-                current_size = line_size
-            else:
-                # Add line; flush if would exceed limit
-                if current_size + line_size > CHUNK_MAX_CHARS and current:
+            # Split lines that are themselves longer than the max
+            segments = [line[i:i + CHUNK_MAX_CHARS] for i in range(0, max(len(line), 1), CHUNK_MAX_CHARS)]
+            for seg in segments:
+                seg_size = len(seg) + 1  # +1 for newline
+                # If we hit a header and have accumulated text, flush current
+                if (seg.startswith("##") or seg.startswith("###")) and current:
                     chunk_text = "\n".join(current).strip()
                     if chunk_text:
                         chunks.append(chunk_text)
-                    current = [line]
-                    current_size = line_size
+                    current = [seg]
+                    current_size = seg_size
                 else:
-                    current.append(line)
-                    current_size += line_size
+                    # Add segment; flush if would exceed limit
+                    if current_size + seg_size > CHUNK_MAX_CHARS and current:
+                        chunk_text = "\n".join(current).strip()
+                        if chunk_text:
+                            chunks.append(chunk_text)
+                        current = [seg]
+                        current_size = seg_size
+                    else:
+                        current.append(seg)
+                        current_size += seg_size
 
         # Flush remainder
         if current:

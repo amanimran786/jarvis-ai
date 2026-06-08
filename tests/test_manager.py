@@ -13,6 +13,13 @@ from unittest.mock import MagicMock, patch, call
 
 # ── Stubs before any import ────────────────────────────────────────────────────
 
+# Save real modules before mocking so we can restore them after module-level
+# imports complete (prevents contaminating later test files).
+import config as _real_config  # noqa: E402
+_real_brain_ollama = sys.modules.get("brains.brain_ollama")
+_real_skills       = sys.modules.get("skills")
+_real_tool_registry = sys.modules.get("tool_registry")
+
 _mock_config = MagicMock()
 _mock_config.LOCAL_DEFAULT = "glm-4.7-flash"
 _mock_config.AGENT_ROSTER  = {
@@ -21,10 +28,13 @@ _mock_config.AGENT_ROSTER  = {
     "devops_release":  {"role": "DevOps engineer.",  "tools": ["shell"],         "model": "glm-4.7-flash"},
     "security_reviewer":{"role": "Security engineer.", "tools": ["file_read"],   "model": "glm-4.7-flash"},
 }
-sys.modules["config"]             = _mock_config
-sys.modules["brains.brain_ollama"] = MagicMock()
-sys.modules["skills"]             = MagicMock()
-sys.modules["tool_registry"]      = MagicMock()
+_mock_brain_ollama  = MagicMock()
+_mock_skills        = MagicMock()
+_mock_tool_registry = MagicMock()
+sys.modules["config"]              = _mock_config
+sys.modules["brains.brain_ollama"] = _mock_brain_ollama
+sys.modules["skills"]              = _mock_skills
+sys.modules["tool_registry"]       = _mock_tool_registry
 
 for mod in list(sys.modules):
     if mod.startswith("core.manager") or mod == "core.manager":
@@ -44,17 +54,44 @@ from core.manager import (
 # dataclasses, not MagicMock auto-attributes, regardless of pytest collection order.
 from agents.security_reviewer import SecurityVerdict, SecurityFinding
 
+# Restore real modules now that core.manager is imported. Later test files
+# (e.g. test_unit_coverage.py::SkillMatchingTests) must see the real skills module.
+sys.modules["config"] = _real_config
+if _real_brain_ollama is not None:
+    sys.modules["brains.brain_ollama"] = _real_brain_ollama
+else:
+    sys.modules.pop("brains.brain_ollama", None)
+if _real_skills is not None:
+    sys.modules["skills"] = _real_skills
+else:
+    sys.modules.pop("skills", None)
+if _real_tool_registry is not None:
+    sys.modules["tool_registry"] = _real_tool_registry
+else:
+    sys.modules.pop("tool_registry", None)
+
 
 @pytest.fixture(autouse=True)
-def _restore_config():
-    """Re-assert this module's config stub before each test.
-
-    test_rbac._make_registry() clobbers sys.modules["config"] at execution
-    time with a stub that lacks 'role' keys. Re-asserting here ensures
-    manager tests always see the correct roster.
-    """
-    sys.modules["config"] = _mock_config
+def _restore_stubs():
+    """Install this module's stubs before each test; restore real modules on teardown."""
+    sys.modules["config"]              = _mock_config
+    sys.modules["brains.brain_ollama"] = _mock_brain_ollama
+    sys.modules["skills"]              = _mock_skills
+    sys.modules["tool_registry"]       = _mock_tool_registry
     yield
+    sys.modules["config"] = _real_config
+    if _real_brain_ollama is not None:
+        sys.modules["brains.brain_ollama"] = _real_brain_ollama
+    else:
+        sys.modules.pop("brains.brain_ollama", None)
+    if _real_skills is not None:
+        sys.modules["skills"] = _real_skills
+    else:
+        sys.modules.pop("skills", None)
+    if _real_tool_registry is not None:
+        sys.modules["tool_registry"] = _real_tool_registry
+    else:
+        sys.modules.pop("tool_registry", None)
 
 
 def _good_llm_response(tasks: list[dict]) -> str:

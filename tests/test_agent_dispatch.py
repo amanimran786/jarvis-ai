@@ -9,6 +9,11 @@ sys.modules.setdefault("memory", MagicMock())
 sys.modules.setdefault("conversation_context", MagicMock())
 sys.modules.setdefault("usage_tracker", MagicMock())
 
+# Save the real config before mocking, so we can restore it after the
+# module-level agent_dispatch import (prevents contaminating test files
+# collected after this one, e.g. test_config_local_stt.py).
+import config as _real_config  # noqa: E402
+
 # Full 8-agent config stub — must use direct assignment (not setdefault) so
 # this file's version wins regardless of pytest collection order.
 _mock_config = MagicMock()
@@ -24,32 +29,41 @@ _mock_config.AGENT_ROSTER = {
 }
 sys.modules["config"] = _mock_config
 
-# Pre-mock brain_ollama so dispatch()'s lazy import picks it up
+# Pre-mock brain_ollama — only ensure the brains package exists.
+# DO NOT install brains.brain_ollama at module level: that would contaminate
+# any test file collected after this one (e.g. test_jarvis_regression_suite.py).
 _mock_brain = MagicMock()
 if not hasattr(sys.modules.get("brains"), "__path__"):
     sys.modules.pop("brains", None)
 importlib.import_module("brains")
-sys.modules["brains.brain_ollama"] = _mock_brain
 
 # Force fresh import so agent_dispatch sees our config mock, not a stale one
 # baked in during earlier collection.
+sys.modules["config"] = _mock_config
 if "agent_dispatch" in sys.modules:
     del sys.modules["agent_dispatch"]
 
 import agent_dispatch  # noqa: E402 — must come after sys.modules setup
 
+# Restore real config so test files collected after this one (e.g.
+# test_config_local_stt.py) see the real module, not a MagicMock.
+sys.modules["config"] = _real_config
+
+_STUB_MODS = {"config": _mock_config, "brains.brain_ollama": _mock_brain}
+
 
 @pytest.fixture(autouse=True)
 def _restore_stubs():
-    """Re-assert stubs before each test.
-
-    test_memory._make_store() clobbers sys.modules["brains.brain_ollama"]
-    with its own mock at execution time. Re-asserting here ensures dispatch
-    tests always call the right brain mock.
-    """
-    sys.modules["config"] = _mock_config
-    sys.modules["brains.brain_ollama"] = _mock_brain
+    """Install stubs before each test and restore original state on teardown."""
+    saved = {k: sys.modules.get(k) for k in _STUB_MODS}
+    for k, v in _STUB_MODS.items():
+        sys.modules[k] = v
     yield
+    for k, orig in saved.items():
+        if orig is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = orig
 
 
 def test_dispatch_returns_stream_for_known_agent():

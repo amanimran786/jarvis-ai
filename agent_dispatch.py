@@ -60,6 +60,6 @@ def dispatch(
 
 def list_agents() -> list[dict]:
     return [
-        {"name": name, "role": agent["role"], "model": agent["model"]}
+        {"id": name, "name": name, "role": agent["role"], "model": agent["model"]}
         for name, agent in AGENT_ROSTER.items()
     ]

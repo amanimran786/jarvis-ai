@@ -24,6 +24,7 @@ def _install_stub(name: str, **attrs) -> types.ModuleType:
 
 # Install ALL stubs BEFORE any imports of router, following test_eval_delta pattern
 _SAVED_MODULES = {}
+_saved_memory_track_topic = None
 
 def _setup_stubs():
     global _SAVED_MODULES
@@ -84,6 +85,10 @@ def _setup_stubs():
         clean_text=text,
         system_extra="",
     )
+    global _saved_memory_track_topic
+    _mem = sys.modules.get("memory")
+    if _mem is not None:
+        _saved_memory_track_topic = getattr(_mem, "track_topic", None)
     sys.modules["memory"].track_topic = lambda *a, **kw: None
 
     # Stub model_router with needed functions BEFORE router imports it
@@ -112,12 +117,18 @@ class MessageIntentParsingTests(unittest.TestCase):
         Without this the stub for `local_runtime.local_training` survives and
         breaks `patch('local_runtime.local_training.record_teacher_example')`.
         """
-        global _SAVED_MODULES
+        global _SAVED_MODULES, _saved_memory_track_topic
         for name, mod in _SAVED_MODULES.items():
             if mod is None:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = mod
+        # Restore the memory.track_topic attribute we mutated in _setup_stubs.
+        # The sys.modules restore above restores the module reference but not the
+        # attribute mutation — do that explicitly so MemoryModuleTests see the real impl.
+        _mem = sys.modules.get("memory")
+        if _mem is not None and _saved_memory_track_topic is not None:
+            _mem.track_topic = _saved_memory_track_topic
         # Also drop the stubbed `desktop` / `desktop.overlay` and `model_router`
         # / `config` we installed unconditionally so the next test file can
         # import the real ones if it needs them.

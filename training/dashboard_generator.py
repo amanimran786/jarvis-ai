@@ -634,9 +634,9 @@ def generate() -> Path:
         <div class="card-sub">latest benchmark run</div>
       </div>
       <div class="card">
-        <div class="card-label">EVAL PASSING</div>
+        <div class="card-label">LATEST EVAL</div>
         <div class="card-value gold">{baseline_pct}</div>
-        <div class="card-sub">{baseline_passed}/{baseline_total} tests</div>
+        <div class="card-sub">{baseline_passed}/{baseline_total} tests passing</div>
       </div>
       <div class="card">
         <div class="card-label">LAST TRAINING</div>
@@ -647,7 +647,7 @@ def generate() -> Path:
   </div>
 
   <!-- ── Score history + Category bars ── -->
-  <div class="grid-2">
+  <div class="grid-2" style="margin-top:20px">
     <div class="card">
       <div class="section-title">EVAL SCORE — TRAINING HISTORY</div>
       <div class="chart-wrap"><canvas id="scoreChart"></canvas></div>

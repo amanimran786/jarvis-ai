@@ -104,19 +104,22 @@ class TestNotify:
 class TestSession:
     def test_exists_true_when_returncode_zero(self):
         from ade import session
-        with patch("subprocess.run") as mock_run:
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             assert session.exists("ade-foo") is True
 
     def test_exists_false_when_returncode_nonzero(self):
         from ade import session
-        with patch("subprocess.run") as mock_run:
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 1
             assert session.exists("ade-foo") is False
 
     def test_list_sessions_parses_output(self):
         from ade import session
-        with patch("subprocess.run") as mock_run:
+        with patch("shutil.which", return_value="/usr/bin/tmux"), \
+             patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "ade-task1\nade-task2\n"
             result = session.list_sessions()
@@ -321,3 +324,67 @@ class TestCli:
         mock_notify.assert_called_once()
         assert "conflict" in mock_notify.call_args[0][0].lower() or \
                "conflict" in mock_notify.call_args[0][1].lower()
+
+
+# ── ade approvals command ─────────────────────────────────────────────────────
+
+class TestCmdApprovals:
+    def test_lists_pending_items(self, capsys):
+        from ade.cli import cmd_approvals
+        import httpx as _httpx
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = [
+            {"stream_id": "100-0", "task_id": "t-devops", "output": "deploy prod"},
+        ]
+        with patch("httpx.get", return_value=mock_resp):
+            cmd_approvals()
+
+        out = capsys.readouterr().out
+        assert "100-0" in out
+        assert "t-devops" in out
+
+    def test_prints_no_pending_when_empty(self, capsys):
+        from ade.cli import cmd_approvals
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = []
+        with patch("httpx.get", return_value=mock_resp):
+            cmd_approvals()
+
+        assert "No pending" in capsys.readouterr().out
+
+    def test_approve_posts_to_event_bus(self, capsys):
+        from ade.cli import cmd_approvals
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "approve", "task_id": "t-devops"}
+        with patch("httpx.post", return_value=mock_resp) as mock_post:
+            cmd_approvals(approve_id="100-0", reason="looks good")
+
+        call_url = mock_post.call_args[0][0]
+        assert "100-0" in call_url
+        body = mock_post.call_args[1]["json"]
+        assert body["decision"] == "approve"
+        assert body["reason"] == "looks good"
+
+    def test_reject_posts_decision_reject(self, capsys):
+        from ade.cli import cmd_approvals
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"status": "reject", "task_id": "t-risky"}
+        with patch("httpx.post", return_value=mock_resp) as mock_post:
+            cmd_approvals(reject_id="200-0", reason="too risky")
+
+        body = mock_post.call_args[1]["json"]
+        assert body["decision"] == "reject"
+
+    def test_bus_unreachable_prints_error(self, capsys):
+        from ade.cli import cmd_approvals
+
+        with patch("httpx.get", side_effect=Exception("connection refused")):
+            cmd_approvals()
+
+        assert "event bus" in capsys.readouterr().err.lower()

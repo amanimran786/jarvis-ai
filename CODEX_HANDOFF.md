@@ -294,3 +294,123 @@ Confirmed: Codex's 10 test fixes + api.py 409 lock patch verified in main. Serve
 - "what did I miss" / away-summary fast-path
 
 **Claude owns going forward (same as before + tools.py)**
+
+---
+
+## Claude Code session — 2026-06-06 (overnight)
+
+### What was built this session
+
+#### 1. Security: nmap aggressive flags unblocked for researcher use (`tools/security/hackingtool_adapter.py`)
+- Removed `-T4`, `-T5`, `--script=vuln`, `--script=exploit`, `--script=intrusive` from `_BLOCKED_FLAGS`
+- Updated nmap `allowed_args` regex from `-T[0-3]` to `-T[0-5]`
+- Added `_NMAP_ALLOWED_SCRIPT_CATEGORIES` / `_NMAP_BLOCKED_SCRIPT_CATEGORIES` frozensets
+- `--script=malware` still blocked; all external-target calls still route through `security_reviewer.review()` and `needs_approval=True`
+- Test updated: `test_nmap_aggressive_timing_flags_pass_allowlist` (was `_are_blocked`)
+
+#### 2. Four new agent workers (`agents/`)
+- `frontend_designer.py` — tools: read_file, write_file; `needs_review: False`
+- `ux_researcher.py` — tools: web_search, read_file; `needs_review: False`
+- `qa_tester.py` — tools: read_file, write_file, run_tests; `needs_review: False`
+- `devops_release.py` — tools: read_file, write_file, run_tests; **`needs_review: True`** (always gates through manager)
+- All follow the `backend_engineer` pattern: memory recall → `ask_local_with_tools` → POST `/results`
+
+#### 3. Generic agent dispatcher (`agents/agent_worker.py`)
+- `_SUPPORTED_AGENTS` set: backend_engineer, frontend_designer, ux_researcher, qa_tester, devops_release, memory_librarian, researcher
+- `_load_process_task(agent_name)` — importlib lazy load, avoids pulling all agents at startup
+- `run_once(agent_name)` — polls SSE inbox, dispatches, returns `{ok, status, task_id}`
+- `run_forever(agent_name)` — wraps run_once with idle sleep
+- `main()` — argparse CLI: `python -m agents.agent_worker --agent researcher [--once] [--timeout-ms 5000]`
+
+#### 4. Researcher agent (`agents/researcher.py`)
+- Imports `deep_research` from `research.pipeline`; `_RESEARCH_AVAILABLE` flag controls graceful fallback
+- Memory recall via `store.context_for_prompt()`; failure is non-fatal
+- Formats output: report body + markdown source links + queries used
+- Fallback when unavailable: `brains.brain_ollama.ask_local_stream`
+- Posts to `/results` with `needs_review: False`, `X-Jarvis-Agent-ID: researcher`
+- `researcher` added to `agent_worker._SUPPORTED_AGENTS`
+
+#### 5. ADE — Autonomous Dev Environment (`ade/`)
+Four new modules + CLI + scripts:
+
+- **`ade/state.py`** — `.worktrees/.ade_state.json` persistence; `upsert/get/set_status/remove/load`
+- **`ade/notify.py`** — `send(title, msg)`: osascript on Darwin, notify-send on Linux; non-fatal on failure
+- **`ade/session.py`** — tmux session CRUD: `create/attach/kill/exists/list_sessions/session_pid`; raises `RuntimeError` if tmux missing or session already exists
+- **`ade/loop.py`** — Plan→Execute→Verify→Retry loop
+  - `detect_test_cmd(root)` auto-detects npm/make/pytest/cargo test runners
+  - `_claude_prompt_cmd(prompt)` — `ADE_CLAUDE_SKIP_PERMISSIONS=1` opt-in for `--dangerously-skip-permissions`
+  - `phase_plan / phase_execute / phase_verify` with state transitions and notifications
+  - MAX_RETRIES=3; verified tests must pass before marking DONE
+- **`ade/cli.py`** — `cmd_start/list/watch/sync/stop` + **`cmd_approvals`** (new)
+  - `cmd_approvals(approve_id, reject_id, reason)`: lists `/approvals/pending`, posts decision to event bus
+- **`ade_cmd.py`** — top-level entry point
+- **`scripts/ade-loop`** — executable Python shebang that calls `ade.loop.main()`
+- **`scripts/setup.sh`** — tmux install (brew/apt), tmux defaults, ade-loop chmod, ~/bin/ade symlink
+
+#### 6. Event bus: approval queue endpoints (`infra/event_bus.py`)
+Three new endpoints added to the FastAPI app:
+- `GET /approvals/{stream_id}` — fetch single pending item; 404 if not found
+- `POST /approvals/{stream_id}` — `ApprovalDecision(decision, reason)`; approve publishes `task.approved` to STREAM_TASKS, reject publishes `task.rejected`; both xack
+- `DELETE /approvals/{stream_id}` — dismiss without status event (xack only)
+- `ApprovalDecision(BaseModel)` with `pattern="^(approve|reject)$"` validation
+
+#### 7. Docker: 6 new worker services (`docker-compose.yml`)
+```
+frontend_designer_worker, ux_researcher_worker, qa_tester_worker,
+devops_release_worker, memory_librarian_worker, researcher_worker
+```
+All: `Dockerfile.api`, `agents.agent_worker --agent <name>`, depend on `event_bus: service_healthy`.
+
+#### 8. Tests: 239 passing (was ~180)
+
+| File | Tests | Status |
+|---|---|---|
+| `test_agent_workers.py` | 14 | ✅ all pass |
+| `test_researcher_agent.py` | 15 | ✅ all pass |
+| `test_event_bus.py` | ~55 | ✅ all pass |
+| `test_ade.py` | ~36 | ✅ all pass |
+| All prior tests | ~119 | ✅ unchanged |
+
+**Key fix applied this session:** `test_agent_worker_dispatches_to_frontend_designer` and `test_agent_worker_dispatches_to_researcher` both used the broken `sys.modules.pop + patch("string.path")` pattern. Fixed to `import agents.X as X` + `patch.object(X, "_load_process_task", ...)` so the patch binds to the actual live module object.
+
+### Verification command (run to confirm clean state)
+```bash
+python3 -m pytest tests/test_researcher_agent.py tests/test_event_bus.py \
+  tests/test_ade.py tests/test_agent_workers.py tests/test_hackingtool_adapter.py \
+  tests/test_manager.py tests/test_backend_engineer.py tests/test_agent_dispatch.py \
+  tests/test_rbac.py tests/test_memory.py tests/test_memory_librarian.py -q
+# Expected: 239 passed
+```
+
+### Known issues / still pending
+
+1. **mem0 end-to-end with Qdrant** — `store.context_for_prompt()` logs `'QdrantClient' object has no attribute 'search'` in tests. Memory recall is non-fatal but live recall from Qdrant won't work until the QdrantClient API mismatch is resolved (likely version skew between qdrant-client and server).
+
+2. **`third_party/hackingtool-plugin/VENDOR.md` SHA** — the TODO for pinning the git subtree commit SHA is still outstanding. User needs to run the git subtree command manually.
+
+3. **`ade loop` not live-tested** — the `phase_plan → phase_execute → phase_verify → retry` loop is implemented and unit-tested, but has not been run end-to-end with a real task + real Claude CLI. Integration test when `tmux` + `claude` CLI are available.
+
+4. **`ade approvals` requires live event bus** — `cmd_approvals` calls `http://localhost:8766/approvals/pending`. Needs `infra/event_bus.py` running with Redis.
+
+### New files at a glance
+```
+agents/agent_worker.py          generic SSE dispatcher, argparse entry
+agents/frontend_designer.py     design agent
+agents/ux_researcher.py         UX research agent
+agents/qa_tester.py             QA agent
+agents/devops_release.py        DevOps agent (always needs_review=True)
+agents/researcher.py            deep_research pipeline + LLM fallback
+ade/__init__.py                 package marker
+ade/state.py                    task state persistence
+ade/notify.py                   macOS/Linux system notifications
+ade/session.py                  tmux session management
+ade/loop.py                     Plan→Execute→Verify→Retry agent loop
+ade/cli.py                      ade start|list|watch|sync|stop|approvals
+ade_cmd.py                      top-level ade entry point
+scripts/ade-loop                 executable loop shebang
+scripts/setup.sh                setup script (tmux, ade symlink)
+tests/test_agent_workers.py     14 tests for new agents + dispatcher
+tests/test_researcher_agent.py  15 tests for researcher agent
+tests/test_event_bus.py         ~55 tests for event bus (incl. approvals)
+tests/test_ade.py               ~36 tests for full ADE stack
+```

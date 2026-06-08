@@ -12,26 +12,32 @@ Tests cover:
 import sys
 import os
 import unittest
+import pytest
 from unittest.mock import MagicMock
-
-# ── Environment bootstrap ─────────────────────────────────────────────────────
-# executor imports `router` lazily (inside execute_step) and `model_router`
-# lazily (inside parse_steps / synthesise_results).  Both pull in PyQt6 /
-# Ollama when the real modules are loaded, which is unavailable in CI.
-# Inject lightweight mocks so the lazy imports succeed without real services.
-
-if "router" not in sys.modules:
-    sys.modules["router"] = MagicMock()
-
-if "model_router" not in sys.modules:
-    _mr_mock = MagicMock()
-    # smart_stream fallback: raise ImportError so tests exercise fallback path
-    _mr_mock.smart_stream.side_effect = ImportError("no model_router in CI")
-    sys.modules["model_router"] = _mr_mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import jarvis_executor as je
+
+# ── Stub setup ────────────────────────────────────────────────────────────────
+# Save originals now; install mocks per-test via autouse fixture so these
+# stubs don't contaminate test files collected after this one.
+_mock_router = MagicMock()
+_mock_model_router = MagicMock()
+_mock_model_router.smart_stream.side_effect = ImportError("no model_router in CI")
+
+
+@pytest.fixture(autouse=True)
+def _executor_stubs():
+    saved = {k: sys.modules.get(k) for k in ("router", "model_router")}
+    sys.modules["router"] = _mock_router
+    sys.modules["model_router"] = _mock_model_router
+    yield
+    for k, orig in saved.items():
+        if orig is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = orig
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

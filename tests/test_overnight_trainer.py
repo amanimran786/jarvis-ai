@@ -22,11 +22,23 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 
 # Mock PyQt6 and sounddevice before any imports that depend on them
+_REAL_STUBBED_MODULES = {
+    name: sys.modules.get(name)
+    for name in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui", "sounddevice")
+}
 sys.modules["PyQt6"] = MagicMock()
+sys.modules["PyQt6.QtCore"] = MagicMock()
 sys.modules["PyQt6.QtWidgets"] = MagicMock()
+sys.modules["PyQt6.QtGui"] = MagicMock()
 sys.modules["sounddevice"] = MagicMock()
 
 from local_runtime import local_finetune_scheduler
+
+for _name, _module in _REAL_STUBBED_MODULES.items():
+    if _module is None:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _module
 
 
 class OvernightTrainerWindowTests(unittest.TestCase):
@@ -140,6 +152,13 @@ class OvernightTrainerScheduleTests(unittest.TestCase):
 class OvernightTrainerBuildPackTests(unittest.TestCase):
     """Test build_training_pack() with mock memory data."""
 
+    def _legacy_only_patches(self, trainer):
+        return (
+            patch.object(trainer, "_collect_teacher_examples", return_value=[]),
+            patch.object(trainer, "_collect_verbatim_examples", return_value=[]),
+            patch.object(trainer, "_build_synthetic_examples", return_value=[]),
+        )
+
     def test_build_pack_with_sufficient_examples(self):
         """With >=10 conversation entries, should build pack."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -150,7 +169,10 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             # Create mock memory
             memory_data = {
                 "conversation_history": [
-                    {"date": "2026-05-04 10:00", "summary": f"Task {i}"}
+                    {
+                        "date": "2026-05-04 10:00",
+                        "summary": f"Completed realistic Jarvis task {i} with enough detail for training.",
+                    }
                     for i in range(12)
                 ]
             }
@@ -161,11 +183,12 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             # Override paths
             trainer.logger = MagicMock()
 
-            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file):
-                with patch("local_runtime.local_finetune_scheduler.PACKS_DIR", pack_dir):
-                    with patch("local_runtime.local_finetune_scheduler._today_date") as mock_today:
-                        mock_today.return_value = "2026-05-04"
-                        pack_path = trainer.build_training_pack()
+            teacher_patch, verbatim_patch, synthetic_patch = self._legacy_only_patches(trainer)
+            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file), \
+                 patch("local_runtime.local_finetune_scheduler.PACKS_DIR", pack_dir), \
+                 patch("local_runtime.local_finetune_scheduler._today_date", return_value="2026-05-04"), \
+                 teacher_patch, verbatim_patch, synthetic_patch:
+                pack_path = trainer.build_training_pack()
 
             assert pack_path is not None
             assert pack_path.exists()
@@ -177,8 +200,10 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             assert len(lines) >= 10
             for line in lines:
                 record = json.loads(line)
-                assert "prompt" in record
-                assert "completion" in record
+                assert "messages" in record
+                roles = [message["role"] for message in record["messages"]]
+                assert "user" in roles
+                assert "assistant" in roles
 
     def test_build_pack_with_insufficient_examples(self):
         """With <10 conversation entries, should return None."""
@@ -198,7 +223,9 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             trainer = local_finetune_scheduler.OvernightTrainer()
             trainer.logger = MagicMock()
 
-            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file):
+            teacher_patch, verbatim_patch, synthetic_patch = self._legacy_only_patches(trainer)
+            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file), \
+                 teacher_patch, verbatim_patch, synthetic_patch:
                 pack_path = trainer.build_training_pack()
 
             assert pack_path is None
@@ -211,7 +238,9 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             trainer = local_finetune_scheduler.OvernightTrainer()
             trainer.logger = MagicMock()
 
-            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", nonexistent):
+            teacher_patch, verbatim_patch, synthetic_patch = self._legacy_only_patches(trainer)
+            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", nonexistent), \
+                 teacher_patch, verbatim_patch, synthetic_patch:
                 pack_path = trainer.build_training_pack()
 
             assert pack_path is None
@@ -225,7 +254,9 @@ class OvernightTrainerBuildPackTests(unittest.TestCase):
             trainer = local_finetune_scheduler.OvernightTrainer()
             trainer.logger = MagicMock()
 
-            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file):
+            teacher_patch, verbatim_patch, synthetic_patch = self._legacy_only_patches(trainer)
+            with patch("local_runtime.local_finetune_scheduler.MEMORY_FILE", memory_file), \
+                 teacher_patch, verbatim_patch, synthetic_patch:
                 pack_path = trainer.build_training_pack()
 
             assert pack_path is None
@@ -239,7 +270,8 @@ class OvernightTrainerEvalTests(unittest.TestCase):
         trainer = local_finetune_scheduler.OvernightTrainer()
         trainer.logger = MagicMock()
 
-        with patch("subprocess.run") as mock_run:
+        with patch.object(trainer, "_run_benchmark_eval", return_value={"passed": 0, "failed": 0, "total": 0}), \
+             patch("subprocess.run") as mock_run:
             mock_result = MagicMock()
             mock_result.stdout = "3 passed in 5.2s\n"
             mock_result.stderr = ""
@@ -256,7 +288,8 @@ class OvernightTrainerEvalTests(unittest.TestCase):
         trainer = local_finetune_scheduler.OvernightTrainer()
         trainer.logger = MagicMock()
 
-        with patch("subprocess.run") as mock_run:
+        with patch.object(trainer, "_run_benchmark_eval", return_value={"passed": 0, "failed": 0, "total": 0}), \
+             patch("subprocess.run") as mock_run:
             mock_result = MagicMock()
             mock_result.stdout = "2 passed, 1 failed in 5.2s\n"
             mock_result.stderr = ""

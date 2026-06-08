@@ -104,7 +104,33 @@ hiddenimports = sorted(set(
     ]
     + [
         "api",
+        # agent runtime
+        "agent_dispatch",
+        "task_runtime",
         "agents",
+        "agents.agent_worker",
+        "agents.backend_engineer",
+        "agents.backend_worker",
+        "agents.devops_release",
+        "agents.frontend_designer",
+        "agents.memory_librarian",
+        "agents.qa_tester",
+        "agents.researcher",
+        "agents.security_reviewer",
+        "agents.ux_researcher",
+        # core layer
+        "core",
+        "core.manager",
+        "core.work_order",
+        # infra layer
+        "infra",
+        "infra.event_bus",
+        "infra.memory",
+        "infra.rbac",
+        "infra.threat_screen",
+        # security
+        "security_roe",
+        # existing
         "behavior_hooks",
         "brains.brain",
         "brains.brain_claude",

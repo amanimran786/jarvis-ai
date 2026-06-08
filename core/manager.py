@@ -108,6 +108,8 @@ Rules:
   when strict ordering is required.
 - Set needs_security_review=true for any task involving: shell execution, file writes, \
   deployments, database mutations, external API calls with credentials, or git operations.
+- Set needs_security_review=true for researcher tasks that request cloud research, cloud \
+  model escalation, or any context.allow_cloud_research flag.
 - devops_release tasks always get security review regardless of your flag.
 - Use the agent whose tools best match the task — don't assign web_search to backend_engineer.
 - description should be actionable and self-contained (the agent has no other context).
@@ -230,6 +232,24 @@ def _run_security_gate(task: AgentTask) -> bool:
         return False
 
 
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _task_requires_manager_gate(task: AgentTask) -> bool:
+    if task.needs_security_review or task.agent in _ALWAYS_REVIEW:
+        return True
+    if task.agent == "researcher" and (
+        _truthy(task.context.get("allow_cloud_research"))
+        or _truthy(task.context.get("cloud_research_approved"))
+    ):
+        task.needs_security_review = True
+        return True
+    return False
+
+
 # ─── Task publishing ───────────────────────────────────────────────────────────
 
 def _event_bus_url() -> str:
@@ -329,9 +349,7 @@ class JarvisManager:
         for task in tasks:
             task.task_id = str(uuid.uuid4())
 
-            # Security gate: always for _ALWAYS_REVIEW agents, otherwise follow LLM flag
-            needs_gate = task.needs_security_review or task.agent in _ALWAYS_REVIEW
-            if needs_gate:
+            if _task_requires_manager_gate(task):
                 approved = _run_security_gate(task)
                 if not approved:
                     continue   # task.status already set to security_blocked
