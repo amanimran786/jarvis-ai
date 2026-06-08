@@ -78,6 +78,15 @@ Jarvis is trying to invert that:
 - grounded in your files, tools, and environment
 - honest about what it knows and what it does not know
 
+## What's New (June 2026)
+
+Four major upgrades shipped this month:
+
+1. **14-Agent Specialized Team** — A named roster of purpose-built agents runs inside the task runtime. Each agent has a defined role: `backend_engineer`, `researcher`, `security_reviewer`, `automation_engineer`, `devops_release`, `frontend_designer`, `ux_researcher`, `qa_tester`, `ai_evaluator`, `ai_safety_agent`, `pipeline_monitor`, `output_quality_checker`, `career_agent`, `memory_librarian`. Dispatch any task to any agent via `POST /tasks`.
+2. **Three.js 3D Office World** — The `/dashboard` now renders a live Roblox-style 3D office in WebGL. Each agent appears as an R6 avatar character with named animations: idle breathing, walk cycle, typing at desk, gym lifting, done jump, failed droop, speaking gesture, waiting head-sway. The office is zoned by function (engineering, design, security, gym, meeting room) with isometric camera. Click an agent to inspect its state.
+3. **Single Unified Dashboard** — Two dashboards (`/` mobile HUD and `/dashboard` ops panel) are now one. The root `/` redirects to `/dashboard`, eliminating a 2038-line duplicate UI surface.
+4. **Fast-Path Contamination Fix** — Agent tasks were being silently intercepted by keyword fast-paths in `router.py` (task list, calendar routes) before ever reaching the LLM, producing garbage output in ~26ms. Fixed by dispatching agent tasks directly through `smart_stream` in `model_router.py` with an agent-specific system context.
+
 ## What's New (April 2026)
 
 Five major systems landed this month:
@@ -93,15 +102,16 @@ Five major systems landed this month:
 ```mermaid
 flowchart LR
     User["You"] --> UI["Desktop UI / CLI"]
-    UI --> API["Local API"]
+    UI --> API["Local API\n/dashboard → 3D Office World"]
     API --> Router["Router + Orchestrator"]
-    Router --> Brain["Brain Core<br/>Identity + Preferences"]
-    Router --> Memory["Memory + Vault<br/>+ Graph + Semantic + mem0"]
-    Router --> Agents["Parallel Agents<br/>Calendar / Tasks / Code"]
+    Router --> Brain["Brain Core\nIdentity + Preferences"]
+    Router --> Memory["Memory + Vault\n+ Graph + Semantic + mem0"]
+    Router --> Agents["Parallel Agents\nCalendar / Tasks / Code"]
     Router --> Skills["Skills"]
     Router --> Tools["Tools + Connectors"]
-    Router --> Models["Local Models"]
-    Router --> Tasks["Managed Task Runtime"]
+    Router --> Models["Local Models\nsmart_stream direct"]
+    Router --> Tasks["Managed Task Runtime\n14 Specialist Agents"]
+    Tasks --> AgentTeam["backend · researcher · security\nautomation · devops · frontend\nux · qa · ai_eval · ai_safety\npipeline · quality · career · memory"]
     Tools --> Mac["Browser / Terminal / macOS / Devices"]
 ```
 
@@ -257,15 +267,35 @@ This is the part that lets Jarvis act more like an operator than a chatbot.
 Main files:
 
 - [task_runtime.py](task_runtime.py)
+- [agents/](agents) — task-based agent modules
 - [jarvis_daemon.py](jarvis_daemon.py)
 - [worktree_manager.py](worktree_manager.py)
 
 What it does:
 
-- registers named agents
-- creates and tracks tasks
-- streams task output
+- dispatches tasks to 14 specialized named agents, each backed by a direct `smart_stream` LLM call with role-specific system context
+- creates and tracks tasks with status, streaming output, and cancellation
+- serializes execution through a single lock (tasks run sequentially, preventing resource contention)
 - prepares isolated code workspaces for code tasks
+
+The 14 agents in the current roster:
+
+| Agent | Role |
+|---|---|
+| `backend_engineer` | API, databases, services, infrastructure code |
+| `researcher` | Deep research, synthesis, literature review |
+| `security_reviewer` | Threat modeling, vulnerability analysis, hardening |
+| `automation_engineer` | Scripts, CI/CD, workflow automation |
+| `devops_release` | Deployments, releases, infra changes (always sets `needs_review=True`) |
+| `frontend_designer` | UI components, layouts, design systems |
+| `ux_researcher` | User experience, usability, UX research |
+| `qa_tester` | Test plans, test cases, regression coverage |
+| `ai_evaluator` | Model evaluation, evals design, benchmark review |
+| `ai_safety_agent` | Safety analysis, alignment review, risk assessment |
+| `pipeline_monitor` | Pipeline health, bottlenecks, observability |
+| `output_quality_checker` | Output review, quality gates, consistency checks |
+| `career_agent` | Career planning, skill gaps, professional growth |
+| `memory_librarian` | Memory hygiene, knowledge organization, vault curation |
 
 ### 10. Voice, Meetings, Vision, and Device Awareness
 
@@ -316,7 +346,8 @@ Jarvis as of April 2026:
 | Agents | Parallel fan-out to calendar, tasks, vault, code, research with escalation |
 | Repo grounding | Use Graphify and vault-based context instead of pure guesswork |
 | Browser + system | Read pages, click controls, open apps, change settings, and take screenshots |
-| Managed runtime | Inspect agents, create tasks, stream task output, and isolate code-task workspaces |
+| Managed runtime | Dispatch tasks to 14 named specialist agents, stream output, inspect status, cancel tasks |
+| 3D Office World | Live WebGL dashboard with R6 avatar agents, zone floors, animated states, click-to-inspect |
 | Extensions | Expose discoverable skills, connectors, and plugins through API and CLI |
 
 ## Current Local Stack
@@ -451,7 +482,9 @@ If the repo feels big, this is the shortest useful map:
 | [camera.py](camera.py) | Screen and camera understanding |
 | [browser.py](browser.py) | Browser control |
 | [hardware.py](hardware.py) | Mac and device awareness |
-| [task_runtime.py](task_runtime.py) | Managed task system |
+| [task_runtime.py](task_runtime.py) | Managed task system — 14-agent team, streaming, cancellation |
+| [agents/](agents) | Task-based agent modules (backend_engineer, researcher, etc.) |
+| [_bg_agents.py](_bg_agents.py) | Legacy background agents (EmailAgent, start/stop) |
 | [skills/](skills) | Skill packs |
 | [connectors/](connectors) | Connector definitions |
 | [plugins/](plugins) | Plugin definitions |
@@ -640,6 +673,8 @@ Jarvis is:
 - an extension surface
 - an always-on brain core
 - a parallel agent dispatcher
+- a 14-agent specialized task team
+- a 3D office world that shows every agent working in real time
 - and a roadmap toward a real local AI assistant
 
 The model is just one part inside that machine.
