@@ -6,6 +6,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import conversation_context as ctx
@@ -816,6 +817,126 @@ def _fail_task(task_id: str, error: str) -> None:
     _persist_task(task_id)
 
 
+# ── Agent tool context injection ──────────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).parent.resolve()
+_SAFE_READ_EXTENSIONS = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".txt"}
+
+# Agents that get live task pipeline state injected before they run
+_MONITOR_AGENTS = {
+    "pipeline-monitor",
+    "output-quality-checker",
+    "ai-evaluator",
+    "ai-safety-agent",
+}
+
+# Agents that get repo file contents injected based on filenames in their prompt
+_FILE_READER_AGENTS = {
+    "security-reviewer",
+    "backend-engineer",
+    "qa-tester",
+    "automation-engineer",
+    "researcher",
+}
+
+
+def _tool_read_files(prompt: str) -> str:
+    """Extract .py/.md filenames from prompt, read them from the repo, return as context block."""
+    if _REPO_ROOT is None:
+        return ""
+    candidates = re.findall(
+        r'\b([\w/._-]+\.(?:py|md|json|yaml|yml|toml|sh|txt))\b', prompt
+    )
+    seen: set[str] = set()
+    sections: list[str] = []
+    for name in candidates[:5]:
+        if name in seen:
+            continue
+        seen.add(name)
+        for base in [_REPO_ROOT, _REPO_ROOT / "brains", _REPO_ROOT / "infra",
+                     _REPO_ROOT / "tests", _REPO_ROOT / "tools"]:
+            candidate = (base / name).resolve()
+            if not str(candidate).startswith(str(_REPO_ROOT)):
+                continue
+            if candidate.suffix not in _SAFE_READ_EXTENSIONS:
+                continue
+            if not candidate.exists():
+                continue
+            try:
+                content = candidate.read_text(errors="replace")[:3000]
+                rel = str(candidate.relative_to(_REPO_ROOT))
+                sections.append(f"[{rel}  —  {len(content)} chars]\n{content}")
+                break
+            except Exception:
+                pass
+    if not sections:
+        return ""
+    return "=== Repo file contents (read-only context) ===\n\n" + "\n\n---\n\n".join(sections)
+
+
+def _tool_live_tasks(limit: int = 20) -> str:
+    """Return a formatted snapshot of the current task pipeline state."""
+    try:
+        tasks = list_tasks(limit=limit)
+    except Exception:
+        return ""
+    lines = []
+    for t in tasks:
+        result_len = len(t.get("result") or "")
+        preview = ((t.get("result") or "")[:100]).replace("\n", " ")
+        line = (
+            f"  {t['id']}  {(t.get('assigned_agent_id') or '?'):<24}"
+            f"  [{t.get('status','?'):<16}]  {result_len:>5}b"
+        )
+        if preview:
+            line += f'  "{preview}"'
+        lines.append(line)
+    header = f"=== Live task pipeline ({len(tasks)} tasks) ==="
+    return header + "\n" + "\n".join(lines)
+
+
+def _tool_fetch_task_results(prompt: str) -> str:
+    """Find task_* IDs mentioned in the prompt and inject their results."""
+    task_ids = re.findall(r'\btask_[a-f0-9]{12}\b', prompt)
+    if not task_ids:
+        return ""
+    sections = []
+    for tid in task_ids[:6]:
+        t = get_task(tid)
+        if not t:
+            continue
+        result = (t.get("result") or "").strip()
+        if not result:
+            continue
+        agent = t.get("assigned_agent_id", "?")
+        status = t.get("status", "?")
+        sections.append(f"[{tid}  /  {agent}  /  {status}]\n{result[:800]}")
+    if not sections:
+        return ""
+    return "=== Referenced task results ===\n\n" + "\n\n".join(sections)
+
+
+def _build_agent_tool_context(agent_id: str, prompt: str) -> str:
+    """Assemble live context to inject before the agent runs its task."""
+    parts: list[str] = []
+
+    if agent_id in _MONITOR_AGENTS:
+        live = _tool_live_tasks()
+        if live:
+            parts.append(live)
+
+    referenced = _tool_fetch_task_results(prompt)
+    if referenced:
+        parts.append(referenced)
+
+    if agent_id in _FILE_READER_AGENTS:
+        files = _tool_read_files(prompt)
+        if files:
+            parts.append(files)
+
+    return "\n\n" + "\n\n".join(parts) if parts else ""
+
+
 def _run_task(task_id: str) -> None:
     with _LOCK:
         task = _TASKS.get(task_id)
@@ -843,6 +964,9 @@ def _run_task(task_id: str) -> None:
                     f"You are the '{agent_id}' agent in Jarvis, a local-first macOS AI runtime. "
                     "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked."
                 )
+                tool_ctx = _build_agent_tool_context(agent_id, original_prompt)
+                if tool_ctx:
+                    agent_ctx = agent_ctx + tool_ctx
                 stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
                 chunks: list[str] = []
                 for index, chunk in enumerate(stream):
