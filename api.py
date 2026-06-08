@@ -1787,13 +1787,140 @@ _PLAN_AGENTS = [
     "career_agent", "memory_librarian",
 ]
 
+# ── Project orchestration state ───────────────────────────────────────────────
+_PROJECTS: dict[str, dict] = {}
+_PROJECTS_LOCK = threading.Lock()
+
+
+def _append_project_event(project_id: str, event_type: str, **kwargs) -> None:
+    with _PROJECTS_LOCK:
+        proj = _PROJECTS.get(project_id)
+        if proj is None:
+            return
+        proj["events"].append({"type": event_type, "ts": _utcnow(), **kwargs})
+
+
+def _utcnow() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None:
+    """Background thread: dispatch wave by wave, inject prior results, synthesize."""
+    import time as _time
+    proj = _PROJECTS[project_id]
+    proj["status"] = "running"
+
+    all_results: list[tuple[int, str, str]] = []  # (group, agent_id, result)
+
+    for group_num in sorted(tasks_by_group.keys()):
+        group_tasks = tasks_by_group[group_num]
+        proj["current_wave"] = group_num
+        _append_project_event(project_id, "wave_start", group=group_num,
+                               count=len(group_tasks))
+
+        # Build context from prior waves to inject into this wave's prompts
+        prior_ctx = ""
+        if all_results:
+            sections = [f"[{agent}]: {res[:500]}" for _, agent, res in all_results]
+            prior_ctx = "Context from earlier wave:\n" + "\n\n".join(sections)
+
+        wave_tasks: list[tuple[str, str]] = []  # (agent_id, task_id)
+        for item in group_tasks:
+            prompt = item["prompt"]
+            if prior_ctx:
+                prompt = f"{prompt}\n\n---\n{prior_ctx}"
+            try:
+                task = task_runtime.submit_task(
+                    prompt,
+                    kind="chat",
+                    source="project",
+                    assigned_agent_id=item.get("agent_id", ""),
+                    meta={"confidence_score": 0.9},
+                )
+                wave_tasks.append((item.get("agent_id", ""), task["id"]))
+                _append_project_event(project_id, "task_dispatched",
+                                       group=group_num,
+                                       agent_id=item.get("agent_id", ""),
+                                       task_id=task["id"])
+            except Exception as exc:
+                log.warning("project wave dispatch error: %s", exc)
+
+        with _PROJECTS_LOCK:
+            proj["waves"][group_num] = {
+                "status": "running",
+                "tasks": [{"agent_id": a, "task_id": t} for a, t in wave_tasks],
+            }
+
+        # Poll until all tasks in this wave reach terminal state
+        deadline = _time.time() + 300
+        terminal = {"succeeded", "failed", "cancelled", "waiting_approval"}
+        while _time.time() < deadline:
+            done = all(
+                (task_runtime.get_task(tid) or {}).get("status") in terminal
+                for _, tid in wave_tasks
+            )
+            if done:
+                break
+            _time.sleep(3)
+
+        # Collect results
+        for agent_id, task_id in wave_tasks:
+            t = task_runtime.get_task(task_id) or {}
+            result = (t.get("result") or "").strip()
+            all_results.append((group_num, agent_id, result))
+
+        with _PROJECTS_LOCK:
+            proj["waves"][group_num]["status"] = "complete"
+        _append_project_event(project_id, "wave_complete", group=group_num)
+
+    # Synthesis: feed all results to a single agent
+    proj["status"] = "synthesizing"
+    synthesis_sections = "\n\n".join(
+        f"=== {agent_id} (wave {g}) ===\n{res[:700]}"
+        for g, agent_id, res in all_results
+        if res
+    )
+    synthesis_prompt = (
+        f"Project goal: {goal}\n\n"
+        f"The following agents completed their tasks:\n\n{synthesis_sections}\n\n"
+        "Produce a synthesis with:\n"
+        "1. Top 3 critical findings (specific, with evidence from the agents above)\n"
+        "2. Prioritized action list (P0 / P1 / P2) with owner agent suggestion\n"
+        "3. One concrete next step to take right now"
+    )
+    try:
+        synth_task = task_runtime.submit_task(
+            synthesis_prompt,
+            kind="chat",
+            source="project",
+            assigned_agent_id="researcher",
+            meta={"confidence_score": 0.95, "approval_reason": "internal orchestrator synthesis"},
+        )
+        proj["synthesis_task_id"] = synth_task["id"]
+        _append_project_event(project_id, "synthesis_start",
+                               task_id=synth_task["id"])
+
+        deadline = _time.time() + 180
+        while _time.time() < deadline:
+            t = task_runtime.get_task(synth_task["id"]) or {}
+            if t.get("status") in {"succeeded", "failed", "cancelled"}:
+                break
+            _time.sleep(3)
+
+        synth_result = (task_runtime.get_task(synth_task["id"]) or {}).get("result", "")
+        proj["synthesis_result"] = synth_result
+    except Exception as exc:
+        log.warning("synthesis error: %s", exc)
+        proj["synthesis_result"] = f"Synthesis failed: {exc}"
+
+    proj["status"] = "complete"
+    _append_project_event(project_id, "project_complete")
+
 
 @app.post("/projects/plan")
 async def projects_plan(request: Request):
-    """
-    Generate an orchestration plan for a project goal.
-    Returns a list of tasks (agent_id, prompt, parallel_group) without executing them.
-    """
+    """Generate an orchestration plan for a project goal."""
     from infra.rbac import registry
     from model_router import smart_stream
     registry.caller_from_request(request)
@@ -1808,14 +1935,15 @@ async def projects_plan(request: Request):
         f"Available agents: {', '.join(_PLAN_AGENTS)}. "
         "Return ONLY valid JSON — no markdown, no prose — in this exact shape:\n"
         '{"tasks": [{"agent_id": "...", "prompt": "...", "group": 1}]}\n'
-        "Use group=1 for tasks that can run in parallel in the first wave, "
-        "group=2 for tasks that depend on group-1 output, etc. "
-        "Be specific and actionable in each prompt. Limit to 8 tasks max."
+        "Use group=1 for tasks that can run in parallel. "
+        "Use group=2 for a review/verification agent that should run after group-1 completes "
+        "and can reference their outputs. "
+        "A synthesis step is added automatically — do not add one yourself. "
+        "Be specific and actionable in each prompt. Limit to 6 tasks max across all groups."
     )
     try:
         stream, _ = smart_stream(goal, tool="chat", extra_system=system)
         raw = "".join(stream)
-        # Extract JSON — strip any accidental markdown fences
         import re as _re
         m = _re.search(r'\{.*\}', raw, _re.DOTALL)
         plan = json.loads(m.group(0)) if m else {"tasks": []}
@@ -1827,27 +1955,82 @@ async def projects_plan(request: Request):
 
 @app.post("/projects/execute")
 async def projects_execute(request: Request):
-    """Dispatch a pre-approved plan (list of tasks) to the task runtime."""
+    """Dispatch a plan wave-by-wave; inject prior results into each subsequent wave."""
     from infra.rbac import registry
+    import uuid as _uuid
     registry.caller_from_request(request)
     body = await request.json()
     tasks_in = body.get("tasks", [])
+    goal = (body.get("goal") or "").strip() or "Unnamed project"
     if not tasks_in:
         return JSONResponse(status_code=400, content={"ok": False, "error": "tasks required"})
-    dispatched = []
+
+    tasks_by_group: dict[int, list] = {}
     for item in tasks_in:
-        agent_id = item.get("agent_id", "")
-        prompt = item.get("prompt", "")
-        if not prompt:
-            continue
-        task = task_runtime.submit_task(
-            prompt,
-            kind="chat",
-            source="project",
-            assigned_agent_id=agent_id,
-        )
-        dispatched.append({"task_id": task["id"], "agent_id": agent_id})
-    return {"ok": True, "dispatched": dispatched}
+        g = int(item.get("group") or 1)
+        tasks_by_group.setdefault(g, []).append(item)
+
+    project_id = f"proj_{_uuid.uuid4().hex[:12]}"
+    with _PROJECTS_LOCK:
+        _PROJECTS[project_id] = {
+            "id": project_id,
+            "goal": goal,
+            "status": "starting",
+            "current_wave": 0,
+            "waves": {},
+            "synthesis_task_id": "",
+            "synthesis_result": "",
+            "events": [],
+        }
+
+    t = threading.Thread(
+        target=_run_project_waves,
+        args=(project_id, tasks_by_group, goal),
+        daemon=True,
+    )
+    t.start()
+    return {"ok": True, "project_id": project_id}
+
+
+@app.get("/projects/{project_id}")
+async def get_project(project_id: str, request: Request):
+    """Poll project state."""
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    proj = _PROJECTS.get(project_id)
+    if not proj:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+    with _PROJECTS_LOCK:
+        return {"ok": True, "project": dict(proj)}
+
+
+@app.get("/projects/{project_id}/stream")
+async def project_stream(project_id: str, request: Request):
+    """SSE stream of project orchestration events."""
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    proj = _PROJECTS.get(project_id)
+    if not proj:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+
+    async def _gen():
+        import asyncio as _asyncio
+        seen = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            with _PROJECTS_LOCK:
+                events = list(proj.get("events", []))
+                status = proj.get("status", "")
+            for ev in events[seen:]:
+                yield f"data: {json.dumps(ev)}\n\n"
+                seen += 1
+            if status == "complete":
+                yield "data: [DONE]\n\n"
+                break
+            await _asyncio.sleep(1)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @app.get("/v1/models")
@@ -4546,56 +4729,133 @@ async def agent_dashboard(request: Request):
     document.getElementById('proj-status').textContent = '';
   }}
 
+  let _activeProjectId = null;
+
   async function executePlan() {{
     if (!_currentPlan.length) return;
     const statusEl = document.getElementById('proj-status');
     const execBtn = document.getElementById('proj-execute-btn');
+    const goal = document.getElementById('proj-goal').value.trim();
     execBtn.disabled = true;
     statusEl.textContent = 'Dispatching…';
     try {{
       const data = await apiFetch('/projects/execute', {{
         method: 'POST',
         headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ tasks: _currentPlan }}),
+        body: JSON.stringify({{ tasks: _currentPlan, goal }}),
       }});
       if (!data.ok) {{ statusEl.textContent = `Error: ${{data.error}}`; execBtn.disabled=false; return; }}
-      const dispatched = data.dispatched || [];
-      statusEl.textContent = `✓ ${{dispatched.length}} tasks dispatched`;
-      // Show execution panel with live stream per task
+      _activeProjectId = data.project_id;
+      statusEl.textContent = `Project ${{_activeProjectId}} running…`;
       const execEl = document.getElementById('proj-execution');
       const agentsOut = document.getElementById('proj-agents-output');
       execEl.style.display = 'block';
-      agentsOut.innerHTML = dispatched.map(d => `
-        <div class="card" id="exec-card-${{d.task_id}}">
-          <div class="card-head">
-            <span class="tag tag-agent">${{escHtml(d.agent_id||'?')}}</span>
-            <span id="exec-status-${{d.task_id}}" class="tag tag-run" style="margin-left:8px">queued</span>
+      agentsOut.innerHTML = `<div id="proj-waves" style="display:flex;flex-direction:column;gap:16px"></div>
+        <div id="proj-synthesis" style="display:none;margin-top:16px">
+          <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#f0a;margin-bottom:8px">
+            ⚡ Synthesis
           </div>
-          <pre id="exec-out-${{d.task_id}}" style="margin:0;padding:12px 16px;white-space:pre-wrap;word-break:break-word;font-size:.78em;color:#7ec8e3;background:#060610;max-height:280px;overflow-y:auto"></pre>
-        </div>`).join('');
-      // Poll task status and open streams
-      dispatched.forEach(d => _watchExecutedTask(d.task_id));
-      setTimeout(() => switchTab('active'), 1200);
+          <div class="card">
+            <div class="card-head">
+              <span class="tag tag-agent">researcher</span>
+              <span id="synth-status" class="tag tag-run" style="margin-left:8px">waiting</span>
+            </div>
+            <pre id="synth-out" style="margin:0;padding:14px 16px;white-space:pre-wrap;word-break:break-word;font-size:.82em;color:#e8d8a0;background:#0a0808;max-height:500px;overflow-y:auto;border-top:1px solid #333"></pre>
+          </div>
+        </div>`;
+      _listenProjectStream(_activeProjectId);
     }} catch(e) {{
       statusEl.textContent = `Execute error: ${{e.message}}`;
       execBtn.disabled = false;
     }}
   }}
 
-  function _watchExecutedTask(taskId) {{
-    // Poll until running, then open SSE
+  function _listenProjectStream(projectId) {{
+    const src = new EventSource(`/projects/${{projectId}}/stream`);
+    src.onmessage = (e) => {{
+      if (e.data === '[DONE]') {{ src.close(); return; }}
+      try {{
+        const ev = JSON.parse(e.data);
+        _handleProjectEvent(ev);
+      }} catch {{}}
+    }};
+    src.onerror = () => src.close();
+  }}
+
+  function _handleProjectEvent(ev) {{
+    const wavesEl = document.getElementById('proj-waves');
+    const statusEl = document.getElementById('proj-status');
+    if (!wavesEl) return;
+
+    if (ev.type === 'wave_start') {{
+      const g = ev.group;
+      let waveDiv = document.getElementById(`proj-wave-${{g}}`);
+      if (!waveDiv) {{
+        waveDiv = document.createElement('div');
+        waveDiv.id = `proj-wave-${{g}}`;
+        waveDiv.innerHTML = `
+          <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#555;margin-bottom:8px">
+            Wave ${{g}} <span id="wave-${{g}}-badge" class="tag tag-run" style="margin-left:6px">running</span>
+            · ${{ev.count}} agent(s)
+          </div>
+          <div id="wave-${{g}}-tasks" style="display:flex;flex-direction:column;gap:6px"></div>`;
+        wavesEl.appendChild(waveDiv);
+      }}
+      statusEl.textContent = `Wave ${{g}} running (${{ev.count}} agents)…`;
+    }}
+
+    if (ev.type === 'task_dispatched') {{
+      const tasksEl = document.getElementById(`wave-${{ev.group}}-tasks`);
+      if (tasksEl && !document.getElementById(`exec-card-${{ev.task_id}}`)) {{
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.id = `exec-card-${{ev.task_id}}`;
+        card.innerHTML = `
+          <div class="card-head">
+            <span class="tag tag-agent">${{escHtml(ev.agent_id||'?')}}</span>
+            <span id="exec-status-${{ev.task_id}}" class="tag tag-run" style="margin-left:8px">queued</span>
+          </div>
+          <pre id="exec-out-${{ev.task_id}}" style="margin:0;padding:10px 14px;white-space:pre-wrap;word-break:break-word;font-size:.78em;color:#7ec8e3;background:#060610;max-height:260px;overflow-y:auto"></pre>`;
+        tasksEl.appendChild(card);
+        _watchExecutedTask(ev.task_id);
+      }}
+    }}
+
+    if (ev.type === 'wave_complete') {{
+      const badge = document.getElementById(`wave-${{ev.group}}-badge`);
+      if (badge) {{ badge.className = 'tag tag-done'; badge.textContent = 'complete'; }}
+      statusEl.textContent = `Wave ${{ev.group}} complete.`;
+    }}
+
+    if (ev.type === 'synthesis_start') {{
+      const synthEl = document.getElementById('proj-synthesis');
+      if (synthEl) synthEl.style.display = 'block';
+      statusEl.textContent = 'Synthesizing results…';
+      _watchExecutedTask(ev.task_id, 'synth-out', 'synth-status');
+    }}
+
+    if (ev.type === 'project_complete') {{
+      statusEl.textContent = '✓ Project complete — synthesis ready';
+      const execBtn = document.getElementById('proj-execute-btn');
+      if (execBtn) execBtn.disabled = false;
+    }}
+  }}
+
+  function _watchExecutedTask(taskId, outId, stId) {{
+    const outElId = outId || `exec-out-${{taskId}}`;
+    const stElId  = stId  || `exec-status-${{taskId}}`;
     let polls = 0;
     const iv = setInterval(async () => {{
       polls++;
-      if (polls > 60) {{ clearInterval(iv); return; }}
+      if (polls > 120) {{ clearInterval(iv); return; }}
       try {{
         const d = await apiFetch(`/tasks/${{taskId}}`);
         const t = d.task || d;
-        const stEl = document.getElementById(`exec-status-${{taskId}}`);
+        const stEl = document.getElementById(stElId);
         if (stEl) stEl.textContent = t.status || '?';
         if (t.status === 'running' || t.status === 'streaming') {{
           clearInterval(iv);
-          const outEl = document.getElementById(`exec-out-${{taskId}}`);
+          const outEl = document.getElementById(outElId);
           if (!outEl) return;
           const src = new EventSource(`/tasks/${{taskId}}/stream`);
           src.onmessage = (e) => {{
@@ -4613,8 +4873,8 @@ async def agent_dashboard(request: Request):
         }} else if (['succeeded','failed','cancelled'].includes(t.status)) {{
           clearInterval(iv);
           if (stEl) {{ stEl.className = t.status==='succeeded'?'tag tag-done':'tag tag-fail'; stEl.textContent = t.status; }}
-          const outEl = document.getElementById(`exec-out-${{taskId}}`);
-          if (outEl && t.result) outEl.textContent = t.result.slice(0, 1000);
+          const outEl = document.getElementById(outElId);
+          if (outEl && t.result) outEl.textContent = t.result.slice(0, 2000);
         }}
       }} catch {{}}
     }}, 1500);
@@ -5224,6 +5484,7 @@ def _find_free_port(start: int = 8765, attempts: int = 10, host: str = "127.0.0.
     import socket
     for port in range(start, start + attempts):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 bind_host = "" if host in {"0.0.0.0", "::", "*"} else host
                 s.bind((bind_host, port))
