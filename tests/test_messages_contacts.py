@@ -8,6 +8,17 @@ import messages
 
 
 class MessagesContactTests(unittest.TestCase):
+    def setUp(self):
+        self._alias_tmp = TemporaryDirectory()
+        self.addCleanup(self._alias_tmp.cleanup)
+        self._alias_patch = patch.object(
+            messages,
+            "_ALIASES_PATH",
+            Path(self._alias_tmp.name) / "contact_aliases.json",
+        )
+        self._alias_patch.start()
+        self.addCleanup(self._alias_patch.stop)
+
     def tearDown(self):
         messages._last_contact_choices = []
         messages._last_fuzzy_matches = []

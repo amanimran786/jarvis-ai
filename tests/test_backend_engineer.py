@@ -18,6 +18,10 @@ from qdrant_client.models import (
 
 # ── Mock/Stub external dependencies before import ─────────────────────────────
 
+# Save real config before mocking so it can be restored after the module-level
+# imports complete (prevents contaminating test files collected after this one).
+import config as _real_config  # noqa: E402
+
 # Stub config
 mock_config = MagicMock()
 mock_config.LOCAL_DEFAULT = "glm-4.7-flash"
@@ -44,9 +48,21 @@ mock_models.MatchValue = MatchValue
 sys.modules["qdrant_client"] = mock_qdrant
 sys.modules["qdrant_client.models"] = mock_models
 
+# Save real brain_ollama before mocking (conftest pre-imports it; we restore
+# it after module-level imports so later test files see the real module).
+_real_brain_ollama = sys.modules.get("brains.brain_ollama")
+
 # Stub brains.brain_ollama
 mock_brain = MagicMock()
 sys.modules["brains.brain_ollama"] = mock_brain
+
+# Save real top-level tools module before deleting — must restore after reimport
+# so modules that already did `import tools` (e.g. router.py) stay consistent
+# with sys.modules["tools"] for patch targets.  The submodules (tools.fs_tools,
+# tools.shell_tools) are intentionally left as the reimported objects so that
+# patch("tools.fs_tools.WORKSPACE_DIR", ...) targets the same module that
+# write_file/run_tests use internally.
+_real_tools = sys.modules.get("tools")
 
 # Clean up sys.modules to ensure a fresh import of everything
 for mod in [
@@ -65,6 +81,52 @@ from agents import backend_worker
 from infra.memory import store
 from tools.fs_tools import WORKSPACE_DIR, read_file, write_file
 from tools.shell_tools import run_tests
+
+# Restore real config and brain_ollama now that module-level imports are done.
+# Subsequent test files collected by pytest will see the real modules, not mocks.
+sys.modules["config"] = _real_config
+if _real_brain_ollama is not None:
+    sys.modules["brains.brain_ollama"] = _real_brain_ollama
+else:
+    sys.modules.pop("brains.brain_ollama", None)
+
+# Restore real top-level tools module so patch("tools.web_search") in later
+# test files targets the same object router.py holds.
+# Submodule entries stay as the reimported versions — backend_engineer tests
+# need patch("tools.fs_tools.WORKSPACE_DIR") to hit the same module that
+# write_file/run_tests use internally.
+if _real_tools is not None:
+    sys.modules["tools"] = _real_tools
+else:
+    sys.modules.pop("tools", None)
+
+# Track originals (real modules) for fixture teardown
+_orig_config = _real_config
+_orig_brain  = _real_brain_ollama
+_orig_qdrant = sys.modules.get("qdrant_client")
+_orig_models = sys.modules.get("qdrant_client.models")
+_orig_tools  = _real_tools
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubs():
+    """Keep stubs alive during each test; restore originals on teardown."""
+    sys.modules["config"] = mock_config
+    sys.modules["brains.brain_ollama"] = mock_brain
+    sys.modules["qdrant_client"] = mock_qdrant
+    sys.modules["qdrant_client.models"] = mock_models
+    yield
+    for key, orig in [
+        ("config", _orig_config),
+        ("brains.brain_ollama", _orig_brain),
+        ("qdrant_client", _orig_qdrant),
+        ("qdrant_client.models", _orig_models),
+        ("tools", _orig_tools),
+    ]:
+        if orig is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = orig
 
 
 # ── Filesystem & Shell Tool Tests ─────────────────────────────────────────────

@@ -6,19 +6,32 @@ and jarvis_agents.focus_advisor().
 import sys
 import os
 import unittest
+import pytest
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Lightweight stubs for PyQt6-dependent modules so imports don't fail in CI
+# PyQt6 stubs — safe to set permanently; the real PyQt6 is installed locally.
+# These only trigger when PyQt6 hasn't been imported yet (e.g. pure-CI runs).
 for _mod in ("PyQt6", "PyQt6.QtCore", "PyQt6.QtWidgets", "PyQt6.QtGui"):
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
 
-if "model_router" not in sys.modules:
-    _mr = MagicMock()
-    _mr.smart_stream.side_effect = ImportError("no model_router in CI")
-    sys.modules["model_router"] = _mr
+# model_router stub — installed per-test via autouse fixture so it doesn't
+# contaminate test_jarvis_regression_suite.py (which needs the real module).
+_mock_mr = MagicMock()
+_mock_mr.smart_stream.side_effect = ImportError("no model_router in CI")
+
+
+@pytest.fixture(autouse=True)
+def _fastpath_stubs():
+    saved = sys.modules.get("model_router")
+    sys.modules["model_router"] = _mock_mr
+    yield
+    if saved is None:
+        sys.modules.pop("model_router", None)
+    else:
+        sys.modules["model_router"] = saved
 
 
 class FocusAdvisorTests(unittest.TestCase):

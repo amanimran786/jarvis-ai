@@ -121,6 +121,27 @@ def cmd_start(task_name: str, prompt: str) -> None:
     print(f"[ade] Status:  ade list")
 
 
+def _cpu_for_pid(pid: int | None) -> str:
+    if pid is None:
+        return "    -"
+    try:
+        import psutil
+        p = psutil.Process(pid)
+        return f"{p.cpu_percent(interval=0.1):>4.1f}%"
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "%cpu="],
+            capture_output=True, text=True,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            return f"{r.stdout.strip():>5}"
+    except Exception:
+        pass
+    return "    -"
+
+
 def cmd_list() -> None:
     repo_root = _repo_root()
     all_state = st.load(repo_root)
@@ -130,7 +151,7 @@ def cmd_list() -> None:
         print("[ade] No active tasks.")
         return
 
-    header = f"{'TASK':<25}  {'STATUS':<12}  {'SESSION':<22}  {'RETRIES':>7}  PROMPT"
+    header = f"{'TASK':<25}  {'STATUS':<12}  {'SESSION':<22}  {'CPU':>6}  {'RETRIES':>7}  PROMPT"
     print(header)
     print("-" * len(header))
 
@@ -141,7 +162,9 @@ def cmd_list() -> None:
         retries = entry.get("retries", 0)
         prompt = (entry.get("prompt", "") or "")[:40]
         alive = "●" if session_name in active_sessions else "○"
-        print(f"{task:<25}  {status:<12}  {alive} {session_name:<20}  {retries:>7}  {prompt}")
+        pid = sess.session_pid(session_name) if session_name in active_sessions else None
+        cpu = _cpu_for_pid(pid) if pid else "     -"
+        print(f"{task:<25}  {status:<12}  {alive} {session_name:<20}  {cpu}  {retries:>7}  {prompt}")
 
 
 def cmd_watch(task_name: str) -> None:
@@ -216,6 +239,57 @@ def cmd_sync(task_name: str) -> None:
         )
 
 
+def cmd_approvals(approve_id: str | None = None, reject_id: str | None = None, reason: str = "") -> None:
+    """
+    List pending human-approval items, or approve/reject one by stream_id.
+
+    ade approvals                   — list all pending
+    ade approvals --approve <id>    — approve item
+    ade approvals --reject  <id>    — reject item
+    """
+    import httpx as _httpx
+    event_bus = os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
+
+    if approve_id or reject_id:
+        stream_id = approve_id or reject_id
+        decision = "approve" if approve_id else "reject"
+        try:
+            resp = _httpx.post(
+                f"{event_bus}/approvals/{stream_id}",
+                json={"decision": decision, "reason": reason},
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                print(f"[ade] {decision.upper()}: task_id={data.get('task_id')}  stream_id={stream_id}")
+            else:
+                print(f"[ade] ERROR {resp.status_code}: {resp.text}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[ade] Could not reach event bus: {exc}", file=sys.stderr)
+        return
+
+    # List pending
+    try:
+        resp = _httpx.get(f"{event_bus}/approvals/pending", timeout=5.0)
+        items = resp.json()
+    except Exception as exc:
+        print(f"[ade] Could not reach event bus ({event_bus}): {exc}", file=sys.stderr)
+        return
+
+    if not items:
+        print("[ade] No pending approvals.")
+        return
+
+    print(f"{'STREAM_ID':<20}  {'TASK_ID':<38}  OUTPUT EXCERPT")
+    print("-" * 90)
+    for item in items:
+        sid = item.get("stream_id", "?")[:20]
+        tid = item.get("task_id", "?")[:38]
+        out = (item.get("output", "") or "")[:60].replace("\n", " ")
+        print(f"{sid:<20}  {tid:<38}  {out}")
+    print(f"\n{len(items)} pending.  Approve: ade approvals --approve <stream_id>")
+
+
 def cmd_stop(task_name: str) -> None:
     slug = _slug(task_name)
     repo_root = _repo_root()
@@ -265,6 +339,11 @@ def main(argv: list[str] | None = None) -> None:
     p_stop = sub.add_parser("stop", help="Kill session and clean up worktree")
     p_stop.add_argument("task_name")
 
+    p_approvals = sub.add_parser("approvals", help="List or act on pending human-approval items")
+    p_approvals.add_argument("--approve", metavar="STREAM_ID", default=None)
+    p_approvals.add_argument("--reject",  metavar="STREAM_ID", default=None)
+    p_approvals.add_argument("--reason", default="")
+
     args = parser.parse_args(argv)
 
     if args.command == "start":
@@ -278,6 +357,12 @@ def main(argv: list[str] | None = None) -> None:
         cmd_sync(args.task_name)
     elif args.command == "stop":
         cmd_stop(args.task_name)
+    elif args.command == "approvals":
+        cmd_approvals(
+            approve_id=args.approve,
+            reject_id=args.reject,
+            reason=args.reason,
+        )
     else:
         parser.print_help()
         sys.exit(1)

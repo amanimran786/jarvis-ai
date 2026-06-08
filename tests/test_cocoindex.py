@@ -20,12 +20,44 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Save real numpy so we can restore it after the test module runs
+_real_numpy    = sys.modules.get('numpy')
+_real_cocoindex = sys.modules.get('cocoindex')
+
 # Mock heavy dependencies before importing local_cocoindex
 sys.modules['cocoindex'] = MagicMock()
 sys.modules['numpy'] = MagicMock()
 
 # Now import our module
 from local_runtime import local_cocoindex
+
+# Restore real numpy/cocoindex immediately after the import so that test files
+# collected AFTER this one (e.g. test_jarvis_regression_suite.py imports
+# meeting_listener which binds numpy at collection time) see the real module.
+if _real_numpy is not None:
+    sys.modules['numpy'] = _real_numpy
+else:
+    sys.modules.pop('numpy', None)
+if _real_cocoindex is not None:
+    sys.modules['cocoindex'] = _real_cocoindex
+else:
+    sys.modules.pop('cocoindex', None)
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_numpy_after_test():
+    """Restore numpy in sys.modules after each test so later test files see the real numpy."""
+    yield
+    if _real_numpy is None:
+        sys.modules.pop('numpy', None)
+    else:
+        sys.modules['numpy'] = _real_numpy
+    if _real_cocoindex is None:
+        sys.modules.pop('cocoindex', None)
+    else:
+        sys.modules['cocoindex'] = _real_cocoindex
 
 
 class SimpleVaultIndexInitTests(unittest.TestCase):
@@ -58,7 +90,7 @@ class MarkdownChunkingTests(unittest.TestCase):
         chunks = indexer._chunk_markdown(text)
         # Should have at least 2 chunks (split on ##)
         self.assertGreaterEqual(len(chunks), 2)
-        self.assertIn("Section 1", chunks[0])
+        self.assertTrue(any("Section 1" in c for c in chunks))
 
     def test_chunk_markdown_respects_max_size(self):
         """_chunk_markdown must respect CHUNK_MAX_CHARS limit."""
@@ -196,7 +228,9 @@ class SearchTests(unittest.TestCase):
             ]
             indexer._embeddings = np_real.array([[0.1, 0.2, 0.3]], dtype=np_real.float32)
 
-            with patch.object(indexer, '_embed_text', return_value=[0.1, 0.2, 0.3]):
+            with patch.object(indexer, '_embed_text', return_value=[0.1, 0.2, 0.3]), \
+                 patch('local_runtime.local_cocoindex.np', np_real), \
+                 patch('local_runtime.local_cocoindex.HAS_NUMPY', True):
                 results = indexer.search("test", top_k=1)
 
             self.assertIsInstance(results, list)

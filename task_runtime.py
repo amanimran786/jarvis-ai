@@ -10,7 +10,7 @@ from typing import Any
 
 import conversation_context as ctx
 import evals
-from router import route_stream
+from model_router import smart_stream
 import task_persistence
 import usage_tracker
 import worktree_manager
@@ -279,6 +279,30 @@ def _default_agents() -> list[dict[str, Any]]:
             "last_error": "",
             "meta": {"source": "hardware", "mode": "daemon"},
         },
+        {
+            "id": "pipeline-monitor",
+            "label": "Pipeline Monitor",
+            "kind": "monitor",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["task_health", "stall_detection", "status_tracking", "pipeline_alerts"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "monitor"},
+        },
+        {
+            "id": "output-quality-checker",
+            "label": "Output Quality Checker",
+            "kind": "monitor",
+            "owner": "jarvis",
+            "status": "idle",
+            "capabilities": ["output_validation", "code_review", "garbage_detection", "quality_scoring"],
+            "current_task_id": "",
+            "last_heartbeat_at": _now(),
+            "last_error": "",
+            "meta": {"source": "task_runtime", "mode": "monitor"},
+        },
     ]
 
 
@@ -375,8 +399,13 @@ def _touch_agent(agent_id: str, *, status: str | None = None, current_task_id: s
 
 
 def _choose_agent(kind: str, requested_agent_id: str = "") -> str:
-    if requested_agent_id and requested_agent_id in _AGENTS:
-        return requested_agent_id
+    if requested_agent_id:
+        # Try exact match first, then normalize underscore↔hyphen (AGENT_ROSTER uses _ , _AGENTS uses -)
+        if requested_agent_id in _AGENTS:
+            return requested_agent_id
+        normalized_id = requested_agent_id.replace("_", "-")
+        if normalized_id in _AGENTS:
+            return normalized_id
     normalized = (kind or "chat").strip().lower()
     if normalized in {"code", "coding", "fix", "implementation", "backend", "api", "runtime"}:
         return "backend-engineer"
@@ -743,7 +772,11 @@ def _run_task(task_id: str) -> None:
                 source = task["source"]
 
             start_seq = usage_tracker.current_seq()
-            stream, model = route_stream(prompt)
+            agent_ctx = (
+                f"You are the '{agent_id}' agent in Jarvis, a local-first macOS AI runtime. "
+                "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked."
+            )
+            stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
             chunks: list[str] = []
             for index, chunk in enumerate(stream):
                 with _LOCK:
@@ -936,6 +969,25 @@ def cancel_task(task_id: str) -> dict[str, Any] | None:
             if agent_id:
                 _touch_agent(agent_id, status="idle", current_task_id="")
         return _copy(task)
+
+
+def purge_terminal_tasks() -> int:
+    """Remove all succeeded/failed/cancelled tasks from memory and persistence. Returns count removed."""
+    bootstrap()
+    with _LOCK:
+        to_remove = [
+            tid for tid, task in _TASKS.items()
+            if task.get("status") in _TERMINAL_TASK_STATUSES
+        ]
+        for tid in to_remove:
+            _TASKS.pop(tid, None)
+            _TASK_EVENTS.pop(tid, None)
+        try:
+            import task_persistence
+            task_persistence.save_snapshot({"tasks": list(_TASKS.values()), "events": dict(_TASK_EVENTS)})
+        except Exception:
+            pass
+    return len(to_remove)
 
 
 def wait_for_task(task_id: str, timeout: float = 5.0) -> dict[str, Any] | None:

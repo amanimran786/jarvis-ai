@@ -132,7 +132,10 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── First specialist worker lane ─────────────────────────────────────────
+  # ─── Specialist agent worker lanes ───────────────────────────────────────
+  # Each worker polls its own inbox stream and processes one task at a time.
+  # All workers share the same Docker image; only the --agent flag differs.
+
   backend_worker:
     build:
       context: .
@@ -145,6 +148,102 @@ services:
       - QDRANT_PORT=6333
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
     command: ["python", "-m", "agents.backend_worker", "--agent", "backend_engineer"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  frontend_designer_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-frontend-designer-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "frontend_designer"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  ux_researcher_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-ux-researcher-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "ux_researcher"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  qa_tester_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-qa-tester-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "qa_tester"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  devops_release_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-devops-release-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "devops_release"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  memory_librarian_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-memory-librarian-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "memory_librarian"]
+    depends_on:
+      event_bus:
+        condition: service_healthy
+
+  researcher_worker:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.api
+    container_name: jarvis-researcher-worker
+    restart: unless-stopped
+    environment:
+      - EVENT_BUS_URL=http://event_bus:8766
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    command: ["python", "-m", "agents.agent_worker", "--agent", "researcher"]
     depends_on:
       event_bus:
         condition: service_healthy

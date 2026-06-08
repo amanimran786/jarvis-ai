@@ -509,12 +509,16 @@ class OvernightTrainer:
 
         Samples most-recent `limit` interactions after filtering.
         """
-        verbatim_path = runtime_state.writable_data_path(
-            "memory",
-            "conversations",
-            "verbatim.jsonl",
-            seed_from=REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl",
-        )
+        repo_verbatim = REPO_ROOT / "memory" / "conversations" / "verbatim.jsonl"
+        if runtime_state.is_frozen_app():
+            verbatim_path = runtime_state.writable_data_path(
+                "memory",
+                "conversations",
+                "verbatim.jsonl",
+                seed_from=repo_verbatim,
+            )
+        else:
+            verbatim_path = repo_verbatim
         if not verbatim_path.exists():
             return []
 
@@ -797,13 +801,17 @@ class OvernightTrainer:
 
         convos = memory.get("conversation_history", [])
         examples = []
-        for convo in convos:
+        for idx, convo in enumerate(convos):
             summary = (convo.get("summary") or "").strip()
             if len(summary) > 30:
+                date = str(convo.get("date") or f"entry {idx + 1}").strip()
                 examples.append({
                     "messages": [
                         {"role": "system", "content": sp},
-                        {"role": "user", "content": f"What happened in our recent conversation?"},
+                        {
+                            "role": "user",
+                            "content": f"What happened in recent conversation {idx + 1} from {date}?",
+                        },
                         {"role": "assistant", "content": summary},
                     ]
                 })

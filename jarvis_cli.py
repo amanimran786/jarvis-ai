@@ -137,7 +137,7 @@ _SLASH_COMMANDS = (
 
 
 def _project_venv_python() -> str:
-    return os.path.join(os.path.dirname(__file__), "venv", "bin", "python")
+    return os.path.normpath(os.path.join(os.path.dirname(__file__), "venv", "bin", "python"))
 
 
 def _ensure_supported_cli_runtime() -> None:

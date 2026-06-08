@@ -33,6 +33,7 @@ _SUPPORTED_AGENTS = {
     "qa_tester",
     "devops_release",
     "memory_librarian",
+    "researcher",
 }
 
 

@@ -1371,6 +1371,10 @@ class InterviewProfileTests(unittest.TestCase):
 
 class RouterTests(unittest.TestCase):
     def setUp(self):
+        self._saved_mode = model_router.get_mode()
+        # Force the default mode so tests aren't affected by mode leakage from
+        # other test classes that change mode without restoring it.
+        model_router.set_mode(config.DEFAULT_MODE)
         router._clear_pending_recipient()
         router._clear_pending_message_draft()
         router._clear_pending_email_draft()
@@ -1378,6 +1382,9 @@ class RouterTests(unittest.TestCase):
         router._last_msg_recipient = ""
         router._last_message_send_result = None
         router._fuzzy_contact_suggestions.clear()
+
+    def tearDown(self):
+        model_router.set_mode(self._saved_mode)
 
     def test_open_source_mode_switch_fast_path(self):
         previous = model_router.get_mode()
@@ -3271,6 +3278,17 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("chat-router", agent_ids)
         self.assertIn("meeting-assist", agent_ids)
         self.assertIn("skill-builder", agent_ids)
+
+    def test_agent_run_accepts_task_runtime_hyphenated_agent_ids(self):
+        api._API_TOKEN = ""
+        with patch("agent_dispatch.dispatch", return_value=iter(["ok"])) as dispatch_mock:
+            response = self.client.post(
+                "/agents/backend-engineer/run",
+                json={"task": "check auth route", "context": "unit test"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("ok", response.text)
+        dispatch_mock.assert_called_once_with("backend_engineer", "check auth route", "unit test")
 
     def test_tasks_endpoint_runs_managed_task_and_records_workspace(self):
         task_runtime.reset_for_tests()
@@ -5621,6 +5639,13 @@ class InboxReadFastPathTests(unittest.TestCase):
 
 class WebSearchSummaryTests(unittest.TestCase):
     """Fast-path routing and result integrity for web search queries."""
+
+    def setUp(self):
+        self._saved_mode = model_router.get_mode()
+        model_router.set_mode(config.DEFAULT_MODE)
+
+    def tearDown(self):
+        model_router.set_mode(self._saved_mode)
 
     def _consume(self, stream) -> str:
         return "".join(stream)

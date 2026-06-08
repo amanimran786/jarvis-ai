@@ -10,10 +10,18 @@ attributes (store / mem0_layer / semantic_memory / review) inside the
 agents.memory_librarian namespace.
 """
 import sys
+import importlib
 from dataclasses import is_dataclass
 from unittest.mock import MagicMock, patch
 
 # ── Mock/Stub external dependencies before import ─────────────────────────────
+
+_REAL_MODULES = {
+    "config": importlib.import_module("config"),
+    "qdrant_client": sys.modules.get("qdrant_client"),
+    "qdrant_client.models": sys.modules.get("qdrant_client.models"),
+    "brains.brain_ollama": sys.modules.get("brains.brain_ollama"),
+}
 
 # Config stub
 _mock_config = MagicMock()
@@ -25,16 +33,18 @@ _mock_config.AGENT_ROSTER = {
         "model": "glm-4.7-flash",
     }
 }
-sys.modules["config"] = _mock_config
+# Track originals for post-test restoration
+_STUB_MODS = ["config", "qdrant_client", "qdrant_client.models", "brains.brain_ollama"]
 
 # Qdrant stub
 _mock_qdrant = MagicMock()
 _mock_models = MagicMock()
+_mock_brain = MagicMock()
+
+# Install stubs needed for the module-level imports below
+sys.modules["config"] = _mock_config
 sys.modules["qdrant_client"] = _mock_qdrant
 sys.modules["qdrant_client.models"] = _mock_models
-
-# brain_ollama stub
-_mock_brain = MagicMock()
 sys.modules["brains.brain_ollama"] = _mock_brain
 
 # Pre-stash the backends we expect memory_librarian to import lazily. The
@@ -54,6 +64,21 @@ sys.modules.pop("agents.memory_librarian", None)
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def _restore_module_stubs():
+    """Keep stubs alive during each test; restore originals afterwards."""
+    sys.modules["config"] = _mock_config
+    sys.modules["qdrant_client"] = _mock_qdrant
+    sys.modules["qdrant_client.models"] = _mock_models
+    sys.modules["brains.brain_ollama"] = _mock_brain
+    yield
+    for k in _STUB_MODS:
+        orig = _REAL_MODULES.get(k)
+        if orig is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = orig
+
 from agents.memory_librarian import (
     MemoryHit,
     CurationReport,
@@ -65,6 +90,12 @@ from agents.memory_librarian import (
     _normalize_content,
     _VALID_LAYERS,
 )
+
+for _name, _module in _REAL_MODULES.items():
+    if _module is None:
+        sys.modules.pop(_name, None)
+    else:
+        sys.modules[_name] = _module
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────

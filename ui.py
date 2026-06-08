@@ -16,7 +16,7 @@ import self_improve as si
 from desktop import hotkeys
 import meeting_listener
 import api
-import agents
+import _bg_agents as agents
 import evals
 import conversation_context as ctx
 from PyQt6.QtWidgets import (
@@ -2059,6 +2059,214 @@ class MessageBubble(QFrame):
         self._msg_label.setText(text)
 
 
+# ── Approval Panel ────────────────────────────────────────────────────────────
+
+class ApprovalPanel(QWidget):
+    """Poll /approvals/pending every 10 s and present approve/reject cards."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._event_bus = os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
+        self._build_ui()
+        self._poll_timer = QTimer(self)
+        _connect_timer_timeout(self._poll_timer, "ApprovalPanel._poll", self._poll)
+        self._poll_timer.start(10_000)
+        self._poll()
+
+    # ── Layout ────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        self.setAutoFillBackground(True)
+        p = self.palette()
+        p.setColor(QPalette.ColorRole.Window, QColor("#010C14"))
+        self.setPalette(p)
+        self.setStyleSheet(
+            _glass_panel_css(
+                border="#B14200",
+                fill="rgba(30, 10, 0, 230)",
+                radius=0,
+            )
+            + "border-top: 1px solid rgba(255, 100, 0, 0.45);"
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(14, 8, 14, 10)
+        outer.setSpacing(6)
+
+        hdr = QHBoxLayout()
+        lbl = QLabel("⚠  PENDING APPROVALS")
+        lbl.setFont(_font(8, QFont.Weight.Bold))
+        lbl.setStyleSheet("color: #FF8C00; background: transparent; letter-spacing: 2px;")
+        self._status_lbl = QLabel("")
+        self._status_lbl.setFont(_font(8))
+        self._status_lbl.setStyleSheet("color: #888888; background: transparent;")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+        hdr.addWidget(self._status_lbl)
+        outer.addLayout(hdr)
+
+        self._cards_area = QWidget()
+        self._cards_layout = QVBoxLayout(self._cards_area)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
+        self._cards_layout.setSpacing(6)
+        outer.addWidget(self._cards_area)
+
+        self.hide()
+
+    # ── Polling ───────────────────────────────────────────────────────────────
+
+    def _poll(self):
+        import urllib.request
+        import urllib.error
+        try:
+            url = f"{self._event_bus}/approvals/pending"
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                items = json.loads(resp.read().decode())
+        except (urllib.error.URLError, OSError):
+            self._status_lbl.setText("Agent bus offline")
+            return
+        except Exception:
+            self._status_lbl.setText("Poll error")
+            return
+
+        self._status_lbl.setText("")
+        self._render_items(items)
+
+    def _render_items(self, items: list):
+        # Clear old cards
+        while self._cards_layout.count():
+            w = self._cards_layout.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+
+        if not items:
+            self.hide()
+            return
+
+        if not self.isVisible():
+            print("\a", end="", flush=True)  # beep
+            self.show()
+            self.raise_()
+            if self.window():
+                self.window().raise_()
+
+        for item in items:
+            self._cards_layout.addWidget(self._make_card(item))
+
+    def _make_card(self, item: dict) -> QWidget:
+        stream_id = item.get("stream_id", "")
+        task_id   = (item.get("task_id", "") or "")[:12]
+        reason    = item.get("reason", "") or "(no reason)"
+        output    = (item.get("output", "") or "")[:200]
+
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background: rgba(40, 15, 0, 200);
+                border: 1px solid rgba(255, 100, 0, 0.40);
+                border-radius: 8px;
+            }
+        """)
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(10, 8, 10, 8)
+        cl.setSpacing(4)
+
+        tid_lbl = QLabel(f"Task: {task_id}")
+        tid_lbl.setFont(_font(8, QFont.Weight.Bold))
+        tid_lbl.setStyleSheet("color: #FF8C00; background: transparent;")
+        cl.addWidget(tid_lbl)
+
+        reason_lbl = QLabel(f"Reason: {reason}")
+        reason_lbl.setFont(_font(8))
+        reason_lbl.setWordWrap(True)
+        reason_lbl.setStyleSheet("color: #CCCCCC; background: transparent;")
+        cl.addWidget(reason_lbl)
+
+        if output:
+            out_lbl = QLabel(output)
+            out_lbl.setFont(_font(8))
+            out_lbl.setWordWrap(True)
+            out_lbl.setStyleSheet("""
+                color: #AAAAAA;
+                background: rgba(2, 10, 16, 180);
+                border: 1px solid rgba(13, 79, 112, 0.3);
+                border-radius: 6px;
+                padding: 4px 8px;
+            """)
+            cl.addWidget(out_lbl)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        approve_btn = QPushButton("✓  APPROVE")
+        approve_btn.setFixedHeight(28)
+        approve_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(0, 160, 60, 0.18);
+                border: 1px solid rgba(0, 200, 80, 0.55);
+                border-radius: 6px;
+                color: #00CC55;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background: rgba(0, 200, 80, 0.30);
+                border-color: #00CC55;
+                color: #FFFFFF;
+            }
+            QPushButton:pressed { background: rgba(0, 200, 80, 0.50); }
+        """)
+        approve_btn.clicked.connect(lambda _=False, sid=stream_id: self._decide(sid, "approve"))
+
+        reject_btn = QPushButton("✗  REJECT")
+        reject_btn.setFixedHeight(28)
+        reject_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(180, 0, 0, 0.18);
+                border: 1px solid rgba(220, 50, 50, 0.55);
+                border-radius: 6px;
+                color: #FF4444;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background: rgba(220, 50, 50, 0.30);
+                border-color: #FF4444;
+                color: #FFFFFF;
+            }
+            QPushButton:pressed { background: rgba(220, 50, 50, 0.50); }
+        """)
+        reject_btn.clicked.connect(lambda _=False, sid=stream_id: self._decide(sid, "reject"))
+
+        btn_row.addWidget(approve_btn)
+        btn_row.addWidget(reject_btn)
+        btn_row.addStretch()
+        cl.addLayout(btn_row)
+
+        return card
+
+    # ── Action ────────────────────────────────────────────────────────────────
+
+    def _decide(self, stream_id: str, decision: str):
+        import urllib.request
+        import urllib.error
+        url = f"{self._event_bus}/approvals/{stream_id}"
+        payload = json.dumps({"decision": decision, "reason": ""}).encode()
+        req = urllib.request.Request(url, data=payload, method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+            self._status_lbl.setText(f"{decision.upper()} sent")
+        except (urllib.error.URLError, OSError):
+            self._status_lbl.setText("Bus offline — could not send")
+        except Exception:
+            self._status_lbl.setText("Send error")
+        self._poll()
+
+
 # ── Main Window ────────────────────────────────────────────────────────────────
 
 class JarvisWindow(QMainWindow):
@@ -2339,6 +2547,13 @@ class JarvisWindow(QMainWindow):
         self.devices_btn.setToolTip("Show nearby devices and bridge actions")
         self.devices_btn.clicked.connect(self._toggle_device_panel)
         action_row.addWidget(self.devices_btn)
+
+        self.work_order_btn = QPushButton("⬡ WORK ORDER")
+        self.work_order_btn.setFixedHeight(28)
+        self.work_order_btn.setFont(_font(8, QFont.Weight.Bold))
+        self.work_order_btn.setToolTip("Cloud Brief → Work Order: paste a plan and dispatch tasks")
+        self.work_order_btn.clicked.connect(self._toggle_work_order_panel)
+        action_row.addWidget(self.work_order_btn)
 
         self.visibility_btn = QPushButton("UNDETECTABLE")
         self.visibility_btn.setFixedHeight(28)
@@ -2691,6 +2906,15 @@ class JarvisWindow(QMainWindow):
 
         root.addWidget(self.device_panel)
 
+        # ── Approval panel ──────────────────────────────────────────────────
+        self.approval_panel = ApprovalPanel(self)
+        root.addWidget(self.approval_panel)
+
+        # ── Work Order panel ────────────────────────────────────────────────
+        self.work_order_panel = WorkOrderPanel(self)
+        self.work_order_panel.hide()
+        root.addWidget(self.work_order_panel)
+
         self._telemetry_timer = QTimer(self)
         _connect_timer_timeout(self._telemetry_timer, "JarvisWindow._refresh_telemetry", self._refresh_telemetry)
         self._telemetry_timer.start(2500)
@@ -2787,6 +3011,16 @@ class JarvisWindow(QMainWindow):
         self._sync_devices_button_state(visible)
         if visible:
             self._refresh_nearby_devices()
+
+    def _toggle_work_order_panel(self):
+        panel = getattr(self, "work_order_panel", None)
+        if panel is None:
+            return
+        visible = not panel.isVisible()
+        panel.setVisible(visible)
+        btn = getattr(self, "work_order_btn", None)
+        if btn:
+            btn.setText("⬡ WORK ORDER" if not visible else "◉ WORK ORDER")
 
     def _toggle_device_panel(self):
         self._set_device_panel_visible(not self.device_panel.isVisible())
@@ -4915,6 +5149,294 @@ end tell
     def showEvent(self, event):
         super().showEvent(event)
         _safe_single_shot(120, "OrbShellWindow.apply_visibility_mode", self._apply_visibility_mode)
+
+
+class WorkOrderPanel(QWidget):
+    """
+    Cloud Brief → Work Order panel.
+
+    Paste a plan from Claude/GPT/Gemini, preview the parsed task list, then
+    dispatch each task to the Jarvis event bus.  All HTTP calls use
+    urllib.request so no new dependencies are introduced.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAutoFillBackground(True)
+        p = self.palette()
+        p.setColor(QPalette.ColorRole.Window, QColor("#010C14"))
+        self.setPalette(p)
+        self.setStyleSheet(
+            _glass_panel_css(fill="rgba(1, 12, 20, 228)", radius=0)
+            + f"border-top: 1px solid {C_BORDER};"
+        )
+        self._preview_tasks: list[dict] = []
+        self._build()
+
+    # ── Layout ─────────────────────────────────────────────────────────────────
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 8, 14, 10)
+        layout.setSpacing(6)
+
+        # Header row
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
+        title_lbl = QLabel("⬡  CLOUD BRIEF → WORK ORDER")
+        title_lbl.setFont(_font(8, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {C_CYAN}; background: transparent; letter-spacing: 2px;")
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+        layout.addLayout(header_row)
+
+        # Brief text area
+        self._brief_area = QTextEdit()
+        self._brief_area.setPlaceholderText(
+            "Paste a plan here (from Claude Code, ChatGPT, Gemini…)\n"
+            "Accepts plain text task lists or JSON."
+        )
+        self._brief_area.setFont(_font(9, mono=True))
+        self._brief_area.setMinimumHeight(90)
+        self._brief_area.setMaximumHeight(160)
+        self._brief_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._brief_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._brief_area.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(2, 10, 16, 200);
+                color: {C_TEXT};
+                border: 1px solid rgba(13, 79, 112, 0.4);
+                border-radius: 8px;
+                padding: 7px 10px;
+            }}
+            QTextEdit:focus {{
+                border: 1px solid {C_CYAN};
+            }}
+        """)
+        layout.addWidget(self._brief_area)
+
+        # Action buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self._preview_btn = QPushButton("▶ Preview")
+        self._preview_btn.setFixedHeight(28)
+        self._preview_btn.setFont(_font(8, QFont.Weight.Bold))
+        self._preview_btn.setStyleSheet(self._btn_css(C_CYAN))
+        self._preview_btn.setToolTip("Parse brief and preview tasks")
+        self._preview_btn.clicked.connect(self._do_preview)
+        btn_row.addWidget(self._preview_btn)
+
+        self._dispatch_btn = QPushButton("⬡ Dispatch to Jarvis")
+        self._dispatch_btn.setFixedHeight(28)
+        self._dispatch_btn.setFont(_font(8, QFont.Weight.Bold))
+        self._dispatch_btn.setStyleSheet(self._btn_css(C_GREEN))
+        self._dispatch_btn.setToolTip("Send all previewed tasks to the Jarvis event bus")
+        self._dispatch_btn.setEnabled(False)
+        self._dispatch_btn.clicked.connect(self._do_dispatch)
+        btn_row.addWidget(self._dispatch_btn)
+
+        self._clear_btn = QPushButton("✕ Clear")
+        self._clear_btn.setFixedHeight(28)
+        self._clear_btn.setFont(_font(8, QFont.Weight.Bold))
+        self._clear_btn.setStyleSheet(self._btn_css(C_TEXT_DIM))
+        self._clear_btn.setToolTip("Reset the work order panel")
+        self._clear_btn.clicked.connect(self._do_clear)
+        btn_row.addWidget(self._clear_btn)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        # Task list / status area
+        self._task_list = QTextEdit()
+        self._task_list.setReadOnly(True)
+        self._task_list.setFont(_font(9, mono=True))
+        self._task_list.setMinimumHeight(60)
+        self._task_list.setMaximumHeight(180)
+        self._task_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._task_list.setStyleSheet(f"""
+            QTextEdit {{
+                background: rgba(2, 10, 16, 180);
+                color: {C_TEXT};
+                border: 1px solid rgba(13, 79, 112, 0.3);
+                border-radius: 8px;
+                padding: 6px 10px;
+            }}
+        """)
+        self._task_list.setPlaceholderText("Task preview will appear here after clicking Preview.")
+        layout.addWidget(self._task_list)
+
+        # Status label
+        self._status_lbl = QLabel("")
+        self._status_lbl.setFont(_font(8))
+        self._status_lbl.setStyleSheet(f"color: {C_TEXT_DIM}; background: transparent;")
+        self._status_lbl.setWordWrap(True)
+        layout.addWidget(self._status_lbl)
+
+    def _btn_css(self, color: str) -> str:
+        return f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
+                color: {color};
+                border: 1px solid rgba(13, 79, 112, 0.45);
+                border-radius: 8px;
+                padding: 0 12px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(0, 212, 255, 0.20), stop:1 rgba(0, 212, 255, 0.05));
+                border-color: rgba(0, 212, 255, 0.70);
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background: rgba(0, 212, 255, 0.3);
+                border-color: {C_CYAN};
+            }}
+            QPushButton:disabled {{
+                color: rgba(74, 143, 168, 0.35);
+                border-color: rgba(13, 79, 112, 0.20);
+            }}
+        """
+
+    # ── Actions ────────────────────────────────────────────────────────────────
+
+    def _do_preview(self):
+        brief = self._brief_area.toPlainText().strip()
+        if not brief:
+            self._set_status("Paste a brief first.", error=True)
+            return
+
+        self._set_status("Contacting Jarvis API…")
+        self._preview_btn.setEnabled(False)
+        self._dispatch_btn.setEnabled(False)
+        threading.Thread(target=self._preview_worker, args=(brief,), daemon=True,
+                         name="WorkOrderPreview").start()
+
+    def _preview_worker(self, brief: str):
+        import urllib.request
+        import urllib.error
+        api_url = os.getenv("JARVIS_API_URL", "http://localhost:8000").rstrip("/")
+        url = f"{api_url}/manager/work-order"
+        payload = json.dumps({"brief": brief, "source": "ui"}).encode()
+        try:
+            req = urllib.request.Request(
+                url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                body = json.loads(resp.read())
+            # API wraps under "work_order"; fall back to top-level for compat.
+            work_order = body.get("work_order", body)
+            tasks = work_order.get("tasks", [])
+            QTimer.singleShot(0, lambda: self._apply_preview(tasks, work_order))
+        except urllib.error.URLError as exc:
+            msg = f"API offline or unreachable: {exc.reason}"
+            QTimer.singleShot(0, lambda: self._set_status(msg, error=True))
+            QTimer.singleShot(0, lambda: self._preview_btn.setEnabled(True))
+        except Exception as exc:
+            msg = f"Preview error: {exc}"
+            QTimer.singleShot(0, lambda: self._set_status(msg, error=True))
+            QTimer.singleShot(0, lambda: self._preview_btn.setEnabled(True))
+
+    def _apply_preview(self, tasks: list[dict], body: dict):
+        self._preview_tasks = tasks
+        self._preview_btn.setEnabled(True)
+        if not tasks:
+            self._task_list.setPlainText("(no tasks parsed)")
+            self._set_status("Preview returned 0 tasks.")
+            return
+
+        lines = []
+        for i, t in enumerate(tasks, 1):
+            flag = " ⚠" if t.get("review_required") else ""
+            agent = t.get("agent", "?")
+            goal = t.get("goal", "")
+            excerpt = goal[:80] + ("…" if len(goal) > 80 else "")
+            lines.append(f"{i:2}. [{agent}]{flag}  {excerpt}")
+
+        self._task_list.setPlainText("\n".join(lines))
+        rc = body.get("review_required_count", 0)
+        self._set_status(
+            f"Preview: {len(tasks)} task(s), {rc} need review. "
+            "Click 'Dispatch to Jarvis' to send."
+        )
+        self._dispatch_btn.setEnabled(True)
+
+    def _do_dispatch(self):
+        if not self._preview_tasks:
+            self._set_status("No tasks to dispatch.", error=True)
+            return
+        self._dispatch_btn.setEnabled(False)
+        self._preview_btn.setEnabled(False)
+        self._set_status("Dispatching…")
+        tasks_copy = list(self._preview_tasks)
+        threading.Thread(target=self._dispatch_worker, args=(tasks_copy,), daemon=True,
+                         name="WorkOrderDispatch").start()
+
+    def _dispatch_worker(self, tasks: list[dict]):
+        import urllib.request
+        import urllib.error
+        import uuid as _uuid
+        bus_url = os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
+        url = f"{bus_url}/tasks"
+        sent = 0
+        errors: list[str] = []
+        for t in tasks:
+            payload = json.dumps({
+                "task_id":        str(_uuid.uuid4()),
+                "agent":          t.get("agent", "researcher"),
+                "goal":           t.get("goal", ""),
+                "source":         "work_order",
+                "review_required": t.get("review_required", False),
+            }).encode()
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    if resp.status in (200, 202):
+                        sent += 1
+                    else:
+                        errors.append(f"HTTP {resp.status}")
+            except urllib.error.URLError as exc:
+                errors.append(f"Bus offline: {exc.reason}")
+                break
+            except Exception as exc:
+                errors.append(str(exc))
+
+        def _done():
+            self._preview_btn.setEnabled(True)
+            if errors:
+                self._set_status(
+                    f"Dispatched {sent}/{len(tasks)} task(s). Errors: {'; '.join(errors[:3])}",
+                    error=True,
+                )
+            else:
+                self._set_status(f"Dispatched {sent} task(s) to Jarvis event bus.")
+                self._dispatch_btn.setEnabled(False)
+
+        QTimer.singleShot(0, _done)
+
+    def _do_clear(self):
+        self._brief_area.clear()
+        self._task_list.clear()
+        self._task_list.setPlaceholderText("Task preview will appear here after clicking Preview.")
+        self._preview_tasks = []
+        self._dispatch_btn.setEnabled(False)
+        self._set_status("")
+
+    def _set_status(self, msg: str, *, error: bool = False):
+        color = C_WARNING if error else C_TEXT_DIM
+        self._status_lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        self._status_lbl.setText(msg)
 
 
 class EnterLineEdit(QTextEdit):

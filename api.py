@@ -175,10 +175,12 @@ def _token_authorized(request: Request) -> bool:
     else:
         supplied = request.headers.get("X-Jarvis-Token", "").strip()
     
-    # Query-token auth is only for browser image/frame GETs where headers cannot
-    # be attached. Mutating endpoints must use Bearer or X-Jarvis-Token.
+    # Query-token auth for browser GETs where headers cannot be attached.
+    # Mutating endpoints must use Bearer or X-Jarvis-Token.
     if not supplied:
-        if request.method == "GET" and request.url.path in {"/remote/screenshot", "/remote/screen/frame"}:
+        if request.method == "GET" and request.url.path in {
+            "/remote/screenshot", "/remote/screen/frame", "/dashboard", "/pending",
+        }:
             supplied = request.query_params.get("token", "").strip()
         
     return bool(supplied) and hmac.compare_digest(supplied, expected)
@@ -944,8 +946,62 @@ def get_runtime_state(refresh: bool = False):
 
 @app.get("/agents")
 def list_agents():
-    import agent_dispatch
-    return {"ok": True, "agents": agent_dispatch.list_agents()}
+    return {"ok": True, "agents": task_runtime.list_agents()}
+
+
+@app.post("/agents/standup")
+async def agents_standup(req: Request):
+    """Generate LLM standup updates for all agents based on current task data."""
+    if not _token_authorized(req):
+        return JSONResponse(status_code=401, content={"ok": False, "error": "unauthorized"})
+    # Gather recent tasks per agent
+    all_tasks = task_runtime.list_tasks(limit=200)
+    agent_data: dict[str, list] = {}
+    for t in sorted(all_tasks, key=lambda x: x.get("updated_at") or "", reverse=True):
+        aid = (t.get("assigned_agent_id") or "").replace("-", "_").strip()
+        if aid and aid not in ("", "manager"):
+            if aid not in agent_data:
+                agent_data[aid] = []
+            if len(agent_data[aid]) < 3:
+                agent_data[aid].append(t)
+
+    lines = []
+    for agent, tasks in sorted(agent_data.items()):
+        for t in tasks:
+            desc = (t.get("description") or t.get("prompt") or "")[:80]
+            lines.append(f"{agent}: [{t.get('status', '?')}] {desc}")
+
+    context = "\n".join(lines) if lines else "No tasks on record."
+
+    prompt = (
+        "Generate concise standup updates for an AI agent team. "
+        "For each agent listed, write 1-2 sentences as if the agent is speaking in a daily standup. "
+        "Mention what they worked on and any blockers. "
+        "Respond with a JSON array ONLY — no markdown fencing. "
+        'Each item: {"agent":"name","update":"...","blockers":null_or_brief_string}\n\n'
+        f"Task data:\n{context}"
+    )
+
+    try:
+        raw = _cloud_agent_run("pipeline_monitor", prompt, "standup_report")
+        import re as _re
+        m = _re.search(r"\[[\s\S]*?\]", raw)
+        if m:
+            updates = json.loads(m.group())
+            return JSONResponse({"ok": True, "updates": updates})
+    except Exception as _exc:
+        log.warning("standup generation error: %s", _exc)
+
+    # Fallback: template-based updates
+    fallback = []
+    for agent, tasks in agent_data.items():
+        latest = tasks[0] if tasks else None
+        if latest:
+            st = latest.get("status", "?")
+            desc = (latest.get("description") or latest.get("prompt") or "")[:60]
+            upd = f"I'm currently [{st}] on: {desc}." if desc else f"Status: {st}."
+            fallback.append({"agent": agent, "update": upd, "blockers": None})
+    return JSONResponse({"ok": True, "updates": fallback})
 
 
 @app.get("/agents/{agent_id}")
@@ -961,20 +1017,133 @@ class AgentRunRequest(BaseModel):
     context: str = ""
 
 
+def _dispatch_agent_name(agent_name: str) -> str:
+    return (agent_name or "").strip().replace("-", "_")
+
+
+_AGENT_GARBAGE = (
+    "open tasks:", "your inbox is clear", "no pending tasks",
+    "tasks completed", "• ship mic fix", "jarvis decision log",
+    "run_tests", "test_result", "running tests", "all tests passed",
+    "successfully created", "tests are complete", "pass verification",
+    "encountered pre-existing", "module resolution", "implementation and unit tests",
+    "endpoint implementation", "task completed successfully",
+)
+
+# Code-writing agents: if no code block present, output is a summary not code
+_CODE_AGENTS = {"backend_engineer", "frontend_designer", "qa_tester", "automation_engineer"}
+
+# Agents that hang or produce garbage with local Ollama — go straight to cloud.
+# Only _CODE_AGENTS benefit from local dispatch (GLM produces good Python/JS).
+# All others: skip local, save 15s of wasted timeout.
+_CLOUD_FIRST_AGENTS = {
+    "security_reviewer", "security-reviewer",
+    "devops_release", "devops-release",
+    "researcher",
+    "ux_researcher",
+    "career_agent",
+    "memory_librarian",
+    "ai_safety_agent",
+    "ai_evaluator",
+    "pipeline_monitor", "pipeline-monitor",
+    "output_quality_checker", "output-quality-checker",
+}
+
+def _agent_output_is_garbage(s: str, agent_name: str = "") -> bool:
+    low = s.strip().lower()
+    if any(g in low for g in _AGENT_GARBAGE) or len(low) < 20:
+        return True
+    # For code agents, a response with no code block is just a task summary
+    if agent_name in _CODE_AGENTS and "```" not in s:
+        return True
+    return False
+
+
+def _cloud_agent_run(agent_name: str, task: str, context: str) -> str:
+    """OpenAI → Gemini fallback for single-agent direct assignment."""
+    from config import AGENT_ROSTER
+    spec = AGENT_ROSTER.get(agent_name, {})
+    system = spec.get("system_prompt") or (
+        f"You are the {agent_name} agent. Role: {spec.get('role', '')}. "
+        "Produce concrete, actionable output. Write actual code/plans/specs — do not use tools."
+    )
+    user_msg = f"{task}\n\nContext:\n{context}" if context else task
+
+    for prov, model in [("openai", "gpt-4o-mini"), ("gemini", "gemini-2.5-flash-lite")]:
+        try:
+            if prov == "openai":
+                import openai as _oai
+                key = os.getenv("OPENAI_API_KEY", "")
+                if not key:
+                    continue
+                client = _oai.OpenAI(api_key=key, timeout=45)
+                r = client.chat.completions.create(
+                    model=model, max_tokens=2048,
+                    messages=[{"role": "system", "content": system},
+                               {"role": "user",   "content": user_msg}],
+                )
+                out = (r.choices[0].message.content or "").strip()
+            else:
+                from google import genai as _gai
+                from google.genai import types as _gtypes
+                key = os.getenv("GEMINI_API_KEY", "")
+                if not key:
+                    continue
+                c = _gai.Client(api_key=key)
+                r = c.models.generate_content(
+                    model=model, contents=user_msg,
+                    config=_gtypes.GenerateContentConfig(
+                        system_instruction=system, max_output_tokens=2048, timeout=45,
+                    ),
+                )
+                out = (r.text or "").strip()
+
+            if out and not _agent_output_is_garbage(out):
+                log.info("agent %s used cloud fallback (%s/%s)", agent_name, prov, model)
+                return out
+        except Exception as exc:
+            log.debug("cloud agent fallback %s/%s for %s failed: %s", prov, model, agent_name, exc)
+
+    return ""
+
+
 @app.post("/agents/{agent_name}/run")
 def run_agent(agent_name: str, req: AgentRunRequest, request: Request):
     from infra.rbac import registry
-    import agent_dispatch
-    registry.enforce(request, agent_name)
-    try:
-        gen = agent_dispatch.dispatch(agent_name, req.task, req.context)
-    except RuntimeError as exc:
-        return JSONResponse(status_code=404, content={"ok": False, "error": str(exc)})
+    import agent_dispatch as _dispatch
+    dispatch_name = _dispatch_agent_name(agent_name)
+    registry.enforce(request, dispatch_name)
 
     def generate():
-        for chunk in gen:
-            if chunk:
-                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        output = ""
+
+        # Skip local dispatch entirely for agents that hang or produce garbage locally
+        if dispatch_name not in _CLOUD_FIRST_AGENTS:
+            try:
+                import concurrent.futures as _cf
+                with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                    fut = _ex.submit(lambda: "".join(_dispatch.dispatch(dispatch_name, req.task, req.context)))
+                    try:
+                        local_out = fut.result(timeout=15)
+                        if _agent_output_is_garbage(local_out, dispatch_name):
+                            log.info("agent %s local output is garbage -- trying cloud", dispatch_name)
+                        else:
+                            output = local_out
+                    except _cf.TimeoutError:
+                        log.warning("agent %s local dispatch timed out (15s) -- trying cloud", dispatch_name)
+            except RuntimeError as exc:
+                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as exc:
+                log.warning("agent %s local dispatch error: %s", dispatch_name, exc)
+
+        # Cloud fallback if local produced nothing useful (or was skipped)
+        if not output.strip():
+            output = _cloud_agent_run(dispatch_name, req.task, req.context)
+
+        if output:
+            yield f"data: {json.dumps({'chunk': output})}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
@@ -984,6 +1153,17 @@ class ManagerRunRequest(BaseModel):
     goal:       str
     session_id: str = ""
     project_id: str = ""
+
+
+class ManagerRunStreamRequest(BaseModel):
+    goal:       str
+    cloud_plan: bool = True
+    project_id: str = ""
+
+
+class CloudWorkOrderRequest(BaseModel):
+    brief: str
+    source: str = "cloud"
 
 
 @app.post("/manager/run")
@@ -1002,6 +1182,582 @@ def manager_run(req: ManagerRunRequest, request: Request):
         return {"ok": True, "plan": plan.to_dict()}
     except Exception as exc:
         log.exception("manager_run error")
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+# Eval log — persistent JSONL, survives restarts
+from pathlib import Path as _EvalPath
+_EVAL_LOG_PATH = _EvalPath("~/.jarvis_eval_log.jsonl").expanduser()
+_EVAL_RUBRICS: dict[str, dict] = {}
+
+
+def _append_eval_log(entry: dict) -> None:
+    import time as _t
+    entry.setdefault("ts", _t.time())
+    try:
+        with _EVAL_LOG_PATH.open("a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception as _exc:
+        log.warning("eval log write failed: %s", _exc)
+
+
+_PIPELINE_ALERTS: list[dict] = []   # in-memory ring buffer, max 50
+_PIPELINE_ALERTS_LOCK = threading.Lock()
+
+
+def _pipeline_health_check() -> dict:
+    """
+    Pipeline Monitor agent — runs a synchronous health sweep.
+    Returns a structured health report with any alerts.
+    """
+    import time
+    now = time.time()
+    alerts = []
+    task_runtime.bootstrap()
+    with task_runtime._LOCK:
+        tasks = list(task_runtime._TASKS.values())
+
+    # Detect stalled running tasks (running > 90s)
+    for t in tasks:
+        if t.get("status") == "running":
+            started = t.get("started_at") or t.get("created_at", "")
+            if started:
+                try:
+                    import datetime as _dt
+                    ts = _dt.datetime.fromisoformat(started.replace("Z", "+00:00"))
+                    age = now - ts.timestamp()
+                    if age > 90:
+                        alerts.append({
+                            "level": "warning",
+                            "type": "stalled_task",
+                            "task_id": t.get("id", "?"),
+                            "agent": t.get("assigned_agent_id", "?"),
+                            "age_seconds": int(age),
+                            "message": f"Task {t.get('id','?')[-8:]} running for {int(age)}s",
+                        })
+                except Exception:
+                    pass
+
+    # Detect garbage outputs in recently completed tasks
+    garbage_patterns = ("task completed", "successfully created", "open tasks:",
+                        "your inbox is clear", "no pending tasks")
+    for t in tasks:
+        if t.get("status") in {"succeeded", "completed"}:
+            result = str(t.get("result") or t.get("response") or "")
+            if result and len(result) < 100:
+                alerts.append({
+                    "level": "warning",
+                    "type": "garbage_output",
+                    "task_id": t.get("id", "?"),
+                    "agent": t.get("assigned_agent_id", "?"),
+                    "message": f"Short output ({len(result)} chars) may be garbage",
+                })
+            elif result:
+                low = result.lower()
+                if any(p in low for p in garbage_patterns):
+                    alerts.append({
+                        "level": "warning",
+                        "type": "garbage_output",
+                        "task_id": t.get("id", "?"),
+                        "agent": t.get("assigned_agent_id", "?"),
+                        "message": "Output matches known garbage pattern",
+                    })
+
+    by_status = {}
+    for t in tasks:
+        s = t.get("status", "unknown")
+        by_status[s] = by_status.get(s, 0) + 1
+
+    report = {
+        "ok": True,
+        "checked_at": time.strftime("%H:%M:%S"),
+        "total_tasks": len(tasks),
+        "by_status": by_status,
+        "alerts": alerts,
+        "health": "degraded" if alerts else "healthy",
+    }
+
+    with _PIPELINE_ALERTS_LOCK:
+        _PIPELINE_ALERTS.extend(alerts)
+        del _PIPELINE_ALERTS[:-50]  # keep last 50
+
+    return report
+
+
+@app.get("/pipeline/health")
+def pipeline_health(request: Request):
+    """Pipeline Monitor — synchronous health check of all tasks and agents."""
+    _token_authorized(request)
+    return _pipeline_health_check()
+
+
+@app.get("/pipeline/alerts")
+def pipeline_alerts(request: Request):
+    """Return recent pipeline alerts from the background monitor."""
+    _token_authorized(request)
+    with _PIPELINE_ALERTS_LOCK:
+        return {"ok": True, "alerts": list(_PIPELINE_ALERTS[-20:])}
+
+
+def _run_eval(agent_name: str, task_description: str, output: str, rubric_criteria: list[str] | None = None) -> dict:
+    """
+    AI Evaluation Lab — scores agent output quality against the task.
+    Returns {"verdict": "pass"|"fail"|"needs_review", "score": 0-100,
+             "feedback": str, "issues": list[str]}.
+    Uses cloud (GPT-4o-mini → Gemini) for reliable structured verdicts.
+    """
+    from config import AGENT_ROSTER
+    spec = AGENT_ROSTER.get(agent_name, {})
+    role = spec.get("role", agent_name)
+
+    eval_system = (
+        "You are the Jarvis AI Evaluation Lab. You review agent outputs for quality. "
+        "Given an agent role, the task it was assigned, and its output, return ONLY a JSON object:\n"
+        '{"verdict":"pass"|"fail"|"needs_review","score":0-100,'
+        '"feedback":"1-2 sentence summary","issues":["issue1",...]}\n\n'
+        "Scoring guide: 90-100=excellent concrete output, 70-89=good with minor gaps, "
+        "50-69=partial/scaffold only, <50=missing/wrong/empty.\n"
+        "verdict=pass if score>=70, needs_review if 50-69, fail if <50.\n"
+        "issues: list specific gaps (e.g. 'No error handling', 'Missing test for edge case X').\n"
+        "Output raw JSON only — no markdown fences, no prose."
+    )
+    if rubric_criteria:
+        eval_system += "\n\nAdditional rubric criteria:\n" + "\n".join(f"- {c}" for c in rubric_criteria)
+    user_msg = (
+        f"Agent role: {role}\n"
+        f"Task: {task_description}\n\n"
+        f"Output:\n{output[:3000]}"
+    )
+
+    for prov, model in [("openai", "gpt-4o-mini"), ("gemini", "gemini-2.5-flash-lite")]:
+        try:
+            if prov == "openai":
+                import openai as _oai
+                key = os.getenv("OPENAI_API_KEY", "")
+                if not key:
+                    continue
+                client = _oai.OpenAI(api_key=key, timeout=20)
+                r = client.chat.completions.create(
+                    model=model, max_tokens=512,
+                    messages=[{"role": "system", "content": eval_system},
+                               {"role": "user",   "content": user_msg}],
+                    response_format={"type": "json_object"},
+                )
+                raw = (r.choices[0].message.content or "").strip()
+            else:
+                from google import genai as _gai
+                from google.genai import types as _gtypes
+                key = os.getenv("GEMINI_API_KEY", "")
+                if not key:
+                    continue
+                c = _gai.Client(api_key=key)
+                r = c.models.generate_content(
+                    model=model, contents=user_msg,
+                    config=_gtypes.GenerateContentConfig(
+                        system_instruction=eval_system,
+                        response_mime_type="application/json",
+                        max_output_tokens=512, timeout=20,
+                    ),
+                )
+                raw = (r.text or "").strip()
+
+            if raw:
+                import json as _j
+                data = _j.loads(raw)
+                return {
+                    "verdict":  data.get("verdict", "needs_review"),
+                    "score":    int(data.get("score", 50)),
+                    "feedback": data.get("feedback", ""),
+                    "issues":   data.get("issues", []),
+                }
+        except Exception as exc:
+            log.debug("eval lab %s/%s failed: %s", prov, model, exc)
+
+    return {"verdict": "unknown", "score": 0, "feedback": "Eval providers unavailable", "issues": []}
+
+
+class EvalRunRequest(BaseModel):
+    agent:     str
+    task:      str
+    output:    str
+    rubric_id: str = ""
+
+
+@app.post("/eval/run")
+def eval_run(req: EvalRunRequest, request: Request):
+    """Standalone Eval Lab endpoint. Returns structured quality verdict."""
+    from infra.rbac import registry
+    registry.enforce(request, "eval")
+    rubric = _EVAL_RUBRICS.get(req.rubric_id, {}) if req.rubric_id else {}
+    result = _run_eval(req.agent, req.task, req.output, rubric_criteria=rubric.get("criteria"))
+    _append_eval_log({"agent": req.agent, "task": req.task[:100], **result})
+    return {"ok": True, **result}
+
+
+@app.get("/eval/log")
+def get_eval_log(request: Request, limit: int = 50, agent: str = "", verdict: str = ""):
+    """Return recent eval log entries, newest first."""
+    from infra.rbac import registry
+    registry.enforce(request, "eval")
+    entries: list[dict] = []
+    if _EVAL_LOG_PATH.exists():
+        lines = _EVAL_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-500:]
+        for line in lines:
+            try:
+                e = json.loads(line)
+                if agent and e.get("agent") != agent:
+                    continue
+                if verdict and e.get("verdict") != verdict:
+                    continue
+                entries.append(e)
+            except Exception:
+                pass
+    return {"ok": True, "entries": entries[-limit:][::-1]}
+
+
+@app.get("/eval/rubrics")
+def list_rubrics(request: Request):
+    from infra.rbac import registry
+    registry.enforce(request, "eval")
+    return {"ok": True, "rubrics": list(_EVAL_RUBRICS.values())}
+
+
+class RubricCreateRequest(BaseModel):
+    id:       str
+    name:     str
+    criteria: list[str]
+
+
+@app.post("/eval/rubrics")
+def create_rubric(req: RubricCreateRequest, request: Request):
+    from infra.rbac import registry
+    registry.enforce(request, "eval")
+    _EVAL_RUBRICS[req.id] = {"id": req.id, "name": req.name, "criteria": req.criteria}
+    return {"ok": True, "rubric": _EVAL_RUBRICS[req.id]}
+
+
+@app.delete("/eval/rubrics/{rubric_id}")
+def delete_rubric(rubric_id: str, request: Request):
+    from infra.rbac import registry
+    registry.enforce(request, "eval")
+    removed = _EVAL_RUBRICS.pop(rubric_id, None)
+    return {"ok": removed is not None, "removed": removed is not None}
+
+
+@app.post("/manager/run-stream")
+async def manager_run_stream(req: ManagerRunStreamRequest, request: Request):
+    """
+    Decompose a project goal into agent tasks, register each in task_runtime,
+    run agents sequentially, and stream SSE events for the dashboard.
+
+    Events:
+      {"type":"plan",      "tasks":[{agent,title,priority,needs_security_review}]}
+      {"type":"start",     "task_id":"...", "agent":"...", "title":"..."}
+      {"type":"chunk",     "task_id":"...", "text":"..."}
+      {"type":"blocked",   "task_id":"...", "agent":"...", "reason":"..."}
+      {"type":"eval_start","task_id":"...", "agent":"..."}
+      {"type":"eval",      "task_id":"...", "verdict":"pass|fail|needs_review", "score":int, "feedback":"...", "issues":[...]}
+      {"type":"done",      "task_id":"...", "agent":"...", "eval_verdict":"..."}
+      {"type":"complete"}
+    """
+    import asyncio
+    import re as _re
+
+    def _sse(obj: dict) -> str:
+        return f"data: {json.dumps(obj)}\n\n"
+
+    def _cloud_decompose(goal: str):
+        from core.manager import AgentTask, _agent_roster_summary
+        from config import AGENT_ROSTER
+        roster = _agent_roster_summary()
+        system = (
+            "You are the Jarvis Manager. Decompose the goal into 2-5 independent agent tasks.\n\n"
+            f"Available agents:\n{roster}\n\n"
+            "Rules:\n"
+            "- DISTRIBUTE work across different specialist agents — never assign more than 2 tasks to the same agent.\n"
+            "- Match the task to the right specialist: backend_engineer=API/data, frontend_designer=UI/components, "
+            "qa_tester=tests/validation, devops_release=CI/deploy/cron, researcher=research/survey, "
+            "automation_engineer=scripts/file-ops, security_reviewer=security-audit.\n"
+            "- set needs_security_review=true ONLY for shell-execution, git-push, file-delete, or database-mutation tasks.\n"
+            "- description must be self-contained and specific enough for the agent to work without other context.\n\n"
+            "Output ONLY this JSON, no prose:\n"
+            '{"goal_summary":"...","tasks":[{"title":"...","description":"...","agent":"...",'
+            '"priority":5,"needs_security_review":false,"context":{}}]}'
+        )
+        valid = set(AGENT_ROSTER.keys())
+
+        # Try GPT-4o-mini → Gemini → local
+        providers = [("openai", "gpt-4o-mini"), ("gemini", "gemini-2.5-flash-lite")]
+        raw = ""
+        for prov, model in providers:
+            try:
+                if prov == "openai":
+                    import openai
+                    key = os.getenv("OPENAI_API_KEY", "")
+                    if not key:
+                        continue
+                    client = openai.OpenAI(api_key=key)
+                    r = client.chat.completions.create(
+                        model=model, max_tokens=1024,
+                        messages=[{"role": "system", "content": system},
+                                  {"role": "user", "content": f"Decompose:\n\n{goal}"}],
+                        response_format={"type": "json_object"},
+                    )
+                    raw = (r.choices[0].message.content or "").strip()
+                else:
+                    from google import genai as gai
+                    from google.genai import types as gtypes
+                    key = os.getenv("GEMINI_API_KEY", "")
+                    if not key:
+                        continue
+                    c = gai.Client(api_key=key)
+                    r = c.models.generate_content(
+                        model=model,
+                        contents=f"Decompose:\n\n{goal}",
+                        config=gtypes.GenerateContentConfig(
+                            system_instruction=system,
+                            response_mime_type="application/json",
+                            max_output_tokens=1024,
+                        ),
+                    )
+                    raw = (r.text or "").strip()
+                if raw:
+                    break
+            except Exception as exc:
+                log.debug("cloud decompose %s/%s failed: %s", prov, model, exc)
+
+        if not raw:
+            from core.manager import manager as _mgr
+            return _mgr.decompose(goal)
+
+        raw = _re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
+        try:
+            data = json.loads(raw)
+        except Exception:
+            from core.manager import manager as _mgr
+            return _mgr.decompose(goal)
+
+        tasks = []
+        for item in data.get("tasks", []):
+            agent = item.get("agent", "researcher")
+            if agent not in valid:
+                agent = "researcher"
+            tasks.append(AgentTask(
+                title=str(item.get("title", "Task"))[:120],
+                description=str(item.get("description", goal)),
+                agent=agent,
+                priority=int(item.get("priority", 5)),
+                needs_security_review=bool(item.get("needs_security_review", False)),
+                context=item.get("context", {}),
+            ))
+        return tasks or _cloud_decompose.__wrapped__(goal)  # fallback if empty
+
+    async def _generate():
+        import agent_dispatch as _dispatch
+        from core.manager import AgentTask, _task_requires_manager_gate, _run_security_gate
+        import uuid
+
+        # ── Step 1: Decompose ────────────────────────────────────────────────
+        try:
+            tasks = await asyncio.to_thread(
+                _cloud_decompose if req.cloud_plan else
+                __import__("core.manager", fromlist=["manager"]).manager.decompose,
+                req.goal,
+            )
+        except Exception as exc:
+            yield _sse({"type": "error", "message": f"Decompose failed: {exc}"})
+            return
+
+        plan_data = [
+            {"agent": t.agent, "title": t.title,
+             "priority": t.priority, "needs_security_review": t.needs_security_review}
+            for t in tasks
+        ]
+        yield _sse({"type": "plan", "tasks": plan_data})
+
+        # ── Step 2: Register + run each task ─────────────────────────────────
+        for t in sorted(tasks, key=lambda x: -x.priority):
+            # Register in task_runtime so dashboard tabs see it
+            registered = task_runtime.submit_task(
+                t.description,
+                kind="code",
+                source="manager",
+                assigned_agent_id=t.agent,
+            )
+            task_id = registered.get("id", str(uuid.uuid4()))
+            # Mark running immediately so Active tab shows it
+            task_runtime._set_task_status(task_id, "running")
+            yield _sse({"type": "start", "task_id": task_id,
+                        "agent": t.agent, "title": t.title})
+
+            # Security gate — fast deterministic pre-screen only in streaming pipeline.
+            # LLM-based deep review is too slow (30s+ hang); pre-screen catches real attacks.
+            # Full _run_security_gate() is reserved for the synchronous /manager/run path.
+            if _task_requires_manager_gate(t):
+                t.task_id = task_id
+                try:
+                    from infra.threat_screen import screen_payload as _screen_payload
+                    _screen = _screen_payload(json.dumps({
+                        "title": t.title, "description": t.description,
+                        "agent": t.agent, "context": t.context,
+                    }))
+                    approved = not _screen.blocked
+                    if not approved:
+                        t.security_verdict = "prescreen_blocked"
+                        log.warning("Pre-screen blocked task %s agent=%s findings=%d",
+                                    task_id, t.agent, len(_screen.findings))
+                except Exception as _exc:
+                    log.warning("Pre-screen error for task %s: %s — approving cautiously", task_id, _exc)
+                    approved = True
+                if not approved:
+                    task_runtime._set_task_status(task_id, "failed", error="prescreen_blocked")
+                    yield _sse({"type": "blocked", "task_id": task_id,
+                                "agent": t.agent, "reason": "prescreen_blocked"})
+                    continue
+
+            # Run agent
+            context_str = json.dumps(t.context) if t.context else ""
+            output = ""
+
+            def _is_garbage(s: str) -> bool:
+                return _agent_output_is_garbage(s, t.agent)
+
+            # cloud_plan=True → use cloud for execution too (local GLM hijacks tools)
+            # Also skip local for agents known to hang or produce garbage locally.
+            if not req.cloud_plan and t.agent not in _CLOUD_FIRST_AGENTS:
+                import concurrent.futures as _cf
+                try:
+                    with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+                        fut = _ex.submit(
+                            lambda: list(_dispatch.dispatch(t.agent, t.description, context_str))
+                        )
+                        try:
+                            chunks = fut.result(timeout=15)
+                            output = "".join(chunks)
+                            if _is_garbage(output):
+                                log.info("agent %s local garbage in pipeline -- using cloud", t.agent)
+                                output = ""
+                        except _cf.TimeoutError:
+                            log.warning("agent %s pipeline local dispatch timed out (15s)", t.agent)
+                except Exception as exc:
+                    log.warning("agent %s local error: %s", t.agent, exc)
+
+            # Cloud execution (primary when cloud_plan=True, fallback otherwise)
+            # best_effort holds the longest non-empty response even if it fails code-block check.
+            # This prevents silent empty cards — we emit best_effort if no clean output found.
+            if not output.strip():
+                from config import AGENT_ROSTER
+                spec = AGENT_ROSTER.get(t.agent, {})
+                system = spec.get("system_prompt") or (
+                    f"You are the {t.agent} agent. Role: {spec.get('role','')}. "
+                    "Produce concrete, actionable output. Write actual code/plans/specs — do not use tools."
+                )
+                best_effort = ""
+                for prov, model in [("openai","gpt-4o-mini"),("gemini","gemini-2.5-flash-lite")]:
+                    try:
+                        if prov == "openai":
+                            import openai
+                            key = os.getenv("OPENAI_API_KEY","")
+                            if not key: continue
+                            client = openai.OpenAI(api_key=key, timeout=45)
+                            r = client.chat.completions.create(
+                                model=model, max_tokens=2048,
+                                messages=[{"role":"system","content":system},
+                                          {"role":"user","content":t.description}],
+                            )
+                            candidate = (r.choices[0].message.content or "").strip()
+                        else:
+                            from google import genai as gai
+                            from google.genai import types as gtypes
+                            key = os.getenv("GEMINI_API_KEY","")
+                            if not key: continue
+                            c = gai.Client(api_key=key)
+                            r = c.models.generate_content(
+                                model=model, contents=t.description,
+                                config=gtypes.GenerateContentConfig(
+                                    system_instruction=system, max_output_tokens=2048,
+                                    timeout=45,
+                                ),
+                            )
+                            candidate = (r.text or "").strip()
+                        if candidate and not _is_garbage(candidate):
+                            output = candidate
+                            best_effort = candidate
+                            break
+                        # Keep longest non-garbage-keyword response as best_effort
+                        if candidate and len(candidate) > len(best_effort):
+                            best_effort = candidate
+                    except Exception as exc:
+                        log.debug("cloud agent %s/%s failed: %s", prov, model, exc)
+                # If quality bar not met but we have something, use it — avoid silent empty card
+                if not output.strip() and best_effort.strip():
+                    output = best_effort
+                    log.warning("agent %s: no code-block output — using best_effort (%d chars)", t.agent, len(output))
+
+            # Emit full output as one chunk (already complete, no true streaming from dispatch)
+            if output:
+                yield _sse({"type": "chunk", "task_id": task_id, "text": output})
+
+            # Eval Lab — auto-evaluate agent output quality before marking complete
+            eval_result = None
+            if output.strip():
+                yield _sse({"type": "eval_start", "task_id": task_id, "agent": t.agent})
+                try:
+                    eval_result = await asyncio.wait_for(
+                        asyncio.to_thread(_run_eval, t.agent, t.description, output),
+                        timeout=25.0,
+                    )
+                    _append_eval_log({
+                        "agent": t.agent, "task": t.description[:100],
+                        "verdict": eval_result.get("verdict", "unknown"),
+                        "score": eval_result.get("score", 0),
+                        "feedback": eval_result.get("feedback", ""),
+                        "issues": eval_result.get("issues", []),
+                    })
+                    yield _sse({"type": "eval", "task_id": task_id,
+                                "verdict": eval_result.get("verdict", "unknown"),
+                                "score": eval_result.get("score", 0),
+                                "feedback": eval_result.get("feedback", ""),
+                                "issues": eval_result.get("issues", [])})
+                except asyncio.TimeoutError:
+                    log.warning("Eval Lab timed out for task %s", task_id)
+                    yield _sse({"type": "eval", "task_id": task_id,
+                                "verdict": "timeout", "score": 0,
+                                "feedback": "Eval timed out", "issues": []})
+                except Exception as _exc:
+                    log.warning("Eval Lab error for task %s: %s", task_id, _exc)
+
+            # Update task_runtime with result
+            task_runtime._complete_task(
+                task_id,
+                response=output or "(no output)",
+                model="dispatch",
+                usage={},
+                interaction_id="",
+                source="manager",
+            )
+            yield _sse({"type": "done", "task_id": task_id, "agent": t.agent,
+                        "eval_verdict": eval_result.get("verdict") if eval_result else None})
+
+        yield _sse({"type": "complete"})
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+@app.post("/manager/work-order")
+def manager_work_order(req: CloudWorkOrderRequest, request: Request):
+    """
+    Convert a pasted cloud-model brief into a local Jarvis work-order preview.
+    This endpoint never schedules tasks; execution must go through Manager review.
+    """
+    from infra.rbac import registry
+    from core.work_order import preview_work_order
+    caller = registry.caller_from_request(request)
+    registry.check_rate_limit(caller)
+    try:
+        return {"ok": True, "work_order": preview_work_order(req.brief, source=req.source)}
+    except Exception as exc:
+        log.exception("manager_work_order error")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
 
@@ -1373,6 +2129,15 @@ def deny_task(task_id: str):
     if not task:
         return JSONResponse(status_code=404, content={"ok": False, "error": "task_not_found"})
     return {"ok": True, "task": task}
+
+
+@app.delete("/tasks/history")
+def clear_task_history(request: Request):
+    """Remove all terminal (succeeded/failed/cancelled) tasks from memory and persistence."""
+    if not _token_authorized(request):
+        return JSONResponse(status_code=401, content={"ok": False, "error": "auth_required"})
+    removed = task_runtime.purge_terminal_tasks()
+    return {"ok": True, "removed": removed}
 
 
 def create_pairing_pin() -> str:
@@ -2088,2043 +2853,1719 @@ def get_pwa_icon():
 
 
 @app.get("/")
-async def root_web_hud(request: Request):
-    """Serve a breathtaking, responsive 2026 glassmorphic mobile web HUD for iPhone & iPad sync."""
+async def root_redirect(request: Request):
+    """Redirect root to the agent ops dashboard."""
+    from fastapi.responses import RedirectResponse
+    token = request.query_params.get("token", "")
+    dest = f"/dashboard?token={token}" if token else "/dashboard"
+    return RedirectResponse(url=dest)
+
+
+
+# ── Meeting Room + Agent Panel JS (raw string) ───────────────────────────────
+
+_MEETING_JS = r"""
+// ============================================================
+// MEETING ROOM + AGENT DETAIL PANEL
+// ============================================================
+
+let _meetingActive = false;
+let _meetingPhase = 'idle'; // idle | gathering | standup | done
+let _meetingSpeakerIdx = -1;
+let _meetingNames = [];
+let _meetingUpdates = {}; // name -> {update, blockers}
+let _meetingTimer = null;
+let _meetingSpots = [];
+let _lastTaskData = [];  // updated by refresh(), used by standup board
+
+// Meeting table center (lobby zone)
+const _MTABLE = [6.5, 12.0];
+
+function _calcSpots(n){
+  return Array.from({length:n},(_,i)=>{
+    const a = (i/n)*Math.PI*2 - Math.PI/2;
+    return [_MTABLE[0]+Math.cos(a)*2.2, _MTABLE[1]+Math.sin(a)*2.1];
+  });
+}
+
+function _wMeetingDraw(){
+  // no-op: Three.js renders the meeting table in the 3D scene
+}
+
+function _wAgentClick(name){
+  if(_meetingActive) return; // don't open panel during meeting
+  _showAgentPanel(name);
+}
+
+function _showAgentPanel(name){
+  const panel=document.getElementById('agent-panel');
+  if(!panel) return;
+  document.getElementById('ap-icon').textContent=AGENT_ICONS[name]||'🤖';
+  document.getElementById('ap-name').textContent=name.replace(/_/g,' ').replace(/\b./g,c=>c.toUpperCase());
+  const zone=AGENT_HOME_ZONES[name]||'?';
+  const zoneLabels={'eng':'Engineering Bay','design':'Design Studio','research':'Research Lab','qa':'QA Floor','safety':'Safety Room','ops':'Ops Center','lobby':'Lobby'};
+  document.getElementById('ap-dept').textContent=zoneLabels[zone]||zone;
+  // Status & task
+  const tasks=(_lastTaskData||[]).filter(t=>normalizeId(t.assigned_agent_id)===name)
+    .sort((a,b)=>new Date(b.updated_at||b.created_at||0)-new Date(a.updated_at||a.created_at||0));
+  const latest=tasks[0];
+  const st=latest?latest.status:'idle';
+  const stColors={'running':'#7ec8e3','queued':'#7ec8e3','working':'#7ec8e3','succeeded':'#28c76f','completed':'#28c76f','failed':'#ea5455','waiting_approval':'#ffd700','idle':'#555'};
+  document.getElementById('ap-status').innerHTML=`<span style="font-size:.75em;background:rgba(0,0,0,.4);border-radius:4px;padding:2px 8px;color:${stColors[st]||'#888'}">${st}</span>`;
+  document.getElementById('ap-task').textContent=latest?(latest.description||latest.prompt||'(no description)').slice(0,120):'No active task.';
+  // Recent history
+  const hist=tasks.slice(0,5);
+  document.getElementById('ap-history').innerHTML=hist.length?
+    `<div style="font-size:.7em;letter-spacing:.08em;color:#555;margin-bottom:4px">RECENT (${hist.length})</div>`+
+    hist.map(t=>{
+      const ic=t.status==='succeeded'||t.status==='completed'?'✅':t.status==='failed'?'❌':t.status==='running'||t.status==='queued'?'⏳':'○';
+      return `<div style="font-size:.8em;color:#666;padding:3px 0;border-bottom:1px solid #1a1a1a">${ic} ${(t.description||t.prompt||'').slice(0,50)}</div>`;
+    }).join('')
+    :'<div style="font-size:.8em;color:#444">No task history.</div>';
+  document.getElementById('ap-assign-btn').onclick=()=>{panel.style.display='none';quickAssign(name);};
+  panel.style.display='block';
+}
+
+// ── Meeting / Standup ─────────────────────────────────────────────────────
+
+function startMeeting(){
+  if(_meetingActive){ endMeeting(); return; }
+  const overlay=document.getElementById('standup-overlay');
+  if(!overlay) return;
+  _meetingActive=true;
+  _meetingPhase='gathering';
+  _meetingNames=Object.keys(_ISO_DESKS);
+  _meetingSpeakerIdx=-1;
+  _meetingSpots=_calcSpots(_meetingNames.length);
+  // Dispatch agents to meeting spots
+  _meetingNames.forEach((name,i)=>{
+    const a=_wAgents[name];
+    if(!a) return;
+    a.state='meeting_walk';
+    a.tx=_meetingSpots[i][0]; a.ty=_meetingSpots[i][1];
+    a.task='';
+  });
+  // Build standup cards
+  overlay.style.display='flex';
+  _buildStandupCards();
+  document.getElementById('standup-status-line').textContent='Gathering in meeting room…';
+  document.getElementById('standup-progress').textContent=`0/${_meetingNames.length}`;
+  // Fetch LLM updates in background
+  _fetchStandupUpdates();
+  // Start standup after agents gather
+  _meetingTimer=setTimeout(_advanceSpeaker,3500);
+}
+
+function endMeeting(){
+  _meetingActive=false;
+  _meetingPhase='idle';
+  if(_meetingTimer){clearTimeout(_meetingTimer);_meetingTimer=null;}
+  document.getElementById('standup-overlay').style.display='none';
+  // Return all agents to idle
+  Object.keys(_wAgents).forEach(name=>{
+    const a=_wAgents[name];
+    if(!a) return;
+    a.state='idle'; a.task='';
+    const [dc,dr]=_ISO_DESKS[name]||[0,0];
+    a.tx=dc+0.5; a.ty=dr+0.5;
+  });
+}
+
+function _advanceSpeaker(){
+  if(!_meetingActive){return;}
+  _meetingSpeakerIdx++;
+  if(_meetingSpeakerIdx>=_meetingNames.length){
+    _meetingPhase='done';
+    document.getElementById('standup-status-line').textContent='Standup complete.';
+    document.getElementById('standup-speaker-name').textContent='—';
+    _meetingTimer=setTimeout(endMeeting,3000);
+    return;
+  }
+  const name=_meetingNames[_meetingSpeakerIdx];
+  _meetingPhase='standup';
+  // Update UI
+  document.getElementById('standup-status-line').textContent='Team updates in progress';
+  document.getElementById('standup-speaker-name').textContent=name.replace(/_/g,' ');
+  document.getElementById('standup-progress').textContent=`${_meetingSpeakerIdx+1}/${_meetingNames.length}`;
+  // Highlight card
+  document.querySelectorAll('.standup-card').forEach(c=>c.style.borderColor='#1e2a3a');
+  const card=document.getElementById('sc-'+name);
+  if(card) card.style.borderColor='#4a9eff';
+  document.querySelectorAll('.spk-badge').forEach(b=>b.style.display='none');
+  const badge=document.getElementById('spk-'+name);
+  if(badge) badge.style.display='inline';
+  // Canvas: set agent to speaking state with update text
+  Object.keys(_wAgents).forEach(n=>{
+    if(_wAgents[n]&&(_wAgents[n].state==='seated'||_wAgents[n].state==='speaking'))
+      _wAgents[n].state=n===name?'speaking':'seated';
+  });
+  if(_wAgents[name]){
+    const upd=_meetingUpdates[name];
+    _wAgents[name].task=upd?upd.update.slice(0,40):'...';
+  }
+  // Scroll card into view
+  if(card) card.scrollIntoView({behavior:'smooth',block:'nearest'});
+  // Advance after speak duration (5s per agent, faster with more agents)
+  const dur=Math.max(3500,7000-_meetingNames.length*200);
+  _meetingTimer=setTimeout(_advanceSpeaker,dur);
+}
+
+function _buildStandupCards(){
+  const container=document.getElementById('standup-cards');
+  if(!container) return;
+  container.innerHTML='';
+  Object.keys(_ISO_DESKS).forEach(name=>{
+    const tasks=(_lastTaskData||[]).filter(t=>normalizeId(t.assigned_agent_id)===name)
+      .sort((a,b)=>new Date(b.updated_at||b.created_at||0)-new Date(a.updated_at||a.created_at||0));
+    const latest=tasks[0];
+    const blockers=tasks.filter(t=>t.status==='failed').slice(0,2);
+    const card=document.createElement('div');
+    card.id='sc-'+name;
+    card.className='standup-card';
+    card.style.cssText='background:#0d1520;border:1px solid #1e2a3a;border-radius:8px;padding:14px;transition:border-color .3s,background .3s;min-width:220px';
+    card.innerHTML=`
+      <div style="font-size:.6em;letter-spacing:.12em;color:#444;margin-bottom:3px">PARTICIPANT</div>
+      <div style="font-size:1em;font-weight:bold;color:#eee;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        ${AGENT_ICONS[name]||'🤖'} ${name.replace(/_/g,' ')}
+        <span id="spk-${name}" class="spk-badge" style="display:none;background:#7ec8e3;color:#0a1520;padding:1px 6px;border-radius:3px;font-size:.6em;letter-spacing:.1em">SPEAKING</span>
+      </div>
+      <div style="font-size:.65em;letter-spacing:.08em;color:#444;margin-bottom:2px">CURRENT TASK</div>
+      <div id="sct-${name}" style="font-size:.8em;color:#bbb;margin-bottom:8px;min-height:16px">${latest?(latest.description||latest.prompt||'').slice(0,60):'—'}</div>
+      <div style="font-size:.65em;letter-spacing:.08em;color:#444;margin-bottom:2px">STATUS UPDATE</div>
+      <div id="scu-${name}" style="font-size:.8em;color:#7ec8e3;margin-bottom:8px;min-height:32px;font-style:italic;color:#668">Generating update…</div>
+      <div style="font-size:.65em;letter-spacing:.08em;color:#444;margin-bottom:2px">BLOCKERS</div>
+      <div id="scb-${name}" style="font-size:.8em;color:${blockers.length?'#ea5455':'#333'}">${blockers.length?blockers.map(t=>(t.description||t.prompt||'').slice(0,50)).join('; '):'No blockers reported.'}</div>`;
+    container.appendChild(card);
+  });
+}
+
+async function _fetchStandupUpdates(){
+  try{
+    const resp=await apiFetch('/agents/standup',{method:'POST'});
+    const updates=(resp.updates||[]);
+    updates.forEach(u=>{
+      _meetingUpdates[u.agent]=u;
+      const el=document.getElementById('scu-'+u.agent);
+      if(el) el.textContent=u.update||'No update available.';
+      if(u.blockers){
+        const bel=document.getElementById('scb-'+u.agent);
+        if(bel){bel.textContent=u.blockers; bel.style.color='#ea5455';}
+      }
+    });
+  } catch(e){ console.warn('standup fetch failed',e); }
+}
+
+// Expose lastTaskData updater — called from refresh()
+function _updateMeetingTaskData(tasks){ _lastTaskData=tasks||[]; }
+"""
+
+# ── 3D Office World JS — Three.js Roblox-style engine (raw string) ───────────
+
+_WORLD_JS = r"""
+// ── Three.js 3D Roblox-style Office World ──────────────────────────────────
+
+const _TILE = 1.0;
+const _WORLD_COLS = 22, _WORLD_ROWS = 15;
+
+const _ISO_ZONES = {
+  eng:[0,0,6,4], design:[7,0,13,4], research:[14,0,21,4],
+  qa:[0,5,6,9], safety:[7,5,13,9], ops:[14,5,21,9],
+  lobby:[0,10,13,14], gym:[14,10,21,14],
+};
+const _ISO_FLOOR_HEX = {
+  eng:0x0d1e2e, design:0x190d22, research:0x0d1e1e,
+  qa:0x1e1a08, safety:0x1e0d0d, ops:0x100d1e,
+  lobby:0x121212, gym:0x1a0d1a,
+};
+const _ISO_LABELS = {
+  eng:'⚙ Engineering', design:'🎨 Design', research:'🔬 Research',
+  qa:'🧪 QA', safety:'🛡 Safety', ops:'📡 Ops',
+  lobby:'🛋 Lobby', gym:'🏋 Eval Gym',
+};
+const _ISO_DESKS = {
+  backend_engineer:[2,1], automation_engineer:[4,2], devops_release:[1,3],
+  frontend_designer:[8,1], ux_researcher:[11,2],
+  researcher:[15,1], security_reviewer:[18,3],
+  qa_tester:[2,6], ai_evaluator:[4,7],
+  ai_safety_agent:[9,6],
+  pipeline_monitor:[15,6], output_quality_checker:[18,7],
+  career_agent:[3,11], memory_librarian:[8,12],
+};
+const _ISO_COLORS = {
+  backend_engineer:0x4a9eff, automation_engineer:0x2d7dd2, devops_release:0x1e5fa8,
+  frontend_designer:0xff6b9d, ux_researcher:0xe05888,
+  researcher:0x5bc8c8, security_reviewer:0x3a9090,
+  qa_tester:0xf5a623, ai_evaluator:0xd4870a,
+  ai_safety_agent:0xef4444,
+  pipeline_monitor:0x8b5cf6, output_quality_checker:0x6d3aed,
+  career_agent:0xa0a0a0, memory_librarian:0x7a7a8a,
+};
+const _GYM_SPOT = [17, 12];
+
+const AGENT_HOME_ZONES = {
+  backend_engineer:'eng', automation_engineer:'eng', devops_release:'eng',
+  frontend_designer:'design', ux_researcher:'design',
+  researcher:'research', security_reviewer:'research',
+  qa_tester:'qa', ai_evaluator:'qa',
+  ai_safety_agent:'safety',
+  pipeline_monitor:'ops', output_quality_checker:'ops',
+  career_agent:'lobby', memory_librarian:'lobby',
+};
+const AGENT_ICONS = {
+  backend_engineer:'⚙️', automation_engineer:'🤖', devops_release:'🚀',
+  frontend_designer:'🎨', ux_researcher:'🔍', researcher:'📚',
+  security_reviewer:'🛡️', qa_tester:'🧪', ai_evaluator:'🏆',
+  ai_safety_agent:'⚠️', pipeline_monitor:'📡', output_quality_checker:'✅',
+  career_agent:'💼', memory_librarian:'🧠',
+};
+
+// ── Shared agent state (also used by _MEETING_JS) ──
+let _wAgents = {};
+
+// ── Three.js state ──
+let _3wScene=null, _3wRenderer=null, _3wCamera=null;
+let _3wInited=false, _3wCanvas=null, _3wRaf=null, _3wLastTs=0;
+let _3wMeshes={}, _3wClickables=[];
+let _3wRaycaster=null, _3wMouse=null;
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+function initWorldIfNeeded(){
+  const canvas=document.getElementById('office-canvas');
+  if(!canvas||_3wInited) return;
+  if(typeof THREE==='undefined') return;
+  _3wCanvas=canvas;
+  _3wInited=true;
+
+  const W=canvas.parentElement.clientWidth||900;
+  const H=Math.round(W*15/22);
+  canvas.style.height=H+'px';
+
+  _3wRenderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  _3wRenderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  _3wRenderer.shadowMap.enabled=true;
+  _3wRenderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  _3wRenderer.setSize(W,H,false);
+
+  _3wScene=new THREE.Scene();
+  _3wScene.background=new THREE.Color(0x0d1117);
+  _3wScene.fog=new THREE.Fog(0x0d1117,30,65);
+
+  _3wSetupCamera(W,H);
+  _3wBuildLights();
+  _3wBuildFloor();
+  _3wBuildFurniture();
+  _3wBuildMeetingTable();
+
+  _3wRaycaster=new THREE.Raycaster();
+  _3wMouse=new THREE.Vector2();
+  canvas.addEventListener('click',_3wHandleClick);
+  window.addEventListener('resize',_3wOnResize);
+
+  Object.keys(_ISO_DESKS).forEach(name=>{
+    const [dc,dr]=_ISO_DESKS[name];
+    _wAgents[name]={
+      state:'idle', tx:dc+0.5, ty:dr+0.5,
+      x:dc+0.5, y:dr+0.5,
+      frame:Math.random()*1000, wanderT:Math.random()*3,
+      celebT:0, task:'', score:null,
+    };
+    const m=_3wMakeChar(name);
+    _3wScene.add(m.group);
+    _3wMeshes[name]=m;
+    m.group.position.set(dc+0.5,0,dr+0.5);
+  });
+
+  _3wRaf=requestAnimationFrame(_3wTick);
+}
+
+function _3wSetupCamera(W,H){
+  const aspect=(W||900)/(H||614);
+  const fH=15;
+  _3wCamera=new THREE.OrthographicCamera(-fH*aspect,fH*aspect,fH,-fH,-200,200);
+  const cx=_WORLD_COLS/2, cz=_WORLD_ROWS/2, d=24;
+  _3wCamera.position.set(cx+d,d*0.6,cz+d);
+  _3wCamera.lookAt(cx,0,cz);
+}
+
+function _3wOnResize(){
+  if(!_3wCanvas||!_3wRenderer||!_3wCamera) return;
+  const W=_3wCanvas.parentElement.clientWidth||900;
+  const H=Math.round(W*15/22);
+  _3wCanvas.style.height=H+'px';
+  _3wRenderer.setSize(W,H,false);
+  const fH=15, aspect=W/H;
+  _3wCamera.left=-fH*aspect; _3wCamera.right=fH*aspect;
+  _3wCamera.top=fH; _3wCamera.bottom=-fH;
+  _3wCamera.updateProjectionMatrix();
+}
+
+// ── Lights ────────────────────────────────────────────────────────────────────
+
+function _3wBuildLights(){
+  _3wScene.add(new THREE.AmbientLight(0x8899cc,0.9));
+  const sun=new THREE.DirectionalLight(0xfff0e0,2.0);
+  sun.position.set(14,22,8);
+  sun.castShadow=true;
+  sun.shadow.mapSize.set(2048,2048);
+  sun.shadow.camera.left=-20; sun.shadow.camera.right=20;
+  sun.shadow.camera.top=20; sun.shadow.camera.bottom=-20;
+  sun.shadow.camera.near=0.5; sun.shadow.camera.far=80;
+  sun.shadow.bias=-0.001;
+  _3wScene.add(sun);
+  const fill=new THREE.DirectionalLight(0x4466cc,0.45);
+  fill.position.set(-8,12,-6);
+  _3wScene.add(fill);
+}
+
+// ── Floor & Zones ─────────────────────────────────────────────────────────────
+
+function _3wBuildFloor(){
+  const gnd=new THREE.Mesh(
+    new THREE.PlaneGeometry(_WORLD_COLS+2,_WORLD_ROWS+2),
+    new THREE.MeshStandardMaterial({color:0x080810,roughness:1})
+  );
+  gnd.rotation.x=-Math.PI/2;
+  gnd.position.set(_WORLD_COLS/2,-0.02,_WORLD_ROWS/2);
+  gnd.receiveShadow=true;
+  _3wScene.add(gnd);
+
+  const borderCol={
+    eng:0x1a4a7a, design:0x4a1a7a, research:0x1a5a4a,
+    qa:0x5a3a1a, safety:0x5a1a1a, ops:0x1a3a5a,
+    lobby:0x3a3a1a, gym:0x5a0aaa,
+  };
+
+  Object.entries(_ISO_ZONES).forEach(([zone,[x1,z1,x2,z2]])=>{
+    const w=(x2-x1)*_TILE, d=(z2-z1)*_TILE;
+    const floor=new THREE.Mesh(
+      new THREE.BoxGeometry(w,0.05,d),
+      new THREE.MeshStandardMaterial({color:_ISO_FLOOR_HEX[zone]||0x111111,roughness:0.9,metalness:0.04})
+    );
+    floor.position.set(x1*_TILE+w/2,0,z1*_TILE+d/2);
+    floor.receiveShadow=true;
+    _3wScene.add(floor);
+    const pts=[
+      new THREE.Vector3(x1,0.04,z1),new THREE.Vector3(x2,0.04,z1),
+      new THREE.Vector3(x2,0.04,z2),new THREE.Vector3(x1,0.04,z2),
+      new THREE.Vector3(x1,0.04,z1),
+    ];
+    _3wScene.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({color:borderCol[zone]||0x2a2a4a,transparent:true,opacity:0.65})
+    ));
+    const lbl=_3wLabelSprite(_ISO_LABELS[zone]||zone);
+    lbl.position.set(x1*_TILE+w/2,0.35,z1*_TILE+1.1);
+    lbl.scale.set(Math.min(w*0.88,6.5),0.55,1);
+    _3wScene.add(lbl);
+  });
+}
+
+// ── Furniture ─────────────────────────────────────────────────────────────────
+
+function _3wBuildFurniture(){
+  Object.entries(_ISO_DESKS).forEach(([name,[dc,dr]])=>{
+    _3wPlaceDesk(dc,dr,_ISO_COLORS[name]||0x334466);
+  });
+  _3wPlaceGym();
+}
+
+function _3wPlaceDesk(col,row,agentColor){
+  const desk=new THREE.Mesh(
+    new THREE.BoxGeometry(0.82,0.06,0.52),
+    new THREE.MeshStandardMaterial({color:0x1a1a2e,roughness:0.7})
+  );
+  desk.position.set(col+0.5,0.40,row+0.5);
+  desk.castShadow=true; desk.receiveShadow=true;
+  _3wScene.add(desk);
+  const mon=new THREE.Mesh(
+    new THREE.BoxGeometry(0.42,0.30,0.04),
+    new THREE.MeshStandardMaterial({color:agentColor,roughness:0.3,metalness:0.4,emissive:agentColor,emissiveIntensity:0.2})
+  );
+  mon.position.set(col+0.5,0.63,row+0.26);
+  _3wScene.add(mon);
+  [[-.36,.21],[.36,.21],[-.36,-.16],[.36,-.16]].forEach(([lx,lz])=>{
+    const leg=new THREE.Mesh(
+      new THREE.BoxGeometry(0.04,0.38,0.04),
+      new THREE.MeshStandardMaterial({color:0x22223a})
+    );
+    leg.position.set(col+0.5+lx,0.19,row+0.5+lz);
+    _3wScene.add(leg);
+  });
+}
+
+function _3wPlaceGym(){
+  const [gc,gr]=_GYM_SPOT;
+  const bar=new THREE.Mesh(
+    new THREE.CylinderGeometry(0.04,0.04,2.4,8),
+    new THREE.MeshStandardMaterial({color:0x888888,metalness:0.8,roughness:0.2})
+  );
+  bar.rotation.z=Math.PI/2;
+  bar.position.set(gc+0.5,0.56,gr+0.5);
+  _3wScene.add(bar);
+  [-0.9,0.9].forEach(ox=>{
+    const wt=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.34,0.34,0.14,14),
+      new THREE.MeshStandardMaterial({color:0x222244,metalness:0.6,roughness:0.3})
+    );
+    wt.rotation.z=Math.PI/2;
+    wt.position.set(gc+0.5+ox,0.56,gr+0.5);
+    _3wScene.add(wt);
+  });
+  const mat=new THREE.Mesh(
+    new THREE.BoxGeometry(3,0.03,2),
+    new THREE.MeshStandardMaterial({color:0x2a0a4a,roughness:0.95})
+  );
+  mat.position.set(gc+0.5,0.04,gr+0.5);
+  _3wScene.add(mat);
+}
+
+function _3wBuildMeetingTable(){
+  const tx=6.5, tz=12.0;
+  const tblMat=new THREE.MeshStandardMaterial({color:0x5a2e10,roughness:0.5,metalness:0.1});
+  const tbl=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.4,0.12,24),tblMat);
+  tbl.position.set(tx,0.48,tz);
+  tbl.castShadow=true; tbl.receiveShadow=true;
+  _3wScene.add(tbl);
+  const ped=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.20,0.46,10),tblMat);
+  ped.position.set(tx,0.23,tz);
+  _3wScene.add(ped);
+}
+
+// ── Roblox R6 Character ───────────────────────────────────────────────────────
+
+function _3wMakeChar(name){
+  const col=_ISO_COLORS[name]||0x4a4a8a;
+  const bodyMat=new THREE.MeshStandardMaterial({color:col,roughness:0.3,metalness:0.05});
+  const skinMat=new THREE.MeshStandardMaterial({color:0xf5c08a,roughness:0.5});
+  const pantMat=new THREE.MeshStandardMaterial({color:0x111122,roughness:0.8});
+  const group=new THREE.Group();
+
+  // Torso
+  const torso=new THREE.Mesh(new THREE.BoxGeometry(0.72,0.88,0.42),bodyMat);
+  torso.position.y=0.44; torso.castShadow=true;
+  group.add(torso);
+
+  // Head pivot at neck
+  const headPiv=new THREE.Group();
+  headPiv.position.y=0.93;
+  group.add(headPiv);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.65,0.65,0.65),skinMat);
+  head.position.y=0.325; head.castShadow=true;
+  headPiv.add(head);
+  [-0.12,0.12].forEach(ex=>{
+    const eye=new THREE.Mesh(
+      new THREE.BoxGeometry(0.09,0.07,0.02),
+      new THREE.MeshStandardMaterial({color:0x111111})
+    );
+    eye.position.set(ex,0.35,0.325);
+    headPiv.add(eye);
+  });
+  const crown=_3wMakeCrown();
+  crown.position.y=0.67;
+  headPiv.add(crown);
+
+  // Arms
+  const lArmPiv=new THREE.Group();
+  lArmPiv.position.set(-0.53,0.82,0);
+  group.add(lArmPiv);
+  const lArm=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.74,0.34),bodyMat);
+  lArm.position.y=-0.37; lArm.castShadow=true;
+  lArmPiv.add(lArm);
+
+  const rArmPiv=new THREE.Group();
+  rArmPiv.position.set(0.53,0.82,0);
+  group.add(rArmPiv);
+  const rArm=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.74,0.34),bodyMat);
+  rArm.position.y=-0.37; rArm.castShadow=true;
+  rArmPiv.add(rArm);
+
+  // Legs
+  const lLegPiv=new THREE.Group();
+  lLegPiv.position.set(-0.19,0.02,0);
+  group.add(lLegPiv);
+  const lLeg=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.74,0.34),pantMat);
+  lLeg.position.y=-0.37; lLeg.castShadow=true;
+  lLegPiv.add(lLeg);
+
+  const rLegPiv=new THREE.Group();
+  rLegPiv.position.set(0.19,0.02,0);
+  group.add(rLegPiv);
+  const rLeg=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.74,0.34),pantMat);
+  rLeg.position.y=-0.37; rLeg.castShadow=true;
+  rLegPiv.add(rLeg);
+
+  // Name label sprite
+  const label=_3wNameSprite(name.replace(/_/g,' '),col);
+  label.position.y=2.15;
+  label.scale.set(3.2,0.72,1);
+  group.add(label);
+
+  // Status dot
+  const dotMat=new THREE.MeshStandardMaterial({color:0x555577,emissive:0x555577,emissiveIntensity:0.6});
+  const dot=new THREE.Mesh(new THREE.SphereGeometry(0.09,8,6),dotMat);
+  dot.position.set(0.4,2.05,0);
+  group.add(dot);
+
+  // Invisible hit box for raycaster
+  const hit=new THREE.Mesh(
+    new THREE.BoxGeometry(0.9,2.1,0.65),
+    new THREE.MeshBasicMaterial({visible:false})
+  );
+  hit.position.y=0.9;
+  hit.userData={agentName:name};
+  group.add(hit);
+  _3wClickables.push(hit);
+
+  return {group, parts:{torso,headPiv,lArmPiv,rArmPiv,lLegPiv,rLegPiv,dot}};
+}
+
+function _3wMakeCrown(){
+  const g=new THREE.Group();
+  const mat=new THREE.MeshStandardMaterial({color:0xffd700,roughness:0.25,metalness:0.7});
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.29,0.31,0.13,6,1,true),mat));
+  for(let i=0;i<5;i++){
+    const a=(i/5)*Math.PI*2;
+    const s=new THREE.Mesh(new THREE.ConeGeometry(0.046,0.20,5),mat);
+    s.position.set(Math.cos(a)*0.27,0.17,Math.sin(a)*0.27);
+    g.add(s);
+  }
+  return g;
+}
+
+function _3wNameSprite(text,color){
+  const cv=document.createElement('canvas');
+  cv.width=256; cv.height=52;
+  const c=cv.getContext('2d');
+  c.clearRect(0,0,256,52);
+  c.fillStyle='rgba(0,0,0,0.62)';
+  if(c.roundRect) c.roundRect(2,2,252,48,8); else c.rect(2,2,252,48);
+  c.fill();
+  c.fillStyle='#'+(color).toString(16).padStart(6,'0');
+  c.font='bold 18px -apple-system,Arial,sans-serif';
+  c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(text,128,26);
+  const tex=new THREE.CanvasTexture(cv);
+  return new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+}
+
+function _3wLabelSprite(text){
+  const cv=document.createElement('canvas');
+  cv.width=320; cv.height=44;
+  const c=cv.getContext('2d');
+  c.clearRect(0,0,320,44);
+  c.fillStyle='rgba(255,255,255,0.12)';
+  c.font='bold 15px -apple-system,Arial,sans-serif';
+  c.textAlign='center'; c.textBaseline='middle';
+  c.fillText(text,160,22);
+  const tex=new THREE.CanvasTexture(cv);
+  return new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+}
+
+// ── Animation Loop ────────────────────────────────────────────────────────────
+
+function _3wTick(ts){
+  if(!_3wInited) return;
+  _3wRaf=requestAnimationFrame(_3wTick);
+  const dt=Math.min((ts-_3wLastTs)/1000,0.05);
+  _3wLastTs=ts;
+  const t=ts/1000;
+  Object.entries(_wAgents).forEach(([name,a])=>_3wAnimAgent(name,a,t,dt));
+  _3wRenderer.render(_3wScene,_3wCamera);
+}
+
+function _3wAnimAgent(name,a,t,dt){
+  const m=_3wMeshes[name];
+  if(!m) return;
+  const {group,parts}=m;
+
+  // Movement — lerp in tile space
+  a.frame=(a.frame||0)+dt*60;
+  const spd=(a.state==='working'||a.state==='gym'||a.state==='meeting_walk')?3.5:1.8;
+  const dx=a.tx-a.x, dz=a.ty-a.y;
+  const dist=Math.sqrt(dx*dx+dz*dz);
+  const moving=dist>0.04;
+  if(moving){
+    const step=Math.min(spd*dt,dist);
+    a.x+=dx/dist*step; a.y+=dz/dist*step;
+    if(dist<0.06){a.x=a.tx; a.y=a.ty;}
+    if(dist>0.1) group.rotation.y=Math.atan2(dx,dz);
+  }
+  group.position.x=a.x; group.position.z=a.y;
+
+  // State transitions
+  a.wanderT=(a.wanderT||0)-dt;
+  if(a.celebT>0){a.celebT-=dt*60; if(a.celebT<=0){a.celebT=0;a.state='idle';}}
+  if(a.state==='idle'&&!moving&&a.wanderT<=0){
+    a.wanderT=2.5+Math.random()*4;
+    const zone=AGENT_HOME_ZONES[name]||'lobby';
+    const [x1,z1,x2,z2]=_ISO_ZONES[zone];
+    a.tx=x1+0.5+Math.random()*Math.max(0,x2-x1-1);
+    a.ty=z1+0.5+Math.random()*Math.max(0,z2-z1-1);
+  }else if(a.state==='meeting_walk'&&!moving){
+    a.state='seated';
+  }
+
+  // Reset limb rotations each frame
+  parts.lArmPiv.rotation.x=0; parts.rArmPiv.rotation.x=0;
+  parts.lLegPiv.rotation.x=0; parts.rLegPiv.rotation.x=0;
+  parts.headPiv.rotation.y=0; parts.headPiv.rotation.x=0;
+  parts.torso.position.y=0.44;
+  group.position.y=0;
+
+  // Walk cycle — applied when moving regardless of state
+  if(moving){
+    const w=t*6;
+    parts.lArmPiv.rotation.x=Math.sin(w)*0.62;
+    parts.rArmPiv.rotation.x=-Math.sin(w)*0.62;
+    parts.lLegPiv.rotation.x=-Math.sin(w)*0.62;
+    parts.rLegPiv.rotation.x=Math.sin(w)*0.62;
+  }else{
+    // State-specific static animations
+    if(a.state==='idle'||a.state==='seated'){
+      parts.torso.position.y=0.44+Math.sin(t*1.4)*0.013;
+      parts.headPiv.rotation.y=Math.sin(t*0.65)*0.14;
+    }else if(a.state==='working'){
+      parts.lArmPiv.rotation.x=-0.45+Math.sin(t*9)*0.13;
+      parts.rArmPiv.rotation.x=-0.45+Math.cos(t*9+1)*0.13;
+      parts.torso.position.y=0.44+Math.sin(t*1.2)*0.008;
+    }else if(a.state==='gym'){
+      const lift=Math.max(0,Math.sin(t*2.2));
+      parts.lArmPiv.rotation.x=-1.3+lift*0.9;
+      parts.rArmPiv.rotation.x=-1.3+lift*0.9;
+      parts.torso.position.y=0.44-lift*0.04;
+    }else if(a.state==='done'){
+      group.position.y=Math.abs(Math.sin(t*6))*0.38;
+      parts.lArmPiv.rotation.x=-1.7+Math.sin(t*6)*0.5;
+      parts.rArmPiv.rotation.x=-1.7+Math.cos(t*6)*0.5;
+    }else if(a.state==='failed'){
+      parts.lArmPiv.rotation.x=0.35; parts.rArmPiv.rotation.x=0.35;
+      parts.headPiv.rotation.x=0.38;
+    }else if(a.state==='speaking'){
+      parts.rArmPiv.rotation.x=-0.5+Math.sin(t*3.5)*0.45;
+      parts.lArmPiv.rotation.x=-0.15+Math.sin(t*2.8+1)*0.18;
+      parts.torso.position.y=0.44+Math.sin(t*2)*0.018;
+      parts.headPiv.rotation.y=Math.sin(t*1.8)*0.22;
+    }else if(a.state==='waiting'){
+      parts.rArmPiv.rotation.x=0.18; parts.lArmPiv.rotation.x=0.18;
+      parts.headPiv.rotation.y=Math.sin(t*2.2)*0.28;
+    }
+  }
+
+  // Status dot color
+  const dotCols={idle:0x555577,working:0x7ec8e3,gym:0xa78bfa,done:0x28c76f,
+    failed:0xea5455,waiting:0xffd700,meeting_walk:0xffd700,seated:0xffd700,speaking:0xff9f43};
+  const dc=dotCols[a.state]||0x555577;
+  parts.dot.material.color.setHex(dc);
+  parts.dot.material.emissive.setHex(dc);
+}
+
+// ── Click ─────────────────────────────────────────────────────────────────────
+
+function _3wHandleClick(e){
+  if(!_3wCamera||!_3wRaycaster) return;
+  const rect=_3wCanvas.getBoundingClientRect();
+  _3wMouse.x=((e.clientX-rect.left)/rect.width)*2-1;
+  _3wMouse.y=-((e.clientY-rect.top)/rect.height)*2+1;
+  _3wRaycaster.setFromCamera(_3wMouse,_3wCamera);
+  const hits=_3wRaycaster.intersectObjects(_3wClickables);
+  if(hits.length){
+    const n=hits[0].object.userData.agentName;
+    if(n)(typeof _wAgentClick==='function'?_wAgentClick:quickAssign)(n);
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+function renderOfficeFloor(agentsData,tasks){
+  initWorldIfNeeded();
+  if(!_3wInited) return;
+  if(typeof _meetingActive!=='undefined'&&_meetingActive) return;
+
+  (agentsData||[]).forEach(agent=>{
+    const name=(agent.id||agent.name||'').replace(/-/g,'_');
+    const a=_wAgents[name];
+    if(!a) return;
+    const prev=a.state;
+    const latest=(tasks||[])
+      .filter(t=>(t.assigned_agent_id||'').replace(/-/g,'_')===name)
+      .sort((p,q)=>(q.updated_at||'').localeCompare(p.updated_at||''))[0];
+    const st=latest?.status||null;
+    const inGym=typeof _gymAgents!=='undefined'&&_gymAgents.has&&_gymAgents.has(name);
+    if(inGym&&st!=='running'){
+      a.state='gym'; a.task=latest?.description||'';
+      a.tx=_GYM_SPOT[0]+(Math.random()-0.5)*1.5;
+      a.ty=_GYM_SPOT[1]+(Math.random()-0.5)*1.5;
+    }else if(st==='running'||st==='queued'||st==='assigned'||st==='streaming'){
+      if(prev!=='working'){
+        a.state='working'; a.task=latest?.description||latest?.prompt||'';
+        const [dc,dr]=_ISO_DESKS[name]||[1,1];
+        a.tx=dc+0.5; a.ty=dr+0.5;
+      }
+    }else if(st==='succeeded'||st==='completed'){
+      if(prev==='working'||prev==='gym'){a.state='done';a.celebT=90;}
+      else if(prev!=='done') a.state='idle';
+      a.task='';
+    }else if(st==='failed'){
+      a.state='failed'; a.task='';
+    }else if(st==='waiting_approval'){
+      a.state='waiting'; a.task='';
+    }else{
+      if(prev!=='done'&&prev!=='failed') a.state='idle';
+      a.task='';
+    }
+    if(typeof _evalScores!=='undefined'&&_evalScores[name]) a.score=_evalScores[name].score;
+  });
+}
+"""
+
+# ── Agent Operations Dashboard ──────────────────────────────────────────────
+
+@app.get("/dashboard")
+async def agent_dashboard(request: Request):
+    """Agent Operations Dashboard — assign work, approve tasks, review decisions."""
     from fastapi.responses import HTMLResponse
-    html_content = """<!DOCTYPE html>
+    token_js = f"'{_API_TOKEN}'" if _API_TOKEN else "localStorage.getItem('jarvis_auth_token') || ''"
+    html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="J.A.R.V.I.S">
-  <link rel="apple-touch-icon" href="/assets/icon_1024.png">
-  <link rel="manifest" href="/manifest.json">
-  <title>J.A.R.V.I.S — Unified Brain</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    :root {
-      --bg: #01080e;
-      --cyan: #00d4ff;
-      --cyan-dim: #0088cc;
-      --cyan-glow: rgba(0, 212, 255, 0.25);
-      --orange: #ff6b00;
-      --orange-glow: rgba(255, 107, 0, 0.35);
-      --border: rgba(13, 79, 112, 0.35);
-      --glass-fill: rgba(3, 18, 28, 0.75);
-      --glass-border: rgba(0, 212, 255, 0.15);
-      --text: #a8e6ff;
-      --text-dim: #4a8fa8;
-      --white-dim: #d8f6ff;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      height: 100vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-    }
-
-    /* Breathtaking background animated grid & scanlines */
-    body::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: 
-        radial-gradient(circle at 50% 30%, rgba(0, 212, 255, 0.12) 0%, transparent 60%),
-        linear-gradient(rgba(0, 180, 220, 0.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 180, 220, 0.02) 1px, transparent 1px);
-      background-size: 100% 100%, 24px 24px, 24px 24px;
-      z-index: -2;
-    }
-
-    body::after {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 100%;
-      background: linear-gradient(0deg, transparent 0%, rgba(0, 212, 255, 0.03) 10%, rgba(0, 212, 255, 0.08) 50%, rgba(0, 212, 255, 0.03) 90%, transparent 100%);
-      background-size: 100% 400px;
-      animation: scanline 12s linear infinite;
-      z-index: -1;
-      pointer-events: none;
-    }
-
-    @keyframes scanline {
-      0% { background-position-y: -400px; }
-      100% { background-position-y: 100%; }
-    }
-
-    /* Header */
-    header {
-      height: 70px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 20px;
-      background: rgba(3, 13, 20, 0.85);
-      border-bottom: 1px solid var(--border);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      z-index: 10;
-      flex-shrink: 0;
-    }
-
-    .brand-block {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .brand-logo {
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      border: 2px solid var(--cyan);
-      box-shadow: 0 0 10px var(--cyan-glow);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      font-weight: bold;
-      color: var(--cyan);
-      background: rgba(0, 212, 255, 0.1);
-      animation: pulse-logo 4s infinite alternate;
-    }
-
-    @keyframes pulse-logo {
-      0% { box-shadow: 0 0 4px var(--cyan-glow); }
-      100% { box-shadow: 0 0 14px rgba(0, 212, 255, 0.5); }
-    }
-
-    .brand-title {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .brand-name {
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      color: var(--cyan);
-      text-shadow: 0 0 8px var(--cyan-glow);
-    }
-
-    .brand-sub {
-      font-size: 8px;
-      color: var(--text-dim);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
-    .status-block {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: rgba(0, 255, 136, 0.08);
-      border: 1px solid rgba(0, 255, 136, 0.3);
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 10px;
-      font-weight: 600;
-      color: #00ff88;
-      letter-spacing: 1px;
-    }
-
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background-color: #00ff88;
-      box-shadow: 0 0 8px #00ff88;
-      animation: blink-dot 1.5s infinite alternate;
-    }
-
-    @keyframes blink-dot {
-      0% { opacity: 0.4; }
-      100% { opacity: 1; }
-    }
-
-    .sidebar-toggle {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      padding: 6px 10px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s ease;
-    }
-
-    .sidebar-toggle:hover, .sidebar-toggle:active {
-      border-color: var(--cyan);
-      color: #fff;
-      background: rgba(0, 212, 255, 0.08);
-    }
-
-    /* Layout Wrapper */
-    .layout-body {
-      display: flex;
-      flex: 1;
-      height: calc(100vh - 70px);
-      position: relative;
-      overflow: hidden;
-    }
-
-    /* Diagnostics Drawer */
-    .diagnostics-drawer {
-      width: 280px;
-      background: rgba(2, 10, 16, 0.95);
-      border-right: 1px solid var(--border);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      display: flex;
-      flex-direction: column;
-      padding: 20px;
-      gap: 20px;
-      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      transform: translateX(-100%);
-      z-index: 5;
-    }
-
-    .diagnostics-drawer.open {
-      transform: translateX(0);
-      position: relative;
-    }
-
-    .drawer-header {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      color: var(--cyan);
-      text-transform: uppercase;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 8px;
-    }
-
-    .stat-card {
-      background: rgba(3, 18, 28, 0.5);
-      border: 1px solid var(--glass-border);
-      border-radius: 10px;
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .stat-label {
-      font-size: 9px;
-      color: var(--text-dim);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
-    .stat-value {
-      font-size: 13px;
-      color: var(--white-dim);
-      font-weight: 600;
-    }
-
-    /* Main Chat Container */
-    .chat-container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      background: transparent;
-      overflow: hidden;
-      padding-bottom: 60px;
-    }
-
-    /* Message Area */
-    .message-area {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      scroll-behavior: smooth;
-    }
-
-    /* Custom Scrollbar */
-    .message-area::-webkit-scrollbar {
-      width: 4px;
-    }
-    .message-area::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .message-area::-webkit-scrollbar-thumb {
-      background: var(--border);
-      border-radius: 2px;
-    }
-
-    /* Message Bubble Capsules */
-    .message-wrap {
-      display: flex;
-      width: 100%;
-      margin: 4px 0;
-    }
-
-    .message-wrap.user {
-      justify-content: flex-end;
-    }
-
-    .message-wrap.jarvis {
-      justify-content: flex-start;
-    }
-
-    .bubble {
-      max-width: 82%;
-      padding: 12px 16px;
-      font-size: 14px;
-      line-height: 1.5;
-      word-wrap: break-word;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-    }
-
-    .message-wrap.user .bubble {
-      background: linear-gradient(135deg, rgba(255, 107, 0, 0.15), rgba(255, 107, 0, 0.05));
-      border: 1px solid rgba(255, 107, 0, 0.4);
-      border-radius: 16px 16px 2px 16px;
-      color: #ffffff;
-    }
-
-    .message-wrap.jarvis .bubble {
-      background: linear-gradient(135deg, rgba(0, 212, 255, 0.08), rgba(0, 212, 255, 0.02));
-      border: 1px solid rgba(0, 212, 255, 0.25);
-      border-radius: 16px 16px 16px 2px;
-      color: var(--white-dim);
-    }
-
-    .bubble p {
-      margin-bottom: 8px;
-    }
-    .bubble p:last-child {
-      margin-bottom: 0;
-    }
-
-    .bubble pre {
-      background: rgba(1, 8, 14, 0.85);
-      border: 1px solid rgba(0, 212, 255, 0.15);
-      border-radius: 8px;
-      padding: 10px;
-      overflow-x: auto;
-      font-family: SF Mono, Consolas, Monaco, monospace;
-      font-size: 11px;
-      margin: 8px 0;
-    }
-
-    .bubble code {
-      font-family: SF Mono, Consolas, Monaco, monospace;
-      font-size: 12px;
-      background: rgba(0, 212, 255, 0.1);
-      padding: 2px 4px;
-      border-radius: 4px;
-      color: #00d4ff;
-    }
-
-    .bubble pre code {
-      background: none;
-      padding: 0;
-      color: var(--white-dim);
-    }
-
-    /* Quick-action chips */
-    .chip-row {
-      display: flex;
-      flex-direction: row;
-      gap: 8px;
-      padding: 8px 16px 4px;
-      overflow-x: auto;
-      overflow-y: hidden;
-      flex-shrink: 0;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      background: rgba(3, 13, 20, 0.85);
-      border-top: 1px solid var(--border);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-    }
-    .chip-row::-webkit-scrollbar { display: none; }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      white-space: nowrap;
-      min-height: 36px;
-      padding: 0 14px;
-      font-size: 12px;
-      font-family: inherit;
-      font-weight: 500;
-      color: #00d4ff;
-      background: rgba(0, 212, 255, 0.08);
-      border: 1px solid rgba(0, 212, 255, 0.35);
-      border-radius: 18px;
-      cursor: pointer;
-      flex-shrink: 0;
-      transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .chip:active {
-      background: rgba(0, 212, 255, 0.2);
-      border-color: rgba(0, 212, 255, 0.7);
-      box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
-    }
-
-    /* Input Bar */
-    .input-bar {
-      padding: 14px 20px;
-      background: rgba(3, 13, 20, 0.85);
-      border-top: 1px solid var(--border);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-
-    .input-wrapper {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      background: rgba(1, 8, 14, 0.8);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 4px 12px;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .input-wrapper:focus-within {
-      border-color: var(--cyan);
-      box-shadow: 0 0 10px var(--cyan-glow);
-    }
-
-    .input-field {
-      flex: 1;
-      background: none;
-      border: none;
-      color: #ffffff;
-      font-size: 14px;
-      outline: none;
-      padding: 8px 6px;
-      resize: none;
-      max-height: 80px;
-      font-family: inherit;
-    }
-
-    .control-btn {
-      background: none;
-      border: none;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      color: var(--text-dim);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-      transition: all 0.2s ease;
-    }
-
-    .control-btn:hover, .control-btn:active {
-      color: #fff;
-    }
-
-    .mic-btn {
-      border: 1px solid var(--border);
-      background: rgba(13, 79, 112, 0.1);
-    }
-
-    .mic-btn.active {
-      background: var(--orange-glow);
-      border-color: var(--orange);
-      color: #ffffff;
-      animation: pulse-mic 1s infinite alternate;
-    }
-
-    @keyframes pulse-mic {
-      0% { box-shadow: 0 0 4px var(--orange-glow); }
-      100% { box-shadow: 0 0 12px rgba(255, 107, 0, 0.6); }
-    }
-
-    .send-btn {
-      background: var(--cyan);
-      color: #01080e;
-      border: none;
-    }
-
-    .send-btn:hover, .send-btn:active {
-      background: #ffffff;
-      box-shadow: 0 0 12px var(--cyan);
-    }
-
-    /* Auth Gate Overlay */
-    .auth-gate {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(1, 8, 14, 0.85);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      padding: 20px;
-    }
-
-    .auth-card {
-      width: 100%;
-      max-width: 400px;
-      background: linear-gradient(135deg, rgba(3, 18, 28, 0.95), rgba(1, 8, 14, 0.98));
-      border: 1px solid var(--glass-border);
-      box-shadow: 0 8px 32px 0 rgba(0, 212, 255, 0.2);
-      border-radius: 16px;
-      padding: 30px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      text-align: center;
-    }
-
-    .auth-logo {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      border: 2px solid var(--cyan);
-      box-shadow: 0 0 15px var(--cyan-glow);
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      font-weight: bold;
-      color: var(--cyan);
-      background: rgba(0, 212, 255, 0.1);
-    }
-
-    .auth-title {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: 2px;
-      color: var(--cyan);
-    }
-
-    .auth-desc {
-      font-size: 12px;
-      color: var(--text-dim);
-      line-height: 1.5;
-    }
-
-    .auth-input {
-      background: rgba(1, 8, 14, 0.85);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      color: #ffffff;
-      padding: 12px 16px;
-      font-size: 14px;
-      outline: none;
-      text-align: center;
-      letter-spacing: 1px;
-    }
-
-    .auth-input:focus {
-      border-color: var(--cyan);
-      box-shadow: 0 0 10px var(--cyan-glow);
-    }
-
-    .auth-submit {
-      background: var(--cyan);
-      color: #01080e;
-      border: none;
-      border-radius: 12px;
-      padding: 12px 16px;
-      font-size: 14px;
-      font-weight: 700;
-      cursor: pointer;
-      letter-spacing: 1px;
-      transition: all 0.2s ease;
-    }
-
-    .auth-submit:hover, .auth-submit:active {
-      background: #ffffff;
-      box-shadow: 0 0 15px var(--cyan);
-    }
-
-    /* Responsive Media Queries */
-    @media (min-width: 768px) {
-      /* On iPads and large viewports, keep drawer open */
-      .diagnostics-drawer {
-        position: relative;
-        transform: translateX(0);
-      }
-    }
-
-    .pin-container {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      margin: 10px 0;
-    }
-
-    .pin-input {
-      width: 48px;
-      height: 54px;
-      background: rgba(1, 8, 14, 0.85);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: #ffffff;
-      font-size: 24px;
-      font-weight: bold;
-      text-align: center;
-      outline: none;
-      transition: all 0.2s ease;
-    }
-
-    .pin-input:focus {
-      border-color: var(--cyan) !important;
-      box-shadow: 0 0 12px var(--cyan-glow) !important;
-    }
-
-    .auth-toggle-btn {
-      background: none;
-      border: none;
-      color: var(--cyan);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      text-decoration: underline;
-      letter-spacing: 0.5px;
-      transition: color 0.2s ease;
-      margin-top: 10px;
-    }
-
-    .auth-toggle-btn:hover {
-      color: #ffffff;
-      text-shadow: 0 0 8px var(--cyan);
-    }
-
-    .auth-error-msg {
-      color: #ff4a4a;
-      font-size: 12px;
-      text-align: center;
-      display: none;
-      margin-top: -5px;
-      text-shadow: 0 0 5px rgba(255, 74, 74, 0.3);
-    }
-
-    @keyframes shake {
-      0%, 100% { transform: translateX(0); }
-      20%, 60% { transform: translateX(-8px); }
-      40%, 80% { transform: translateX(8px); }
-    }
-
-    /* Holographic Control Deck */
-    .control-deck {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 60px; /* collapsed height */
-      background: linear-gradient(0deg, rgba(3, 18, 28, 0.96), rgba(1, 8, 14, 0.98));
-      border-top: 1px solid var(--glass-border);
-      border-radius: 20px 20px 0 0;
-      box-shadow: 0 -8px 32px rgba(0, 212, 255, 0.15);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      z-index: 90;
-      transition: height 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.1);
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .control-deck.expanded {
-      height: 480px; /* expanded height */
-    }
-
-    .deck-handle {
-      height: 60px;
-      min-height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 20px;
-      cursor: pointer;
-      border-bottom: 1px solid rgba(0, 212, 255, 0.05);
-    }
-
-    .deck-title {
-      font-size: 14px;
-      font-weight: 700;
-      letter-spacing: 1.5px;
-      color: var(--cyan);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      text-shadow: 0 0 8px var(--cyan-glow);
-    }
-
-    .deck-toggle-icon {
-      font-size: 18px;
-      color: var(--cyan);
-      transition: transform 0.3s ease;
-    }
-
-    .control-deck.expanded .deck-toggle-icon {
-      transform: rotate(180deg);
-    }
-
-    .deck-content {
-      flex: 1;
-      padding: 20px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    /* Grid layout of remote modules */
-    .deck-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-    }
-
-    @media (max-width: 480px) {
-      .deck-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .deck-card {
-      background: rgba(3, 18, 28, 0.5);
-      border: 1px solid rgba(0, 212, 255, 0.08);
-      border-radius: 12px;
-      padding: 15px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .card-header {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-dim);
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      border-bottom: 1px solid rgba(0, 212, 255, 0.05);
-      padding-bottom: 6px;
-    }
-
-    /* Sensor Telemetry Rows */
-    .sensor-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 13px;
-    }
-    
-    .sensor-val {
-      font-weight: 600;
-      color: #ffffff;
-      text-shadow: 0 0 4px rgba(255, 255, 255, 0.3);
-    }
-
-    /* Screenshare Feed widget */
-    .screen-feed-container {
-      position: relative;
-      width: 100%;
-      height: 120px;
-      border-radius: 8px;
-      overflow: hidden;
-      background: #000;
-      border: 1px solid rgba(0, 212, 255, 0.1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    #screenFeedImg {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      opacity: 0.85;
-      transition: opacity 0.3s ease;
-    }
-
-    #screenFeedImg.loading {
-      opacity: 0.3;
-    }
-
-    .feed-controls {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      margin-top: 5px;
-    }
-
-    .deck-btn {
-      flex: 1;
-      background: rgba(0, 212, 255, 0.08);
-      border: 1px solid rgba(0, 212, 255, 0.2);
-      border-radius: 8px;
-      color: var(--cyan);
-      padding: 8px;
-      font-size: 11px;
-      font-weight: 700;
-      cursor: pointer;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      transition: all 0.2s ease;
-    }
-
-    .deck-btn:hover, .deck-btn:active {
-      background: var(--cyan);
-      color: #01080e;
-      box-shadow: 0 0 10px var(--cyan-glow);
-    }
-
-    /* Sliders styling */
-    .slider-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .slider-label {
-      font-size: 11px;
-      color: var(--text-dim);
-      display: flex;
-      justify-content: space-between;
-    }
-
-    .deck-slider {
-      -webkit-appearance: none;
-      width: 100%;
-      height: 6px;
-      border-radius: 3px;
-      background: rgba(13, 79, 112, 0.35);
-      outline: none;
-    }
-
-    .deck-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--cyan);
-      cursor: pointer;
-      box-shadow: 0 0 8px var(--cyan);
-    }
-
-    /* Actions Matrix styling */
-    .actions-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    /* ── Full-screen MacBook Screen Viewer ─────────────────────────────── */
-    #screenViewer {
-      display: none;
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #000;
-      z-index: 9999;
-      flex-direction: column;
-      touch-action: none;
-    }
-    #screenViewer.active { display: flex; }
-
-    #screenCanvas {
-      flex: 1;
-      width: 100%;
-      object-fit: contain;
-      cursor: crosshair;
-      touch-action: none;
-      display: block;
-    }
-
-    #screenBar {
-      flex-shrink: 0;
-      background: rgba(2, 10, 16, 0.95);
-      border-top: 1px solid rgba(0, 212, 255, 0.25);
-      padding: 8px 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    #screenInput {
-      flex: 1;
-      background: rgba(3, 18, 28, 0.9);
-      color: #a8e6ff;
-      border: 1px solid rgba(0, 212, 255, 0.3);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 14px;
-      outline: none;
-    }
-    #screenInput:focus { border-color: #00d4ff; }
-
-    .screen-btn {
-      background: rgba(0, 212, 255, 0.1);
-      color: #00d4ff;
-      border: 1px solid rgba(0, 212, 255, 0.3);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-size: 13px;
-      cursor: pointer;
-      white-space: nowrap;
-      -webkit-tap-highlight-color: transparent;
-    }
-    .screen-btn:active { background: rgba(0, 212, 255, 0.25); }
-
-    #screenFps {
-      font-size: 10px;
-      color: rgba(0,212,255,0.4);
-      position: absolute;
-      top: 6px; right: 10px;
-      pointer-events: none;
-    }
-
-    #screenClickFeedback {
-      position: fixed;
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      background: rgba(0,212,255,0.5);
-      border: 2px solid #00d4ff;
-      pointer-events: none;
-      z-index: 10000;
-      transform: translate(-50%,-50%) scale(0);
-      transition: transform 0.15s ease, opacity 0.3s ease;
-      opacity: 0;
-    }
-    #screenClickFeedback.pop {
-      transform: translate(-50%,-50%) scale(1);
-      opacity: 1;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jarvis — Agent Ops</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#d0d0e0;min-height:100vh}}
+  .topbar{{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:#111120;border-bottom:1px solid #222244;position:sticky;top:0;z-index:100}}
+  .topbar h1{{font-size:1.1em;font-weight:600;color:#7ec8e3;letter-spacing:.04em}}
+  .badge{{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:.75em;font-weight:600}}
+  .badge-ok{{background:#0d2a1a;color:#28c76f;border:1px solid #1a4a2a}}
+  .badge-warn{{background:#2a1a0a;color:#ff9f43;border:1px solid #4a2a0a}}
+  .badge-err{{background:#2a0a0a;color:#ea5455;border:1px solid #4a0a0a}}
+  #auth-gate{{position:fixed;inset:0;background:#0a0a0f;display:flex;align-items:center;justify-content:center;z-index:999}}
+  .auth-box{{background:#13131f;border:1px solid #333;border-radius:12px;padding:32px;max-width:360px;width:100%;text-align:center}}
+  .auth-box h2{{color:#7ec8e3;margin-bottom:16px}}
+  .auth-box input{{width:100%;padding:10px;background:#0a0a0f;border:1px solid #333;border-radius:8px;color:#d0d0e0;font-size:1em;margin-bottom:12px}}
+  .btn{{padding:8px 18px;border:none;border-radius:8px;font-size:.9em;font-weight:600;cursor:pointer;transition:.15s}}
+  .btn-primary{{background:#7ec8e3;color:#0a0a0f}}
+  .btn-primary:hover{{background:#a8dff0}}
+  .btn-approve{{background:#0d2a1a;color:#28c76f;border:1px solid #1a4a2a}}
+  .btn-approve:hover{{background:#1a4a2a}}
+  .btn-deny{{background:#2a0a0a;color:#ea5455;border:1px solid #4a0a0a}}
+  .btn-deny:hover{{background:#4a0a0a}}
+  .btn-run{{background:#1a1a3a;color:#7ec8e3;border:1px solid #2a2a5a}}
+  .btn-run:hover{{background:#2a2a5a}}
+  .btn-sm{{padding:5px 12px;font-size:.8em}}
+  .tabs{{display:flex;gap:4px;padding:12px 24px;border-bottom:1px solid #1a1a3a;overflow-x:auto}}
+  .tab{{padding:8px 18px;border-radius:8px;font-size:.88em;cursor:pointer;color:#888;border:1px solid transparent;white-space:nowrap}}
+  .tab.active{{color:#7ec8e3;background:#111128;border-color:#2a2a5a}}
+  .tab:hover:not(.active){{color:#aaa}}
+  .pane{{display:none;padding:20px 24px}}
+  .pane.active{{display:block}}
+  .stat-row{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+  .stat{{flex:1;min-width:140px;background:#111120;border:1px solid #1a1a3a;border-radius:10px;padding:16px;text-align:center}}
+  .stat-num{{font-size:2em;font-weight:700;color:#7ec8e3}}
+  .stat-lbl{{font-size:.78em;color:#777;margin-top:4px}}
+  .card{{background:#111120;border:1px solid #1a1a3a;border-radius:10px;margin-bottom:12px;overflow:hidden}}
+  .card-head{{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1a1a3a;gap:8px;flex-wrap:wrap}}
+  .card-body{{padding:12px 16px;font-size:.85em;color:#aaa;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto}}
+  .card-foot{{padding:10px 16px;display:flex;gap:8px;border-top:1px solid #1a1a3a;flex-wrap:wrap}}
+  .tag{{padding:3px 8px;border-radius:4px;font-size:.72em;font-weight:600}}
+  .tag-wait{{background:#2a2a0a;color:#ffd700}}
+  .tag-run{{background:#0a1a2a;color:#7ec8e3}}
+  .tag-done{{background:#0d1a0d;color:#28c76f}}
+  .tag-fail{{background:#1a0a0a;color:#ea5455}}
+  .tag-agent{{background:#1a1a3a;color:#bb99ff}}
+  .agent-grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}}
+  .agent-card{{background:#111120;border:1px solid #1a1a3a;border-radius:10px;padding:14px}}
+  .agent-card h3{{font-size:.9em;color:#7ec8e3;margin-bottom:4px}}
+  .agent-card p{{font-size:.78em;color:#888;margin-bottom:10px;min-height:32px}}
+  .form-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+  .form-group{{display:flex;flex-direction:column;gap:6px}}
+  .form-group.full{{grid-column:1/-1}}
+  label{{font-size:.82em;color:#888}}
+  select,textarea,input[type=text]{{background:#0a0a0f;border:1px solid #2a2a4a;border-radius:8px;color:#d0d0e0;padding:8px 10px;font-size:.88em;resize:vertical}}
+  select{{cursor:pointer}}
+  textarea{{min-height:100px;font-family:inherit}}
+  .result-area{{background:#0a0a0f;border:1px solid #1a1a3a;border-radius:8px;padding:12px;font-size:.82em;color:#aaa;min-height:60px;max-height:300px;overflow-y:auto;white-space:pre-wrap;margin-top:12px}}
+  #agent-stream{{white-space:pre-wrap;word-break:break-word}}
+  .empty{{text-align:center;color:#555;padding:32px;font-size:.9em}}
+  .dot{{width:8px;height:8px;border-radius:50%;display:inline-block;animation:pulse 1.5s ease-in-out infinite}}
+  .dot-green{{background:#28c76f}}
+  .dot-yellow{{background:#ffd700}}
+  @keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.4}}}}
+  .scroll-table{{overflow-x:auto}}
+  table{{width:100%;border-collapse:collapse;font-size:.82em}}
+  th{{text-align:left;padding:8px 10px;color:#666;border-bottom:1px solid #1a1a3a;font-weight:500}}
+  td{{padding:8px 10px;border-bottom:1px solid #111128;vertical-align:top}}
+  .truncate{{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+  @media(max-width:600px){{.form-grid{{grid-template-columns:1fr}}.stat-row{{flex-direction:column}}}}
+  /* ---- Virtual Office Floor ---- */
+  .floor-plan{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0}}
+  .floor-zone{{background:#111120;border:1px solid #1a1a3a;border-radius:10px;padding:12px}}
+  .floor-zone.zone-eng{{border-color:#1a3a5a;background:linear-gradient(135deg,#0a111a,#111120)}}
+  .floor-zone.zone-design{{border-color:#3a1a5a;background:linear-gradient(135deg,#110a1a,#111120)}}
+  .floor-zone.zone-research{{border-color:#1a3a2a;background:linear-gradient(135deg,#0a1a0f,#111120)}}
+  .floor-zone.zone-qa{{border-color:#3a2a1a;background:linear-gradient(135deg,#1a120a,#111120)}}
+  .floor-zone.zone-safety{{border-color:#3a1a1a;background:linear-gradient(135deg,#1a0a0a,#111120)}}
+  .floor-zone.zone-ops{{border-color:#1a2a3a;background:linear-gradient(135deg,#0a1219,#111120)}}
+  .floor-zone.zone-lobby{{grid-column:1/-1;border-color:#2a2a1a;background:linear-gradient(135deg,#131308,#111120)}}
+  .floor-zone.zone-gym{{grid-column:1/-1;background:linear-gradient(135deg,#1a0a3a,#0d0d20);border-color:#5a0aaa;display:none}}
+  .zone-hdr{{font-size:.72em;text-transform:uppercase;letter-spacing:.1em;color:#666;margin-bottom:10px;font-weight:600;display:flex;align-items:center;gap:6px}}
+  .zone-seats{{display:flex;flex-wrap:wrap;gap:8px;min-height:44px;align-items:flex-start}}
+  .agent-seat{{background:#0d0d1a;border:1px solid #1a1a2a;border-radius:8px;padding:10px 8px;min-width:82px;max-width:96px;cursor:pointer;text-align:center;position:relative;transition:all .2s;flex-shrink:0}}
+  .agent-seat:hover{{border-color:#3a3a6a;background:#131328;transform:translateY(-1px)}}
+  .seat-active{{border-color:#2a5a7a!important;background:#0a1a2a!important;animation:seatpulse 1.5s ease-in-out infinite}}
+  .seat-done{{border-color:#1a4a1a!important;background:#0a1a0a!important}}
+  .seat-fail{{border-color:#4a1a1a!important;background:#1a0a0a!important}}
+  .seat-wait{{border-color:#4a4a1a!important;background:#1a1a0a!important}}
+  .seat-idle{{opacity:.55}}
+  .seat-icon{{font-size:1.5em;margin-bottom:3px;line-height:1}}
+  .seat-name{{font-size:.58em;color:#999;line-height:1.3;word-break:break-all}}
+  .seat-score{{font-size:.6em;margin-top:3px;font-weight:600;line-height:1}}
+  .seat-dot{{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%}}
+  .sdot-active{{background:#7ec8e3;animation:pulse 1.5s ease-in-out infinite}}
+  .sdot-done{{background:#28c76f}}
+  .sdot-fail{{background:#ea5455}}
+  .sdot-wait{{background:#ffd700;animation:pulse 1.5s ease-in-out infinite}}
+  .gym-pill{{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#2a1a4a;border-radius:20px;color:#a78bfa;font-size:.78em;margin:2px;border:1px solid #4a2a8a}}
+  @keyframes seatpulse{{0%,100%{{box-shadow:0 0 0 0 rgba(126,200,227,.25)}}50%{{box-shadow:0 0 0 10px rgba(126,200,227,0)}}}}
+  @media(max-width:720px){{.floor-plan{{grid-template-columns:1fr 1fr}}}}
+  @media(max-width:460px){{.floor-plan{{grid-template-columns:1fr}}}}
+  /* ---- Help modal ---- */
+  .help-modal{{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:300}}
+  .help-modal.open{{display:flex}}
+  .help-box{{background:#13131f;border:1px solid #333;border-radius:14px;padding:28px 24px;max-width:560px;width:92%;max-height:82vh;overflow-y:auto}}
+  .help-box h2{{color:#7ec8e3;margin-bottom:16px;font-size:1em;letter-spacing:.03em}}
+  .help-sec{{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1a1a3a}}
+  .help-sec:last-child{{border-bottom:none;margin-bottom:0}}
+  .help-sec h3{{color:#aaa;font-size:.82em;margin-bottom:4px}}
+  .help-sec p{{font-size:.76em;color:#666;line-height:1.55}}
+  /* ---- Eval Log tab ---- */
+  #eval-filter-agent,#eval-filter-verdict{{background:#0a0a0f;border:1px solid #2a2a4a;border-radius:6px;color:#d0d0e0;padding:5px 8px;font-size:.8em}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
 <body>
 
-  <!-- Full-Screen Mac Screen Viewer -->
-  <div id="screenViewer">
-    <span id="screenFps"></span>
-    <img id="screenCanvas" alt="MacBook Screen" draggable="false" />
-    <div id="screenBar">
-      <button class="screen-btn" onclick="closeScreenView()">✕</button>
-      <input id="screenInput" type="text" placeholder="Command Jarvis…" autocomplete="off"
-             onkeydown="if(event.key==='Enter'){sendScreenCommand();}" />
-      <button class="screen-btn" onclick="sendScreenCommand()">Send</button>
-      <button class="screen-btn" id="screenLiveBtn" onclick="toggleScreenLive()">⏸</button>
+<div id="auth-gate">
+  <div class="auth-box">
+    <h2>Jarvis Agent Ops</h2>
+    <p style="color:#777;font-size:.85em;margin-bottom:16px">Enter your API token to continue</p>
+    <input type="password" id="auth-input" placeholder="API token">
+    <button class="btn btn-primary" style="width:100%" onclick="doAuth()">Connect</button>
+  </div>
+</div>
+
+<div class="topbar">
+  <h1>⚡ Jarvis Agent Operations</h1>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span id="refresh-lbl" style="font-size:.75em;color:#555">auto-refresh 5s</span>
+    <span id="pipeline-health-badge" class="badge" style="background:#0d1a2a;color:#7ec8e3;border:1px solid #1a3a5a;cursor:pointer;font-size:.72em"
+          onclick="checkPipelineHealth()" title="Click to run pipeline health check">
+      🔍 Pipeline Monitor
+    </span>
+    <button class="btn btn-run btn-sm" onclick="document.getElementById('help-modal').classList.add('open')" title="How to use this dashboard" style="padding:4px 12px;font-size:.78em">? Help</button>
+    <span id="status-badge" class="badge badge-ok"><span class="dot dot-green"></span>Online</span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('queue')">⏳ Approval Queue <span id="queue-count" style="color:#ffd700"></span></div>
+  <div class="tab" onclick="switchTab('active')">▶ Active <span id="active-count" style="color:#7ec8e3"></span></div>
+  <div class="tab" onclick="switchTab('history')">📋 History</div>
+  <div class="tab" onclick="switchTab('assign')">＋ Assign Work</div>
+  <div class="tab" onclick="switchTab('agents')">🤖 Agents</div>
+  <div class="tab" onclick="switchTab('project')">🚀 Project</div>
+  <div class="tab" onclick="switchTab('evallog')">📊 Eval Log</div>
+</div>
+
+<!-- Queue -->
+<div class="pane active" id="pane-queue">
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="st-pending">—</div><div class="stat-lbl">Awaiting Approval</div></div>
+    <div class="stat"><div class="stat-num" id="st-running">—</div><div class="stat-lbl">Active Tasks</div></div>
+    <div class="stat"><div class="stat-num" id="st-done">—</div><div class="stat-lbl">Completed (all time)</div></div>
+  </div>
+  <div id="queue-list"><div class="empty">Loading…</div></div>
+</div>
+
+<!-- Active -->
+<div class="pane" id="pane-active">
+  <div id="active-list"><div class="empty">Loading…</div></div>
+</div>
+
+<!-- History -->
+<div class="pane" id="pane-history">
+  <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn btn-deny btn-sm" onclick="clearHistory()" style="font-size:.8em">🗑 Clear History</button>
+  </div>
+  <div class="scroll-table">
+    <table id="history-table">
+      <thead><tr><th>ID</th><th>Agent</th><th>Prompt + Result Preview</th><th>Status</th><th>Finished</th></tr></thead>
+      <tbody id="history-body"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Assign -->
+<div class="pane" id="pane-assign">
+  <div class="card">
+    <div class="card-head"><strong>Assign Work to Agent</strong></div>
+    <div style="padding:16px">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Agent</label>
+          <select id="assign-agent">
+            <option value="">Auto-select (Manager)</option>
+            <option value="backend_engineer">Backend Engineer</option>
+            <option value="frontend_designer">Frontend Designer</option>
+            <option value="ux_researcher">UX Researcher</option>
+            <option value="qa_tester">QA Tester</option>
+            <option value="devops_release">DevOps Release</option>
+            <option value="researcher">Researcher</option>
+            <option value="automation_engineer">Automation Engineer</option>
+            <option value="career_agent">Career Agent</option>
+            <option value="memory_librarian">Memory Librarian</option>
+            <option value="security_reviewer">Security Reviewer</option>
+            <option value="ai_safety_agent">AI Safety Agent</option>
+            <option value="ai_evaluator">AI Evaluator (Eval Lab)</option>
+            <option value="pipeline_monitor">Pipeline Monitor</option>
+            <option value="output_quality_checker">Output Quality Checker</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Kind</label>
+          <select id="assign-kind">
+            <option value="chat">Chat / General</option>
+            <option value="code">Code</option>
+            <option value="research">Research</option>
+            <option value="review">Review</option>
+            <option value="plan">Plan</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>Task Description</label>
+          <textarea id="assign-prompt" placeholder="Describe the task in detail…"></textarea>
+        </div>
+        <div class="form-group full">
+          <label>Context (optional)</label>
+          <textarea id="assign-context" placeholder="Any additional context for the agent…" style="min-height:60px"></textarea>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" onclick="submitTask()">Assign Task</button>
+        <span id="assign-status" style="font-size:.82em;color:#888"></span>
+      </div>
+      <div id="assign-result" class="result-area" style="display:none"></div>
     </div>
   </div>
-  <div id="screenClickFeedback"></div>
+</div>
 
-  <!-- Auth Gate -->
-  <div id="authGate" class="auth-gate" style="display: none;">
-    <div class="auth-card" id="authCard">
-      <div class="auth-logo">J</div>
-      <h2 class="auth-title">SECURITY GATEWAY</h2>
-      
-      <!-- Token Pane -->
-      <div id="tokenPane" style="display: flex; flex-direction: column; gap: 20px; width: 100%;">
-        <p class="auth-desc">Connect with your J.A.R.V.I.S Security Token. You can copy this link directly from the MacBook desktop shell.</p>
-        <input type="password" id="authTokenInput" class="auth-input" placeholder="Paste Security Token Here">
-        <button id="authSubmitBtn" class="auth-submit">AUTHENTICATE SYSTEM</button>
-      </div>
-      
-      <!-- PIN Pane -->
-      <div id="pinPane" style="display: none; flex-direction: column; gap: 20px; width: 100%;">
-        <p class="auth-desc">Connect a remote device (e.g. Smart TV) using a temporary 6-digit pairing code generated on your MacBook.</p>
-        <div class="pin-container">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="0">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="1">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="2">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="3">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="4">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" class="pin-input" maxlength="1" data-index="5">
-        </div>
-        <div id="pinErrorMsg" class="auth-error-msg"></div>
-        <div style="font-size: 11px; color: var(--text-dim);">The pairing PIN expires after 5 minutes.</div>
-      </div>
-
-      <button id="authToggleBtn" class="auth-toggle-btn">Pair with 6-Digit PIN</button>
+<!-- Agents — Virtual Office Floor -->
+<div class="pane" id="pane-agents">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+    <span style="font-size:.75em;color:#555">Click a character to view agent details.</span>
+    <button onclick="startMeeting()" style="background:#1a2a1a;border:1px solid #2a4a2a;color:#5a9a5a;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:600;letter-spacing:.05em">🪑 Meeting Room</button>
+  </div>
+  <div style="position:relative;border-radius:8px;overflow:hidden;background:#0d1117;border:1px solid #1e2430">
+    <canvas id="office-canvas" style="display:block;width:100%;cursor:pointer"></canvas>
+    <div style="position:absolute;bottom:8px;left:12px;font-size:.68em;color:#444;pointer-events:none;line-height:1.6">
+      Click a character to assign work &nbsp;•&nbsp;
+      <span style="color:#7ec8e3">●</span> Working &nbsp;
+      <span style="color:#28c76f">●</span> Done &nbsp;
+      <span style="color:#a78bfa">●</span> Eval Gym &nbsp;
+      <span style="color:#333">●</span> Idle
     </div>
   </div>
+</div>
 
-  <!-- Header -->
-  <header>
-    <div class="brand-block">
-      <div class="brand-logo">J</div>
-      <div class="brand-title">
-        <span class="brand-name">J.A.R.V.I.S</span>
-        <span class="brand-sub">Unified Brain Server</span>
+<!-- Project -->
+<div class="pane" id="pane-project">
+  <div class="card">
+    <div class="card-head"><strong>Assign a Project to the Agent Team</strong></div>
+    <div style="padding:16px">
+      <div class="form-group full" style="margin-bottom:12px">
+        <label>Project Goal</label>
+        <textarea id="proj-goal" placeholder="Describe what you want to build or accomplish. The Manager will decompose it into tasks and assign each to the right agent." style="min-height:90px"></textarea>
       </div>
-    </div>
-    <div class="status-block">
-      <div id="ttsToggle" class="control-btn" style="border: 1px solid var(--border); font-size: 14px; width: 32px; height: 32px;" title="Toggle Speech Feedback">🔊</div>
-      <div class="status-badge">
-        <div class="status-dot"></div>
-        <span id="statusLabel">ONLINE</span>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85em;color:#aaa">
+          <input type="checkbox" id="proj-cloud" checked style="accent-color:#7ec8e3"> Use cloud planning (fast decomposition)
+        </label>
       </div>
-      <button id="sidebarToggle" class="sidebar-toggle">⬡</button>
-    </div>
-  </header>
-
-  <!-- Layout Body -->
-  <div class="layout-body">
-    <!-- Diagnostics Sidebar -->
-    <div id="sidebar" class="diagnostics-drawer">
-      <div class="drawer-header">Tactical Matrix</div>
-      
-      <div class="stat-card">
-        <div class="stat-label">Model Fleet</div>
-        <div id="activeModelVal" class="stat-value">open-source</div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-label">Uptime</div>
-        <div id="uptimeVal" class="stat-value">-- : -- : --</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-label">Active Threads</div>
-        <div id="threadsVal" class="stat-value">3 Active</div>
-      </div>
-      
-      <div class="stat-card">
-        <div class="stat-label">System Memory</div>
-        <div id="memoryVal" class="stat-value">Connected</div>
-      </div>
-    </div>
-
-    <!-- Main Chat Window -->
-    <div class="chat-container">
-      <div id="messageArea" class="message-area">
-        <div class="message-wrap jarvis">
-          <div class="bubble">
-            <p>Unified brain online, operator. I am synchronized with your MacBook runtime. How shall we proceed?</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Quick-Action Chips -->
-      <div class="chip-row" id="chipRow">
-        <button class="chip" onclick="sendChip('what\\'s on my calendar today?')">📅 Calendar</button>
-        <button class="chip" onclick="sendChip('summarize my inbox')">📧 Email</button>
-        <button class="chip" onclick="sendChip('show my recent messages')">💬 Messages</button>
-        <button class="chip" onclick="focusChip('search the web for ')">🔍 Search</button>
-        <button class="chip" onclick="sendChip('what is your current status and mode?')">⚡ Status</button>
-        <button class="chip" onclick="sendChip('what do you remember about me?')">🧠 Memory</button>
-        <button class="chip" onclick="sendChip('what is the weather like right now?')">🌤️ Weather</button>
-        <button class="chip" onclick="openScreenView()" style="background:rgba(0,255,136,0.12);border-color:rgba(0,255,136,0.4);color:#00ff88;">🖥️ Screen</button>
-      </div>
-
-      <!-- Input Area -->
-      <div class="input-bar">
-        <button id="micBtn" class="control-btn mic-btn" title="Smart Listen">🎤</button>
-        <div class="input-wrapper">
-          <textarea id="inputField" class="input-field" placeholder="Send a message..." rows="1"></textarea>
-        </div>
-        <button id="sendBtn" class="control-btn send-btn">➤</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Holographic Control Deck -->
-  <div id="controlDeck" class="control-deck">
-    <!-- Clickable Handle Bar -->
-    <div class="deck-handle" id="deckHandle">
-      <div class="deck-title">
-        <span>⬡</span> REMOTE SYSTEMS DECK
-      </div>
-      <div class="deck-toggle-icon" id="deckToggleIcon">▲</div>
-    </div>
-    
-    <!-- Expanded Deck Content -->
-    <div class="deck-content">
-      <!-- 2-Column Grid -->
-      <div class="deck-grid">
-        
-        <!-- MacBook Screen Live Feed -->
-        <div class="deck-card" style="grid-column: span 1;">
-          <div class="card-header">MacBook Live Feed</div>
-          <div class="screen-feed-container">
-            <img id="screenFeedImg" src="" alt="MacBook Screen Feed">
-          </div>
-          <div class="feed-controls">
-            <button id="refreshFeedBtn" class="deck-btn">Refresh</button>
-            <button id="autoFeedBtn" class="deck-btn">Auto-Stream</button>
-          </div>
-        </div>
-
-        <!-- System Sensors Telemetry -->
-        <div class="deck-card">
-          <div class="card-header">macOS Telemetry</div>
-          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 5px;">
-            <div class="sensor-row">
-              <span style="color: var(--text-dim);">Battery</span>
-              <span id="telBattery" class="sensor-val">--</span>
-            </div>
-            <div class="sensor-row">
-              <span style="color: var(--text-dim);">CPU Load</span>
-              <span id="telCpu" class="sensor-val">--</span>
-            </div>
-            <div class="sensor-row">
-              <span style="color: var(--text-dim);">Memory Usage</span>
-              <span id="telMemory" class="sensor-val">--</span>
-            </div>
-            <div class="sensor-row">
-              <span style="color: var(--text-dim);">Host OS</span>
-              <span id="telOs" class="sensor-val" style="font-size: 11px;">--</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Audio Volume & Brightness Controls -->
-        <div class="deck-card">
-          <div class="card-header">hardware Actuators</div>
-          <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px;">
-            <div class="slider-group">
-              <div class="slider-label">
-                <span>System Volume</span>
-                <span id="volVal">50%</span>
-              </div>
-              <input type="range" id="volSlider" class="deck-slider" min="0" max="100" value="50">
-            </div>
-            <div class="slider-group">
-              <div class="slider-label">
-                <span>Screen Brightness</span>
-                <span id="brightVal">50%</span>
-              </div>
-              <input type="range" id="brightSlider" class="deck-slider" min="0" max="100" value="50">
-            </div>
-          </div>
-        </div>
-
-        <!-- Quick System Actions -->
-        <div class="deck-card">
-          <div class="card-header">Tactical Overrides</div>
-          <div class="actions-grid" style="margin-top: 5px;">
-            <button id="actLockBtn" class="deck-btn" style="border-color: rgba(255, 74, 74, 0.4); color: #ff6b6b;">Lock Mac</button>
-            <button id="actMuteBtn" class="deck-btn">Mute Audio</button>
-            <button id="actPlayBtn" class="deck-btn">Play/Pause</button>
-            <button id="actNextBtn" class="deck-btn">Next Track</button>
-          </div>
-        </div>
-
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" id="proj-btn" onclick="runProject()">Run Project</button>
+        <span id="proj-status" style="font-size:.82em;color:#888"></span>
       </div>
     </div>
   </div>
 
-    <script>
-    // System Configurations
-    let token = localStorage.getItem('jarvis_auth_token') || '';
-    let mobileSessionId = localStorage.getItem('jarvis_mobile_session_id') || '';
-    if (!mobileSessionId) {
-      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-        mobileSessionId = window.crypto.randomUUID();
-      } else {
-        mobileSessionId = 'mobile-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
-      }
-      localStorage.setItem('jarvis_mobile_session_id', mobileSessionId);
-    }
-    let ttsEnabled = localStorage.getItem('jarvis_tts_enabled') !== 'false';
-    let recognition = null;
-    let isListening = false;
+  <!-- Live plan cards -->
+  <div id="proj-plan" style="display:none;margin-top:16px">
+    <div style="font-size:.78em;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Decomposition Plan</div>
+    <div id="proj-plan-cards" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+  </div>
 
-    const authGate = document.getElementById('authGate');
-    const authTokenInput = document.getElementById('authTokenInput');
-    const authSubmitBtn = document.getElementById('authSubmitBtn');
-    const sendBtn = document.getElementById('sendBtn');
-    const micBtn = document.getElementById('micBtn');
-    const inputField = document.getElementById('inputField');
-    const messageArea = document.getElementById('messageArea');
-    const sidebar = document.getElementById('sidebar');
-    const sidebarToggle = document.getElementById('sidebarToggle');
-    const ttsToggle = document.getElementById('ttsToggle');
+  <!-- Per-agent output -->
+  <div id="proj-agents-output" style="margin-top:16px"></div>
+</div>
 
-    // TV / Remote Pairing Elements
-    const tokenPane = document.getElementById('tokenPane');
-    const pinPane = document.getElementById('pinPane');
-    const authToggleBtn = document.getElementById('authToggleBtn');
-    const authCard = document.getElementById('authCard');
-    const pinErrorMsg = document.getElementById('pinErrorMsg');
-    const pinInputs = document.querySelectorAll('.pin-input');
+<!-- Eval Log -->
+<div class="pane" id="pane-evallog">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:.9em">AI Evaluation History</strong>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="eval-filter-agent" onchange="loadEvalLog()">
+        <option value="">All agents</option>
+        <option value="backend_engineer">backend_engineer</option>
+        <option value="frontend_designer">frontend_designer</option>
+        <option value="qa_tester">qa_tester</option>
+        <option value="devops_release">devops_release</option>
+        <option value="security_reviewer">security_reviewer</option>
+        <option value="researcher">researcher</option>
+        <option value="ux_researcher">ux_researcher</option>
+        <option value="automation_engineer">automation_engineer</option>
+      </select>
+      <select id="eval-filter-verdict" onchange="loadEvalLog()">
+        <option value="">All verdicts</option>
+        <option value="pass">pass</option>
+        <option value="needs_review">needs_review</option>
+        <option value="fail">fail</option>
+      </select>
+      <button class="btn btn-run btn-sm" onclick="loadEvalLog()">Refresh</button>
+    </div>
+  </div>
+  <div class="scroll-table">
+    <table id="eval-log-table">
+      <thead><tr><th>Time</th><th>Agent</th><th>Task</th><th>Score</th><th>Verdict</th><th>Feedback</th></tr></thead>
+      <tbody id="eval-log-body"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+  <!-- Rubrics section -->
+  <div style="margin-top:24px;border-top:1px solid #1a1a3a;padding-top:16px">
+    <strong style="font-size:.85em">Custom Rubrics</strong>
+    <div id="rubric-list" style="margin-top:8px;font-size:.8em;color:#888">No rubrics defined yet.</div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:200px">
+        <input type="text" id="rubric-id" placeholder="Rubric ID (e.g. security_qa)" style="font-size:.82em">
+        <input type="text" id="rubric-name" placeholder="Display name" style="font-size:.82em">
+        <textarea id="rubric-criteria" placeholder="One criterion per line&#10;e.g. Must include Executive Summary&#10;Must have at least 3 findings" style="min-height:80px;font-size:.82em"></textarea>
+        <button class="btn btn-run btn-sm" onclick="createRubric()">Save Rubric</button>
+      </div>
+      <div id="rubric-status" style="font-size:.78em;color:#888;padding-top:4px"></div>
+    </div>
+  </div>
+</div>
 
-    let pairingMode = 'token'; // 'token' or 'pin'
+<!-- Help Modal -->
+<div class="help-modal" id="help-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="help-box">
+    <h2>⚡ How to Use Jarvis Agent Ops</h2>
+    <div class="help-sec"><h3>⏳ Approval Queue</h3><p>Tasks flagged by the security gate land here before running. Approve to execute or Deny to cancel. Risk tasks from risky prompts (vault writes, exec, external calls) route here automatically.</p></div>
+    <div class="help-sec"><h3>▶ Active</h3><p>Tasks currently running or queued. Shows which agent is working and a live output preview. Use Stop to cancel a running task.</p></div>
+    <div class="help-sec"><h3>📋 History</h3><p>All completed tasks. Click a row to expand the full output. Use Clear History to reset. Results persist until cleared or server restart.</p></div>
+    <div class="help-sec"><h3>＋ Assign Work</h3><p>Send a task directly to one agent. Pick the agent, describe what you want, hit Assign. The output streams live into the result box. Leave agent blank to let the Manager route it to whoever's best suited.</p></div>
+    <div class="help-sec"><h3>🤖 Agents (Virtual Office Floor)</h3><p>See all 15 agents in their department zones. Blue pulse = active, green = done, gold = waiting approval. The 🏋️ Eval Gym row lights up purple whenever an agent output is being quality-reviewed. Click any agent seat to jump directly to Assign Work for that agent.</p></div>
+    <div class="help-sec"><h3>🚀 Project</h3><p>Enter a big goal and watch the team execute it live. The Manager decomposes your goal into tasks and assigns each to the right specialist. Each agent runs and the AI Eval Lab scores their output. Watch the cards appear in real time — green dot = done + passed eval, purple = in evaluation.</p></div>
+    <div class="help-sec"><h3>📊 Eval Log</h3><p>Persistent history of every AI Evaluation Lab result across all project runs and direct agent evals. Filter by agent or verdict. Create custom rubrics to add extra criteria to any eval.</p></div>
+    <div class="help-sec"><h3>🔍 Pipeline Monitor (top bar)</h3><p>Click to sweep all active tasks for stalls, short outputs, or garbage. Shows alert count or green if healthy. Alerts persist for 8s then reset.</p></div>
+    <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('help-modal').classList.remove('open')">Got it</button>
+  </div>
+</div>
 
-    authToggleBtn.addEventListener('click', () => {
-      if (pairingMode === 'token') {
-        pairingMode = 'pin';
-        tokenPane.style.display = 'none';
-        pinPane.style.display = 'flex';
-        authToggleBtn.textContent = 'Use Security Token';
-        pinInputs[0].focus();
-      } else {
-        pairingMode = 'token';
-        tokenPane.style.display = 'flex';
-        pinPane.style.display = 'none';
-        authToggleBtn.textContent = 'Pair with 6-Digit PIN';
-        authTokenInput.focus();
-      }
-      pinErrorMsg.style.display = 'none';
-    });
+<script>
+  let token = {token_js};
+  let currentTab = 'queue';
+  let refreshTimer = null;
 
-    // Wire up PIN input autotabbing, backspace, and paste handlers
-    pinInputs.forEach((input, index) => {
-      // Shift focus forward on digit input
-      input.addEventListener('input', (e) => {
-        const val = e.target.value.replace(/[^0-9]/g, '');
-        e.target.value = val;
-        
-        if (val && index < 5) {
-          pinInputs[index + 1].focus();
-        }
-        
-        // If all 6 digits are filled, automatically submit
-        checkAndSubmitPin();
-      });
+  const AGENT_DESCRIPTIONS = {{
+    backend_engineer:  'API design, FastAPI endpoints, database schemas, async Python',
+    frontend_designer: 'PyQt6 components, UI layout, dark-theme design specs',
+    ux_researcher:     'User flow critique, interaction patterns, accessibility',
+    qa_tester:         'Test plans, pytest suites, edge case analysis',
+    devops_release:    'Release checklists, CI/CD, packaging, deployment',
+    researcher:        'Web research, synthesis, best-practice surveys',
+    automation_engineer: 'Shell scripts, file pipelines, batch ops',
+    career_agent:      'Resume tailoring, job scoring, interview prep',
+    memory_librarian:  'Store/recall project knowledge, semantic search',
+    security_reviewer: 'Script review, threat analysis, CVE scanning',
+    ai_safety_agent:   'Risk triage, threat scoring, pre-execution review',
+    ai_evaluator:          'Output quality scoring, pass/fail/needs-review verdicts, defect feedback',
+    pipeline_monitor:      'Stall detection, task health sweep, garbage output alerts',
+    output_quality_checker:'Validates completed outputs: code presence, completeness, policy compliance',
+    agent_worker:          'Task dispatch, routing, orchestration',
+  }};
 
-      // Handle backspace (shift focus backward)
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' && !e.target.value && index > 0) {
-          pinInputs[index - 1].focus();
-        }
-      });
+  function doAuth() {{
+    const v = document.getElementById('auth-input').value.trim();
+    if (!v) return;
+    token = v;
+    localStorage.setItem('jarvis_auth_token', v);
+    document.getElementById('auth-gate').style.display = 'none';
+    start();
+  }}
 
-      // Handle pasting
-      input.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const data = (e.clipboardData || window.clipboardData).getData('text');
-        const digits = data.replace(/[^0-9]/g, '').substring(0, 6).split('');
-        
-        digits.forEach((digit, idx) => {
-          if (pinInputs[idx]) {
-            pinInputs[idx].value = digit;
-          }
-        });
-        
-        if (digits.length > 0) {
-          const focusIdx = Math.min(digits.length, 5);
-          pinInputs[focusIdx].focus();
-        }
-        
-        checkAndSubmitPin();
-      });
-    });
+  function hdrs() {{ return token ? {{'Authorization': 'Bearer ' + token}} : {{}}; }}
 
-    async function checkAndSubmitPin() {
-      const pin = Array.from(pinInputs).map(i => i.value).join('');
-      if (pin.length !== 6) return;
+  async function apiFetch(path, opts={{}}) {{
+    const r = await fetch(path, {{ headers: hdrs(), ...opts }});
+    if (r.status === 401) {{
+      document.getElementById('auth-gate').style.display = 'flex';
+      throw new Error('unauthorized');
+    }}
+    return r.json();
+  }}
 
-      pinErrorMsg.style.display = 'none';
-      
-      try {
-        const resp = await fetch(`/bridge/pair?pin=${pin}`);
-        const data = await resp.json();
-        
-        if (data.ok && data.token) {
-          token = data.token;
-          localStorage.setItem('jarvis_auth_token', token);
-          checkAuth();
-          // Clear inputs
-          pinInputs.forEach(i => i.value = '');
-        } else {
-          handlePinFailure(data.error, data.remaining_attempts, data.lockout_seconds);
-        }
-      } catch (err) {
-        handlePinFailure('network_error');
-      }
-    }
+  function switchTab(name) {{
+    currentTab = name;
+    document.querySelectorAll('.tab').forEach((t, i) => {{
+      const names = ['queue','active','history','assign','agents','project','evallog'];
+      t.classList.toggle('active', names[i] === name);
+    }});
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    document.getElementById('pane-' + name).classList.add('active');
+    if (name === 'agents') initWorldIfNeeded();
+    if (name !== 'project') refresh();
+  }}
 
-    function handlePinFailure(error, remainingAttempts, lockoutSeconds) {
-      // Shake the card
-      authCard.style.animation = 'none';
-      void authCard.offsetWidth; // trigger reflow
-      authCard.style.animation = 'shake 0.4s ease';
+  function fmtTime(ts) {{
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit'}}) + ' ' + d.toLocaleDateString([], {{month:'short',day:'numeric'}});
+  }}
 
-      // Clear all inputs and focus on first
-      pinInputs.forEach(i => i.value = '');
-      pinInputs[0].focus();
+  function statusTag(s) {{
+    const map = {{
+      waiting_approval:'tag-wait', queued:'tag-run', assigned:'tag-run',
+      running:'tag-run', streaming:'tag-run',
+      completed:'tag-done', succeeded:'tag-done',
+      failed:'tag-fail', cancelled:'tag-fail',
+    }};
+    return `<span class="tag ${{map[s]||'tag-wait'}}">${{s||'?'}}</span>`;
+  }}
 
-      pinErrorMsg.style.display = 'block';
-      if (error === 'rate_limit_lockout' || lockoutSeconds) {
-        const mins = Math.ceil((lockoutSeconds || 900) / 60);
-        pinErrorMsg.textContent = `Brute-force detected! Locked out for ${mins} minutes.`;
-      } else if (error === 'invalid_pin') {
-        pinErrorMsg.textContent = `Invalid code. ${remainingAttempts} attempts remaining.`;
-      } else {
-        pinErrorMsg.textContent = 'Connection error. Please try again.';
-      }
-    }
+  async function refresh() {{
+    try {{
+      const [allTasks, agentsData] = await Promise.all([
+        apiFetch('/tasks?limit=100'),
+        apiFetch('/agents'),
+      ]);
+      const tasks = allTasks.tasks || [];
+      const agents = agentsData.agents || [];
+      if(typeof _updateMeetingTaskData==='function') _updateMeetingTaskData(tasks);
 
-    // UI Updates
-    ttsToggle.textContent = ttsEnabled ? '🔊' : '🔇';
+      const pending = tasks.filter(t => t.status === 'waiting_approval');
+      const running = tasks.filter(t => t.status === 'running' || t.status === 'queued');
+      const done = tasks.filter(t => ['completed','succeeded','failed'].includes(t.status));
 
-    // 1. Authentication Check & URL Token Grab
-    const params = new URLSearchParams(window.location.search);
-    const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
-    const urlToken = hashParams.get('token') || params.get('token');
-    if (urlToken) {
-      token = urlToken;
-      localStorage.setItem('jarvis_auth_token', urlToken);
-      // Clean query string / hash fragment
-      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
-      window.history.replaceState({path: cleanUrl}, '', cleanUrl);
-    }
+      document.getElementById('st-pending').textContent = pending.length;
+      document.getElementById('st-running').textContent = running.length;
+      document.getElementById('st-done').textContent = done.length;
+      document.getElementById('queue-count').textContent = pending.length ? `(${{pending.length}})` : '';
+      document.getElementById('active-count').textContent = running.length ? `(${{running.length}})` : '';
 
-    async function checkAuth() {
-      if (!token) {
-        authGate.style.display = 'flex';
+      if (currentTab === 'queue') renderQueue(pending);
+      if (currentTab === 'active') renderActive(running);
+      if (currentTab === 'history') renderHistory(done);
+      if (currentTab === 'agents') renderOfficeFloor(agents, tasks);
+      if (currentTab === 'evallog') loadEvalLog();
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        document.getElementById('status-badge').className = 'badge badge-err';
+    }}
+  }}
+
+  function renderQueue(tasks) {{
+    const el = document.getElementById('queue-list');
+    if (!tasks.length) {{ el.innerHTML = '<div class="empty">No tasks awaiting approval</div>'; return; }}
+    el.innerHTML = tasks.map(t => `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <span class="tag tag-agent">${{t.assigned_agent_id || 'unassigned'}}</span>
+            <span class="tag tag-wait" style="margin-left:4px">awaiting approval</span>
+          </div>
+          <span style="font-size:.75em;color:#555">${{fmtTime(t.created_at)}}</span>
+        </div>
+        <div class="card-body">${{escHtml(t.prompt || '')}}</div>
+        ${{t.approval_reason ? `<div style="padding:8px 16px;font-size:.78em;color:#888;background:#0d0d1a;border-top:1px solid #1a1a3a">⚠ ${{escHtml(t.approval_reason)}}</div>` : ''}}
+        <div class="card-foot">
+          <button class="btn btn-approve btn-sm" onclick="approveTask('${{t.id}}')">✓ Approve</button>
+          <button class="btn btn-deny btn-sm" onclick="denyTask('${{t.id}}')">✗ Deny</button>
+          <span style="font-size:.75em;color:#555;margin-left:auto">${{t.id}}</span>
+        </div>
+      </div>`).join('');
+  }}
+
+  function renderActive(tasks) {{
+    const el = document.getElementById('active-list');
+    if (!tasks.length) {{ el.innerHTML = '<div class="empty">No active tasks</div>'; return; }}
+    el.innerHTML = tasks.map(t => `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <span class="tag tag-agent">${{t.assigned_agent_id || 'unassigned'}}</span>
+            ${{statusTag(t.status)}}
+          </div>
+          <span style="font-size:.75em;color:#555">${{fmtTime(t.started_at || t.created_at)}}</span>
+        </div>
+        <div class="card-body">${{escHtml(t.prompt || '')}}</div>
+        ${{t.result ? `<div class="card-body" style="border-top:1px solid #1a1a3a;color:#7ec8e3">${{escHtml(t.result.slice(0,400))}}${{t.result.length>400?'…':''}}</div>` : ''}}
+        <div class="card-foot">
+          <button class="btn btn-deny btn-sm" onclick="cancelTask('${{t.id}}')">Stop</button>
+          <span style="font-size:.75em;color:#555;margin-left:auto">${{t.id}}</span>
+        </div>
+      </div>`).join('');
+  }}
+
+  function renderHistory(tasks) {{
+    const tbody = document.getElementById('history-body');
+    const shown = tasks
+      .slice()
+      .sort((a,b) => new Date(b.finished_at||b.updated_at||0) - new Date(a.finished_at||a.updated_at||0))
+      .slice(0, 50);
+    if (!shown.length) {{ tbody.innerHTML = '<tr><td colspan="5" class="empty">No completed tasks</td></tr>'; return; }}
+    tbody.innerHTML = shown.map(t => {{
+      const hasResult = t.result && t.result.trim().length > 0;
+      const resultPreview = hasResult ? escHtml(t.result.slice(0, 120)) + (t.result.length > 120 ? '…' : '') : '';
+      return `
+        <tr style="cursor:${{hasResult ? 'pointer' : 'default'}}" onclick="toggleResult('${{t.id}}')" title="${{hasResult ? 'Click to expand result' : ''}}">
+          <td style="font-size:.75em;color:#555">${{t.id.slice(-8)}}</td>
+          <td><span class="tag tag-agent" style="font-size:.75em">${{t.assigned_agent_id || '—'}}</span></td>
+          <td>
+            <div style="max-width:340px">${{escHtml((t.prompt||'').slice(0,80))}}</div>
+            ${{resultPreview ? `<div style="font-size:.72em;color:#5a8a5a;margin-top:3px">${{resultPreview}}</div>` : ''}}
+          </td>
+          <td>${{statusTag(t.status)}}</td>
+          <td style="font-size:.75em;color:#777">${{fmtTime(t.finished_at)}}</td>
+        </tr>
+        <tr id="result-${{t.id}}" style="display:none">
+          <td colspan="5" style="padding:0">
+            <div style="background:#0a0a14;border-top:1px solid #1a1a3a;padding:14px 16px">
+              <div style="font-size:.72em;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Full Result — ${{t.assigned_agent_id}} · ${{t.id}}</div>
+              <pre style="white-space:pre-wrap;word-break:break-word;font-size:.8em;color:#c0d8c0;margin:0;max-height:400px;overflow-y:auto">${{escHtml(t.result || '(no output)')}}</pre>
+              ${{t.error ? `<div style="margin-top:8px;font-size:.78em;color:#ea5455">Error: ${{escHtml(t.error)}}</div>` : ''}}
+            </div>
+          </td>
+        </tr>`;
+    }}).join('');
+  }}
+
+  function toggleResult(id) {{
+    const row = document.getElementById('result-' + id);
+    if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+  }}
+
+  function titleCase(s) {{
+    return s.replace(/_/g,' ').replace(/\b[a-z]/g, c => c.toUpperCase());
+  }}
+
+  // Normalize agent id: hyphens → underscores (API uses hyphens, JS uses underscores)
+  function normalizeId(id) {{ return (id||'').replace(/-/g,'_'); }}
+
+  // Eval scores stored per agent during live project runs
+  const _evalScores = {{}};
+  // Agents currently in the eval gym (populated by runProject SSE events)
+  const _gymAgents = new Set();
+
+  // AGENT_HOME_ZONES, AGENT_ICONS, renderOfficeFloor — defined in _WORLD_JS (injected below)
+
+  async function loadEvalLog() {{
+    const agent = document.getElementById('eval-filter-agent')?.value || '';
+    const verdict = document.getElementById('eval-filter-verdict')?.value || '';
+    const tbody = document.getElementById('eval-log-body');
+    if (!tbody) return;
+    try {{
+      const params = new URLSearchParams({{limit:50}});
+      if (agent) params.set('agent', agent);
+      if (verdict) params.set('verdict', verdict);
+      const data = await apiFetch('/eval/log?' + params);
+      const entries = data.entries || [];
+      if (!entries.length) {{
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">No eval history yet. Run a project or use Assign Work to generate evals.</td></tr>';
         return;
-      }
-      // Validate token against server before hiding auth gate
-      try {
-        const resp = await fetch('/auth/verify', {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        if (resp.status === 401) {
-          // Stale token — clear and re-prompt
-          token = '';
-          localStorage.removeItem('jarvis_auth_token');
-          authGate.style.display = 'flex';
-          return;
-        }
-      } catch (e) {
-        // Network error — still show app, status will show OFFLINE
-      }
-      authGate.style.display = 'none';
-      pollSystemStatus();
-      clearInterval(window._statusPoll);
-      window._statusPoll = setInterval(pollSystemStatus, 15000);
-    }
+      }}
+      const vcColor = {{pass:'#5a8a5a',fail:'#ea5455',needs_review:'#e8a838',timeout:'#555',unknown:'#555'}};
+      tbody.innerHTML = entries.map(e => {{
+        const t = e.ts ? new Date(e.ts*1000).toLocaleTimeString([],{{hour:'2-digit',minute:'2-digit'}}) + ' ' + new Date(e.ts*1000).toLocaleDateString([],{{month:'short',day:'numeric'}}) : '—';
+        const vc = vcColor[e.verdict]||'#888';
+        const issues = (e.issues||[]).slice(0,2).join('; ');
+        return `<tr>
+          <td style="white-space:nowrap;color:#666;font-size:.75em">${{t}}</td>
+          <td><span class="tag tag-agent" style="font-size:.7em">${{escHtml(e.agent||'?')}}</span></td>
+          <td class="truncate" style="max-width:200px;font-size:.78em;color:#888" title="${{escHtml(e.task||'')}}">${{escHtml((e.task||'').slice(0,60))}}</td>
+          <td style="font-weight:600;color:${{vc}};font-size:.82em">${{e.score??'—'}}/100</td>
+          <td><span style="color:${{vc}};font-size:.78em;font-weight:600">${{e.verdict||'?'}}</span></td>
+          <td style="font-size:.75em;color:#777" title="${{escHtml(e.feedback||'')}}">${{escHtml((e.feedback||'').slice(0,80))}}${{issues?`<div style="color:#666;margin-top:2px">${{escHtml(issues)}}</div>`:''}}</td>
+        </tr>`;
+      }}).join('');
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">Error loading eval log: ${{e.message}}</td></tr>`;
+    }}
+  }}
 
-    authSubmitBtn.addEventListener('click', () => {
-      const inputVal = authTokenInput.value.trim();
-      if (inputVal) {
-        token = inputVal;
-        localStorage.setItem('jarvis_auth_token', inputVal);
-        checkAuth();
-      }
-    });
+  async function loadRubrics() {{
+    try {{
+      const data = await apiFetch('/eval/rubrics');
+      const el = document.getElementById('rubric-list');
+      if (!el) return;
+      const list = data.rubrics || [];
+      if (!list.length) {{ el.textContent = 'No rubrics defined yet.'; return; }}
+      el.innerHTML = list.map(r => `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="color:#aaa;font-size:.8em"><strong>${{escHtml(r.name)}}</strong> <span style="color:#555">(id: ${{escHtml(r.id)}})</span> — ${{r.criteria?.length||0}} criteria</span>
+        <button class="btn btn-deny btn-sm" style="font-size:.72em;padding:2px 8px" onclick="deleteRubric('${{escHtml(r.id)}}')">Remove</button>
+      </div>`).join('');
+    }} catch(e) {{ }}
+  }}
 
-    // 2. Poll System Status
-    async function pollSystemStatus() {
-      try {
-        const resp = await fetch('/status', {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        if (resp.status === 401) {
-          token = '';
-          localStorage.removeItem('jarvis_auth_token');
-          checkAuth();
-          return;
-        }
-        const data = await resp.json();
-        if (data) {
-          document.getElementById('statusLabel').textContent = 'ONLINE';
-          document.getElementById('activeModelVal').textContent = data.model || data.mode || 'online';
-          if (data.uptime) {
-            document.getElementById('uptimeVal').textContent = data.uptime;
-          }
-        }
-      } catch (e) {
-        document.getElementById('statusLabel').textContent = 'OFFLINE';
-      }
-    }
+  async function createRubric() {{
+    const id = document.getElementById('rubric-id')?.value.trim();
+    const name = document.getElementById('rubric-name')?.value.trim();
+    const criteriaRaw = document.getElementById('rubric-criteria')?.value.trim();
+    const statusEl = document.getElementById('rubric-status');
+    if (!id || !name || !criteriaRaw) {{ if(statusEl) statusEl.textContent='Fill in all fields.'; return; }}
+    const criteria = criteriaRaw.split('\\n').map(s=>s.trim()).filter(Boolean);
+    try {{
+      await apiFetch('/eval/rubrics', {{
+        method:'POST',
+        headers:{{...hdrs(),'Content-Type':'application/json'}},
+        body:JSON.stringify({{id,name,criteria}})
+      }});
+      if(statusEl) statusEl.textContent='Saved!';
+      document.getElementById('rubric-id').value='';
+      document.getElementById('rubric-name').value='';
+      document.getElementById('rubric-criteria').value='';
+      loadRubrics();
+    }} catch(e) {{ if(statusEl) statusEl.textContent='Error: '+e.message; }}
+  }}
 
-    // 3. Floating Sidebar Toggle
-    sidebarToggle.addEventListener('click', () => {
-      sidebar.classList.toggle('open');
-    });
+  async function deleteRubric(id) {{
+    if (!confirm('Delete rubric "'+id+'"?')) return;
+    await apiFetch('/eval/rubrics/'+id, {{method:'DELETE'}});
+    loadRubrics();
+  }}
 
-    // 4. TTS Feedback Toggle
-    ttsToggle.addEventListener('click', () => {
-      ttsEnabled = !ttsEnabled;
-      localStorage.setItem('jarvis_tts_enabled', ttsEnabled);
-      ttsToggle.textContent = ttsEnabled ? '🔊' : '🔇';
-    });
+  async function checkPipelineHealth() {{
+    const badge = document.getElementById('pipeline-health-badge');
+    badge.textContent = '🔍 Checking...';
+    try {{
+      const data = await apiFetch('/pipeline/health');
+      const alerts = data.alerts || [];
+      if (alerts.length === 0) {{
+        badge.style.background = '#0d2a1a';
+        badge.style.color = '#28c76f';
+        badge.style.borderColor = '#1a4a2a';
+        badge.textContent = '✅ Pipeline healthy (' + (data.total_tasks||0) + ' tasks)';
+      }} else {{
+        badge.style.background = '#2a1a0a';
+        badge.style.color = '#f0a500';
+        badge.style.borderColor = '#4a2a0a';
+        badge.textContent = '⚠ ' + alerts.length + ' alert' + (alerts.length>1?'s':'');
+        badge.title = alerts.map(a => a.message).join('\\n');
+      }}
+      setTimeout(() => {{
+        badge.style.background='#0d1a2a'; badge.style.color='#7ec8e3';
+        badge.style.borderColor='#1a3a5a';
+        badge.textContent='🔍 Pipeline Monitor';
+      }}, 8000);
+    }} catch(e) {{
+      badge.textContent = '❌ Monitor error';
+    }}
+  }}
 
-    // 5. Speech Recognition Setup (Browser STT)
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+  async function approveTask(id) {{
+    await apiFetch(`/tasks/${{id}}/approve`, {{method:'POST'}});
+    refresh();
+  }}
 
-      recognition.onstart = () => {
-        isListening = true;
-        micBtn.classList.add('active');
-        inputField.placeholder = "Listening...";
-      };
+  async function denyTask(id) {{
+    await apiFetch(`/tasks/${{id}}/deny`, {{method:'POST'}});
+    refresh();
+  }}
 
-      recognition.onend = () => {
-        isListening = false;
-        micBtn.classList.remove('active');
-        inputField.placeholder = "Send a message...";
-      };
+  async function cancelTask(id) {{
+    await apiFetch(`/tasks/${{id}}/cancel`, {{method:'POST'}});
+    refresh();
+  }}
 
-      recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        inputField.value = transcript;
-        sendMessage();
-      };
-    } else {
-      micBtn.style.display = 'none';
-    }
+  async function clearHistory() {{
+    if (!confirm('Remove all completed tasks from history?')) return;
+    const r = await fetch('/tasks/history', {{method:'DELETE', headers: hdrs()}});
+    const d = await r.json();
+    document.getElementById('history-body').innerHTML =
+      '<tr><td colspan="5" class="empty">Cleared ' + (d.removed||0) + ' tasks</td></tr>';
+    setTimeout(refresh, 800);
+  }}
 
-    micBtn.addEventListener('click', () => {
-      if (!recognition) return;
-      if (isListening) {
-        recognition.stop();
-      } else {
-        recognition.start();
-      }
-    });
+  function quickAssign(agentName) {{
+    document.getElementById('assign-agent').value = agentName;
+    switchTab('assign');
+  }}
 
-    // 6. Speech Synthesis (Browser TTS)
-    function speakText(text) {
-      if (!ttsEnabled || !window.speechSynthesis) return;
-      // Strip markdown code fences before speaking
-      const plainText = text.replace(/```[\\s\\S]*?```/g, "").replace(/`[^`]+`/g, "");
-      
-      // Stop previous utterance
-      window.speechSynthesis.cancel();
-      
-      const utterance = new SpeechSynthesisUtterance(plainText);
-      const voices = window.speechSynthesis.getVoices();
-      // Prefer standard Daniel or Google UK English voices
-      const englishVoice = voices.find(v => v.name.includes('Daniel') || v.name.includes('Google UK English')) || voices.find(v => v.lang.startsWith('en'));
-      if (englishVoice) {
-        utterance.voice = englishVoice;
-      }
-      utterance.rate = 1.0;
-      window.speechSynthesis.speak(utterance);
-    }
+  async function submitTask() {{
+    const agent = document.getElementById('assign-agent').value;
+    const prompt = document.getElementById('assign-prompt').value.trim();
+    const context = document.getElementById('assign-context').value.trim();
+    const kind = document.getElementById('assign-kind').value;
+    const statusEl = document.getElementById('assign-status');
+    const resultEl = document.getElementById('assign-result');
 
-    // 7a. Quick-action chip helpers
-    function sendChip(message) {
-      inputField.value = message;
-      sendMessage();
-    }
-    function focusChip(prefix) {
-      inputField.value = prefix;
-      inputField.focus();
-      // Place cursor at end
-      const len = inputField.value.length;
-      inputField.setSelectionRange(len, len);
-    }
+    if (!prompt) {{ statusEl.textContent = 'Task description is required.'; return; }}
 
-    // 7. Markdown parsing
-    function parseMarkdown(text) {
-      // Escape HTML
-      let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      // Handle block code (must come before inline code)
-      html = html.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, (match, lang, code) => {
-        return `<pre><code>${code.trim()}</code></pre>`;
-      });
-      // Handle inline code (must come before bold/italic to protect content)
-      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-      // Bold: **text** or __text__
-      html = html.replace(/\\*\\*([^\\*]+)\\*\\*/g, '<strong>$1</strong>');
-      html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-      // Italic: *text* or _text_ (single, not already consumed by bold)
-      html = html.replace(/\\*([^\\*<>]+)\\*/g, '<em>$1</em>');
-      html = html.replace(/_([^_<>]+)_/g, '<em>$1</em>');
-      // Newlines
-      html = html.replace(/\\n/g, '<br>');
-      return html;
-    }
+    statusEl.textContent = 'Submitting…';
+    resultEl.style.display = 'none';
+    resultEl.innerHTML = '';
 
-    // 8a. Toast notification helper
-    function showToast(msg, type = 'error') {
-      let toast = document.getElementById('jarvisToast');
-      if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'jarvisToast';
-        toast.style.cssText = [
-          'position:fixed', 'top:80px', 'left:50%', 'transform:translateX(-50%)',
-          'background:rgba(3,18,28,0.97)', 'border:1px solid rgba(0,212,255,0.4)',
-          'color:#00d4ff', 'padding:12px 20px', 'border-radius:10px',
-          'font-size:13px', 'font-weight:600', 'z-index:9999',
-          'max-width:90vw', 'text-align:center',
-          'box-shadow:0 4px 20px rgba(0,212,255,0.3)',
-          'transition:opacity 0.3s ease', 'pointer-events:none'
-        ].join(';');
-        document.body.appendChild(toast);
-      }
-      if (type === 'warn') toast.style.borderColor = 'rgba(255,165,0,0.6)', toast.style.color = '#ffa500';
-      else if (type === 'ok') toast.style.borderColor = 'rgba(0,255,100,0.4)', toast.style.color = '#00ff88';
-      else toast.style.borderColor = 'rgba(0,212,255,0.4)', toast.style.color = '#00d4ff';
-      toast.textContent = msg;
-      toast.style.opacity = '1';
-      clearTimeout(toast._hideTimer);
-      toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
-    }
-
-    // 8. Chat Operations
-    let _isSending = false;
-    async function sendMessage() {
-      if (_isSending) { showToast('⏳ Still sending\u2026 please wait', 'warn'); return; }
-      const message = inputField.value.trim();
-      if (!message) return;
-
-      _isSending = true;
-      sendBtn.disabled = true;
-      sendBtn.style.opacity = '0.6';
-      sendBtn.innerHTML = '⏳';
-
-      inputField.value = '';
-      inputField.style.height = 'auto';
-
-      // Append User message
-      const userWrap = document.createElement('div');
-      userWrap.className = 'message-wrap user';
-      userWrap.innerHTML = `<div class="bubble"><p>${parseMarkdown(message)}</p></div>`;
-      messageArea.appendChild(userWrap);
-      messageArea.scrollTop = messageArea.scrollHeight;
-
-      // Create empty Jarvis stream bubble
-      const jarvisWrap = document.createElement('div');
-      jarvisWrap.className = 'message-wrap jarvis';
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.innerHTML = `<p class="streaming-cursor">...</p>`;
-      jarvisWrap.appendChild(bubble);
-      messageArea.appendChild(jarvisWrap);
-      messageArea.scrollTop = messageArea.scrollHeight;
-
-      try {
-        const response = await fetch('/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({ message: message, stream: true, source: 'mobile_web', session_id: mobileSessionId })
-        });
-
-        if (response.status === 401) {
-          token = '';
-          localStorage.removeItem('jarvis_auth_token');
-          jarvisWrap.remove(); userWrap.remove();
-          checkAuth();
-          showToast('🔒 Session expired — please re-authenticate');
-          return;
-        }
-
-        if (response.status === 409) {
-          // Chat lock busy — restore message and auto-retry in 2s
-          jarvisWrap.remove(); userWrap.remove();
-          inputField.value = message;
-          showToast('⏳ Jarvis is busy — retrying in 2 seconds…', 'warn');
-          setTimeout(() => {
-            _isSending = false;
-            sendBtn.disabled = false;
-            sendBtn.style.opacity = '1';
-            sendBtn.innerHTML = '➤';
-            sendMessage();
-          }, 2000);
-          return;
-        }
-
-        if (!response.ok) {
-          bubble.innerHTML = `<p style="color:#ff6644">⚠ Server error ${response.status}. Please try again.</p>`;
-          messageArea.scrollTop = messageArea.scrollHeight;
-          showToast(`⚠ Error ${response.status} — try again`, 'warn');
-          return;
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let fullResponse = '';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\\n');
-          buffer = lines.pop();
-
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            if (trimmed.startsWith('data: ')) {
-              const dataStr = trimmed.slice(6);
-              if (dataStr === '[DONE]') {
-                break;
-              } else {
-                try {
-                  const data = JSON.parse(dataStr);
-                  if (data.model) {
-                    document.getElementById('activeModelVal').textContent = data.model;
-                  }
-                  if (data.chunk) {
-                    fullResponse += data.chunk;
-                    bubble.innerHTML = `<p>${parseMarkdown(fullResponse)}</p>`;
-                    messageArea.scrollTop = messageArea.scrollHeight;
-                  }
-                } catch (err) {}
-              }
-            }
-          }
-        }
-        
-        // Final Speech Feedback
-        speakText(fullResponse);
-
-      } catch (err) {
-        bubble.innerHTML = `<p style="color:#ff6644">📡 Network error — check your connection.</p>`;
-        messageArea.scrollTop = messageArea.scrollHeight;
-        showToast('📡 Connection lost', 'warn');
-      } finally {
-        _isSending = false;
-        sendBtn.disabled = false;
-        sendBtn.style.opacity = '1';
-        sendBtn.innerHTML = '➤';
-      }
-    }
-
-    sendBtn.addEventListener('click', sendMessage);
-    inputField.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-
-    // Auto-expand textarea
-    inputField.addEventListener('input', () => {
-      inputField.style.height = 'auto';
-      inputField.style.height = (inputField.scrollHeight - 4) + 'px';
-    });
-
-    // ── Full-Screen MacBook Screen Viewer ────────────────────────────────────
-    let _screenLive = false;
-    let _screenTimer = null;
-    let _screenLastTs = 0;
-    let _screenW = 1, _screenH = 1;   // actual frame dimensions from headers
-    const screenViewer  = document.getElementById('screenViewer');
-    const screenCanvas  = document.getElementById('screenCanvas');
-    const screenFps     = document.getElementById('screenFps');
-    const screenLiveBtn = document.getElementById('screenLiveBtn');
-    const clickFeedback = document.getElementById('screenClickFeedback');
-
-    async function fetchFrame() {
-      const ts = Date.now();
-      const url = `/remote/screen/frame?token=${token}&t=${ts}`;
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) return;
-        // Grab real dimensions from headers before reading body
-        const fw = parseInt(resp.headers.get('X-Frame-Width') || '0');
-        const fh = parseInt(resp.headers.get('X-Frame-Height') || '0');
-        const sw = parseInt(resp.headers.get('X-Screen-Width') || '0');
-        const sh = parseInt(resp.headers.get('X-Screen-Height') || '0');
-        if (sw > 0) { _screenW = sw; _screenH = sh; }
-        const blob = await resp.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const old = screenCanvas.src;
-        screenCanvas.src = objectUrl;
-        if (old && old.startsWith('blob:')) URL.revokeObjectURL(old);
-        const elapsed = Date.now() - ts;
-        screenFps.textContent = elapsed + 'ms';
-      } catch(e) { /* network hiccup — keep looping */ }
-    }
-
-    function startScreenLive() {
-      if (_screenTimer) return;
-      _screenLive = true;
-      screenLiveBtn.textContent = '⏸';
-      fetchFrame();
-      _screenTimer = setInterval(fetchFrame, 1200);
-    }
-
-    function stopScreenLive() {
-      _screenLive = false;
-      screenLiveBtn.textContent = '▶';
-      if (_screenTimer) { clearInterval(_screenTimer); _screenTimer = null; }
-    }
-
-    function toggleScreenLive() {
-      _screenLive ? stopScreenLive() : startScreenLive();
-    }
-
-    function openScreenView() {
-      screenViewer.classList.add('active');
-      document.body.style.overflow = 'hidden';
-      // Force landscape on supporting devices
-      if (screen.orientation && screen.orientation.lock) {
-        screen.orientation.lock('landscape').catch(() => {});
-      }
-      startScreenLive();
-    }
-
-    function closeScreenView() {
-      stopScreenLive();
-      screenViewer.classList.remove('active');
-      document.body.style.overflow = '';
-      if (screen.orientation && screen.orientation.unlock) {
-        screen.orientation.unlock();
-      }
-    }
-
-    // Map a tap on the <img> to Mac screen coordinates and send a click
-    screenCanvas.addEventListener('click', async (e) => {
-      const rect = screenCanvas.getBoundingClientRect();
-      // The image is letterboxed with object-fit:contain — compute actual render size
-      const imgAspect = _screenW / _screenH;
-      const boxAspect = rect.width / rect.height;
-      let renderW, renderH, offsetX, offsetY;
-      if (imgAspect > boxAspect) {
-        renderW = rect.width;
-        renderH = rect.width / imgAspect;
-        offsetX = 0;
-        offsetY = (rect.height - renderH) / 2;
-      } else {
-        renderH = rect.height;
-        renderW = rect.height * imgAspect;
-        offsetX = (rect.width - renderW) / 2;
-        offsetY = 0;
-      }
-      const relX = (e.clientX - rect.left - offsetX) / renderW;
-      const relY = (e.clientY - rect.top  - offsetY) / renderH;
-      if (relX < 0 || relX > 1 || relY < 0 || relY > 1) return;
-
-      // Visual tap feedback
-      clickFeedback.style.left = e.clientX + 'px';
-      clickFeedback.style.top  = e.clientY + 'px';
-      clickFeedback.classList.add('pop');
-      setTimeout(() => clickFeedback.classList.remove('pop'), 350);
-
-      await fetch('/remote/click', {
+    if (agent) {{
+      // Direct agent run via SSE stream
+      const resp = await fetch(`/agents/${{agent}}/run`, {{
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ x: relX, y: relY, double: false })
-      });
-      // Refresh screen ~400ms after click to show result
-      setTimeout(fetchFrame, 400);
-    });
-
-    // Double-tap to double-click
-    let _lastTap = 0;
-    screenCanvas.addEventListener('touchend', async (e) => {
-      const now = Date.now();
-      if (now - _lastTap < 300) {
-        e.preventDefault();
-        const t = e.changedTouches[0];
-        const rect = screenCanvas.getBoundingClientRect();
-        const imgAspect = _screenW / _screenH;
-        const boxAspect = rect.width / rect.height;
-        let renderW, renderH, offsetX, offsetY;
-        if (imgAspect > boxAspect) {
-          renderW = rect.width; renderH = rect.width / imgAspect;
-          offsetX = 0; offsetY = (rect.height - renderH) / 2;
-        } else {
-          renderH = rect.height; renderW = rect.height * imgAspect;
-          offsetX = (rect.width - renderW) / 2; offsetY = 0;
-        }
-        const relX = (t.clientX - rect.left - offsetX) / renderW;
-        const relY = (t.clientY - rect.top  - offsetY) / renderH;
-        if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
-          await fetch('/remote/click', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ x: relX, y: relY, double: true })
-          });
-          setTimeout(fetchFrame, 400);
-        }
-      }
-      _lastTap = now;
-    });
-
-    // Two-finger swipe to scroll
-    let _touchStartY = 0, _touchStartX = 0;
-    screenCanvas.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2) {
-        _touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        _touchStartX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-      }
-    }, { passive: true });
-    screenCanvas.addEventListener('touchmove', async (e) => {
-      if (e.touches.length === 2) {
-        e.preventDefault();
-        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const dy = (cy - _touchStartY) / 40;
-        const dx = (cx - _touchStartX) / 40;
-        if (Math.abs(dy) > 0.3 || Math.abs(dx) > 0.3) {
-          _touchStartY = cy; _touchStartX = cx;
-          fetch('/remote/scroll', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-            body: JSON.stringify({ dy, dx })
-          });
-        }
-      }
-    }, { passive: false });
-
-    async function sendScreenCommand() {
-      const inp = document.getElementById('screenInput');
-      const msg = inp.value.trim();
-      if (!msg) return;
-      inp.value = '';
-      const resp = await fetch('/chat', {
+        headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ task: prompt, context: context }})
+      }});
+      if (!resp.ok) {{
+        statusEl.textContent = `Error: ${{resp.status}}`;
+        return;
+      }}
+      statusEl.textContent = `Running ${{agent}}…`;
+      resultEl.style.display = 'block';
+      resultEl.innerHTML = '<span id="agent-stream"></span>';
+      const streamEl = document.getElementById('agent-stream');
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {{
+        const {{ done, value }} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {{stream: true}});
+        const lines = buf.split('\\n');
+        buf = lines.pop();
+        for (const line of lines) {{
+          if (line.startsWith('data: ')) {{
+            const data = line.slice(6);
+            if (data === '[DONE]') {{ statusEl.textContent = 'Done.'; break; }}
+            try {{ streamEl.textContent += (JSON.parse(data).chunk || ''); }} catch {{}}
+          }}
+        }}
+      }}
+    }} else {{
+      // Submit via task queue
+      const data = await apiFetch('/tasks', {{
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ message: msg, stream: false, source: 'mobile_web', session_id: mobileSessionId })
-      });
-      const data = await resp.json();
-      // Briefly flash response in fps display
-      screenFps.textContent = (data.response || '').slice(0, 60);
-      setTimeout(() => { screenFps.textContent = ''; }, 4000);
-      // Refresh screen to show any changes
-      setTimeout(fetchFrame, 600);
-    }
+        headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ prompt, kind, source: 'dashboard' }})
+      }});
+      statusEl.textContent = data.ok ? `Queued: ${{data.task?.id||'?'}}` : `Error: ${{data.error||'unknown'}}`;
+      if (data.ok) {{
+        document.getElementById('assign-prompt').value = '';
+        document.getElementById('assign-context').value = '';
+        setTimeout(() => switchTab('queue'), 800);
+      }}
+    }}
+    refresh();
+  }}
 
-    // ── Progressive Web App (PWA) Service Worker Registration ─────────────────
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-          .then((reg) => console.log('[PWA] ServiceWorker registered:', reg.scope))
-          .catch((err) => console.warn('[PWA] ServiceWorker registration failed:', err));
-      });
-    }
+  async function runProject() {{
+    const goal = document.getElementById('proj-goal').value.trim();
+    const cloudPlan = document.getElementById('proj-cloud').checked;
+    const statusEl = document.getElementById('proj-status');
+    const btnEl = document.getElementById('proj-btn');
+    const planEl = document.getElementById('proj-plan');
+    const planCards = document.getElementById('proj-plan-cards');
+    const agentsOut = document.getElementById('proj-agents-output');
 
-    // ── Holographic Control Deck JS Logic ────────────────────────────────────
-    const controlDeck = document.getElementById('controlDeck');
-    const deckHandle = document.getElementById('deckHandle');
-    
-    // Toggle Deck Expand/Collapse
-    deckHandle.addEventListener('click', () => {
-      controlDeck.classList.toggle('expanded');
-      // If expanded and we don't have telemetry, trigger a fetch
-      if (controlDeck.classList.contains('expanded')) {
-        fetchTelemetry();
-        if (autoStreamActive) {
-          startScreenStream();
-        } else {
-          refreshScreenFeed();
-        }
-      } else {
-        stopScreenStream();
-      }
-    });
+    if (!goal) {{ statusEl.textContent = 'Enter a project goal first.'; return; }}
 
-    // 1. Telemetry Sensor Loop
-    const telBattery = document.getElementById('telBattery');
-    const telCpu = document.getElementById('telCpu');
-    const telMemory = document.getElementById('telMemory');
-    const telOs = document.getElementById('telOs');
+    btnEl.disabled = true;
+    statusEl.textContent = 'Decomposing…';
+    planEl.style.display = 'none';
+    planCards.innerHTML = '';
+    agentsOut.innerHTML = '';
 
-    async function fetchTelemetry() {
-      if (!token) return;
-      try {
-        const resp = await fetch('/remote/telemetry', {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data && data.telemetry) {
-            const tel = data.telemetry;
-            telBattery.textContent = tel.battery || '--';
-            telCpu.textContent = tel.cpu || '--';
-            telMemory.textContent = tel.memory || '--';
-            telOs.textContent = tel.os || '--';
-          }
-        }
-      } catch (err) {
-        console.warn('Failed to fetch system telemetry:', err);
-      }
-    }
+    const agentOutputs = {{}};  // task_id → DOM element
 
-    // Poll telemetry every 10 seconds when active
-    setInterval(() => {
-      if (token && controlDeck.classList.contains('expanded')) {
-        fetchTelemetry();
-      }
-    }, 10000);
+    try {{
+      const resp = await fetch('/manager/run-stream', {{
+        method: 'POST',
+        headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ goal, cloud_plan: cloudPlan }}),
+      }});
+      if (!resp.ok) {{
+        statusEl.textContent = `Error ${{resp.status}}`;
+        btnEl.disabled = false;
+        return;
+      }}
 
-    // 2. Volume & Brightness Sliders (with debounce)
-    const volSlider = document.getElementById('volSlider');
-    const volVal = document.getElementById('volVal');
-    const brightSlider = document.getElementById('brightSlider');
-    const brightVal = document.getElementById('brightVal');
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
 
-    function setupDebouncedSlider(slider, valLabel, endpointPath, fieldName) {
-      let debounceTimeout = null;
-      
-      slider.addEventListener('input', (e) => {
-        const value = e.target.value;
-        valLabel.textContent = value + '%';
-        
-        clearTimeout(debounceTimeout);
-        debounceTimeout = setTimeout(async () => {
-          if (!token) return;
-          try {
-            const body = {};
-            body[fieldName] = parseInt(value);
-            await fetch(endpointPath, {
-              method: 'POST',
-              headers: {
-                'Authorization': 'Bearer ' + token,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(body)
-            });
-          } catch (err) {
-            console.warn(`Failed to update slider at ${endpointPath}:`, err);
-          }
-        }, 200);
-      });
-    }
+      while (true) {{
+        const {{ done, value }} = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, {{stream: true}});
+        const lines = buf.split('\\n');
+        buf = lines.pop();
+        for (const line of lines) {{
+          if (!line.startsWith('data: ')) continue;
+          let ev;
+          try {{ ev = JSON.parse(line.slice(6)); }} catch {{ continue; }}
 
-    setupDebouncedSlider(volSlider, volVal, '/remote/volume', 'level');
-    setupDebouncedSlider(brightSlider, brightVal, '/remote/brightness', 'level');
+          if (ev.type === 'plan') {{
+            planEl.style.display = 'block';
+            planCards.innerHTML = ev.tasks.map(t => `
+              <div class="tag tag-agent" style="padding:4px 10px;border-radius:6px" id="plan-${{t.agent}}-${{encodeURIComponent(t.title).slice(0,20)}}">
+                ${{escHtml(t.agent.replace(/_/g,' '))}} — ${{escHtml(t.title)}}
+              </div>`).join('');
+            statusEl.textContent = `Plan ready: ${{ev.tasks.length}} task(s)`;
 
-    // 3. System Override Actions
-    async function triggerSystemAction(actionName) {
-      if (!token) return;
-      try {
-        const resp = await fetch('/remote/action', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + token,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ action: actionName })
-        });
-        const data = await resp.json();
-        if (data && data.message) {
-          // Speak feedback on click!
-          if (ttsEnabled && window.speechSynthesis) {
-            const utterance = new SpeechSynthesisUtterance(data.message);
-            window.speechSynthesis.speak(utterance);
-          }
-        }
-      } catch (err) {
-        console.warn(`Action ${actionName} failed:`, err);
-      }
-    }
+          }} else if (ev.type === 'start') {{
+            statusEl.textContent = `Running: ${{ev.agent}} → ${{ev.title||ev.task_id}}`;
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.id = `agent-card-${{ev.task_id}}`;
+            card.innerHTML = `
+              <div class="card-head">
+                <span class="tag tag-agent">${{escHtml(ev.agent)}}</span>
+                <span style="font-size:.82em;color:#aaa">${{escHtml(ev.title||'')}}</span>
+                <span class="tag tag-run" id="status-${{ev.task_id}}" style="margin-left:auto">running</span>
+              </div>
+              <pre id="out-${{ev.task_id}}" style="margin:0;padding:12px 16px;white-space:pre-wrap;word-break:break-word;font-size:.8em;color:#c0c0c0;background:#0a0a14;max-height:320px;overflow-y:auto"></pre>`;
+            agentsOut.appendChild(card);
+            agentOutputs[ev.task_id] = card;
 
-    document.getElementById('actLockBtn').addEventListener('click', () => triggerSystemAction('lock'));
-    document.getElementById('actMuteBtn').addEventListener('click', () => triggerSystemAction('mute'));
-    document.getElementById('actPlayBtn').addEventListener('click', () => triggerSystemAction('play_pause'));
-    document.getElementById('actNextBtn').addEventListener('click', () => triggerSystemAction('next_track'));
+          }} else if (ev.type === 'chunk') {{
+            const pre = document.getElementById(`out-${{ev.task_id}}`);
+            if (pre) {{
+              pre.textContent += ev.text;
+              pre.scrollTop = pre.scrollHeight;
+            }}
 
-    // 4. MacBook Screenshare Live Feed
-    const screenFeedImg = document.getElementById('screenFeedImg');
-    const refreshFeedBtn = document.getElementById('refreshFeedBtn');
-    const autoFeedBtn = document.getElementById('autoFeedBtn');
-    
-    let autoStreamActive = false;
-    let streamInterval = null;
+          }} else if (ev.type === 'blocked') {{
+            const st = document.getElementById(`status-${{ev.task_id}}`);
+            if (st) {{ st.className = 'tag tag-fail'; st.textContent = 'blocked'; }}
+            const pre = document.getElementById(`out-${{ev.task_id}}`);
+            if (pre) pre.textContent += `\n[Security blocked: ${{ev.reason}}]`;
 
-    function refreshScreenFeed() {
-      if (!token) return;
-      screenFeedImg.classList.add('loading');
-      
-      // Load directly using token parameter
-      const imgUrl = `/remote/screenshot?token=${token}&t=${Date.now()}`;
-      
-      const tempImg = new Image();
-      tempImg.onload = () => {
-        screenFeedImg.src = imgUrl;
-        screenFeedImg.classList.remove('loading');
-      };
-      tempImg.onerror = () => {
-        screenFeedImg.classList.remove('loading');
-      };
-      tempImg.src = imgUrl;
-    }
+          }} else if (ev.type === 'eval_start') {{
+            const st = document.getElementById(`status-${{ev.task_id}}`);
+            if (st) {{ st.className = 'tag'; st.style.background='#2a1a4a'; st.style.color='#a78bfa'; st.textContent = '🏋️ in gym'; }}
+            statusEl.textContent = `Evaluating ${{ev.agent}} output...`;
+            // Move agent to gym on the office floor
+            _gymAgents.add(normalizeId(ev.agent));
 
-    refreshFeedBtn.addEventListener('click', () => {
-      refreshScreenFeed();
-    });
+          }} else if (ev.type === 'eval') {{
+            const verdictColor = {{pass:'#5a8a5a',fail:'#ea5455',needs_review:'#e8a838',timeout:'#555',unknown:'#555'}};
+            const vc = verdictColor[ev.verdict] || '#555';
+            const card = document.getElementById(`agent-card-${{ev.task_id}}`);
+            if (card) {{
+              const evalDiv = document.createElement('div');
+              evalDiv.style = `padding:8px 16px;background:#0d0d1e;border-top:1px solid #1a1a3a;font-size:.78em`;
+              evalDiv.innerHTML = `<span style="color:${{vc}};font-weight:600">Eval: ${{ev.verdict}} ${{ev.score}}/100</span>`
+                + (ev.feedback ? ` — <span style="color:#aaa">${{escHtml(ev.feedback)}}</span>` : '')
+                + (ev.issues?.length ? `<div style="margin-top:4px;color:#888">${{ev.issues.map(i=>`• ${{escHtml(i)}}`).join('<br>')}}</div>` : '');
+              card.appendChild(evalDiv);
+            }}
+            // Store score for agent office floor
+            const agentKey = normalizeId(ev.agent);
+            _evalScores[agentKey] = {{ verdict: ev.verdict, score: ev.score }};
+            _gymAgents.delete(agentKey);
 
-    function startScreenStream() {
-      autoStreamActive = true;
-      autoFeedBtn.textContent = 'Stop Stream';
-      autoFeedBtn.style.background = 'var(--orange)';
-      autoFeedBtn.style.color = '#ffffff';
-      autoFeedBtn.style.borderColor = 'var(--orange)';
-      
-      refreshScreenFeed();
-      streamInterval = setInterval(() => {
-        if (controlDeck.classList.contains('expanded')) {
-          refreshScreenFeed();
-        } else {
-          stopScreenStream();
-        }
-      }, 2500); // 2.5 second refresh screenshare
-    }
+          }} else if (ev.type === 'done') {{
+            const st = document.getElementById(`status-${{ev.task_id}}`);
+            const verdict = ev.eval_verdict;
+            const doneColor = verdict==='pass'?'tag-done':verdict==='fail'?'tag-fail':'tag-done';
+            if (st) {{ st.className = `tag ${{doneColor}}`; st.style=''; st.textContent = verdict ? `done · ${{verdict}}` : 'done'; }}
+            _gymAgents.delete(normalizeId(ev.agent));
 
-    function stopScreenStream() {
-      autoStreamActive = false;
-      autoFeedBtn.textContent = 'Auto-Stream';
-      autoFeedBtn.style.background = '';
-      autoFeedBtn.style.color = '';
-      autoFeedBtn.style.borderColor = '';
-      
-      clearInterval(streamInterval);
-      streamInterval = null;
-    }
+          }} else if (ev.type === 'error') {{
+            statusEl.textContent = `Error: ${{ev.message}}`;
 
-    autoFeedBtn.addEventListener('click', () => {
-      if (autoStreamActive) {
-        stopScreenStream();
-      } else {
-        startScreenStream();
-      }
-    });
+          }} else if (ev.type === 'complete') {{
+            statusEl.textContent = 'All agents finished.';
+            _gymAgents.clear();
+            btnEl.disabled = false;
+            setTimeout(() => refresh(), 1000);
+          }}
+        }}
+      }}
+      // Stream closed — re-enable button even if complete event was never sent (server error)
+      _gymAgents.clear();
+      btnEl.disabled = false;
+    }} catch(e) {{
+      statusEl.textContent = `Stream error: ${{e.message}}`;
+      _gymAgents.clear();
+      btnEl.disabled = false;
+    }}
+  }}
 
-    // Init
-    checkAuth();
-  </script>
+  function escHtml(s) {{
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }}
+
+  function start() {{
+    refresh();
+    loadRubrics();
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(refresh, 5000);
+  }}
+
+  // Init
+  if (token) {{
+    document.getElementById('auth-gate').style.display = 'none';
+    start();
+  }}
+
+  document.getElementById('auth-input').addEventListener('keydown', e => {{ if (e.key==='Enter') doAuth(); }});
+  document.addEventListener('click', e => {{
+    const panel = document.getElementById('agent-panel');
+    if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && e.target.id !== 'office-canvas') {{
+      panel.style.display = 'none';
+    }}
+  }});
+
+{_WORLD_JS}
+{_MEETING_JS}
+</script>
+
+<!-- Standup Board Overlay -->
+<div id="standup-overlay" style="display:none;position:fixed;inset:0;z-index:400;background:rgba(5,8,14,.92);flex-direction:column;overflow:auto">
+  <div style="max-width:1200px;margin:0 auto;padding:16px 20px;width:100%">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px;border-bottom:1px solid #1a2a3a;padding-bottom:12px">
+      <div>
+        <div style="font-size:.65em;letter-spacing:.18em;color:#444;margin-bottom:2px">STANDUP BOARD</div>
+        <div style="font-size:.8em;color:#555" id="standup-status-line">Gathering in meeting room…</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:18px;font-size:.75em">
+        <span style="color:#555">Speaking: <span id="standup-speaker-name" style="color:#7ec8e3">—</span></span>
+        <span style="color:#555">Progress: <span id="standup-progress" style="color:#888">0/14</span></span>
+        <button onclick="endMeeting()" style="background:#1a1a1a;border:1px solid #333;color:#666;padding:4px 12px;border-radius:5px;cursor:pointer;font-size:.85em;letter-spacing:.05em">✕ CLOSE</button>
+      </div>
+    </div>
+    <div id="standup-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+  </div>
+</div>
+
+<!-- Agent Detail Panel -->
+<div id="agent-panel" style="display:none;position:fixed;right:20px;top:70px;width:290px;z-index:300;background:#0f1520;border:1px solid #1e2a3a;border-radius:10px;padding:16px;box-shadow:0 8px 40px rgba(0,0,0,.7)">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <span id="ap-icon" style="font-size:2em;line-height:1"></span>
+    <div style="flex:1;min-width:0">
+      <div id="ap-name" style="font-size:1em;font-weight:700;color:#eee;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <div id="ap-dept" style="font-size:.72em;color:#555"></div>
+    </div>
+    <button onclick="document.getElementById('agent-panel').style.display='none'" style="background:none;border:none;color:#444;cursor:pointer;font-size:1.1em;padding:0;line-height:1">✕</button>
+  </div>
+  <div id="ap-status" style="margin-bottom:8px"></div>
+  <div style="font-size:.68em;letter-spacing:.08em;color:#444;margin-bottom:4px">CURRENT TASK</div>
+  <div id="ap-task" style="font-size:.82em;color:#9ec8f8;background:#0a1422;border-radius:5px;padding:8px;margin-bottom:12px;min-height:32px;line-height:1.4"></div>
+  <div id="ap-history" style="margin-bottom:12px;max-height:140px;overflow-y:auto"></div>
+  <button id="ap-assign-btn" style="width:100%;padding:7px;background:rgba(42,74,106,.4);border:1px solid #2a5a8a;color:#7ec8e3;border-radius:6px;cursor:pointer;font-size:.82em;letter-spacing:.04em">＋ Assign New Task</button>
+</div>
 </body>
 </html>"""
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=html)
 
 
 @app.get("/pending")

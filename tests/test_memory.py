@@ -7,9 +7,18 @@ external services.
 import sys
 import time
 import uuid
+import pytest
 from unittest.mock import MagicMock, patch, call
 
 # ── Stub external deps before import ─────────────────────────────────────────
+
+# Save real modules before mocking so we can restore them after module-level
+# imports complete (prevents contaminating test files collected after this one,
+# e.g. test_qwen3_routing.py imports brain_ollama functions at module level).
+import config as _real_config  # noqa: E402
+_real_brain_ollama = sys.modules.get("brains.brain_ollama")
+_real_qdrant       = sys.modules.get("qdrant_client")
+_real_qdrant_models = sys.modules.get("qdrant_client.models")
 
 # config stub
 _mock_config = MagicMock()
@@ -43,6 +52,45 @@ if "infra.memory" in sys.modules:
     del sys.modules["infra.memory"]
 if "infra" in sys.modules:
     del sys.modules["infra"]
+
+# Restore real modules now that module-level imports are done. Later test files
+# (e.g. test_qwen3_routing.py) must see the real brain_ollama module.
+sys.modules["config"] = _real_config
+if _real_brain_ollama is not None:
+    sys.modules["brains.brain_ollama"] = _real_brain_ollama
+else:
+    sys.modules.pop("brains.brain_ollama", None)
+if _real_qdrant is not None:
+    sys.modules["qdrant_client"] = _real_qdrant
+else:
+    sys.modules.pop("qdrant_client", None)
+if _real_qdrant_models is not None:
+    sys.modules["qdrant_client.models"] = _real_qdrant_models
+else:
+    sys.modules.pop("qdrant_client.models", None)
+
+
+@pytest.fixture(autouse=True)
+def _memory_stubs():
+    """Install memory-test stubs before each test; restore real modules after."""
+    sys.modules["config"]              = _mock_config
+    sys.modules["brains.brain_ollama"] = _mock_brain
+    sys.modules["qdrant_client"]        = _mock_qdrant_mod
+    sys.modules["qdrant_client.models"] = _mock_qdrant_models
+    yield
+    sys.modules["config"] = _real_config
+    if _real_brain_ollama is not None:
+        sys.modules["brains.brain_ollama"] = _real_brain_ollama
+    else:
+        sys.modules.pop("brains.brain_ollama", None)
+    if _real_qdrant is not None:
+        sys.modules["qdrant_client"] = _real_qdrant
+    else:
+        sys.modules.pop("qdrant_client", None)
+    if _real_qdrant_models is not None:
+        sys.modules["qdrant_client.models"] = _real_qdrant_models
+    else:
+        sys.modules.pop("qdrant_client.models", None)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,7 +163,7 @@ def test_write_calls_embed_and_upsert():
     store, client = _make_store()
     _mock_brain.embed = _mock_embed
     # recall returns nothing (no dedup needed for personal)
-    client.search.return_value = []
+    client.query_points.return_value.points = []
 
     entry_id = store.write("personal", "Dark mode preferred", agent_id="human")
 
@@ -170,7 +218,7 @@ def test_write_personal_dedup_supersedes_near_duplicate():
 
     # Simulate a near-duplicate at score 0.97
     old_hit = _make_hit("User likes dark mode", score=0.97, layer="personal")
-    client.search.return_value = [old_hit]
+    client.query_points.return_value.points = [old_hit]
 
     store.write("personal", "User prefers dark mode", agent_id="human")
     # Should delete old entry, then upsert new one
@@ -184,7 +232,7 @@ def test_write_personal_no_dedup_below_threshold():
 
     # Score below 0.95 dedup threshold
     distant_hit = _make_hit("User likes pizza", score=0.40, layer="personal")
-    client.search.return_value = [distant_hit]
+    client.query_points.return_value.points = [distant_hit]
 
     store.write("personal", "User prefers dark mode", agent_id="human")
     client.delete.assert_not_called()
@@ -194,7 +242,7 @@ def test_write_personal_no_dedup_below_threshold():
 def test_write_working_sets_ttl():
     store, client = _make_store()
     _mock_brain.embed = _mock_embed
-    client.search.return_value = []
+    client.query_points.return_value.points = []
     client.scroll.return_value = ([], None)  # no session entries yet
 
     before = time.time()
@@ -217,7 +265,7 @@ def test_recall_returns_hits_above_min_score():
         _make_hit("Dark mode preferred",   score=0.85),
         _make_hit("Pizza for lunch",        score=0.20),   # below min_score
     ]
-    client.search.return_value = hits
+    client.query_points.return_value.points = hits
 
     results = store.recall("UI preferences", layer="personal", min_score=0.30)
     assert len(results) == 1
@@ -235,7 +283,7 @@ def test_recall_filters_expired_entries():
     valid = _make_hit("valid note", score=0.8, layer="working")
     valid.payload["expires_at"] = time.time() + 3600
 
-    client.search.return_value = [expired, valid]
+    client.query_points.return_value.points = [expired, valid]
 
     results = store.recall("anything", layer="working")
     assert len(results) == 1
@@ -245,10 +293,10 @@ def test_recall_filters_expired_entries():
 def test_recall_searches_all_layers_when_no_layer_given():
     store, client = _make_store()
     _mock_brain.embed = _mock_embed
-    client.search.return_value = []
+    client.query_points.return_value.points = []
 
     store.recall("something")
-    assert client.search.call_count == 4   # one call per layer
+    assert client.query_points.call_count == 4   # one call per layer
 
 
 def test_recall_returns_empty_when_embed_fails():
@@ -257,7 +305,7 @@ def test_recall_returns_empty_when_embed_fails():
 
     results = store.recall("anything")
     assert results == []
-    client.search.assert_not_called()
+    client.query_points.assert_not_called()
 
 
 # ── forget() tests ─────────────────────────────────────────────────────────────
@@ -373,7 +421,7 @@ def test_summarize_working_collapses_oldest_entries():
     # First scroll: session entries for summarize trigger check
     # Second scroll: called inside summarize_working itself
     client.scroll.side_effect = [(entries, None), (entries, None)]
-    client.search.return_value = []   # no dedup hits for the summary write
+    client.query_points.return_value.points = []   # no dedup hits for the summary write
 
     summary = store.summarize_working("sess", agent_id="human")
 
@@ -409,7 +457,7 @@ def test_context_for_prompt_returns_formatted_block():
     store, client = _make_store()
     _mock_brain.embed = _mock_embed
 
-    client.search.return_value = [_make_hit("Dark mode preferred", score=0.88)]
+    client.query_points.return_value.points = [_make_hit("Dark mode preferred", score=0.88)]
 
     ctx = store.context_for_prompt("UI preferences", layer="personal", top_k=3)
     assert "[Memory context]" in ctx
@@ -421,7 +469,7 @@ def test_context_for_prompt_returns_formatted_block():
 def test_context_for_prompt_returns_empty_string_when_no_hits():
     store, client = _make_store()
     _mock_brain.embed = _mock_embed
-    client.search.return_value = []
+    client.query_points.return_value.points = []
 
     ctx = store.context_for_prompt("anything")
     assert ctx == ""

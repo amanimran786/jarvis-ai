@@ -224,8 +224,9 @@ def test_convert_to_mlx_format_supports_prompt_completion_packs():
             split_counts[split_name] = len(lines)
             assert lines
             loaded = json.loads(lines[0])
-            assert "prompt" in loaded
-            assert "completion" in loaded
+            assert [message["role"] for message in loaded["messages"]] == ["user", "assistant"]
+            assert loaded["messages"][0]["content"].startswith("User: task")
+            assert loaded["messages"][1]["content"].startswith("response")
 
         assert split_counts == {"train": 22, "valid": 4, "test": 4}
 
