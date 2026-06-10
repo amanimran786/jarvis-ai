@@ -32,7 +32,7 @@ Jarvis is trying to become your own private, open-source-first desktop intellige
 If you are new to this repo, read these sections in order:
 
 1. `What Is Jarvis?`
-2. `What's New (April 2026)`
+2. `What's New (June 2026)`
 3. `How Jarvis Works`
 4. `Current State`
 5. `Roadmap`
@@ -78,14 +78,39 @@ Jarvis is trying to invert that:
 - grounded in your files, tools, and environment
 - honest about what it knows and what it does not know
 
+## Intended Use
+
+Jarvis is a **personal, single-user, local-first assistant runtime**. It is built to run on one Mac, for one person, with that person's memory, files, and tools.
+
+What it is for:
+
+- a daily driver assistant that knows your context and runs mostly on local models
+- a managed agent team that can research, write code, and run commands on your machine — inside a sandbox, with every write surfaced for your review
+- a test bed for local-model routing, memory architecture, and safe agent-runtime design
+
+What it is **not**:
+
+- not a hosted service or multi-tenant product
+- not an autonomous system — agents never merge code, never write to your knowledge vault, and never persist "lessons" without explicit human approval
+- not cloud-dependent — `open-source` mode keeps core inference on local models only
+
 ## What's New (June 2026)
 
-Four major upgrades shipped this month:
+Two waves shipped this month. The second wave turned the agent team into a real runtime with tools, isolation, and verification:
 
-1. **14-Agent Specialized Team** — A named roster of purpose-built agents runs inside the task runtime. Each agent has a defined role: `backend_engineer`, `researcher`, `security_reviewer`, `automation_engineer`, `devops_release`, `frontend_designer`, `ux_researcher`, `qa_tester`, `ai_evaluator`, `ai_safety_agent`, `pipeline_monitor`, `output_quality_checker`, `career_agent`, `memory_librarian`. Dispatch any task to any agent via `POST /tasks`.
-2. **Three.js 3D Office World** — The `/dashboard` now renders a live Roblox-style 3D office in WebGL. Each agent appears as an R6 avatar character with named animations: idle breathing, walk cycle, typing at desk, gym lifting, done jump, failed droop, speaking gesture, waiting head-sway. The office is zoned by function (engineering, design, security, gym, meeting room) with isometric camera. Click an agent to inspect its state.
-3. **Single Unified Dashboard** — Two dashboards (`/` mobile HUD and `/dashboard` ops panel) are now one. The root `/` redirects to `/dashboard`, eliminating a 2038-line duplicate UI surface.
-4. **Fast-Path Contamination Fix** — Agent tasks were being silently intercepted by keyword fast-paths in `router.py` (task list, calendar routes) before ever reaching the LLM, producing garbage output in ~26ms. Fixed by dispatching agent tasks directly through `smart_stream` in `model_router.py` with an agent-specific system context.
+1. **Agents With Real Tools** — Agents now run a multi-turn tool loop instead of producing one-shot text. They get an allowlist-validated `bash` tool (list-args, `shell=False`, pipelines supported with each stage validated separately; redirection, `;`, and `$()` are rejected) plus a tool budget that forces a final no-tools answer when exhausted.
+2. **Seatbelt Sandbox on Every Command** — Every agent command runs under macOS `sandbox-exec`: network denied, file writes confined to the task worktree and tmp, inherited by child processes. Live-proven: agent-spawned test code gets `PermissionError` writing to `$HOME` and denied socket connects, while worktree writes succeed.
+3. **Isolated Code Worktrees** — `kind="code"` tasks get their own git worktree on a `codex/<task>` branch. The `write_file` tool can only write inside it. The resulting diff is staged and surfaced for human review — the runtime never merges a branch. E2E-proven: an agent wrote a module plus tests, watched pytest fail, fixed its own bug, and surfaced the passing diff.
+4. **Auto-Verification With Fabrication Defense** — Task output is scored by a verifier that receives the runtime-captured tool transcript as ground truth. If an agent claims it executed something but the runtime counted zero tool calls, the output is flagged before verification. Failed tasks retry (max 2).
+5. **Routines and Approval-Gated Lessons** — Cron-style routines run agents on a schedule (`/routines` CRUD, RBAC-protected). Agents can propose lessons learned, but nothing persists until a human approves it in the dashboard.
+6. **Context Minimalism** — Multi-task waves chain through a compact result index; downstream agents pull full upstream results only when they ask for them.
+
+Earlier in June:
+
+7. **14-Agent Specialized Team** — A named roster of purpose-built agents runs inside the task runtime. Each agent has a defined role: `backend_engineer`, `researcher`, `security_reviewer`, `automation_engineer`, `devops_release`, `frontend_designer`, `ux_researcher`, `qa_tester`, `ai_evaluator`, `ai_safety_agent`, `pipeline_monitor`, `output_quality_checker`, `career_agent`, `memory_librarian`. Dispatch any task to any agent via `POST /tasks`.
+8. **Three.js 3D Office World** — The `/dashboard` now renders a live Roblox-style 3D office in WebGL. Each agent appears as an R6 avatar character with named animations: idle breathing, walk cycle, typing at desk, gym lifting, done jump, failed droop, speaking gesture, waiting head-sway. The office is zoned by function (engineering, design, security, gym, meeting room) with isometric camera. Click an agent to inspect its state.
+9. **Single Unified Dashboard** — Two dashboards (`/` mobile HUD and `/dashboard` ops panel) are now one. The root `/` redirects to `/dashboard`, eliminating a 2038-line duplicate UI surface.
+10. **Fast-Path Contamination Fix** — Agent tasks were being silently intercepted by keyword fast-paths in `router.py` (task list, calendar routes) before ever reaching the LLM, producing garbage output in ~26ms. Fixed by dispatching agent tasks directly through `smart_stream` in `model_router.py` with an agent-specific system context.
 
 ## What's New (April 2026)
 
@@ -112,6 +137,7 @@ flowchart LR
     Router --> Models["Local Models\nsmart_stream direct"]
     Router --> Tasks["Managed Task Runtime\n14 Specialist Agents"]
     Tasks --> AgentTeam["backend · researcher · security\nautomation · devops · frontend\nux · qa · ai_eval · ai_safety\npipeline · quality · career · memory"]
+    AgentTeam --> Sandbox["Sandboxed Tool Loop\nbash + write_file · Seatbelt\ngit worktrees · verification"]
     Tools --> Mac["Browser / Terminal / macOS / Devices"]
 ```
 
@@ -126,7 +152,8 @@ Every request follows roughly this path:
 5. Jarvis chooses the right model and tools.
 6. Jarvis can dispatch parallel agents if useful.
 7. Jarvis answers, acts, or starts a managed task.
-8. Jarvis stores useful memory for future sessions.
+8. Managed tasks run agents in a sandboxed tool loop, and their output is verified against what they actually executed.
+9. Jarvis stores useful memory for future sessions.
 
 ## The Main Systems
 
@@ -274,9 +301,13 @@ Main files:
 What it does:
 
 - dispatches tasks to 14 specialized named agents, each backed by a direct `smart_stream` LLM call with role-specific system context
+- runs each agent in a multi-turn tool loop: allowlist-validated `bash` (list-args, `shell=False`, pipeline stages validated separately) plus `write_file`, under a tool budget
+- wraps every agent command in a macOS Seatbelt sandbox — network denied, writes confined to the task worktree and tmp, inherited by child processes
+- gives `kind="code"` tasks an isolated git worktree; the diff is surfaced for human review and the branch is never auto-merged
+- verifies output against the runtime-captured tool transcript, detects fabricated execution claims, and retries failed tasks (max 2)
+- persists projects, events, and routines in SQLite (`~/.jarvis/projects.db`); a scheduler thread runs cron-style routines
 - creates and tracks tasks with status, streaming output, and cancellation
 - serializes execution through a single lock (tasks run sequentially, preventing resource contention)
-- prepares isolated code workspaces for code tasks
 
 The 14 agents in the current roster:
 
@@ -320,7 +351,9 @@ What it does:
 
 ## Current State
 
-Jarvis as of April 2026:
+Jarvis as of June 2026:
+
+**Agent runtime** — 14 specialist agents with a sandboxed multi-turn tool loop, isolated git worktrees for code tasks, transcript-grounded verification, and scheduled routines.
 
 **Voice** — Kokoro TTS with macOS `say` fallback. Faster-whisper STT (upgrade path: large-v3-turbo).
 
@@ -347,6 +380,10 @@ Jarvis as of April 2026:
 | Repo grounding | Use Graphify and vault-based context instead of pure guesswork |
 | Browser + system | Read pages, click controls, open apps, change settings, and take screenshots |
 | Managed runtime | Dispatch tasks to 14 named specialist agents, stream output, inspect status, cancel tasks |
+| Agent tools | Multi-turn tool loop with allowlisted bash (pipelines supported) and worktree-confined file writes |
+| Agent safety | Seatbelt sandbox on every command (no network, confined writes), human-review diffs, never auto-merge |
+| Verification | Score agent output against the runtime tool transcript, detect fabricated execution, auto-retry |
+| Routines | Schedule agents on cron-style routines; approval-gated lessons for self-improvement |
 | 3D Office World | Live WebGL dashboard with R6 avatar agents, zone floors, animated states, click-to-inspect |
 | Extensions | Expose discoverable skills, connectors, and plugins through API and CLI |
 
@@ -423,17 +460,22 @@ Main work:
 - unify memory, vault, graph, and mem0 grounding
 - add stronger retrieval and reranking
 
-### Phase 4: Better Tools and Actions
+### Phase 4: Better Tools and Actions — largely shipped (June 2026)
 
 Goal:
 
 Let Jarvis act safely and reliably on the machine.
 
-Main work:
+Shipped:
+
+- sandboxed agent tool loop (Seatbelt: no network, confined writes)
+- isolated git worktrees with human-review diffs for code tasks
+- transcript-grounded verification for multi-step actions
+
+Remaining:
 
 - cleaner connector boundaries
-- better verification for multi-step actions
-- clearer safe vs privileged tool categories
+- clearer safe vs privileged tool categories outside the task runtime
 
 ### Phase 5: Multimodal Jarvis
 
@@ -535,6 +577,15 @@ Managed runtime:
 - `GET /tasks/{task_id}`
 - `GET /tasks/{task_id}/events`
 - `GET /tasks/{task_id}/stream`
+
+Routines and lessons (RBAC-protected):
+
+- `GET /routines`
+- `POST /routines`
+- `DELETE /routines/{routine_id}`
+- `GET /agents/{agent_id}/lessons/pending`
+- `POST /agents/{agent_id}/lessons/approve`
+- `POST /agents/{agent_id}/lessons/dismiss`
 
 Memory and vault:
 
@@ -673,7 +724,8 @@ Jarvis is:
 - an extension surface
 - an always-on brain core
 - a parallel agent dispatcher
-- a 14-agent specialized task team
+- a 14-agent specialized task team with real, sandboxed tools
+- a verification loop that checks what agents actually did, not what they claim
 - a 3D office world that shows every agent working in real time
 - and a roadmap toward a real local AI assistant
 
