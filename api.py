@@ -28,6 +28,8 @@ import json
 import itertools
 import os
 import hmac
+import sqlite3
+from pathlib import Path
 import hashlib
 import secrets
 import threading
@@ -1012,6 +1014,163 @@ def get_agent(agent_id: str):
     return {"ok": True, "agent": agent}
 
 
+@app.get("/agents/{agent_id}/lessons/pending")
+async def get_pending_lesson(agent_id: str, request: Request):
+    import re as _re
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not _re.match(r'^[a-z0-9-]+$', agent_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid agent_id"})
+    from task_runtime import _LESSONS_DIR
+    path = _LESSONS_DIR / f"{agent_id}.pending.md"
+    if not path.exists():
+        return {"ok": True, "pending": None}
+    return {"ok": True, "pending": path.read_text(encoding="utf-8")}
+
+
+@app.post("/agents/{agent_id}/lessons/approve")
+async def approve_lesson(agent_id: str, request: Request):
+    import re as _re
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not _re.match(r'^[a-z0-9-]+$', agent_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid agent_id"})
+    from task_runtime import _LESSONS_DIR
+    pending = _LESSONS_DIR / f"{agent_id}.pending.md"
+    active = _LESSONS_DIR / f"{agent_id}.md"
+    if not pending.exists():
+        return JSONResponse(status_code=404, content={"ok": False, "error": "no pending lesson"})
+    content = pending.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    body_lines = [
+        l for l in lines
+        if not l.startswith("# PENDING_APPROVAL")
+        and not l.startswith("# Agent:")
+        and not l.startswith("# Proposed:")
+        and not l.startswith("# Failure")
+    ]
+    active_content = "\n".join(body_lines).strip() + "\n"
+    active.write_text(active_content, encoding="utf-8")
+    pending.unlink()
+    return {"ok": True, "activated": str(active)}
+
+
+@app.post("/agents/{agent_id}/lessons/dismiss")
+async def dismiss_lesson(agent_id: str, request: Request):
+    import re as _re
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not _re.match(r'^[a-z0-9-]+$', agent_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid agent_id"})
+    from task_runtime import _LESSONS_DIR
+    pending = _LESSONS_DIR / f"{agent_id}.pending.md"
+    if pending.exists():
+        pending.unlink()
+    return {"ok": True}
+
+
+# ── Routines endpoints ──────────────────────────────────────────────────────────
+
+class RoutineCreateRequest(BaseModel):
+    name: str
+    prompt: str
+    agent_id: str = ""
+    schedule: str
+    enabled: bool = True
+
+
+class RoutinePatchRequest(BaseModel):
+    name: str | None = None
+    prompt: str | None = None
+    agent_id: str | None = None
+    schedule: str | None = None
+    enabled: bool | None = None
+
+
+@app.get("/routines")
+async def list_routines(request: Request):
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    return {"ok": True, "routines": _routines_db_list()}
+
+
+@app.post("/routines")
+async def create_routine(req: RoutineCreateRequest, request: Request):
+    import re as _re
+    import uuid as _uuid
+    from datetime import datetime, timezone
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    name = req.name.strip()[:120]
+    prompt = req.prompt.strip()[:4096]
+    agent_id = req.agent_id.strip()
+    schedule = req.schedule.strip()
+    if not name:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "name required"})
+    if not prompt:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "prompt required"})
+    if agent_id and not _re.match(r'^[a-z0-9-]+$', agent_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid agent_id"})
+    if not _validate_schedule(schedule):
+        return JSONResponse(status_code=400, content={
+            "ok": False,
+            "error": "invalid schedule — use 'interval:<seconds>' (min 60), a cron expression, or @daily/@hourly/@weekly",
+        })
+    r = {
+        "id": f"rtn_{_uuid.uuid4().hex[:12]}",
+        "name": name,
+        "prompt": prompt,
+        "agent_id": agent_id,
+        "schedule": schedule,
+        "enabled": int(req.enabled),
+        "last_fired_at": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _routines_db_upsert(r)
+    return {"ok": True, "routine": r}
+
+
+@app.patch("/routines/{routine_id}")
+async def patch_routine(routine_id: str, req: RoutinePatchRequest, request: Request):
+    import re as _re
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not _re.match(r'^rtn_[a-f0-9]+$', routine_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid routine_id"})
+    rows = _routines_db_list()
+    existing = next((r for r in rows if r["id"] == routine_id), None)
+    if existing is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+    if req.name is not None:
+        existing["name"] = req.name.strip()[:120]
+    if req.prompt is not None:
+        existing["prompt"] = req.prompt.strip()[:4096]
+    if req.agent_id is not None:
+        aid = req.agent_id.strip()
+        if aid and not _re.match(r'^[a-z0-9-]+$', aid):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid agent_id"})
+        existing["agent_id"] = aid
+    if req.schedule is not None:
+        if not _validate_schedule(req.schedule.strip()):
+            return JSONResponse(status_code=400, content={"ok": False, "error": "invalid schedule"})
+        existing["schedule"] = req.schedule.strip()
+    if req.enabled is not None:
+        existing["enabled"] = int(req.enabled)
+    _routines_db_upsert(existing)
+    return {"ok": True, "routine": existing}
+
+
+@app.delete("/routines/{routine_id}")
+async def delete_routine(routine_id: str, request: Request):
+    import re as _re
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not _re.match(r'^rtn_[a-f0-9]+$', routine_id):
+        return JSONResponse(status_code=400, content={"ok": False, "error": "invalid routine_id"})
+    _routines_db_delete(routine_id)
+    return {"ok": True}
+
+
 class AgentRunRequest(BaseModel):
     task: str
     context: str = ""
@@ -1781,15 +1940,287 @@ def manager_status(session_id: str, request: Request):
 # --- Project Plan Mode ----------------------------------------------------------
 
 _PLAN_AGENTS = [
-    "backend_engineer", "researcher", "security_reviewer", "automation_engineer",
-    "devops_release", "frontend_designer", "ux_researcher", "qa_tester",
-    "ai_evaluator", "ai_safety_agent", "pipeline_monitor", "output_quality_checker",
-    "career_agent", "memory_librarian",
+    "backend-engineer", "researcher", "security-reviewer", "automation-engineer",
+    "devops-release", "frontend-designer", "ux-researcher", "qa-tester",
+    "ai-evaluator", "ai-safety-agent", "pipeline-monitor", "output-quality-checker",
+    "career-agent", "memory-librarian",
 ]
 
 # ── Project orchestration state ───────────────────────────────────────────────
 _PROJECTS: dict[str, dict] = {}
 _PROJECTS_LOCK = threading.Lock()
+_PROJECTS_DB = Path.home() / ".jarvis" / "projects.db"
+
+
+def _projects_db_init() -> None:
+    _PROJECTS_DB.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(str(_PROJECTS_DB))
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            goal TEXT,
+            status TEXT,
+            created_at TEXT,
+            synthesis_result TEXT
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS project_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            payload TEXT NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS routines (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            agent_id TEXT,
+            schedule TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_fired_at TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    con.commit()
+    con.close()
+
+try:
+    _projects_db_init()
+except Exception:
+    log.exception("projects DB init failed — running without persistence")
+
+
+def _projects_db_load() -> None:
+    if not _PROJECTS_DB.exists():
+        return
+    con = sqlite3.connect(str(_PROJECTS_DB))
+    con.row_factory = sqlite3.Row
+    try:
+        for row in con.execute("SELECT * FROM projects ORDER BY rowid"):
+            pid = row["id"]
+            events = []
+            for ev in con.execute(
+                "SELECT type, ts, payload FROM project_events WHERE project_id=? ORDER BY id",
+                (pid,)
+            ):
+                entry = {"type": ev["type"], "ts": ev["ts"]}
+                entry.update(json.loads(ev["payload"]))
+                events.append(entry)
+            _PROJECTS[pid] = {
+                "id": pid,
+                "goal": row["goal"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "synthesis_result": row["synthesis_result"] or "",
+                "events": events,
+                "waves": {},
+                "current_wave": 0,
+            }
+    finally:
+        con.close()
+
+try:
+    _projects_db_load()
+except Exception:
+    log.exception("projects DB load failed — starting with empty project history")
+
+
+def _projects_db_upsert(proj: dict) -> None:
+    try:
+        con = sqlite3.connect(str(_PROJECTS_DB))
+        con.execute("""
+            INSERT OR REPLACE INTO projects (id, goal, status, created_at, synthesis_result)
+            VALUES (?, ?, ?, ?, ?)
+        """, (proj["id"], proj["goal"], proj["status"], proj["created_at"],
+              proj.get("synthesis_result", "")))
+        con.commit()
+        con.close()
+    except Exception:
+        log.exception("projects db upsert failed")
+
+
+def _projects_db_append_event(project_id: str, event_type: str, ts: str, payload: dict) -> None:
+    try:
+        con = sqlite3.connect(str(_PROJECTS_DB))
+        con.execute(
+            "INSERT INTO project_events (project_id, type, ts, payload) VALUES (?,?,?,?)",
+            (project_id, event_type, ts, json.dumps(payload))
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        log.exception("projects db append event failed")
+
+
+# ── Routines (cron / interval-triggered tasks) ────────────────────────────────
+
+def _routines_db_list() -> list[dict]:
+    try:
+        con = sqlite3.connect(str(_PROJECTS_DB))
+        con.row_factory = sqlite3.Row
+        rows = list(con.execute("SELECT * FROM routines ORDER BY created_at"))
+        con.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        log.exception("routines db list failed")
+        return []
+
+
+def _routines_db_upsert(r: dict) -> None:
+    try:
+        con = sqlite3.connect(str(_PROJECTS_DB))
+        con.execute("""
+            INSERT OR REPLACE INTO routines
+              (id, name, prompt, agent_id, schedule, enabled, last_fired_at, created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (r["id"], r["name"], r["prompt"], r.get("agent_id") or "",
+              r["schedule"], int(r.get("enabled", 1)),
+              r.get("last_fired_at") or None, r["created_at"]))
+        con.commit()
+        con.close()
+    except Exception:
+        log.exception("routines db upsert failed")
+
+
+def _routines_db_delete(routine_id: str) -> None:
+    try:
+        con = sqlite3.connect(str(_PROJECTS_DB))
+        con.execute("DELETE FROM routines WHERE id=?", (routine_id,))
+        con.commit()
+        con.close()
+    except Exception:
+        log.exception("routines db delete failed")
+
+
+def _cron_field_matches(field: str, value: int, lo: int, hi: int) -> bool:
+    if field == "*":
+        return True
+    for part in field.split(","):
+        if "/" in part:
+            rng, step_s = part.split("/", 1)
+            step = int(step_s)
+            if rng == "*":
+                start, end = lo, hi
+            elif "-" in rng:
+                start, end = map(int, rng.split("-"))
+            else:
+                start, end = int(rng), hi
+            if value in range(start, end + 1, step):
+                return True
+        elif "-" in part:
+            a, b = map(int, part.split("-"))
+            if a <= value <= b:
+                return True
+        else:
+            if int(part) == value:
+                return True
+    return False
+
+
+_CRON_MACROS = {
+    "@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *",
+    "@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0",
+    "@daily": "0 0 * * *", "@midnight": "0 0 * * *",
+    "@hourly": "0 * * * *",
+}
+
+
+def _cron_matches(expr: str, dt) -> bool:
+    expr = _CRON_MACROS.get(expr.strip().lower(), expr)
+    parts = expr.split()
+    if len(parts) != 5:
+        return False
+    min_e, hour_e, dom_e, month_e, dow_e = parts
+    # cron dow: 0=Sunday ... 6=Saturday; isoweekday: 1=Mon...7=Sun
+    cron_dow = dt.isoweekday() % 7
+    return (
+        _cron_field_matches(min_e, dt.minute, 0, 59)
+        and _cron_field_matches(hour_e, dt.hour, 0, 23)
+        and _cron_field_matches(dom_e, dt.day, 1, 31)
+        and _cron_field_matches(month_e, dt.month, 1, 12)
+        and _cron_field_matches(dow_e, cron_dow, 0, 6)
+    )
+
+
+def _validate_schedule(schedule: str) -> bool:
+    s = schedule.strip().lower()
+    if s.startswith("interval:"):
+        try:
+            secs = int(s[9:])
+            return secs >= 60
+        except ValueError:
+            return False
+    macro = _CRON_MACROS.get(s)
+    if macro:
+        return True
+    parts = s.split()
+    if len(parts) != 5:
+        return False
+    allowed = set("0123456789*,-/")
+    return all(all(c in allowed for c in p) for p in parts)
+
+
+def _routines_scheduler() -> None:
+    """Background thread: fire scheduled routines when due."""
+    from datetime import datetime, timezone
+    import uuid as _uuid
+    while True:
+        try:
+            time.sleep(30)
+            now = datetime.now(timezone.utc)
+            now_minute = now.strftime("%Y-%m-%dT%H:%M")
+            for r in _routines_db_list():
+                if not r.get("enabled"):
+                    continue
+                schedule = (r.get("schedule") or "").strip().lower()
+                last = r.get("last_fired_at") or ""
+                should_fire = False
+                if schedule.startswith("interval:"):
+                    try:
+                        secs = int(schedule[9:])
+                    except ValueError:
+                        continue
+                    if not last:
+                        should_fire = True
+                    else:
+                        try:
+                            from datetime import datetime as _dt
+                            elapsed = (now - _dt.fromisoformat(last)).total_seconds()
+                            should_fire = elapsed >= secs
+                        except Exception:
+                            should_fire = True
+                else:
+                    if _cron_matches(schedule, now):
+                        # Fire once per minute — skip if already fired this minute
+                        last_minute = last[:16] if last else ""
+                        should_fire = last_minute != now_minute
+                if not should_fire:
+                    continue
+                prompt = (r.get("prompt") or "")[:4096]
+                agent_id = (r.get("agent_id") or "").strip()
+                import re as _re
+                if agent_id and not _re.match(r'^[a-z0-9-]+$', agent_id):
+                    log.warning("routine %s has invalid agent_id %r — skipping", r["id"], agent_id)
+                    continue
+                try:
+                    task_runtime.submit_task(
+                        prompt,
+                        kind="chat",
+                        source="routine",
+                        assigned_agent_id=agent_id,
+                        meta={"routine_id": r["id"], "routine_name": r.get("name", "")},
+                    )
+                    r["last_fired_at"] = now.isoformat()
+                    _routines_db_upsert(r)
+                    log.info("routine %r fired: %s", r.get("name"), r["id"])
+                except Exception:
+                    log.exception("routine %s fire failed", r["id"])
+        except Exception:
+            log.exception("routines scheduler tick failed")
 
 
 def _append_project_event(project_id: str, event_type: str, **kwargs) -> None:
@@ -1797,7 +2228,9 @@ def _append_project_event(project_id: str, event_type: str, **kwargs) -> None:
         proj = _PROJECTS.get(project_id)
         if proj is None:
             return
-        proj["events"].append({"type": event_type, "ts": _utcnow(), **kwargs})
+        ts = _utcnow()
+        proj["events"].append({"type": event_type, "ts": ts, **kwargs})
+    _projects_db_append_event(project_id, event_type, ts, kwargs)
 
 
 def _utcnow() -> str:
@@ -1810,8 +2243,9 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
     import time as _time
     proj = _PROJECTS[project_id]
     proj["status"] = "running"
+    _projects_db_upsert(proj)
 
-    all_results: list[tuple[int, str, str]] = []  # (group, agent_id, result)
+    all_results: list[tuple[int, str, str, str]] = []  # (group, agent_id, task_id, result)
 
     for group_num in sorted(tasks_by_group.keys()):
         group_tasks = tasks_by_group[group_num]
@@ -1819,11 +2253,20 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
         _append_project_event(project_id, "wave_start", group=group_num,
                                count=len(group_tasks))
 
-        # Build context from prior waves to inject into this wave's prompts
+        # Context minimalism: inject only a compact index of prior results.
+        # Agents pull any full result on demand via <task_result>TASK_ID</task_result>.
         prior_ctx = ""
         if all_results:
-            sections = [f"[{agent}]: {res[:500]}" for _, agent, res in all_results]
-            prior_ctx = "Context from earlier wave:\n" + "\n\n".join(sections)
+            lines = []
+            for _, agent, tid, res in all_results:
+                summary = " ".join(res.split())[:120]
+                lines.append(f"- {tid} [{agent}]: {summary}")
+            prior_ctx = (
+                "Index of earlier-wave results (summaries only). "
+                "To read a full result, output <task_result>TASK_ID</task_result> "
+                "on its own line and the runtime will return it:\n"
+                + "\n".join(lines)
+            )
 
         wave_tasks: list[tuple[str, str]] = []  # (agent_id, task_id)
         for item in group_tasks:
@@ -1868,7 +2311,7 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
         for agent_id, task_id in wave_tasks:
             t = task_runtime.get_task(task_id) or {}
             result = (t.get("result") or "").strip()
-            all_results.append((group_num, agent_id, result))
+            all_results.append((group_num, agent_id, task_id, result))
 
         with _PROJECTS_LOCK:
             proj["waves"][group_num]["status"] = "complete"
@@ -1876,14 +2319,17 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
 
     # Synthesis: feed all results to a single agent
     proj["status"] = "synthesizing"
-    synthesis_sections = "\n\n".join(
-        f"=== {agent_id} (wave {g}) ===\n{res[:700]}"
-        for g, agent_id, res in all_results
+    _projects_db_upsert(proj)
+    synthesis_sections = "\n".join(
+        f"- {tid} [{agent_id}, wave {g}]: {' '.join(res.split())[:200]}"
+        for g, agent_id, tid, res in all_results
         if res
     )
     synthesis_prompt = (
         f"Project goal: {goal}\n\n"
-        f"The following agents completed their tasks:\n\n{synthesis_sections}\n\n"
+        f"Index of completed agent task results (summaries only):\n\n{synthesis_sections}\n\n"
+        "To read any full result, output <task_result>TASK_ID</task_result> on its own line "
+        "and the runtime will return it. Pull the results you need before synthesizing.\n\n"
         "Produce a synthesis with:\n"
         "1. Top 3 critical findings (specific, with evidence from the agents above)\n"
         "2. Prioritized action list (P0 / P1 / P2) with owner agent suggestion\n"
@@ -1915,6 +2361,7 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
         proj["synthesis_result"] = f"Synthesis failed: {exc}"
 
     proj["status"] = "complete"
+    _projects_db_upsert(proj)
     _append_project_event(project_id, "project_complete")
 
 
@@ -1947,6 +2394,30 @@ async def projects_plan(request: Request):
         import re as _re
         m = _re.search(r'\{.*\}', raw, _re.DOTALL)
         plan = json.loads(m.group(0)) if m else {"tasks": []}
+        _known_plan = set(_PLAN_AGENTS)
+
+        def _fix_agent_id(aid: str) -> str:
+            norm = aid.replace("_", "-").lower().strip()
+            if norm in _known_plan:
+                return norm
+            if any(k in norm for k in ("quality", "checker")):
+                return "output-quality-checker"
+            if any(k in norm for k in ("test", "coverage", "qa")):
+                return "qa-tester"
+            if any(k in norm for k in ("security", "safety", "threat")):
+                return "security-reviewer"
+            if any(k in norm for k in ("synthesis", "compile", "summarize", "aggregate")):
+                return "researcher"
+            if any(k in norm for k in ("code", "backend", "api", "engineer")):
+                return "backend-engineer"
+            if any(k in norm for k in ("front", "ui", "design", "visual")):
+                return "frontend-designer"
+            if any(k in norm for k in ("monitor", "pipeline", "health")):
+                return "pipeline-monitor"
+            return "researcher"
+
+        for task in plan.get("tasks", []):
+            task["agent_id"] = _fix_agent_id(task.get("agent_id", ""))
         return {"ok": True, "plan": plan}
     except Exception as exc:
         log.exception("projects_plan error")
@@ -1976,12 +2447,14 @@ async def projects_execute(request: Request):
             "id": project_id,
             "goal": goal,
             "status": "starting",
+            "created_at": _utcnow(),
             "current_wave": 0,
             "waves": {},
             "synthesis_task_id": "",
             "synthesis_result": "",
             "events": [],
         }
+    _projects_db_upsert(_PROJECTS[project_id])
 
     t = threading.Thread(
         target=_run_project_waves,
@@ -4037,6 +4510,8 @@ async def agent_dashboard(request: Request):
   <div class="tab" onclick="switchTab('agents')">🤖 Agents</div>
   <div class="tab" onclick="switchTab('project')">🚀 Project</div>
   <div class="tab" onclick="switchTab('evallog')">📊 Eval Log</div>
+  <div class="tab" onclick="switchTab('lessons')">🧠 Lessons <span id="lessons-count" style="color:#c084fc"></span></div>
+  <div class="tab" onclick="switchTab('routines')">⏰ Routines <span id="routines-count" style="color:#34d399"></span></div>
 </div>
 
 <!-- Queue -->
@@ -4226,6 +4701,43 @@ async def agent_dashboard(request: Request):
   </div>
 </div>
 
+<!-- Lessons -->
+<div class="pane" id="pane-lessons">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:.9em">Agent Lessons (Pending Approval)</strong>
+    <button class="btn btn-run btn-sm" onclick="loadPendingLessons()">Refresh</button>
+  </div>
+  <div id="lessons-list"><div class="empty">Loading…</div></div>
+</div>
+
+<!-- Routines -->
+<div class="pane" id="pane-routines">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:.9em">Scheduled Routines</strong>
+    <button class="btn btn-approve btn-sm" onclick="showRoutineForm()">+ New Routine</button>
+  </div>
+  <div id="routine-form" style="display:none;background:#111128;border:1px solid #2a2a5a;border-radius:10px;padding:14px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><label style="font-size:.8em;color:#888;display:block;margin-bottom:4px">Name</label>
+        <input id="rtn-name" type="text" placeholder="e.g. Daily security scan" style="width:100%;background:#0d0d1f;border:1px solid #2a2a5a;border-radius:6px;padding:6px 10px;color:#e0e0ff;font-size:.85em"></div>
+      <div><label style="font-size:.8em;color:#888;display:block;margin-bottom:4px">Agent (leave blank for Manager)</label>
+        <input id="rtn-agent" type="text" placeholder="e.g. security-reviewer" style="width:100%;background:#0d0d1f;border:1px solid #2a2a5a;border-radius:6px;padding:6px 10px;color:#e0e0ff;font-size:.85em"></div>
+    </div>
+    <div style="margin-bottom:10px"><label style="font-size:.8em;color:#888;display:block;margin-bottom:4px">Schedule</label>
+      <input id="rtn-schedule" type="text" placeholder="@daily  or  0 9 * * *  or  interval:3600" style="width:100%;background:#0d0d1f;border:1px solid #2a2a5a;border-radius:6px;padding:6px 10px;color:#e0e0ff;font-size:.85em">
+      <div style="font-size:.75em;color:#555;margin-top:3px">Cron (5-field), @daily/@hourly/@weekly, or interval:&lt;seconds&gt; (min 60)</div>
+    </div>
+    <div style="margin-bottom:12px"><label style="font-size:.8em;color:#888;display:block;margin-bottom:4px">Prompt</label>
+      <textarea id="rtn-prompt" rows="3" placeholder="What should the agent do?" style="width:100%;background:#0d0d1f;border:1px solid #2a2a5a;border-radius:6px;padding:6px 10px;color:#e0e0ff;font-size:.85em;resize:vertical"></textarea>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-approve btn-sm" onclick="saveRoutine()">Save</button>
+      <button class="btn btn-deny btn-sm" onclick="hideRoutineForm()">Cancel</button>
+    </div>
+  </div>
+  <div id="routines-list"><div class="empty">Loading…</div></div>
+</div>
+
 <!-- Help Modal -->
 <div class="help-modal" id="help-modal" onclick="if(event.target===this)this.classList.remove('open')">
   <div class="help-box">
@@ -4238,6 +4750,7 @@ async def agent_dashboard(request: Request):
     <div class="help-sec"><h3>🚀 Project</h3><p>Enter a goal and click <strong>Generate Plan</strong>. The LLM decomposes it into tasks per agent, grouped into parallel waves. Edit any task inline before hitting <strong>Execute Plan</strong>. Each dispatched task streams live output in the Active tab and in the execution panel. Use <strong>Run Without Plan</strong> to dispatch immediately via the Manager stream.</p></div>
     <div class="help-sec"><h3>⌨️ Slash Commands</h3><p>In the Assign Work prompt box, type a command on its own line and press Enter: <code>/plan &lt;goal&gt;</code> — generate a project plan, <code>/project &lt;goal&gt;</code> — open project tab with goal pre-filled, <code>/status</code> — jump to active tasks, <code>/help</code> — show this dialog.</p></div>
     <div class="help-sec"><h3>📊 Eval Log</h3><p>Persistent history of every AI Evaluation Lab result across all project runs and direct agent evals. Filter by agent or verdict. Create custom rubrics to add extra criteria to any eval.</p></div>
+    <div class="help-sec"><h3>⏰ Routines</h3><p>Schedule recurring agent tasks. Supports cron expressions (<code>0 9 * * 1</code>), macros (<code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>), and intervals (<code>interval:3600</code>). The scheduler fires every 30 seconds and dispatches due tasks via <code>submit_task</code>. Toggle enabled/disabled without deleting. Click the trash icon to remove a routine.</p></div>
     <div class="help-sec"><h3>🔍 Pipeline Monitor (top bar)</h3><p>Click to sweep all active tasks for stalls, short outputs, or garbage. Shows alert count or green if healthy. Alerts persist for 8s then reset.</p></div>
     <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('help-modal').classList.remove('open')">Got it</button>
   </div>
@@ -4289,13 +4802,15 @@ async def agent_dashboard(request: Request):
   function switchTab(name) {{
     currentTab = name;
     document.querySelectorAll('.tab').forEach((t, i) => {{
-      const names = ['queue','active','history','assign','agents','project','evallog'];
+      const names = ['queue','active','history','assign','agents','project','evallog','lessons','routines'];
       t.classList.toggle('active', names[i] === name);
     }});
     document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
     document.getElementById('pane-' + name).classList.add('active');
     if (name === 'agents') initWorldIfNeeded();
-    if (name !== 'project') refresh();
+    if (name === 'lessons') loadPendingLessons();
+    if (name === 'routines') loadRoutines();
+    if (name !== 'project' && name !== 'lessons' && name !== 'routines') refresh();
   }}
 
   function fmtTime(ts) {{
@@ -4349,7 +4864,7 @@ async def agent_dashboard(request: Request):
     const el = document.getElementById('queue-list');
     if (!tasks.length) {{ el.innerHTML = '<div class="empty">No tasks awaiting approval</div>'; return; }}
     el.innerHTML = tasks.map(t => `
-      <div class="card">
+      <div class="card" data-task-id="${{t.id}}">
         <div class="card-head">
           <div>
             <span class="tag tag-agent">${{t.assigned_agent_id || 'unassigned'}}</span>
@@ -4574,13 +5089,159 @@ async def agent_dashboard(request: Request):
   }}
 
   async function approveTask(id) {{
+    const card = document.querySelector(`[data-task-id="${{id}}"]`);
     await apiFetch(`/tasks/${{id}}/approve`, {{method:'POST'}});
-    refresh();
+    if (card) {{
+      card.querySelector('.card-foot').innerHTML =
+        `<span id="appr-status-${{id}}" class="tag tag-run">starting…</span>`;
+      const out = document.createElement('pre');
+      out.id = `appr-out-${{id}}`;
+      out.style.cssText = 'margin:0;padding:12px 16px;white-space:pre-wrap;word-break:break-word;font-size:.78em;color:#7ec8e3;max-height:220px;overflow-y:auto;background:#060610;border-top:1px solid #1a1a3a';
+      card.appendChild(out);
+      _watchExecutedTask(id, `appr-out-${{id}}`, `appr-status-${{id}}`);
+    }} else {{
+      refresh();
+    }}
   }}
 
   async function denyTask(id) {{
     await apiFetch(`/tasks/${{id}}/deny`, {{method:'POST'}});
     refresh();
+  }}
+
+  async function loadPendingLessons() {{
+    const el = document.getElementById('lessons-list');
+    const countEl = document.getElementById('lessons-count');
+    if (!el) return;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    try {{
+      // Fetch pending lessons for all verifiable agents
+      const verifiableAgents = ['security-reviewer','qa-tester','backend-engineer','researcher','output-quality-checker'];
+      const results = await Promise.all(
+        verifiableAgents.map(id => apiFetch(`/agents/${{id}}/lessons/pending`).catch(() => ({{ok:true, pending:null}})))
+      );
+      const pending = results
+        .map((r, i) => r.pending ? {{agent_id: verifiableAgents[i], content: r.pending}} : null)
+        .filter(Boolean);
+      countEl.textContent = pending.length ? `(${{pending.length}})` : '';
+      if (!pending.length) {{
+        el.innerHTML = '<div class="empty">No pending lessons</div>';
+        return;
+      }}
+      el.innerHTML = pending.map(p => `
+        <div class="card" data-agent="${{p.agent_id}}">
+          <div class="card-head">
+            <span class="tag tag-agent">${{p.agent_id}}</span>
+            <span class="tag tag-wait" style="margin-left:4px">pending approval</span>
+          </div>
+          <div class="card-body"><pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:.82em;color:#c084fc">${{escHtml(p.content)}}</pre></div>
+          <div class="card-foot">
+            <button class="btn btn-approve btn-sm" onclick="approveLesson('${{p.agent_id}}')">✓ Approve</button>
+            <button class="btn btn-deny btn-sm" onclick="dismissLesson('${{p.agent_id}}')">✗ Dismiss</button>
+          </div>
+        </div>`).join('');
+    }} catch(e) {{
+      el.innerHTML = `<div class="empty">Error loading lessons: ${{e.message}}</div>`;
+    }}
+  }}
+
+  async function approveLesson(agentId) {{
+    await apiFetch(`/agents/${{agentId}}/lessons/approve`, {{method:'POST'}});
+    loadPendingLessons();
+  }}
+
+  async function dismissLesson(agentId) {{
+    await apiFetch(`/agents/${{agentId}}/lessons/dismiss`, {{method:'POST'}});
+    loadPendingLessons();
+  }}
+
+  // ── Routines ──────────────────────────────────────────────────────────────
+  let _editingRoutineId = null;
+  let _routinesCache = [];
+
+  function showRoutineForm(routineId) {{
+    const r = routineId ? _routinesCache.find(x => x.id === routineId) : null;
+    _editingRoutineId = r ? r.id : null;
+    document.getElementById('rtn-name').value = r ? r.name : '';
+    document.getElementById('rtn-agent').value = r ? (r.agent_id||'') : '';
+    document.getElementById('rtn-schedule').value = r ? r.schedule : '';
+    document.getElementById('rtn-prompt').value = r ? r.prompt : '';
+    document.getElementById('routine-form').style.display = 'block';
+  }}
+
+  function hideRoutineForm() {{
+    document.getElementById('routine-form').style.display = 'none';
+    _editingRoutineId = null;
+  }}
+
+  async function saveRoutine() {{
+    const name = document.getElementById('rtn-name').value.trim();
+    const agent_id = document.getElementById('rtn-agent').value.trim();
+    const schedule = document.getElementById('rtn-schedule').value.trim();
+    const prompt = document.getElementById('rtn-prompt').value.trim();
+    if (!name || !schedule || !prompt) {{ alert('Name, schedule, and prompt are required.'); return; }}
+    if (_editingRoutineId) {{
+      await apiFetch(`/routines/${{_editingRoutineId}}`, {{
+        method: 'PATCH',
+        headers: {{'Content-Type':'application/json'}},
+        body: JSON.stringify({{name, agent_id, schedule, prompt}}),
+      }});
+    }} else {{
+      const r = await apiFetch('/routines', {{
+        method: 'POST',
+        headers: {{'Content-Type':'application/json'}},
+        body: JSON.stringify({{name, agent_id, schedule, prompt, enabled: true}}),
+      }});
+      if (r && !r.ok && r.error) {{ alert('Error: ' + r.error); return; }}
+    }}
+    hideRoutineForm();
+    loadRoutines();
+  }}
+
+  async function toggleRoutine(id, enabled) {{
+    await apiFetch(`/routines/${{id}}`, {{
+      method: 'PATCH',
+      headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify({{enabled}}),
+    }});
+    loadRoutines();
+  }}
+
+  async function deleteRoutine(id) {{
+    if (!confirm('Delete this routine?')) return;
+    await apiFetch(`/routines/${{id}}`, {{method:'DELETE'}});
+    loadRoutines();
+  }}
+
+  async function loadRoutines() {{
+    const el = document.getElementById('routines-list');
+    const cntEl = document.getElementById('routines-count');
+    const d = await apiFetch('/routines');
+    if (!d || !d.routines) {{ el.innerHTML='<div class="empty">Failed to load</div>'; return; }}
+    const list = d.routines;
+    _routinesCache = list;
+    cntEl.textContent = list.length ? `(${{list.length}})` : '';
+    if (!list.length) {{ el.innerHTML='<div class="empty">No routines yet — click + New Routine to add one</div>'; return; }}
+    el.innerHTML = list.map(r => {{
+      const enabledLabel = r.enabled ? '<span class="tag tag-run">enabled</span>' : '<span class="tag" style="background:#333;color:#888">paused</span>';
+      const lastFired = r.last_fired_at ? 'Last: ' + r.last_fired_at.slice(0,16).replace('T',' ') : 'never fired';
+      return `<div class="card" style="margin-bottom:10px">
+        <div class="card-head" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          ${{enabledLabel}}
+          <strong style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{escHtml(r.name)}}</strong>
+          <span class="tag tag-agent">${{escHtml(r.agent_id || 'manager')}}</span>
+          <code style="font-size:.78em;color:#7ec8e3;background:#0d0d1f;padding:2px 8px;border-radius:4px">${{escHtml(r.schedule)}}</code>
+        </div>
+        <div style="padding:6px 16px 4px;font-size:.8em;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${{escHtml(r.prompt.slice(0,120))}}${{r.prompt.length>120?'…':''}}</div>
+        <div class="card-foot" style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:.75em;color:#555">${{lastFired}}</span>
+          <span style="flex:1"></span>
+          <button class="btn btn-sm" style="background:#1a2a1a;color:#34d399;border:1px solid #34d399" onclick="showRoutineForm('${{r.id}}')">Edit</button>
+          <button class="btn btn-sm ${{r.enabled?'btn-deny':'btn-approve'}}" onclick="toggleRoutine('${{r.id}}', ${{!r.enabled}})">${{r.enabled?'Pause':'Resume'}}</button>
+          <button class="btn btn-deny btn-sm" onclick="deleteRoutine('${{r.id}}')">Delete</button>
+        </div>
+      </div>`;
+    }}).join('');
   }}
 
   async function cancelTask(id) {{
@@ -5565,5 +6226,8 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
 
         warm_thread = threading.Thread(target=_warm_local_caches, daemon=True, name="OllamaWarm")
         warm_thread.start()
+
+    sched_thread = threading.Thread(target=_routines_scheduler, daemon=True, name="RoutinesScheduler")
+    sched_thread.start()
 
     return t
