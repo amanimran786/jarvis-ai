@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -15,6 +16,8 @@ from model_router import smart_stream
 import task_persistence
 import usage_tracker
 import worktree_manager
+
+log = logging.getLogger(__name__)
 
 
 _LOCK = threading.RLock()
@@ -822,6 +825,627 @@ def _fail_task(task_id: str, error: str) -> None:
 _REPO_ROOT = Path(__file__).parent.resolve()
 _SAFE_READ_EXTENSIONS = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".txt"}
 
+# ── Phase 3: verification loop + self-improvement ─────────────────────────────
+
+_LESSONS_DIR = Path.home() / ".jarvis" / "agent_lessons"
+_VERIFIABLE_AGENTS = {
+    "security-reviewer", "qa-tester", "backend-engineer",
+    "researcher", "output-quality-checker", "automation-engineer",
+}
+_AUTO_VERIFY = os.getenv("JARVIS_AUTO_VERIFY", "1").strip() == "1"
+
+
+def _load_agent_lesson(agent_id: str) -> str:
+    """Read active (approved) lesson for this agent, if any."""
+    if not re.match(r'^[a-z0-9-]+$', agent_id):
+        return ""
+    path = _LESSONS_DIR / f"{agent_id}.md"
+    if not path.exists():
+        return ""
+    try:
+        content = path.read_text(encoding="utf-8")[:4000].strip()
+        if content.startswith("# PENDING_APPROVAL"):
+            return ""  # not yet approved
+        return f"\n\n=== Learned behaviors for {agent_id} ===\n{content}"
+    except Exception:
+        return ""
+
+
+# First-person past-tense execution claims. Deliberately narrow: "you can run X"
+# or "next, run pytest" must NOT match — only claims that execution already happened.
+_EXEC_CLAIM_PATTERNS = re.compile(
+    r"(?:\bthe command\s+`?[^`\n]{1,80}`?\s+(?:returned|showed|output|reported|confirmed|produced|gave))"
+    r"|(?:\bI\s+(?:ran|executed|invoked)\b)"
+    r"|(?:\b(?:running|executing)\s+`[^`\n]{1,80}`\s+(?:returned|produced|gave|shows|showed|confirms|confirmed))"
+    r"|(?:\bcommand output (?:indicates|shows|showed|confirms|confirmed|reveals|revealed))"
+    r"|(?:\bafter running\s+`?[^`\n]{1,80}`?,)"
+    r"|(?:\bthe output of\s+`[^`\n]{1,80}`\s+(?:is|was|shows|showed))",
+    re.IGNORECASE,
+)
+
+
+def _detect_fabricated_execution(response: str, tool_calls: int) -> str:
+    """
+    Deterministic fabrication check: the response claims a command was executed,
+    but the runtime made zero tool calls for this task. Returns the matched
+    claim text, or "" if clean.
+    """
+    if tool_calls > 0:
+        return ""
+    m = _EXEC_CLAIM_PATTERNS.search(response)
+    return m.group(0).strip() if m else ""
+
+
+def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
+                 tool_calls: int = -1, tool_transcript: str = "") -> dict:
+    """
+    Score a completed task output using a lightweight LLM call.
+    Returns {"pass": bool, "score": float, "reason": str}.
+    Fails open (pass=True) on any error so verification never blocks valid tasks.
+    """
+    import json as _json
+    try:
+        from brains.brain import ask_stream
+        from config import GPT_MINI
+        tool_fact = ""
+        if tool_calls == 0:
+            tool_fact = (
+                "\nRUNTIME FACT (ground truth, not from the agent): the agent executed "
+                "ZERO tool calls during this task. If the response cites command output, "
+                "file listings, or test results as if it ran them, those claims are "
+                "FABRICATED — set the overall score to 0.0 regardless of the other "
+                "criteria and say so in the reason.\n"
+            )
+        elif tool_calls > 0:
+            tool_fact = (
+                f"\nRUNTIME FACT (ground truth, not from the agent): the agent executed "
+                f"{tool_calls} real tool call(s); their outputs are shown below, captured "
+                "by the runtime. The response may summarize them without quoting raw "
+                "output — do NOT penalize that. Instead check that its claims are "
+                "CONSISTENT with these outputs.\n"
+            )
+        transcript_block = ""
+        if tool_transcript and tool_calls > 0:
+            transcript_block = (
+                "\nRUNTIME-CAPTURED TOOL OUTPUTS (ground truth):\n"
+                f"{tool_transcript[-3000:]}\n"
+            )
+        verify_prompt = (
+            f"You are an output quality evaluator. Score this agent response.\n\n"
+            f"Agent: {agent_id}\n"
+            f"Task: {prompt[:500]}\n"
+            f"{tool_fact}{transcript_block}\n"
+            f"Response (first 1500 chars):\n{result[:1500]}\n\n"
+            "Score on three criteria (0-1 each):\n"
+            "1. Does it directly address the task?\n"
+            "2. Are claims grounded in evidence vs. speculation?\n"
+            "3. Is it complete FOR WHAT THE TASK ASKED? A narrow task deserves a "
+            "short answer — a correct, direct answer to a simple question scores 1. "
+            "Do NOT demand extra insights, recommendations, or detail the task did "
+            "not request.\n\n"
+            "A response fails ONLY for: wrong or fabricated content, not addressing "
+            "the task, or claims unsupported by the evidence. Stylistic preferences, "
+            "phrasing choices, or extra caution are NOT failures — at most a minor "
+            "score reduction.\n\n"
+            "Return ONLY valid JSON (no prose, no markdown):\n"
+            '{"score": 0.0, "reason": "one sentence"}\n'
+            "Score = average of the three criteria."
+        )
+        raw = "".join(ask_stream(verify_prompt, model=GPT_MINI, track_context=False, bypass_local=True))
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return {"pass": True, "score": 1.0, "reason": "parse error — failing open"}
+        verdict = _json.loads(m.group(0))
+        score = float(verdict.get("score", 1.0))
+        # Pass is computed from the score, never taken from the model — mini
+        # models set pass=false over stylistic nitpicks while scoring high.
+        return {
+            "pass": score >= 0.65,
+            "score": score,
+            "reason": str(verdict.get("reason", "")),
+        }
+    except Exception as exc:
+        log.warning("auto_verify error for %s: %s", task_id, exc)
+        return {"pass": True, "score": 1.0, "reason": f"verify error: {exc}"}
+
+
+def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) -> None:
+    """
+    Propose a lesson for this agent: LLM generates a behavior rule,
+    written as a pending file for human approval.
+    """
+    if not re.match(r'^[a-z0-9-]+$', agent_id):
+        log.warning("propose_skill_update: rejected invalid agent_id %r", agent_id)
+        return
+    try:
+        from model_router import smart_stream
+        _LESSONS_DIR.mkdir(parents=True, exist_ok=True)
+        lesson_prompt = (
+            f"An agent named '{agent_id}' failed to produce a good response.\n\n"
+            f"Task: {prompt[:400]}\n\n"
+            f"Response: {result[:800]}\n\n"
+            f"Failure reason: {reason}\n\n"
+            "Write ONE specific behavior rule (2-4 sentences) this agent should follow "
+            "next time it sees a similar task. Be concrete and actionable. "
+            "No markdown headers, no preamble — just the rule text."
+        )
+        stream, _ = smart_stream(lesson_prompt, tool="chat")
+        rule = "".join(chunk for chunk in stream).strip()
+        if not rule:
+            return
+        ts = datetime.now(timezone.utc).isoformat()
+        content = (
+            f"# PENDING_APPROVAL\n"
+            f"# Agent: {agent_id}\n"
+            f"# Proposed: {ts}\n"
+            f"# Failure reason: {reason}\n\n"
+            f"{rule}\n"
+        )
+        path = _LESSONS_DIR / f"{agent_id}.pending.md"
+        path.write_text(content, encoding="utf-8")
+        log.info("skill proposal written for %s: %s", agent_id, path)
+    except Exception as exc:
+        log.warning("propose_skill_update error for %s: %s", agent_id, exc)
+
+_BASH_ALLOWED_CMDS = {
+    # test/lint runners — scoped to project, don't allow arbitrary -c eval
+    "pytest", "ruff", "mypy", "flake8",
+    # read-only filesystem inspection
+    "grep", "find", "ls", "cat", "head", "tail", "wc",
+    # git — argument-filtered below to read-only subcommands
+    "git",
+    # safe output
+    "echo",
+}
+# git subcommands agents may use; all others are denied
+_GIT_ALLOWED_SUBCOMMANDS = {"log", "diff", "status", "show", "ls-files", "shortlog", "blame"}
+_BASH_MAX_OUTPUT = 4096
+_BASH_TIMEOUT = 30
+
+
+_BASH_MAX_PIPE_STAGES = 4
+
+# macOS Seatbelt sandbox — kernel-enforced confinement for agent-executed
+# commands, inherited by child processes (so pytest's subprocesses stay
+# confined too). Deprecated CLI but still the only stable userland entry
+# point to Seatbelt; Apple's own tooling relies on the same facility.
+_SANDBOX_EXEC = "/usr/bin/sandbox-exec"
+
+
+def _sandbox_available() -> bool:
+    import sys
+    if os.getenv("JARVIS_DISABLE_SANDBOX") == "1":
+        return False
+    return sys.platform == "darwin" and os.path.exists(_SANDBOX_EXEC)
+
+
+def _sandbox_profile(write_roots: "list[Path]") -> str:
+    """Seatbelt profile: reads allowed, network denied, writes denied except
+    `write_roots` plus tmp dirs and /dev (TMPDIR resolves under
+    /private/var/folders on macOS)."""
+    allows = [
+        '(subpath "/private/tmp")',
+        '(subpath "/private/var/folders")',
+        '(subpath "/dev")',
+    ]
+    for r in write_roots:
+        p = str(Path(r).resolve()).replace("\\", "\\\\").replace('"', '\\"')
+        allows.append(f'(subpath "{p}")')
+    return (
+        "(version 1)\n"
+        "(allow default)\n"
+        "(deny network*)\n"
+        "(deny file-write*)\n"
+        f"(allow file-write* {' '.join(allows)})\n"
+    )
+
+
+def _sandbox_wrap(argv: "list[str]", write_roots: "list[Path]") -> "list[str]":
+    if not _sandbox_available():
+        return argv
+    return [_SANDBOX_EXEC, "-p", _sandbox_profile(write_roots)] + argv
+
+
+def _validate_bash_segment(parts: list[str], root: "Path | None" = None) -> "list[str] | str":
+    """Validate one pipeline segment against `root` (defaults to repo root).
+    Returns the (possibly glob-expanded) argv list, or an error string
+    starting with '[bash'."""
+    root = root or _REPO_ROOT
+    if not parts:
+        return "[bash error: empty command segment]"
+    exe = Path(parts[0]).name  # strip any path prefix
+    if exe not in _BASH_ALLOWED_CMDS:
+        return f"[bash denied: '{exe}' is not in the allowed command list]"
+    # Rebuild with just the basename to prevent executable path traversal
+    parts = [exe] + parts[1:]
+    # git: restrict to read-only subcommands
+    if exe == "git":
+        sub = parts[1] if len(parts) > 1 else ""
+        if sub not in _GIT_ALLOWED_SUBCOMMANDS:
+            return f"[bash denied: 'git {sub}' is not in the allowed git subcommand list]"
+    # Block path traversal in file arguments for filesystem commands.
+    # shell=False does no glob expansion, so expand globs here (relative to repo
+    # root) — expanded paths then go through the same traversal check.
+    _PATH_CMDS = {"ls", "cat", "head", "tail", "grep", "find", "wc"}
+    if exe in _PATH_CMDS and root is not None:
+        import glob as _glob
+        expanded: list[str] = [parts[0]]
+        for arg in parts[1:]:
+            if arg.startswith("-"):
+                expanded.append(arg)
+                continue  # skip flags
+            if any(c in arg for c in ("*", "?", "[")):
+                # find uses glob args as -name patterns — pass through unexpanded
+                if exe == "find":
+                    expanded.append(arg)
+                    continue
+                matches = sorted(_glob.glob(str(root / arg)))
+                matches = [m for m in matches
+                           if str(Path(m).resolve()).startswith(str(root))]
+                if not matches:
+                    return f"[bash error: glob '{arg}' matched no files in repo root]"
+                # Relative paths — shorter output, and never silently cap below
+                # the real match count (agents draw wrong conclusions otherwise)
+                expanded.extend(
+                    str(Path(m).relative_to(root)) for m in matches[:500]
+                )
+                continue
+            try:
+                resolved = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
+                if not str(resolved).startswith(str(root)):
+                    return f"[bash denied: path '{arg}' resolves outside repo root]"
+            except Exception:
+                pass  # malformed paths will fail naturally at runtime
+            expanded.append(arg)
+        parts = expanded
+    return parts
+
+
+def _tool_bash(command_str: str, root: "Path | None" = None) -> str:
+    """Execute a bash command string with safety guardrails. Returns stdout+stderr truncated.
+
+    Supports pipelines (cmd1 | cmd2) between allowlisted commands — each stage
+    is validated independently and chained with shell=False. Shell redirection
+    is rejected with an explanatory error so agents self-correct.
+    `root` scopes path validation and cwd (defaults to repo root; tasks with an
+    isolated workspace pass their worktree)."""
+    import shlex
+    import subprocess
+    root = root or _REPO_ROOT
+    try:
+        tokens = shlex.split(command_str.strip())
+    except ValueError as e:
+        return f"[bash error: could not parse command: {e}]"
+    if not tokens:
+        return "[bash error: empty command]"
+    for tok in tokens:
+        if tok != "|" and any(c in tok for c in (">", "<", ";", "&", "`", "$(")):
+            return (f"[bash denied: shell operator in '{tok}' is not supported. "
+                    "Pipes between allowed commands work (e.g. ls *.py | wc -l); "
+                    "redirection, chaining and substitution do not]")
+    # Split into pipeline segments on '|' tokens
+    segments: list[list[str]] = [[]]
+    for tok in tokens:
+        if tok == "|":
+            segments.append([])
+        else:
+            segments[-1].append(tok)
+    if len(segments) > _BASH_MAX_PIPE_STAGES:
+        return f"[bash denied: pipelines are limited to {_BASH_MAX_PIPE_STAGES} stages]"
+    # Isolated worktrees are writable inside the sandbox; the main repo never is —
+    # repo-root tasks get read-only enforcement at the kernel level.
+    write_roots = [root] if root != _REPO_ROOT else []
+    validated: list[list[str]] = []
+    for seg in segments:
+        v = _validate_bash_segment(seg, root)
+        if isinstance(v, str):
+            return v
+        # Bare `pytest` does not put cwd on sys.path; `python -m pytest` does —
+        # without this, tests in a worktree can't import top-level modules.
+        if v and v[0] in ("pytest", "mypy", "flake8"):
+            import sys as _sys
+            v = [_sys.executable, "-m", v[0]] + v[1:]
+        validated.append(_sandbox_wrap(v, write_roots))
+    try:
+        if len(validated) == 1:
+            result = subprocess.run(
+                validated[0],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                timeout=_BASH_TIMEOUT,
+                shell=False,
+            )
+            out = (result.stdout + result.stderr).strip()
+        else:
+            procs: list[subprocess.Popen] = []
+            prev_stdout = None
+            for seg in validated:
+                p = subprocess.Popen(
+                    seg,
+                    cwd=str(root),
+                    stdin=prev_stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    shell=False,
+                )
+                if prev_stdout is not None:
+                    prev_stdout.close()  # let upstream see SIGPIPE
+                prev_stdout = p.stdout
+                procs.append(p)
+            try:
+                stdout, last_err = procs[-1].communicate(timeout=_BASH_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                for p in procs:
+                    p.kill()
+                return f"[bash timeout: command exceeded {_BASH_TIMEOUT}s]"
+            errs = []
+            for p in procs[:-1]:
+                p.wait(timeout=5)
+                if p.stderr is not None:
+                    e = p.stderr.read()
+                    p.stderr.close()
+                    if e.strip():
+                        errs.append(e.strip())
+            if last_err and last_err.strip():
+                errs.append(last_err.strip())
+            out = (stdout + ("\n" + "\n".join(errs) if errs else "")).strip()
+        if len(out) > _BASH_MAX_OUTPUT:
+            out = out[:_BASH_MAX_OUTPUT] + f"\n[truncated — {len(out)} chars total]"
+        return out or "(no output)"
+    except subprocess.TimeoutExpired:
+        return f"[bash timeout: command exceeded {_BASH_TIMEOUT}s]"
+    except Exception as e:
+        return f"[bash error: {e}]"
+
+
+def _execute_bash_tool_calls(result_text: str) -> str:
+    """Find <bash>...</bash> tags in result, execute each, append outputs."""
+    pattern = re.compile(r'<bash>(.*?)</bash>', re.DOTALL)
+    calls = pattern.findall(result_text)
+    if not calls:
+        return result_text
+    outputs = []
+    for cmd in calls[:5]:  # max 5 tool calls per response
+        cmd = cmd.strip()
+        out = _tool_bash(cmd)
+        outputs.append(f"$ {cmd}\n{out}")
+    suffix = "\n\n--- Tool Outputs ---\n" + "\n\n".join(outputs)
+    return result_text + suffix
+
+
+def _extract_bash_calls(text: str) -> list[str]:
+    """Return list of bash command strings from <bash>...</bash> tags in text."""
+    return [m.strip() for m in re.findall(r'<bash>(.*?)</bash>', text, re.DOTALL)]
+
+
+_WRITE_MAX_BYTES = 262144
+_WRITE_TAG_RE = re.compile(r'<write_file path="([^"]+)">\n?(.*?)</write_file>', re.DOTALL)
+
+
+def _extract_write_calls(text: str) -> list[tuple[str, str]]:
+    """Return (path, content) pairs from <write_file path="...">...</write_file> tags."""
+    return [(m.group(1), m.group(2)) for m in _WRITE_TAG_RE.finditer(text)]
+
+
+def _tool_write_file(rel_path: str, content: str, root: Path) -> str:
+    """Write a file inside an isolated workspace. Only ever called with a
+    per-task git worktree as root — never the live repo."""
+    p = rel_path.strip()
+    if not p or Path(p).is_absolute():
+        return f"[write denied: path must be relative to the workspace root, got '{p}']"
+    parts = Path(p).parts
+    if ".." in parts or ".git" in parts:
+        return f"[write denied: path '{p}' may not contain '..' or '.git']"
+    try:
+        target = (root / p).resolve()
+    except Exception as e:
+        return f"[write error: bad path '{p}': {e}]"
+    if not str(target).startswith(str(root)):
+        return f"[write denied: path '{p}' resolves outside the workspace]"
+    if len(content.encode("utf-8", errors="replace")) > _WRITE_MAX_BYTES:
+        return f"[write denied: content exceeds {_WRITE_MAX_BYTES} bytes]"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return f"[wrote {len(content)} chars to {p}]"
+    except Exception as e:
+        return f"[write error: {e}]"
+
+
+def _workspace_diff(root: Path) -> str:
+    """Stage everything in the worktree and return the cached diff (truncated).
+    The branch is never merged by the runtime — this diff is the review surface."""
+    import subprocess
+    try:
+        subprocess.run(["git", "add", "-A"], cwd=str(root), capture_output=True,
+                       text=True, timeout=30, shell=False)
+        r = subprocess.run(["git", "diff", "--cached"], cwd=str(root),
+                           capture_output=True, text=True, timeout=30, shell=False)
+        diff = r.stdout.strip()
+        if len(diff) > 6000:
+            diff = diff[:6000] + f"\n[diff truncated — {len(diff)} chars total]"
+        return diff
+    except Exception as e:
+        log.warning("workspace diff failed for %s: %s", root, e)
+        return ""
+
+
+_TASK_RESULT_MAX = 8000
+
+
+def _tool_task_result(task_id: str) -> str:
+    """Return the stored result of a completed task. On-demand context retrieval."""
+    tid = task_id.strip()
+    if not re.match(r'^task_[a-f0-9]{6,32}$', tid):
+        return "[task_result denied: invalid task id format]"
+    with _LOCK:
+        t = _TASKS.get(tid)
+        if t is None:
+            return f"[task_result error: task {tid} not found]"
+        status = t.get("status", "")
+        result = (t.get("result") or "").strip()
+    if status not in _TERMINAL_TASK_STATUSES:
+        return f"[task_result: task {tid} is still '{status}' — no result yet]"
+    if not result:
+        return f"[task_result: task {tid} finished with empty result]"
+    if len(result) > _TASK_RESULT_MAX:
+        result = result[:_TASK_RESULT_MAX] + f"\n[truncated — {len(result)} chars total]"
+    return result
+
+
+def _extract_task_result_calls(text: str) -> list[str]:
+    """Return list of task ids from <task_result>...</task_result> tags in text."""
+    return [m.strip() for m in re.findall(r'<task_result>(.*?)</task_result>', text, re.DOTALL)]
+
+
+def _run_tool_loop(
+    task_id: str,
+    original_prompt: str,
+    agent_ctx: str,
+    initial_response: str,
+    initial_model: str,
+    start_index: int,
+    work_root: "Path | None" = None,
+    allow_write: bool = False,
+) -> tuple[str, str, int, int, str]:
+    """
+    Multi-turn tool-call loop.
+
+    If the LLM response contains <bash>...</bash> tags, execute them, then re-call
+    the LLM with full history so it can reason about the results. Repeats up to
+    4 more times (5 total iterations including the initial call in _run_task).
+
+    Returns (final_response_text, model_used, last_chunk_index, tool_calls_made,
+    tool_transcript). tool_transcript is the runtime-captured tool output history —
+    ground truth for the verifier, since the final response may summarize rather
+    than quote it. The returned text is ONLY the last continuation response —
+    callers accumulate the full transcript themselves via SSE events already emitted.
+    """
+    response = initial_response
+    model = initial_model
+    index = start_index
+    tool_calls_made = 0
+    conversation: list[tuple[str, str]] = []  # (assistant_text, tool_results_text)
+
+    def _transcript() -> str:
+        return "\n\n".join(tools for _, tools in conversation)
+
+    for _iter in range(4):  # up to 4 continuation rounds after the initial call
+        bash_calls = _extract_bash_calls(response)
+        result_calls = _extract_task_result_calls(response)
+        write_calls = _extract_write_calls(response) if (allow_write and work_root) else []
+        if not bash_calls and not result_calls and not write_calls:
+            break
+
+        # Execute tools
+        tool_parts: list[str] = []
+        for path, content in write_calls[:5]:
+            out = _tool_write_file(path, content, work_root)
+            tool_calls_made += 1
+            tool_parts.append(f"[write_file {path}]\n{out}")
+        for cmd in bash_calls[:5]:
+            out = _tool_bash(cmd, root=work_root)
+            tool_calls_made += 1
+            tool_parts.append(f"$ {cmd}\n{out}")
+        for tid in result_calls[:5]:
+            out = _tool_task_result(tid)
+            tool_calls_made += 1
+            tool_parts.append(f"[task_result {tid}]\n{out}")
+        tool_output = "\n\n".join(tool_parts)
+        conversation.append((response, tool_output))
+
+        # Emit tool results as SSE chunks so the client sees them live
+        suffix = "\n\n--- Tool Outputs ---\n" + tool_output + "\n"
+        index += 1
+        _append_event(task_id, "chunk", chunk=suffix, index=index, model=model)
+
+        # Check for cancel before making another LLM call
+        with _LOCK:
+            t = _TASKS.get(task_id, {})
+            if t.get("cancel_requested"):
+                return response, model, index, tool_calls_made, _transcript()
+
+        # Build continuation prompt: original task + full prior history
+        history_blocks: list[str] = []
+        for i, (prev_resp, prev_tools) in enumerate(conversation):
+            history_blocks.append(
+                f"[Step {i + 1} — your response]:\n{prev_resp}\n\n"
+                f"[Step {i + 1} — tool results]:\n{prev_tools}"
+            )
+        continuation_prompt = (
+            f"{original_prompt}\n\n"
+            "---\n"
+            "You used tools in a previous step. Results:\n\n"
+            + "\n\n---\n\n".join(history_blocks)
+            + "\n\n---\n\n"
+            "Continue your analysis with these results. "
+            "Write your final complete answer. "
+            "Only use "
+            + ("<bash>, <write_file> or <task_result>" if allow_write else "<bash> or <task_result>")
+            + " tags again if you need one more step."
+        )
+
+        # Stream continuation response
+        stream, model = smart_stream(continuation_prompt, tool="chat", extra_system=agent_ctx)
+        cont_chunks: list[str] = []
+        for chunk in stream:
+            with _LOCK:
+                t = _TASKS.get(task_id, {})
+                if t.get("cancel_requested"):
+                    return "".join(cont_chunks), model, index, tool_calls_made, _transcript()
+                if t.get("status") != "streaming":
+                    _set_task_status(task_id, "streaming")
+            cont_chunks.append(chunk)
+            index += 1
+            _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+
+        response = "".join(cont_chunks)
+
+    # Budget exhausted but the agent still wants tools: force a final answer
+    # so the stored result is never a dangling, unexecuted tool tag.
+    if conversation and (_extract_bash_calls(response) or _extract_task_result_calls(response)
+                         or (allow_write and _extract_write_calls(response))):
+        history_blocks = [
+            f"[Step {i + 1} — your response]:\n{prev_resp}\n\n"
+            f"[Step {i + 1} — tool results]:\n{prev_tools}"
+            for i, (prev_resp, prev_tools) in enumerate(conversation)
+        ]
+        wrapup_prompt = (
+            f"{original_prompt}\n\n"
+            "---\n"
+            "Tool history so far:\n\n"
+            + "\n\n---\n\n".join(history_blocks)
+            + "\n\n---\n\n"
+            "Your tool budget is EXHAUSTED — no more <bash> or <task_result> tags "
+            "will be executed. Using ONLY the tool results already shown above, "
+            "write your final complete answer now. If the results are insufficient, "
+            "say exactly what is known and what could not be determined."
+        )
+        with _LOCK:
+            t = _TASKS.get(task_id, {})
+            if t.get("cancel_requested"):
+                return response, model, index, tool_calls_made, _transcript()
+        stream, model = smart_stream(wrapup_prompt, tool="chat", extra_system=agent_ctx)
+        final_chunks: list[str] = []
+        for chunk in stream:
+            final_chunks.append(chunk)
+            index += 1
+            _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+        final = "".join(final_chunks)
+        if final.strip():
+            # Strip any tags the model emitted anyway — they will not run
+            final = re.sub(r'<bash>.*?</bash>', '[tool budget exhausted — not executed]',
+                           final, flags=re.DOTALL)
+            final = re.sub(r'<task_result>.*?</task_result>',
+                           '[tool budget exhausted — not executed]', final, flags=re.DOTALL)
+            final = _WRITE_TAG_RE.sub('[tool budget exhausted — not executed]', final)
+            response = final
+
+    return response, model, index, tool_calls_made, _transcript()
+
+
 # Agents that get live task pipeline state injected before they run
 _MONITOR_AGENTS = {
     "pipeline-monitor",
@@ -958,15 +1582,55 @@ def _run_task(task_id: str) -> None:
                     prompt = task.get("effective_prompt") or task["prompt"]
                     original_prompt = task["prompt"]
                     source = task["source"]
+                    original_kind = task.get("kind", "chat")
 
                 start_seq = usage_tracker.current_seq()
+                _bash_tool_hint = (
+                    "Bash tool: you may execute read-only shell commands by wrapping them in "
+                    "<bash>command</bash> tags in your response. "
+                    "The runtime will execute the command and return the output so you can continue. "
+                    "Allowed commands: grep, find, ls, cat, head, tail, wc, git log/diff/status/show, pytest, ruff, echo. "
+                    "IMPORTANT constraints: (1) Pipes between allowed commands work "
+                    "(e.g. ls *.py | wc -l, max 4 stages); redirection (>, 2>), command "
+                    "chaining (;, &&) and substitution ($(), backticks) are rejected. "
+                    "(2) Paths must be within the workspace root. Globs like *.py are expanded relative to it. "
+                    "MANDATORY: if the task asks you to run, check, count, or inspect anything in the repo, "
+                    "you MUST emit a <bash> tag and wait for the real output. NEVER fabricate or imagine "
+                    "command output — fabricated output is a critical failure."
+                )
+                # Isolated workspace (git worktree on its own branch): unlocks
+                # the write tool. Bash/pytest run inside it; diff is surfaced
+                # for review and the branch is NEVER merged by the runtime.
+                with _LOCK:
+                    _ws = dict(_TASKS[task_id].get("workspace") or {})
+                work_root: Path | None = None
+                if _ws.get("ok") and _ws.get("enabled") and _ws.get("worktree_path"):
+                    _wr = Path(_ws["worktree_path"]).resolve()
+                    if _wr.is_dir():
+                        work_root = _wr
+                _write_tool_hint = ""
+                if work_root is not None:
+                    _write_tool_hint = (
+                        " Write tool: you are in an ISOLATED git worktree (branch "
+                        f"{_ws.get('branch', '?')}) — you may create or modify files with "
+                        '<write_file path="relative/path.py">full file content</write_file> tags. '
+                        "Always write the COMPLETE file content, not a fragment. "
+                        "After writing, verify with <bash>pytest ...</bash> or ruff in the same "
+                        "or next step. Your changes land on the isolated branch only; a human "
+                        "reviews the diff before anything is merged."
+                    )
                 agent_ctx = (
                     f"You are the '{agent_id}' agent in Jarvis, a local-first macOS AI runtime. "
-                    "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked."
+                    "Produce a direct, complete response to the task. Do not produce a plan unless explicitly asked. "
+                    + _bash_tool_hint
+                    + _write_tool_hint
                 )
                 tool_ctx = _build_agent_tool_context(agent_id, original_prompt)
                 if tool_ctx:
                     agent_ctx = agent_ctx + tool_ctx
+                lesson = _load_agent_lesson(agent_id)
+                if lesson:
+                    agent_ctx = agent_ctx + lesson
                 stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
                 chunks: list[str] = []
                 for index, chunk in enumerate(stream):
@@ -980,7 +1644,51 @@ def _run_task(task_id: str) -> None:
                     chunks.append(chunk)
                     _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
 
-                response = "".join(chunks)
+                initial_response = "".join(chunks)
+                # Phase 2: multi-turn tool-call loop. If the initial response
+                # contains <bash> calls, execute them and feed results back
+                # to the LLM for a genuine continuation (up to 4 more rounds).
+                response, model, index, tool_calls_made, tool_transcript = _run_tool_loop(
+                    task_id,
+                    original_prompt,
+                    agent_ctx,
+                    initial_response,
+                    model,
+                    index,
+                    work_root=work_root,
+                    allow_write=work_root is not None,
+                )
+                # Deterministic fabrication check: response claims execution
+                # but zero tool calls actually ran. Runs for ALL agents — no
+                # LLM needed, the runtime knows the ground truth.
+                fabricated_claim = _detect_fabricated_execution(response, tool_calls_made)
+                if fabricated_claim:
+                    warning = (
+                        "\n\n[RUNTIME WARNING: this response claims command execution "
+                        f'("{fabricated_claim}") but the agent made ZERO tool calls. '
+                        "The claimed output is fabricated and must not be trusted.]"
+                    )
+                    response += warning
+                    index += 1
+                    _append_event(task_id, "chunk", chunk=warning, index=index, model=model)
+                    log.warning(
+                        "task %s (%s): fabricated execution claim detected: %r",
+                        task_id, agent_id, fabricated_claim,
+                    )
+                # Surface workspace changes as a reviewable diff. The branch is
+                # never merged by the runtime — review and merge are human steps.
+                if work_root is not None:
+                    ws_diff = _workspace_diff(work_root)
+                    if ws_diff:
+                        diff_block = (
+                            f"\n\n--- Workspace Diff (branch {_ws.get('branch', '?')}, "
+                            "NOT merged — review required) ---\n" + ws_diff
+                        )
+                        response += diff_block
+                        index += 1
+                        _append_event(task_id, "chunk", chunk=diff_block, index=index, model=model)
+                        _append_event(task_id, "workspace_diff",
+                                      branch=_ws.get("branch", ""), chars=len(ws_diff))
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 context_stats = ctx.record_request_stats(model, source=f"task:{source}")
                 interaction = evals.log_interaction(original_prompt, response, model, source=f"task:{source}", context=context_stats)
@@ -995,9 +1703,47 @@ def _run_task(task_id: str) -> None:
                     interaction_id=interaction["id"],
                     source=source,
                 )
+            # Verification runs OUTSIDE the lock — LLM calls cannot hold _LOCK
+            if _AUTO_VERIFY and agent_id in _VERIFIABLE_AGENTS:
+                with _LOCK:
+                    task_meta = _TASKS.get(task_id, {}).get("meta") or {}
+                retry_count = int(task_meta.get("retry_count", 0))
+                verdict = _auto_verify(
+                    task_id, agent_id, original_prompt, response,
+                    tool_calls=tool_calls_made,
+                    tool_transcript=tool_transcript,
+                )
+                if not verdict["pass"] and retry_count < 2:
+                    log.info(
+                        "task %s failed verification (score=%.2f): %s — retrying (%d/2)",
+                        task_id, verdict["score"], verdict["reason"], retry_count + 1,
+                    )
+                    retry_prompt = (
+                        f"{original_prompt}\n\n"
+                        f"---\nPrevious attempt failed quality check: {verdict['reason']}\n"
+                        "Produce a better response that addresses this specific weakness."
+                    )
+                    submit_task(
+                        retry_prompt,
+                        kind=original_kind,
+                        source="retry",
+                        assigned_agent_id=agent_id,
+                        meta={"retry_count": retry_count + 1, "confidence_score": 0.9,
+                              "original_task_id": task_id},
+                    )
+                elif not verdict["pass"] and retry_count >= 2:
+                    log.warning(
+                        "task %s failed verification after max retries: %s",
+                        task_id, verdict["reason"],
+                    )
+                    _propose_skill_update(agent_id, original_prompt, response, verdict["reason"])
     except Exception as exc:
         with _LOCK:
             _fail_task(task_id, str(exc))
+        _ap = locals().get("original_prompt", "")
+        _ai = locals().get("agent_id", "")
+        if _ai in _VERIFIABLE_AGENTS and _ap:
+            _propose_skill_update(_ai, _ap, str(exc), f"exception: {exc}")
     finally:
         with _LOCK:
             task = _TASKS.get(task_id, {})

@@ -17,7 +17,7 @@ def _fake_workspace() -> dict:
 
 def test_dev_team_agent_runs_clear_work_with_confidence_debrief_contract():
     task_runtime.reset_for_tests()
-    with patch("task_runtime.route_stream", return_value=(iter(["Fixed the targeted test."]), "UnitTestModel")), \
+    with patch("task_runtime.smart_stream", return_value=(iter(["Fixed the targeted test."]), "UnitTestModel")), \
          patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=_fake_workspace()):
         task = task_runtime.submit_task("fix the auth middleware unit test", kind="code")
         completed = task_runtime.wait_for_task(task["id"], timeout=2.0)
@@ -34,7 +34,7 @@ def test_dev_team_agent_runs_clear_work_with_confidence_debrief_contract():
 
 def test_low_confidence_agent_work_waits_for_human_review():
     task_runtime.reset_for_tests()
-    with patch("task_runtime.route_stream") as route_mock, \
+    with patch("task_runtime.smart_stream") as smart_mock, \
          patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=_fake_workspace()):
         task = task_runtime.submit_task("make everything better", kind="code")
 
@@ -43,4 +43,4 @@ def test_low_confidence_agent_work_waits_for_human_review():
     assert task["approval_reason"] == "confidence below safe autonomy threshold"
     assert task["autonomy"] == "human_review"
     assert task["confidence"]["score"] < task["confidence"]["threshold"]
-    route_mock.assert_not_called()
+    smart_mock.assert_not_called()
