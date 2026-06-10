@@ -91,3 +91,24 @@ graphify-out/cypher.txt
 # Obsidian local UI state
 vault/.obsidian/workspace.json
 vault/.obsidian/graph.json
+
+# Generated security scan artifacts (nmap, gitleaks, subfinder outputs)
+workspace/
+
+# Personal data — never publish (portfolio repo is public)
+contact_aliases.json
+vault/
+memory/conversations/
+memory/episodic/**/*.json
+memory/semantic/**/*.json
+kb/core/identity.md
+kb/career/Jarvis_Universal_Interview_Context.md
+kb/career/application_states.md
+kb/career/career_ops_interview_playbook.md
+kb/career/packs/youtube_pem_2026.md
+kb/career/universal_base.md
+
+# Training runtime state
+training/benchmarks.jsonl
+training/overnight_log.jsonl
+training/overnight_state.json
