@@ -202,6 +202,16 @@ def _cloud_security_review(payload_str: str) -> str:
 
             if raw:
                 log.info("Security gate used cloud fallback (%s/%s)", provider, model)
+                _audit_security_event(
+                    "cloud_call",
+                    actor="security_reviewer",
+                    target="security review fallback",
+                    decision="sent",
+                    severity="warning",
+                    reason="local security reviewer returned empty output",
+                    rollback_ref="manual_review",
+                    extra={"provider": provider, "model": model},
+                )
                 return raw
 
         except Exception as exc:
@@ -209,6 +219,15 @@ def _cloud_security_review(payload_str: str) -> str:
 
     log.warning("All cloud security providers failed — returning empty")
     return ""
+
+
+def _audit_security_event(action: str, **kwargs) -> None:
+    """Best-effort security audit emit; never changes the reviewer verdict."""
+    try:
+        from infra.security_audit import audit_event
+        audit_event(action, **kwargs)
+    except Exception:
+        log.exception("security audit emit failed")
 
 
 # ─── Pre-screen → LLM pipeline ───────────────────────────────────────────────
@@ -244,7 +263,7 @@ def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
             )
             for f in screen.findings
         ]
-        return SecurityVerdict(
+        verdict = SecurityVerdict(
             verdict="FAIL",
             severity="critical",
             findings=findings,
@@ -255,6 +274,17 @@ def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
             task_id=task_id,
             stage=stage,
         )
+        _audit_security_event(
+            "threat_screen_block",
+            actor="security_reviewer",
+            target=f"task {task_id or 'unknown'}",
+            decision=verdict.verdict,
+            severity="critical",
+            reason=verdict.summary,
+            task_id=task_id,
+            rollback_ref=task_id or "manual_review",
+        )
+        return verdict
 
     # Step 2: LLM deep analysis — local first, cloud free-tier fallback
     from agent_dispatch import dispatch
@@ -271,6 +301,17 @@ def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
     log.info(
         "Security verdict task_id=%s verdict=%s severity=%s findings=%d",
         task_id, verdict.verdict, verdict.severity, len(verdict.findings),
+    )
+    _audit_security_event(
+        "security_verdict",
+        actor="security_reviewer",
+        target=f"task {task_id or 'unknown'}",
+        decision=verdict.verdict,
+        severity="critical" if verdict.severity == "critical" else "warning" if verdict.is_blocking() else "info",
+        reason=verdict.summary,
+        task_id=task_id,
+        rollback_ref=task_id or "manual_review",
+        extra={"review_stage": stage, "finding_count": len(verdict.findings)},
     )
     return verdict
 

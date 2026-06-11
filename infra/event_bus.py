@@ -45,6 +45,16 @@ STREAM_APPROVALS = "jarvis:approvals"
 GROUP_SCHEDULER  = "scheduler"
 GROUP_MANAGER    = "manager"
 
+
+def _audit_security_event(action: str, **kwargs) -> None:
+    """Best-effort security audit emit; never breaks event-bus flow."""
+    try:
+        from infra.security_audit import audit_event
+        audit_event(action, **kwargs)
+    except Exception:
+        log.exception("security audit emit failed")
+
+
 # ─── Think-tag stripping ──────────────────────────────────────────────────────
 
 _THINK_RE = re.compile(
@@ -358,6 +368,16 @@ async def create_task(req: TaskRequest):
     block_reason = _inline_threat_screen(req)
     if block_reason:
         log.warning("POST /tasks blocked by threat screen: %s", block_reason)
+        _audit_security_event(
+            "threat_screen_block",
+            actor=str(req.context.get("source") or "event_bus"),
+            target=req.title or req.agent,
+            decision="held",
+            severity="critical",
+            reason=block_reason,
+            rollback_ref="approval_queue",
+            extra={"agent": req.agent},
+        )
         return JSONResponse(
             status_code=202,
             content={
@@ -475,6 +495,16 @@ async def decide_approval(stream_id: str, body: ApprovalDecision, request: Reque
         task_id = fields.get("task_id", "unknown")
 
     event_type = "task.approved" if body.decision == "approve" else "task.rejected"
+    _audit_security_event(
+        "approval_granted" if body.decision == "approve" else "approval_denied",
+        actor="human",
+        target=f"event_bus approval {stream_id}",
+        decision=body.decision,
+        severity="notice" if body.decision == "approve" else "warning",
+        reason=body.reason,
+        task_id=task_id,
+        rollback_ref=task_id,
+    )
     await r.xadd(STREAM_TASKS, {
         "type":    event_type,
         "task_id": task_id,

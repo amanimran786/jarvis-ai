@@ -2703,6 +2703,26 @@ def stats_agents():
     return _get_agent_stats_data()
 
 
+@app.get("/security/events")
+def security_events(limit: int = 200, action: str = "", severity: str = "", task_id: str = ""):
+    from infra.security_audit import read_events
+    return {
+        "ok": True,
+        "events": read_events(
+            limit=limit,
+            action=action,
+            severity=severity,
+            task_id=task_id,
+        ),
+    }
+
+
+@app.get("/security/summary")
+def security_summary(limit: int = 1000):
+    from infra.security_audit import summarize
+    return {"ok": True, "summary": summarize(limit=limit)}
+
+
 @app.post("/tasks")
 def create_task(req: TaskRequest):
     task = task_runtime.submit_task(

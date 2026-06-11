@@ -37,6 +37,23 @@ class AgentIdentity:
     rate_limit_rpm: int
 
 
+def _audit_rbac_denial(actor: str, target: str, reason: str) -> None:
+    """Emit RBAC denial audit records without coupling enforcement to disk IO."""
+    try:
+        from infra.security_audit import audit_event, RBAC_DENY
+        audit_event(
+            RBAC_DENY,
+            actor=actor or "unknown",
+            target=target,
+            decision="deny",
+            severity="warning",
+            reason=reason,
+            rollback_ref="rbac_registry",
+        )
+    except Exception:
+        pass
+
+
 # ─── Rate limiter ─────────────────────────────────────────────────────────────
 
 class _SlidingWindow:
@@ -113,6 +130,7 @@ class RBACRegistry:
             return self._identities["human"]
         identity = self._identities.get(agent_id)
         if identity is None:
+            _audit_rbac_denial(agent_id, "agent_identity", "unknown agent identity")
             raise HTTPException(
                 status_code=403,
                 detail=f"Unknown agent identity: '{agent_id}'",
@@ -122,10 +140,16 @@ class RBACRegistry:
     def check_dispatch(self, caller: AgentIdentity, target_agent: str) -> None:
         """Raise 403 if caller is not allowed to dispatch target_agent."""
         if caller.role == "readonly":
+            _audit_rbac_denial(caller.agent_id, target_agent, "readonly role cannot dispatch")
             raise HTTPException(status_code=403, detail="readonly role cannot dispatch agents")
         if "*" in caller.allowed_agents:
             return
         if target_agent not in caller.allowed_agents:
+            _audit_rbac_denial(
+                caller.agent_id,
+                target_agent,
+                f"dispatch not permitted for role={caller.role}",
+            )
             raise HTTPException(
                 status_code=403,
                 detail=(
@@ -139,6 +163,11 @@ class RBACRegistry:
         if "*" in caller.allowed_tools:
             return
         if tool not in caller.allowed_tools:
+            _audit_rbac_denial(
+                caller.agent_id,
+                tool,
+                "tool not permitted",
+            )
             raise HTTPException(
                 status_code=403,
                 detail=f"'{caller.agent_id}' is not permitted to use tool '{tool}'",
@@ -147,6 +176,11 @@ class RBACRegistry:
     def check_rate_limit(self, caller: AgentIdentity) -> None:
         """Raise 429 if caller has exceeded their per-minute request limit."""
         if not self._rl.is_allowed(caller.agent_id, caller.rate_limit_rpm):
+            _audit_rbac_denial(
+                caller.agent_id,
+                "rate_limit",
+                f"rate limit exceeded ({caller.rate_limit_rpm} rpm)",
+            )
             raise HTTPException(
                 status_code=429,
                 detail=(
