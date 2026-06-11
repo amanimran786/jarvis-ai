@@ -395,7 +395,28 @@ def _run_security_gate(request: ToolRunRequest, spec: dict) -> str | None:
 
 
 def _audit_log(result: ToolRunResult, request: ToolRunRequest) -> None:
-    """Write a structured audit entry to the project memory layer."""
+    """Write structured audit entries to the project memory layer and audit stream."""
+    try:
+        from infra.security_audit import audit_event, SECURITY_TOOL_EXEC
+        audit_event(
+            SECURITY_TOOL_EXEC,
+            actor=request.agent_id,
+            target=f"{request.tool} {request.target}",
+            decision="blocked" if result.blocked else "ran",
+            severity="warning" if result.blocked or result.exit_code else "notice",
+            reason=result.block_reason or (result.stderr[:300] if result.stderr else ""),
+            task_id=result.audit_id,
+            rollback_ref=result.output_path or result.audit_id,
+            extra={
+                "tool": result.tool,
+                "target": result.target,
+                "approved_by": request.approved_by or "",
+                "exit_code": result.exit_code,
+            },
+        )
+    except Exception as exc:
+        logger.warning("security audit stream write failed (non-fatal): %s", exc)
+
     try:
         from infra.memory import store  # type: ignore
         if store is None:

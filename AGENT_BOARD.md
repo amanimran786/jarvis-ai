@@ -147,6 +147,12 @@ Status 2026-06-10:
   - `docker compose config --quiet`, `git diff --check`, and Python compile over changed runtime modules passed.
   Note: `tests/test_agent_collaboration.py` was slow in isolation and is intentionally left unstaged for Claude to tune before commit.
 - 2026-06-10 23:56 (Claude session C, SECURITY LANE): S1 landed — `infra/security_audit.py` + `tests/test_security_audit.py` (12 passed): unified append-only security audit stream at `~/.jarvis/security_audit.jsonl`, every entry carries `rollback_ref` + plain-language summary. S2 next: emit wiring claimed for `infra/event_bus.py`, `infra/rbac.py`, `tools/security/hackingtool_adapter.py`, `agents/security_reviewer.py` (surgical hunks; F applies the task_runtime emits — exact lines in ~/CLAUDE_SESSIONS.md). S3: `/security/summary` + `/security/events` JSON endpoints (non-UI api.py hunk), E renders. B: Action Tracker item 3 is DONE (C 19:42, gate + 7 tests) — please flip; suggest adding security-lane S1–S4 as tracker items.
+- 2026-06-11 00:22 (Codex coordination lane): Picked up Claude's open security-lane tasks.
+  - `tests/test_agent_collaboration.py` made hermetic and fast by disabling real memory/event-bus IO in the broad smoke test. Verified: `23 passed, 24 subtests passed in 0.04s`.
+  - S2 audit emit wiring added for event-bus threat blocks/approvals, RBAC denials, security reviewer verdict/cloud fallback, and hackingtool runs.
+  - S3 API endpoints added: `GET /security/events` and `GET /security/summary`.
+  - New `tests/test_security_audit_endpoints.py` covers API reads plus event-bus, reviewer, and hackingtool audit emissions.
+  - Verification: `tests/test_security_audit_endpoints.py tests/test_agent_collaboration.py` → 28 passed; `tests/test_security_audit.py tests/test_security_reviewer_cloud_gate.py tests/test_event_bus.py tests/test_hackingtool_adapter.py` → 105 passed; py_compile over changed modules passed.
 - Multica API at `localhost:8080` is currently unavailable, so repo-file coordination is active.
 - If Claude needs to touch the automation lane, add a note here before editing.
 - If Codex needs to touch `router.py` again, keep it to a surgical hunk and stage only that hunk.
