@@ -130,6 +130,11 @@ def _from_mapping(item: dict[str, Any], *, source: str, valid_agents: set[str]) 
     description = str(item.get("description") or item.get("task") or title)
     raw_context = item.get("context") if isinstance(item.get("context"), dict) else {}
     context = _sanitize_context(raw_context)
+    # Cloud research cannot be granted by brief-level context. A brief that
+    # sets cloud_research_approved or allow_cloud_research is treated as a
+    # *request* for cloud research — which triggers security review — not as
+    # a pre-approval. The actual gate is the ALLOW_CLOUD_RESEARCH env var
+    # combined with system-level config; brief content never lifts the gate.
     requested_cloud_research = _truthy_context(raw_context.get("allow_cloud_research")) or _truthy_context(
         raw_context.get("cloud_research_approved")
     )

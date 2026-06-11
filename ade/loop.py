@@ -14,6 +14,11 @@ from pathlib import Path
 
 from ade import notify, state as st
 
+try:
+    from infra import jarvis_md as _jmd
+except ImportError:
+    _jmd = None  # type: ignore[assignment]
+
 MAX_RETRIES = 3
 CLAUDE_BIN = "claude"
 TIMEOUT_PLAN_SEC = 300
@@ -77,6 +82,40 @@ def _claude_prompt_cmd(prompt: str) -> list[str]:
     if os.getenv("ADE_CLAUDE_SKIP_PERMISSIONS", "").lower() in {"1", "true", "yes"}:
         cmd.insert(1, "--dangerously-skip-permissions")
     return cmd
+
+
+# ── Post-tool hook ────────────────────────────────────────────────────────────
+
+def run_post_tool_hook(worktree: Path) -> tuple[bool, str]:
+    """
+    Run ruff check --fix + ruff format + mypy after any file modification.
+    Returns (passed, combined output). Non-fatal: only reports, does not abort.
+    """
+    output_parts = []
+
+    for cmd in [
+        [sys.executable, "-m", "ruff", "check", "--fix", str(worktree)],
+        [sys.executable, "-m", "ruff", "format", str(worktree)],
+        [sys.executable, "-m", "mypy", str(worktree), "--ignore-missing-imports", "--no-error-summary"],
+    ]:
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=str(worktree),
+                capture_output=True,
+                text=True,
+                timeout=120,
+                shell=False,
+            )
+            if result.stdout.strip():
+                output_parts.append(f"[{cmd[2]}] {result.stdout.strip()}")
+            if result.returncode not in (0, 1):  # ruff exits 1 on fixable issues
+                output_parts.append(f"[{cmd[2]}] exit {result.returncode}: {result.stderr[:200]}")
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # ruff/mypy not installed — skip silently
+
+    combined = "\n".join(output_parts)
+    return True, combined
 
 
 # ── Loop phases ───────────────────────────────────────────────────────────────
@@ -146,7 +185,14 @@ def phase_execute(task_name: str, prompt: str, worktree: Path, repo_root: Path, 
             f"Refer to PLAN.md for context."
         )
 
-    return _run_interactive(_claude_prompt_cmd(exec_prompt), worktree)
+    rc = _run_interactive(_claude_prompt_cmd(exec_prompt), worktree)
+
+    # Post-tool hook: lint + type-check every file the agent touched
+    _, hook_output = run_post_tool_hook(worktree)
+    if hook_output:
+        print(f"[ADE] Post-tool hook output:\n{hook_output[:1000]}")
+
+    return rc
 
 
 def phase_verify(task_name: str, worktree: Path, repo_root: Path) -> tuple[bool, str]:
@@ -170,12 +216,31 @@ def phase_verify(task_name: str, worktree: Path, repo_root: Path) -> tuple[bool,
         if result.returncode == 0:
             print("[ADE] Tests PASSED.")
             return True, ""
-        print(f"[ADE] Tests FAILED (exit {result.returncode}):\n{output[-3000:]}")
-        return False, output[-3000:]
+        error_tail = output[-3000:]
+        print(f"[ADE] Tests FAILED (exit {result.returncode}):\n{error_tail}")
+        _propose_jarvis_md_entry(task_name, error_tail)
+        return False, error_tail
     except subprocess.TimeoutExpired:
         msg = f"test suite timed out after {TIMEOUT_TEST_SEC}s"
         print(f"[ADE] {msg}")
+        _propose_jarvis_md_entry(task_name, msg)
         return False, msg
+
+
+# ── JARVIS.md integration ─────────────────────────────────────────────────────
+
+def _propose_jarvis_md_entry(task_name: str, error_output: str) -> None:
+    """Print a proposed JARVIS.md regression entry for human review."""
+    if _jmd is None:
+        return
+    first_line = error_output.strip().splitlines()[0][:120] if error_output.strip() else "unknown failure"
+    entry = _jmd.propose_regression_entry(
+        agent=f"ADE/{task_name}",
+        what_failed=first_line,
+        fix_applied="<pending — fill in after fix>",
+    )
+    print(f"\n[ADE] Proposed JARVIS.md regression entry:\n{entry}")
+    print("[ADE] Run `jarvis_md append_regression '<entry>'` after the fix is confirmed.\n")
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────

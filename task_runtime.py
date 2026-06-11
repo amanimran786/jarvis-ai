@@ -843,9 +843,12 @@ def _load_agent_lesson(agent_id: str) -> str:
     if not path.exists():
         return ""
     try:
-        content = path.read_text(encoding="utf-8")[:4000].strip()
-        if content.startswith("# PENDING_APPROVAL"):
+        full = path.read_text(encoding="utf-8").strip()
+        if full.startswith("# PENDING_APPROVAL"):
             return ""  # not yet approved
+        # Lessons accumulate over time — when over budget, keep the newest
+        # (tail), not the oldest.
+        content = full[-4000:]
         return f"\n\n=== Learned behaviors for {agent_id} ===\n{content}"
     except Exception:
         return ""
@@ -877,7 +880,8 @@ def _detect_fabricated_execution(response: str, tool_calls: int) -> str:
 
 
 def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
-                 tool_calls: int = -1, tool_transcript: str = "") -> dict:
+                 tool_calls: int = -1, tool_transcript: str = "",
+                 inherited_transcript: str = "") -> dict:
     """
     Score a completed task output using a lightweight LLM call.
     Returns {"pass": bool, "score": float, "reason": str}.
@@ -888,7 +892,17 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
         from brains.brain import ask_stream
         from config import GPT_MINI
         tool_fact = ""
-        if tool_calls == 0:
+        if tool_calls == 0 and inherited_transcript:
+            # Retry attempts inherit the prior attempt's runtime-captured
+            # outputs — citing those is grounded, not fabricated.
+            tool_fact = (
+                "\nRUNTIME FACT (ground truth, not from the agent): the agent executed "
+                "ZERO new tool calls in this attempt, but the runtime carried over REAL "
+                "tool outputs from the previous attempt (shown below). Claims consistent "
+                "with those outputs are grounded and must NOT be treated as fabricated. "
+                "Only claims going beyond them are unsupported.\n"
+            )
+        elif tool_calls == 0:
             tool_fact = (
                 "\nRUNTIME FACT (ground truth, not from the agent): the agent executed "
                 "ZERO tool calls during this task. If the response cites command output, "
@@ -909,6 +923,11 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
             transcript_block = (
                 "\nRUNTIME-CAPTURED TOOL OUTPUTS (ground truth):\n"
                 f"{tool_transcript[-3000:]}\n"
+            )
+        elif inherited_transcript and tool_calls == 0:
+            transcript_block = (
+                "\nRUNTIME-CAPTURED TOOL OUTPUTS (from the previous attempt, ground truth):\n"
+                f"{inherited_transcript[-3000:]}\n"
             )
         verify_prompt = (
             f"You are an output quality evaluator. Score this agent response.\n\n"
@@ -949,6 +968,32 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
         return {"pass": True, "score": 1.0, "reason": f"verify error: {exc}"}
 
 
+_VERDICTS_PATH = Path.home() / ".jarvis" / "verifier_verdicts.jsonl"
+
+
+def _record_verdict(task_id: str, agent_id: str, verdict: dict,
+                    tool_calls: int, retry_count: int) -> None:
+    """Append the verifier verdict to a JSONL log so calibration is measurable
+    (pass rate per agent, score distribution, retry effectiveness)."""
+    import json as _json
+    try:
+        _VERDICTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "score": verdict.get("score"),
+            "pass": verdict.get("pass"),
+            "reason": verdict.get("reason", ""),
+            "tool_calls": tool_calls,
+            "retry_count": retry_count,
+        }
+        with open(_VERDICTS_PATH, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry) + "\n")
+    except Exception:
+        log.exception("failed to record verifier verdict for %s", task_id)
+
+
 def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) -> None:
     """
     Propose a lesson for this agent: LLM generates a behavior rule,
@@ -969,7 +1014,7 @@ def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) 
             "next time it sees a similar task. Be concrete and actionable. "
             "No markdown headers, no preamble — just the rule text."
         )
-        stream, _ = smart_stream(lesson_prompt, tool="chat")
+        stream, _ = smart_stream(lesson_prompt, tool="chat", prefer_local=True)
         rule = "".join(chunk for chunk in stream).strip()
         if not rule:
             return
@@ -1332,6 +1377,31 @@ def _run_tool_loop(
     def _transcript() -> str:
         return "\n\n".join(tools for _, tools in conversation)
 
+    def _history_blocks() -> list[str]:
+        """Compact prior steps so the continuation prompt does not grow
+        quadratically: the latest step stays rich, older steps are truncated
+        hard, and the total history is budget-capped (oldest elided first)."""
+        blocks: list[str] = []
+        last = len(conversation) - 1
+        for i, (prev_resp, prev_tools) in enumerate(conversation):
+            resp_cap, tools_cap = (2000, 4000) if i == last else (400, 800)
+            resp = prev_resp if len(prev_resp) <= resp_cap else (
+                prev_resp[:resp_cap] + "\n[...truncated]")
+            # Tool output tails carry the verdict (test summaries, error lines)
+            tools = prev_tools if len(prev_tools) <= tools_cap else (
+                "[...truncated]\n" + prev_tools[-tools_cap:])
+            blocks.append(
+                f"[Step {i + 1} — your response]:\n{resp}\n\n"
+                f"[Step {i + 1} — tool results]:\n{tools}"
+            )
+        elided = 0
+        while len(blocks) > 1 and sum(len(b) for b in blocks) > 12000:
+            blocks.pop(0)
+            elided += 1
+        if elided:
+            blocks[0] = f"[{elided} earlier step(s) elided]\n\n" + blocks[0]
+        return blocks
+
     for _iter in range(4):  # up to 4 continuation rounds after the initial call
         bash_calls = _extract_bash_calls(response)
         result_calls = _extract_task_result_calls(response)
@@ -1367,13 +1437,8 @@ def _run_tool_loop(
             if t.get("cancel_requested"):
                 return response, model, index, tool_calls_made, _transcript()
 
-        # Build continuation prompt: original task + full prior history
-        history_blocks: list[str] = []
-        for i, (prev_resp, prev_tools) in enumerate(conversation):
-            history_blocks.append(
-                f"[Step {i + 1} — your response]:\n{prev_resp}\n\n"
-                f"[Step {i + 1} — tool results]:\n{prev_tools}"
-            )
+        # Build continuation prompt: original task + compacted prior history
+        history_blocks = _history_blocks()
         continuation_prompt = (
             f"{original_prompt}\n\n"
             "---\n"
@@ -1388,7 +1453,7 @@ def _run_tool_loop(
         )
 
         # Stream continuation response
-        stream, model = smart_stream(continuation_prompt, tool="chat", extra_system=agent_ctx)
+        stream, model = smart_stream(continuation_prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
         cont_chunks: list[str] = []
         for chunk in stream:
             with _LOCK:
@@ -1407,11 +1472,7 @@ def _run_tool_loop(
     # so the stored result is never a dangling, unexecuted tool tag.
     if conversation and (_extract_bash_calls(response) or _extract_task_result_calls(response)
                          or (allow_write and _extract_write_calls(response))):
-        history_blocks = [
-            f"[Step {i + 1} — your response]:\n{prev_resp}\n\n"
-            f"[Step {i + 1} — tool results]:\n{prev_tools}"
-            for i, (prev_resp, prev_tools) in enumerate(conversation)
-        ]
+        history_blocks = _history_blocks()
         wrapup_prompt = (
             f"{original_prompt}\n\n"
             "---\n"
@@ -1427,7 +1488,7 @@ def _run_tool_loop(
             t = _TASKS.get(task_id, {})
             if t.get("cancel_requested"):
                 return response, model, index, tool_calls_made, _transcript()
-        stream, model = smart_stream(wrapup_prompt, tool="chat", extra_system=agent_ctx)
+        stream, model = smart_stream(wrapup_prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
         final_chunks: list[str] = []
         for chunk in stream:
             final_chunks.append(chunk)
@@ -1442,6 +1503,20 @@ def _run_tool_loop(
                            '[tool budget exhausted — not executed]', final, flags=re.DOTALL)
             final = _WRITE_TAG_RE.sub('[tool budget exhausted — not executed]', final)
             response = final
+
+    # A continuation round can stream zero chunks — never store an empty
+    # result when real tool outputs exist.
+    if not response.strip():
+        if conversation:
+            last_text = next((r for r, _ in reversed(conversation) if r.strip()), "")
+            response = (
+                (last_text + "\n\n" if last_text else "")
+                + "[runtime note: the model returned no final text after tool "
+                "execution; the tool outputs below are runtime-captured ground truth]\n\n"
+                "--- Tool Outputs ---\n" + _transcript()[-4000:]
+            ).strip()
+        else:
+            response = "[runtime note: the model returned no text]"
 
     return response, model, index, tool_calls_made, _transcript()
 
@@ -1631,7 +1706,7 @@ def _run_task(task_id: str) -> None:
                 lesson = _load_agent_lesson(agent_id)
                 if lesson:
                     agent_ctx = agent_ctx + lesson
-                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx)
+                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
                 chunks: list[str] = []
                 for index, chunk in enumerate(stream):
                     with _LOCK:
@@ -1660,8 +1735,16 @@ def _run_task(task_id: str) -> None:
                 )
                 # Deterministic fabrication check: response claims execution
                 # but zero tool calls actually ran. Runs for ALL agents — no
-                # LLM needed, the runtime knows the ground truth.
-                fabricated_claim = _detect_fabricated_execution(response, tool_calls_made)
+                # LLM needed, the runtime knows the ground truth. Skipped when
+                # the task inherited verified outputs from a prior attempt —
+                # the LLM verifier judges those against the evidence instead.
+                with _LOCK:
+                    task_meta = _TASKS.get(task_id, {}).get("meta") or {}
+                inherited_transcript = str(task_meta.get("inherited_transcript", ""))
+                fabricated_claim = (
+                    "" if (inherited_transcript and tool_calls_made == 0)
+                    else _detect_fabricated_execution(response, tool_calls_made)
+                )
                 if fabricated_claim:
                     warning = (
                         "\n\n[RUNTIME WARNING: this response claims command execution "
@@ -1705,23 +1788,38 @@ def _run_task(task_id: str) -> None:
                 )
             # Verification runs OUTSIDE the lock — LLM calls cannot hold _LOCK
             if _AUTO_VERIFY and agent_id in _VERIFIABLE_AGENTS:
-                with _LOCK:
-                    task_meta = _TASKS.get(task_id, {}).get("meta") or {}
                 retry_count = int(task_meta.get("retry_count", 0))
                 verdict = _auto_verify(
                     task_id, agent_id, original_prompt, response,
                     tool_calls=tool_calls_made,
                     tool_transcript=tool_transcript,
+                    inherited_transcript=inherited_transcript,
                 )
+                _record_verdict(task_id, agent_id, verdict, tool_calls_made, retry_count)
+                with _LOCK:
+                    if task_id in _TASKS:
+                        (_TASKS[task_id].setdefault("meta", {}))["verification"] = verdict
                 if not verdict["pass"] and retry_count < 2:
                     log.info(
                         "task %s failed verification (score=%.2f): %s — retrying (%d/2)",
                         task_id, verdict["score"], verdict["reason"], retry_count + 1,
                     )
+                    # Carry real evidence forward — without it, retries parrot
+                    # the prior answer with zero tool calls and fail fabrication
+                    # checks every time.
+                    evidence = (tool_transcript or inherited_transcript)[-2500:]
+                    evidence_block = (
+                        "\nVerified tool outputs from the previous attempt "
+                        "(runtime-captured — you may cite these as evidence):\n"
+                        f"{evidence}\n" if evidence else ""
+                    )
                     retry_prompt = (
                         f"{original_prompt}\n\n"
                         f"---\nPrevious attempt failed quality check: {verdict['reason']}\n"
-                        "Produce a better response that addresses this specific weakness."
+                        f"{evidence_block}"
+                        "Produce a better response that addresses this specific weakness. "
+                        "If you need facts beyond the outputs above, execute fresh <bash> "
+                        "commands — do not invent results."
                     )
                     submit_task(
                         retry_prompt,
@@ -1729,7 +1827,8 @@ def _run_task(task_id: str) -> None:
                         source="retry",
                         assigned_agent_id=agent_id,
                         meta={"retry_count": retry_count + 1, "confidence_score": 0.9,
-                              "original_task_id": task_id},
+                              "original_task_id": task_id,
+                              "inherited_transcript": evidence},
                     )
                 elif not verdict["pass"] and retry_count >= 2:
                     log.warning(

@@ -35,7 +35,6 @@ logger = logging.getLogger("jarvis.tools.security.hackingtool")
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _RESULTS_DIR = _REPO_ROOT / "workspace" / "security_results"
-_DEFAULT_HUMAN_APPROVAL_TOKEN = "I_APPROVE_THIS_AUTHORIZED_SECURITY_TEST"
 
 # ── Allowlist ─────────────────────────────────────────────────────────────────
 #
@@ -227,16 +226,31 @@ def _is_local_path(target: str) -> bool:
 
 
 def _expected_human_approval_token() -> str:
-    return os.getenv("JARVIS_SECURITY_APPROVAL_TOKEN", _DEFAULT_HUMAN_APPROVAL_TOKEN).strip()
+    """
+    Return the configured approval token from the environment.
+
+    Fails closed: if JARVIS_SECURITY_APPROVAL_TOKEN is not set or is empty,
+    raises ValueError rather than falling back to a known static string that
+    could be guessed or leaked via source code.
+    """
+    token = os.getenv("JARVIS_SECURITY_APPROVAL_TOKEN", "").strip()
+    if not token:
+        raise ValueError(
+            "JARVIS_SECURITY_APPROVAL_TOKEN must be set to use security tools"
+        )
+    return token
 
 
 def _has_human_approval(request: ToolRunRequest) -> bool:
     approved_by = (request.approved_by or "").strip().lower()
     token = (request.approval_token or "").strip()
-    expected = _expected_human_approval_token()
-    if not approved_by or not token or not expected:
+    if not approved_by or not token:
         return False
     if approved_by in {"ai", "agent", "jarvis", request.agent_id.strip().lower()}:
+        return False
+    try:
+        expected = _expected_human_approval_token()
+    except ValueError:
         return False
     return token == expected
 

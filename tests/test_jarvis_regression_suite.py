@@ -3281,7 +3281,7 @@ class ApiSurfaceTests(unittest.TestCase):
 
     def test_agent_run_accepts_task_runtime_hyphenated_agent_ids(self):
         api._API_TOKEN = ""
-        with patch("agent_dispatch.dispatch", return_value=iter(["ok"])) as dispatch_mock:
+        with patch("agent_dispatch.dispatch", return_value=iter(["```python\nok = True\n```"])) as dispatch_mock:
             response = self.client.post(
                 "/agents/backend-engineer/run",
                 json={"task": "check auth route", "context": "unit test"},
@@ -3301,7 +3301,7 @@ class ApiSurfaceTests(unittest.TestCase):
             "worktree_path": "/tmp/repo/.jarvis/task_123",
             "branch": "codex/task_123-refactor-auth",
         }
-        with patch("task_runtime.route_stream", return_value=(iter(["Fixed auth middleware."]), "UnitTestModel")), \
+        with patch("task_runtime.smart_stream", return_value=(iter(["Fixed auth middleware."]), "UnitTestModel")), \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3338,7 +3338,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_tasks_endpoint_wraps_vault_kind_with_curator_prompt(self):
         task_runtime.reset_for_tests()
         fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
-        with patch("task_runtime.route_stream", return_value=(iter(["Queued vault work."]), "UnitTestModel")), \
+        with patch("task_runtime.smart_stream", return_value=(iter(["Queued vault work."]), "UnitTestModel")), \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3360,7 +3360,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_tasks_endpoint_wraps_skill_kind_with_skill_builder_prompt(self):
         task_runtime.reset_for_tests()
         fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
-        with patch("task_runtime.route_stream", return_value=(iter(["Proposed skill."]), "UnitTestModel")), \
+        with patch("task_runtime.smart_stream", return_value=(iter(["Proposed skill."]), "UnitTestModel")), \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3381,7 +3381,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_tasks_endpoint_holds_skill_registry_mutation_until_approved(self):
         task_runtime.reset_for_tests()
         fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
-        with patch("task_runtime.route_stream") as route_mock, \
+        with patch("task_runtime.smart_stream") as route_mock, \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3400,7 +3400,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_tasks_endpoint_holds_risky_task_until_approved(self):
         task_runtime.reset_for_tests()
         fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
-        with patch("task_runtime.route_stream", return_value=(iter(["Deployment checklist ready."]), "UnitTestModel")) as route_mock, \
+        with patch("task_runtime.smart_stream", return_value=(iter(["Deployment checklist ready."]), "UnitTestModel")) as route_mock, \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3432,7 +3432,7 @@ class ApiSurfaceTests(unittest.TestCase):
     def test_tasks_endpoint_can_deny_risky_waiting_task(self):
         task_runtime.reset_for_tests()
         fake_workspace = {"ok": False, "enabled": False, "created": False, "reason": "", "repo_root": "", "worktree_path": "", "branch": ""}
-        with patch("task_runtime.route_stream") as route_mock, \
+        with patch("task_runtime.smart_stream") as route_mock, \
              patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=fake_workspace):
             response = self.client.post(
                 "/tasks",
@@ -3544,17 +3544,17 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["error"], "chat_busy")
 
-    def test_web_hud_keeps_stream_parser_javascript_valid(self):
+    def test_agent_ops_dashboard_serves_current_runtime_javascript(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         html = response.text
-        self.assertIn(r"buffer.split('\n')", html)
-        self.assertNotIn("buffer.split('\n')", html)
-        self.assertIn("data.model", html)
-        self.assertIn("jarvis_mobile_session_id", html)
-        self.assertIn("window.location.hash", html)
-        self.assertIn("session_id: mobileSessionId", html)
+        self.assertIn("Jarvis — Agent Ops", html)
+        self.assertIn("Jarvis Agent Ops", html)
+        self.assertIn("apiFetch", html)
+        self.assertIn("/agents", html)
+        self.assertIn("/tasks", html)
+        self.assertIn("switchTab('agents')", html)
 
     def test_bridge_url_uses_hash_token_not_query_token(self):
         with patch.dict(os.environ, {"JARVIS_API_TOKEN": "bridge-token"}, clear=False), \
@@ -5857,19 +5857,26 @@ class EmailDigestFastPathTests(unittest.TestCase):
         {"sender": "Carol", "from_address": "carol@ex.com", "subject": "Lunch plans", "snippet": "you free Thursday?"},
     ]
 
+    _MOCK_DIGEST = "• Q3 OKRs from Alice need review\n• URGENT: Server down (Bob) — action required\n• Lunch with Carol Thursday"
+
     def test_digest_returns_gmail_label(self):
-        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+        # Label was updated to "Email Digest" when digest fast-path was added
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS), \
+             patch("brains.brain_ollama.ask_local_stream", return_value=iter([self._MOCK_DIGEST])):
             stream, label = router.route_stream("what are my emails about today?")
-        self.assertEqual(label, "Gmail")
+            self._consume(stream)
+        self.assertEqual(label, "Email Digest")
 
     def test_digest_has_three_bullets(self):
-        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS), \
+             patch("brains.brain_ollama.ask_local_stream", return_value=iter([self._MOCK_DIGEST])):
             stream, label = router.route_stream("give me an email digest")
             text = self._consume(stream)
         self.assertEqual(text.count("•"), 3)
 
     def test_digest_flags_urgent(self):
-        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS):
+        with patch("google_services.get_unread_email_subjects", return_value=self.FAKE_EMAILS), \
+             patch("brains.brain_ollama.ask_local_stream", return_value=iter([self._MOCK_DIGEST])):
             stream, label = router.route_stream("email summary")
             text = self._consume(stream)
         self.assertIn("urgent", text.lower())

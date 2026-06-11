@@ -165,7 +165,11 @@ def _clear_mic_candidate_failure(label: str) -> None:
 
 
 def _input_capable_device_indexes() -> set[int] | None:
-    """Return input-capable PyAudio device indexes, or None when unavailable."""
+    """Return input-capable PyAudio device indexes, or None when unavailable.
+
+    Excludes devices with defaultSampleRate == 0 — these are broken/virtual
+    devices that cause PaMacCore AUHAL errors when opened.
+    """
     audio = None
     try:
         audio = sr.Microphone.get_pyaudio().PyAudio()
@@ -173,8 +177,16 @@ def _input_capable_device_indexes() -> set[int] | None:
         indexes: set[int] = set()
         for index in range(count):
             info = audio.get_device_info_by_index(index) or {}
-            if int(info.get("maxInputChannels") or 0) > 0:
-                indexes.add(index)
+            if int(info.get("maxInputChannels") or 0) <= 0:
+                continue
+            # Skip devices whose CoreAudio sample rate is unset — these are
+            # virtual/aggregate buses that generate PaMacCore AUHAL errors.
+            try:
+                if float(info.get("defaultSampleRate") or 0) <= 0:
+                    continue
+            except (TypeError, ValueError):
+                pass
+            indexes.add(index)
         return indexes
     except Exception:
         return None

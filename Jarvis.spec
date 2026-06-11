@@ -116,6 +116,9 @@ hiddenimports = sorted(set(
         "agents.memory_librarian",
         "agents.qa_tester",
         "agents.researcher",
+        "agents.ai_safety_agent",
+        "agents.automation_engineer",
+        "agents.career_agent",
         "agents.security_reviewer",
         "agents.ux_researcher",
         # core layer
@@ -124,7 +127,9 @@ hiddenimports = sorted(set(
         "core.work_order",
         # infra layer
         "infra",
+        "infra.checkpointer",
         "infra.event_bus",
+        "infra.jarvis_md",
         "infra.memory",
         "infra.rbac",
         "infra.threat_screen",
@@ -161,10 +166,12 @@ hiddenimports = sorted(set(
         "local_runtime.local_stt",
         "local_runtime.local_tts",
         "local_runtime.local_model_benchmark",
+        "jarvis_health",
         "meeting_listener",
         "meeting_controller",
         "memory",
         "messages",
+        "messages_thread",
         "model_router",
         "notes",
         "operative",
@@ -189,6 +196,20 @@ hiddenimports = sorted(set(
         "vault",
         "voice",
         "wiki_builder",
+        # proactive / watcher
+        "proactive_watcher",
+        "jarvis_watcher",
+        # ADE
+        "ade",
+        "ade.cli",
+        "ade.fleet",
+        "ade.loop",
+        "ade.notify",
+        "ade.session",
+        "ade.state",
+        "ade_cmd",
+        # misc
+        "jarvis_cli",
     ]
 ))
 

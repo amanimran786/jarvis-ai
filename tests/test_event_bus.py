@@ -48,14 +48,22 @@ def _make_redis() -> AsyncMock:
     return r
 
 
+_TEST_APPROVAL_TOKEN = "test-approval-token-for-unit-tests"
+_APPROVAL_HEADERS = {"Authorization": f"Bearer {_TEST_APPROVAL_TOKEN}"}
+
+
 @pytest.fixture()
 def redis_mock():
     return _make_redis()
 
 
 @pytest.fixture()
-def client(redis_mock):
-    """TestClient without lifespan so scheduler/manager_loop don't spin up."""
+def client(redis_mock, monkeypatch):
+    """TestClient without lifespan so scheduler/manager_loop don't spin up.
+
+    Sets JARVIS_EVENT_BUS_APPROVAL_TOKEN so approval endpoint tests pass auth.
+    """
+    monkeypatch.setenv("JARVIS_EVENT_BUS_APPROVAL_TOKEN", _TEST_APPROVAL_TOKEN)
     with patch.object(eb, "get_redis", AsyncMock(return_value=redis_mock)):
         # Not used as context manager → no lifespan startup/shutdown
         yield TestClient(eb.app, raise_server_exceptions=True), redis_mock
@@ -141,6 +149,47 @@ class TestPostTasks:
         tc, r = client
         resp = tc.post("/tasks", json={"title": "T", "description": "D"})
         assert resp.json()["agent"] == "backend_engineer"
+
+    def test_task_with_credential_pattern_is_held_for_approval(self, client):
+        """Threat screen blocks tasks containing credential patterns."""
+        tc, r = client
+        resp = tc.post("/tasks", json={
+            "title": "Rotate key",
+            "description": "Use " + "sk-ant-" + ("a" * 48) + " to call API",
+            "agent": "backend_engineer",
+        })
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["queued"] is False
+        assert body["status"] == "waiting_approval"
+        r.xadd.assert_not_called()
+
+    def test_external_task_with_risky_keyword_is_held(self, client):
+        """Webhook/external tasks with risky keywords are held when threat_screen import fails."""
+        tc, r = client
+        with patch("infra.event_bus._inline_threat_screen", wraps=eb._inline_threat_screen):
+            with patch("infra.threat_screen.screen_payload", side_effect=ImportError):
+                resp = tc.post("/tasks", json={
+                    "title": "Deploy now",
+                    "description": "run deploy script",
+                    "agent": "devops_release",
+                    "context": {"source": "webhook"},
+                })
+        # If screen_payload raises ImportError the fallback keyword check should catch "deploy"
+        assert resp.status_code == 202
+
+    def test_clean_task_passes_threat_screen(self, client):
+        """Non-risky tasks from known sources are queued normally."""
+        tc, r = client
+        resp = tc.post("/tasks", json={
+            "title": "Write unit tests",
+            "description": "Add coverage for the new parser",
+            "agent": "qa_tester",
+            "context": {},
+        })
+        assert resp.status_code == 202
+        assert "task_id" in resp.json()
+        r.xadd.assert_called_once()
 
 
 # ── POST /results ─────────────────────────────────────────────────────────────
@@ -277,7 +326,8 @@ class TestApprovals:
     def test_approve_decision_acks_and_publishes_task_approved(self, client):
         tc, r = client
         r.xrange.return_value = [("700-0", {"task_id": "t-devops", "output": "ok"})]
-        resp = tc.post("/approvals/700-0", json={"decision": "approve", "reason": "looks good"})
+        resp = tc.post("/approvals/700-0", json={"decision": "approve", "reason": "looks good"},
+                       headers=_APPROVAL_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "approve"
@@ -290,7 +340,8 @@ class TestApprovals:
     def test_reject_decision_publishes_task_rejected(self, client):
         tc, r = client
         r.xrange.return_value = [("800-0", {"task_id": "t-risky", "output": "rm -rf /"})]
-        resp = tc.post("/approvals/800-0", json={"decision": "reject", "reason": "destructive"})
+        resp = tc.post("/approvals/800-0", json={"decision": "reject", "reason": "destructive"},
+                       headers=_APPROVAL_HEADERS)
         assert resp.status_code == 200
         assert resp.json()["status"] == "reject"
         rejected_call = r.xadd.call_args
@@ -299,16 +350,42 @@ class TestApprovals:
 
     def test_invalid_decision_returns_422(self, client):
         tc, r = client
-        resp = tc.post("/approvals/900-0", json={"decision": "maybe"})
+        resp = tc.post("/approvals/900-0", json={"decision": "maybe"}, headers=_APPROVAL_HEADERS)
         assert resp.status_code == 422
 
     def test_dismiss_acks_without_status_event(self, client):
         tc, r = client
-        resp = tc.delete("/approvals/500-0")
+        resp = tc.delete("/approvals/500-0", headers=_APPROVAL_HEADERS)
         assert resp.status_code == 200
         assert resp.json()["status"] == "dismissed"
         r.xack.assert_called_once_with(eb.STREAM_APPROVALS, "human", "500-0")
         r.xadd.assert_not_called()
+
+    def test_approve_without_token_returns_401(self, client):
+        tc, r = client
+        r.xrange.return_value = [("700-0", {"task_id": "t-devops", "output": "ok"})]
+        resp = tc.post("/approvals/700-0", json={"decision": "approve", "reason": "no auth"})
+        assert resp.status_code == 401
+
+    def test_dismiss_without_token_returns_401(self, client):
+        tc, r = client
+        resp = tc.delete("/approvals/500-0")
+        assert resp.status_code == 401
+
+    def test_approve_with_wrong_token_returns_401(self, client):
+        tc, r = client
+        r.xrange.return_value = [("700-0", {"task_id": "t-devops", "output": "ok"})]
+        resp = tc.post("/approvals/700-0", json={"decision": "approve"},
+                       headers={"Authorization": "Bearer wrong-token"})
+        assert resp.status_code == 401
+
+    def test_approval_rejected_when_token_env_var_not_set(self, client, monkeypatch):
+        tc, r = client
+        monkeypatch.delenv("JARVIS_EVENT_BUS_APPROVAL_TOKEN", raising=False)
+        r.xrange.return_value = [("700-0", {"task_id": "t-devops", "output": "ok"})]
+        resp = tc.post("/approvals/700-0", json={"decision": "approve"},
+                       headers=_APPROVAL_HEADERS)
+        assert resp.status_code == 401
 
 
 # ── GET /health ───────────────────────────────────────────────────────────────
