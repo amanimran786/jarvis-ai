@@ -3,6 +3,7 @@ import base64
 import email as email_lib
 import email.mime.text
 import shutil
+import argparse
 from datetime import datetime, timedelta, timezone
 import re
 from google.auth.transport.requests import Request
@@ -42,6 +43,37 @@ def _ensure_auth_files() -> None:
     _copy_legacy_auth_file(LEGACY_TOKEN_FILE, TOKEN_FILE)
 
 
+def _write_token(creds: Credentials) -> None:
+    os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
+    with open(TOKEN_FILE, "w") as f:
+        f.write(creds.to_json())
+    try:
+        os.chmod(TOKEN_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def clear_google_token() -> bool:
+    try:
+        os.remove(TOKEN_FILE)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def reauthorize_google() -> Credentials:
+    _ensure_auth_files()
+    if not os.path.exists(CREDENTIALS_FILE):
+        raise FileNotFoundError(
+            f"Google OAuth credentials not found. Put credentials.json at {CREDENTIALS_FILE}."
+        )
+    clear_google_token()
+    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
+    creds = flow.run_local_server(port=0)
+    _write_token(creds)
+    return creds
+
+
 def _get_creds() -> Credentials:
     _ensure_auth_files()
     creds = None
@@ -51,19 +83,8 @@ def _get_creds() -> Credentials:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            if not os.path.exists(CREDENTIALS_FILE):
-                raise FileNotFoundError(
-                    f"Google OAuth credentials not found. Put credentials.json at {CREDENTIALS_FILE}."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
-        try:
-            os.chmod(TOKEN_FILE, 0o600)
-        except OSError:
-            pass
+            creds = reauthorize_google()
+        _write_token(creds)
     return creds
 
 
@@ -324,3 +345,29 @@ def send_email(to: str, subject: str, body: str) -> str:
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     _gmail().users().messages().send(userId="me", body={"raw": raw}).execute()
     return f"Email sent to {to}."
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Jarvis Google OAuth helper")
+    parser.add_argument("--reauth", action="store_true", help="Clear the saved Google token and run OAuth again.")
+    parser.add_argument("--status", action="store_true", help="Check whether the current Google token is usable.")
+    args = parser.parse_args(argv)
+
+    if args.reauth:
+        creds = reauthorize_google()
+        account = getattr(creds, "account", None) or "connected"
+        print(f"Google OAuth re-authorized for {account}.")
+        return 0
+
+    if args.status:
+        creds = _get_creds()
+        account = getattr(creds, "account", None) or "connected"
+        print(f"Google OAuth is available for {account}.")
+        return 0
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

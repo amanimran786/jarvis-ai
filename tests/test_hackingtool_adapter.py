@@ -37,6 +37,9 @@ def _restore_stubs(monkeypatch):
     Not set at module/collection level because they would corrupt the `infra`
     and `agents` packages for test files collected after us (e.g. when this
     file is collected first alphabetically or in reverse order).
+
+    Also sets JARVIS_SECURITY_APPROVAL_TOKEN so that _approved_req() tests
+    work after the fail-closed fix (unset env var → no static fallback).
     """
     _mock_store.reset_mock()
     _mock_store.write = MagicMock()
@@ -45,6 +48,7 @@ def _restore_stubs(monkeypatch):
     _mock_reviewer.review = MagicMock()
     monkeypatch.setitem(sys.modules, "infra.memory", _mock_memory)
     monkeypatch.setitem(sys.modules, "agents.security_reviewer", _mock_reviewer)
+    monkeypatch.setenv("JARVIS_SECURITY_APPROVAL_TOKEN", _TEST_APPROVAL_TOKEN)
     yield
 
 

@@ -147,7 +147,7 @@ def _parse_calendar_reminder(text: str):
     """Parse natural 'remind me to X at Y' / 'remind me at Y to X' / 'schedule X at Y' into (title, dt) or None.
 
     Returns (event_title: str, start_dt: datetime) or None if not parseable.
-    Only handles same-day HH:MM AM/PM patterns — complex scheduling falls to orchestrator.
+    Handles same-day and tomorrow HH:MM AM/PM patterns — complex scheduling falls to orchestrator.
     """
     import datetime
 
@@ -170,39 +170,43 @@ def _parse_calendar_reminder(text: str):
         # Ambiguous — assume PM for afternoon sanity (e.g., "at 3" → 3 PM)
         hour += 12
 
+    # Detect explicit "tomorrow" offset
+    force_tomorrow = bool(re.search(r"\btomorrow\b", text, re.IGNORECASE))
+
+    def _make_dt(h: int, m: int, force_next_day: bool) -> datetime.datetime:
+        now = datetime.datetime.now()
+        candidate = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if force_next_day:
+            return candidate + datetime.timedelta(days=1)
+        if candidate <= now:
+            candidate += datetime.timedelta(days=1)
+        return candidate
+
     # "remind me at TIME to TITLE" — time comes before the task
     time_first_match = re.search(
-        r"remind\s+me\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+to\s+(.+)",
+        r"remind\s+me\s+(?:tomorrow\s+)?at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+to\s+(.+)",
         text, re.IGNORECASE,
     )
     if time_first_match:
         title = time_first_match.group(1).strip().strip(".,;")
         if title and len(title) >= 3:
-            now = datetime.datetime.now()
-            start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if start_dt <= now:
-                start_dt += datetime.timedelta(days=1)
-            return title, start_dt
+            return title, _make_dt(hour, minute, force_tomorrow)
 
-    # "set a reminder at 3pm for the dentist" — time-first + for-phrase
+    # "set a reminder for tomorrow at TIME to TASK" / "set a reminder at TIME for TASK"
     set_reminder_match = re.search(
-        r"set\s+(?:a\s+)?reminder\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+for\s+(.+)",
+        r"set\s+(?:a\s+)?reminder\s+(?:for\s+(?:tomorrow\s+)?)?at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+(?:for|to)\s+(.+)",
         text, re.IGNORECASE,
     )
     if set_reminder_match:
         title = set_reminder_match.group(1).strip().strip(".,;")
         if title and len(title) >= 2:
-            now = datetime.datetime.now()
-            start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if start_dt <= now:
-                start_dt += datetime.timedelta(days=1)
-            return title, start_dt
+            return title, _make_dt(hour, minute, force_tomorrow)
 
-    # "remind me to TITLE at TIME" and other verb-first patterns
+    # "remind me to TITLE at TIME" / "remind me tomorrow at TIME to TITLE" and other verb-first patterns
     title_match = re.search(
-        r"(?:remind\s+me\s+to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment|reminder)\s+(?:for|with|to)?|"
+        r"(?:remind\s+me\s+(?:tomorrow\s+)?to|schedule|add\s+(?:a\s+)?(?:meeting|event|appointment|reminder)\s+(?:for|with|to)?|"
         r"create\s+(?:a\s+)?(?:meeting|event|calendar\s+event)\s+(?:for|with)?|"
-        r"book\s+(?:a\s+)?(?:meeting|call|slot)\s+(?:for|with)?)\s+(.+?)\s+at\s+\d",
+        r"book\s+(?:a\s+)?(?:meeting|call|slot)\s+(?:for|with)?)\s+(.+?)\s+(?:tomorrow\s+)?at\s+\d",
         text, re.IGNORECASE,
     )
     if not title_match:
@@ -212,13 +216,7 @@ def _parse_calendar_reminder(text: str):
     if not title or len(title) < 3:
         return None
 
-    now = datetime.datetime.now()
-    start_dt = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    # If the time has already passed today, schedule for tomorrow
-    if start_dt <= now:
-        start_dt += datetime.timedelta(days=1)
-
-    return title, start_dt
+    return title, _make_dt(hour, minute, force_tomorrow)
 
 
 def _schedule_osascript_alarm(title: str, dt) -> str:
@@ -1330,7 +1328,9 @@ def _is_email_digest_query(lower: str) -> bool:
         r"\b(?:emails?|mail|inbox)\b.{0,40}\b(?:about|summary|digest|overview|gist|tldr|tl;dr|today)\b"
         r"|\b(?:what(?:'s| is| are)?)\b.{0,20}\b(?:emails?|mail|inbox)\b.{0,30}\b(?:about|say|contain|today)\b"
         r"|\bemail\s+(?:digest|summary|overview|recap)\b"
-        r"|\bwhat(?:'s| is)\s+in\s+my\s+(?:email|inbox|mail)\b",
+        r"|\bwhat(?:'s| is)\s+in\s+my\s+(?:email|inbox|mail)\b"
+        r"|\bany\s+(?:important|urgent|new|unread)?\s*emails?\b"
+        r"|\bsummariz[e]?\s+(?:my\s+)?(?:inbox|emails?|mail)\b",
         lower,
         re.IGNORECASE,
     ))
@@ -2709,7 +2709,8 @@ def route_stream(user_input: str) -> tuple:
     contact_details_query = _parse_contact_details_query(user_input)
     last_response_recipient = _parse_send_last_response_request(user_input)
     recipient_only = ""
-    if not composed_message and any(term in lower for term in ("send", "message", "text")):
+    has_message_verb = bool(re.search(r"\b(?:send|message|text)\b", lower))
+    if not composed_message and has_message_verb:
         recipient_only = _parse_message_recipient_only(user_input)
 
     # ── 0. Pending email state ────────────────────────────────────────────────
@@ -2852,10 +2853,30 @@ def route_stream(user_input: str) -> tuple:
     # ── Email digest fast-path: "what are my emails about today?" ────────────
     if _is_email_digest_query(lower) and not composed_email and not email_recipient_only:
         try:
-            _emails = gs.get_unread_email_subjects(max_results=15)
-            return _s(_build_email_digest(_emails)), "Gmail"
+            _emails = gs.get_unread_email_subjects(max_results=10)
         except Exception:
-            return _s("I couldn't fetch your email digest right now."), "Gmail"
+            return _s("No email access available."), "Email Digest"
+        if not _emails:
+            return _s("Your inbox is clear — no unread emails."), "Email Digest"
+        _email_lines = "\n".join(
+            f"From {e['sender']}: {e['subject']}. {e.get('snippet', '')}"
+            for e in _emails[:10]
+        )
+        _digest_prompt = (
+            f"Unread emails ({len(_emails)}):\n{_email_lines}"
+        )
+        _DIGEST_SYSTEM = (
+            "You are Jarvis. Summarize these unread emails in 3 bullet points. "
+            "Be concise and actionable. Focus on what needs a response."
+        )
+        def _digest_stream(prompt=_digest_prompt, system=_DIGEST_SYSTEM, fallback_emails=_emails):
+            try:
+                from brains.brain_ollama import ask_local_stream
+                for chunk in ask_local_stream(prompt, system_extra=system):
+                    yield chunk
+            except Exception:
+                yield _build_email_digest(fallback_emails)
+        return _digest_stream(), "Email Digest"
 
     # ── Email reply fast-path: "reply to that email from X" ──────────────────
     if _is_email_reply_query(lower) and not composed_email and not email_recipient_only:
@@ -3431,7 +3452,7 @@ def route_stream(user_input: str) -> tuple:
         _set_pending_message_draft(recipient, body, resolved_address=resolved)
         return _s(_message_confirmation_prompt(recipient, body)), "Messages"
 
-    if recipient_only and any(term in lower for term in ("send", "message", "text")):
+    if recipient_only and has_message_verb:
         _set_pending_recipient(recipient_only)
         return _s(f"What would you like to say to {recipient_only}?"), "Messages"
 

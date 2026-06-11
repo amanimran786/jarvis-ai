@@ -7,7 +7,13 @@ replace sys.modules["config"] with a MagicMock.  This ensures that
 module-level constants (e.g. APPLE_FOUNDATION_BASE_URL) are bound to real
 values and not to MagicMock objects.
 """
+import os
 import sys
+
+# Unit tests must never make real verifier LLM calls. Background task threads
+# run _auto_verify after _complete_task; without this, tests with a mocked
+# smart_stream still leak real GPT_MINI calls (and pollute the verdict log).
+os.environ.setdefault("JARVIS_AUTO_VERIFY", "0")
 
 _EARLY_IMPORTS = [
     "brains.brain_apple_foundation",

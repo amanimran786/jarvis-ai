@@ -12,7 +12,7 @@ Covers:
 Notes on implementation:
   - There is no agents/researcher.py — only researcher.md and ux_researcher.py.
     task_runtime routes kind="research" to the "researcher" agent-id but processes
-    it through route_stream (not a separate process_task module).
+    it through smart_stream (not a separate process_task module).
   - agent_dispatch.dispatch() routes to Ollama (ask_local_with_tools), not to
     agents/*.process_task(); the two dispatch paths are separate.
   - task_runtime must be imported at module level (before any PyQt6 sub-module
@@ -47,7 +47,7 @@ def test_submit_task_queues_and_dispatches_to_backend_engineer():
     # Arrange
     task_runtime.reset_for_tests()
 
-    with patch("task_runtime.route_stream", return_value=(iter(["done"]), "MockModel")), \
+    with patch("task_runtime.smart_stream", return_value=(iter(["done"]), "MockModel")), \
          patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=_fake_workspace()):
         # Act
         task = task_runtime.submit_task(
@@ -69,7 +69,7 @@ def test_submit_task_queues_and_dispatches_to_researcher():
     # Arrange
     task_runtime.reset_for_tests()
 
-    with patch("task_runtime.route_stream", return_value=(iter(["research result"]), "MockModel")), \
+    with patch("task_runtime.smart_stream", return_value=(iter(["research result"]), "MockModel")), \
          patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=_fake_workspace()):
         # Act
         task = task_runtime.submit_task(
@@ -92,7 +92,7 @@ def test_task_requiring_approval_stays_in_waiting_approval():
     # Arrange
     task_runtime.reset_for_tests()
 
-    with patch("task_runtime.route_stream") as mock_route, \
+    with patch("task_runtime.smart_stream") as mock_route, \
          patch("task_runtime.worktree_manager.prepare_isolated_workspace", return_value=_fake_workspace()):
         # Act
         task = task_runtime.submit_task("git push origin main", kind="code")
@@ -118,7 +118,7 @@ def test_approve_task_then_dispatches():
     assert task_runtime.get_task(task["id"])["status"] == "waiting_approval"
 
     # Act
-    with patch("task_runtime.route_stream", return_value=(iter(["deployed"]), "MockModel")):
+    with patch("task_runtime.smart_stream", return_value=(iter(["deployed"]), "MockModel")):
         task_runtime.approve_task(task["id"])
         result = task_runtime.wait_for_task(task["id"], timeout=5.0)
 

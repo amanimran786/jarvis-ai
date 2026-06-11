@@ -311,10 +311,62 @@ async def health():
     return {"status": "ok", "scheduler": scheduler._running if scheduler else False}
 
 
+_RISKY_KEYWORDS: frozenset[str] = frozenset({
+    "shell", "deploy", "push", "delete", "drop", "rm", "exec",
+})
+
+
+def _inline_threat_screen(req: TaskRequest) -> str | None:
+    """
+    Lightweight inline security screen for incoming task payloads.
+
+    First tries the full threat screen from infra.threat_screen. Falls back to
+    a keyword check for tasks from external/webhook sources.
+
+    Returns a block reason string if the task should be held, None if it passes.
+    """
+    payload_text = f"{req.title}\n{req.description}"
+    try:
+        from infra.threat_screen import screen_payload
+        result = screen_payload(payload_text)
+        if result.blocked:
+            reasons = "; ".join(f["description"] for f in result.findings[:3])
+            return reasons or "threat screen blocked"
+    except ImportError:
+        pass
+
+    # Fallback: reject external/webhook tasks that contain risky keywords
+    source = (req.context.get("source") or "").lower()
+    if source in {"webhook", "external"}:
+        lower = payload_text.lower()
+        for kw in _RISKY_KEYWORDS:
+            if kw in lower:
+                return f"risky keyword '{kw}' in external task payload"
+
+    return None
+
+
 @app.post("/tasks", status_code=202)
 async def create_task(req: TaskRequest):
-    """Human or Jarvis Manager submits a task. Scheduler routes it to the right agent."""
+    """
+    Human or Jarvis Manager submits a task. Scheduler routes it to the right agent.
+
+    All tasks are screened by the threat layer before queuing. Tasks that fail
+    the screen are held for human approval instead of being dispatched immediately.
+    """
     import json
+    block_reason = _inline_threat_screen(req)
+    if block_reason:
+        log.warning("POST /tasks blocked by threat screen: %s", block_reason)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "queued": False,
+                "status": "waiting_approval",
+                "reason": block_reason,
+            },
+        )
+
     r = await get_redis()
     task_id = str(uuid.uuid4())
     msg_id = await r.xadd(STREAM_TASKS, {
@@ -376,14 +428,43 @@ async def get_approval(stream_id: str):
     return {"stream_id": mid, **fields}
 
 
+def _approval_token_authorized(request: Request) -> bool:
+    """
+    Bearer token check for approval endpoints.
+
+    Reads JARVIS_EVENT_BUS_APPROVAL_TOKEN from the environment. Fails closed:
+    if the env var is not set, ALL approval requests are rejected. This prevents
+    unauthenticated callers from approving or dismissing tasks even on an
+    internal port.
+    """
+    expected = os.getenv("JARVIS_EVENT_BUS_APPROVAL_TOKEN", "").strip()
+    if not expected:
+        log.warning(
+            "JARVIS_EVENT_BUS_APPROVAL_TOKEN is not set — all approval requests rejected. "
+            "Set this env var to enable the approval endpoints."
+        )
+        return False
+    bearer = request.headers.get("Authorization", "")
+    if bearer.lower().startswith("bearer "):
+        supplied = bearer[7:].strip()
+    else:
+        supplied = request.headers.get("X-Jarvis-Token", "").strip()
+    return bool(supplied) and supplied == expected
+
+
 @app.post("/approvals/{stream_id}")
-async def decide_approval(stream_id: str, body: ApprovalDecision):
+async def decide_approval(stream_id: str, body: ApprovalDecision, request: Request):
     """
     Human approves or rejects a pending task.
+
+    Requires a valid Bearer token (JARVIS_EVENT_BUS_APPROVAL_TOKEN). Fails
+    closed: if the token env var is unset, all requests are rejected.
 
     - approve: ACKs the approval item and publishes task.approved to STREAM_TASKS.
     - reject:  ACKs the approval item and publishes task.rejected to STREAM_TASKS.
     """
+    if not _approval_token_authorized(request):
+        raise HTTPException(status_code=401, detail="approval endpoint requires authentication")
     r = await get_redis()
 
     # Look up the pending item so we can carry the task_id forward
@@ -407,8 +488,14 @@ async def decide_approval(stream_id: str, body: ApprovalDecision):
 
 
 @app.delete("/approvals/{stream_id}")
-async def dismiss_approval(stream_id: str):
-    """ACK without a decision — removes from pending queue without status update."""
+async def dismiss_approval(stream_id: str, request: Request):
+    """
+    ACK without a decision — removes from pending queue without status update.
+
+    Requires the same bearer token as POST /approvals/{stream_id}.
+    """
+    if not _approval_token_authorized(request):
+        raise HTTPException(status_code=401, detail="approval endpoint requires authentication")
     r = await get_redis()
     await r.xack(STREAM_APPROVALS, "human", stream_id)
     return {"status": "dismissed"}

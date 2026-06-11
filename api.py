@@ -436,6 +436,9 @@ class TaskRequest(BaseModel):
     kind: str = "task"
     source: str = "api"
     assigned_agent_id: str = ""
+    # Alias — callers keep sending agent_id; silently ignoring it made tasks
+    # run unverified as jarvis-manager.
+    agent_id: str = ""
     terse_mode: str = ""
     isolated_workspace: bool | None = None
     meta: dict | None = None
@@ -1049,7 +1052,16 @@ async def approve_lesson(agent_id: str, request: Request):
         and not l.startswith("# Proposed:")
         and not l.startswith("# Failure")
     ]
-    active_content = "\n".join(body_lines).strip() + "\n"
+    new_lesson = "\n".join(body_lines).strip()
+    existing = active.read_text(encoding="utf-8").strip() if active.exists() else ""
+    if new_lesson and new_lesson in existing:
+        pending.unlink()
+        return {"ok": True, "activated": str(active), "duplicate": True}
+    from datetime import datetime, timezone
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    entry = f"- [{stamp}] {new_lesson}" if "\n" not in new_lesson else f"## {stamp}\n{new_lesson}"
+    # Approved lessons accumulate; earlier lessons are never clobbered.
+    active_content = (existing + "\n\n" + entry + "\n") if existing else (entry + "\n")
     active.write_text(active_content, encoding="utf-8")
     pending.unlink()
     return {"ok": True, "activated": str(active)}
@@ -2655,13 +2667,49 @@ def list_tasks(limit: int = 25, status: str = ""):
     return {"ok": True, "tasks": task_runtime.list_tasks(limit=limit, status=status)}
 
 
+def _get_agent_stats_data() -> dict:
+    """Aggregate task outcomes by assigned agent for the Agent Ops stats view."""
+    tasks = task_runtime.list_tasks(limit=10000)
+    buckets: dict[str, dict] = {}
+    success_statuses = {"succeeded", "completed"}
+    for task in tasks:
+        agent_id = str(task.get("assigned_agent_id") or "unassigned")
+        bucket = buckets.setdefault(
+            agent_id,
+            {"agent_id": agent_id, "task_count": 0, "success_count": 0, "last_active": None},
+        )
+        bucket["task_count"] += 1
+        if task.get("status") in success_statuses:
+            bucket["success_count"] += 1
+        timestamp = task.get("updated_at") or task.get("finished_at") or task.get("created_at") or None
+        if timestamp and (bucket["last_active"] is None or timestamp > bucket["last_active"]):
+            bucket["last_active"] = timestamp
+
+    agents = []
+    for bucket in buckets.values():
+        count = int(bucket["task_count"])
+        agents.append({
+            "agent_id": bucket["agent_id"],
+            "task_count": count,
+            "success_rate": float(bucket["success_count"] / count) if count else 0.0,
+            "last_active": bucket["last_active"],
+        })
+    agents.sort(key=lambda item: (-item["task_count"], item["agent_id"]))
+    return {"agents": agents, "total": len(agents)}
+
+
+@app.get("/stats/agents")
+def stats_agents():
+    return _get_agent_stats_data()
+
+
 @app.post("/tasks")
 def create_task(req: TaskRequest):
     task = task_runtime.submit_task(
         req.prompt,
         kind=req.kind,
         source=req.source,
-        assigned_agent_id=req.assigned_agent_id,
+        assigned_agent_id=req.assigned_agent_id or req.agent_id,
         terse_mode=req.terse_mode,
         isolated_workspace=req.isolated_workspace,
         meta=req.meta,
@@ -4384,15 +4432,15 @@ async def agent_dashboard(request: Request):
   .btn-run:hover{{background:#2a2a5a}}
   .btn-sm{{padding:5px 12px;font-size:.8em}}
   .tabs{{display:flex;gap:4px;padding:12px 24px;border-bottom:1px solid #1a1a3a;overflow-x:auto}}
-  .tab{{padding:8px 18px;border-radius:8px;font-size:.88em;cursor:pointer;color:#888;border:1px solid transparent;white-space:nowrap}}
+  .tab{{padding:8px 18px;border-radius:8px;font-size:.88em;cursor:pointer;color:#a0a0b8;border:1px solid transparent;white-space:nowrap}}
   .tab.active{{color:#7ec8e3;background:#111128;border-color:#2a2a5a}}
-  .tab:hover:not(.active){{color:#aaa}}
+  .tab:hover:not(.active){{color:#c8c8da}}
   .pane{{display:none;padding:20px 24px}}
   .pane.active{{display:block}}
   .stat-row{{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
   .stat{{flex:1;min-width:140px;background:#111120;border:1px solid #1a1a3a;border-radius:10px;padding:16px;text-align:center}}
   .stat-num{{font-size:2em;font-weight:700;color:#7ec8e3}}
-  .stat-lbl{{font-size:.78em;color:#777;margin-top:4px}}
+  .stat-lbl{{font-size:.78em;color:#9a9ab0;margin-top:4px}}
   .card{{background:#111120;border:1px solid #1a1a3a;border-radius:10px;margin-bottom:12px;overflow:hidden}}
   .card-head{{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #1a1a3a;gap:8px;flex-wrap:wrap}}
   .card-body{{padding:12px 16px;font-size:.85em;color:#aaa;white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto}}
@@ -4410,13 +4458,13 @@ async def agent_dashboard(request: Request):
   .form-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
   .form-group{{display:flex;flex-direction:column;gap:6px}}
   .form-group.full{{grid-column:1/-1}}
-  label{{font-size:.82em;color:#888}}
+  label{{font-size:.82em;color:#a8a8c0}}
   select,textarea,input[type=text]{{background:#0a0a0f;border:1px solid #2a2a4a;border-radius:8px;color:#d0d0e0;padding:8px 10px;font-size:.88em;resize:vertical}}
   select{{cursor:pointer}}
   textarea{{min-height:100px;font-family:inherit}}
   .result-area{{background:#0a0a0f;border:1px solid #1a1a3a;border-radius:8px;padding:12px;font-size:.82em;color:#aaa;min-height:60px;max-height:300px;overflow-y:auto;white-space:pre-wrap;margin-top:12px}}
   #agent-stream{{white-space:pre-wrap;word-break:break-word}}
-  .empty{{text-align:center;color:#555;padding:32px;font-size:.9em}}
+  .empty{{text-align:center;color:#8888a4;padding:32px;font-size:.9em}}
   .dot{{width:8px;height:8px;border-radius:50%;display:inline-block;animation:pulse 1.5s ease-in-out infinite}}
   .dot-green{{background:#28c76f}}
   .dot-yellow{{background:#ffd700}}
@@ -4464,6 +4512,56 @@ async def agent_dashboard(request: Request):
   @keyframes seatpulse{{0%,100%{{box-shadow:0 0 0 0 rgba(126,200,227,.25)}}50%{{box-shadow:0 0 0 10px rgba(126,200,227,0)}}}}
   @media(max-width:720px){{.floor-plan{{grid-template-columns:1fr 1fr}}}}
   @media(max-width:460px){{.floor-plan{{grid-template-columns:1fr}}}}
+  /* ---- Accessibility base ---- */
+  :focus-visible{{outline:2px solid #7ec8e3;outline-offset:2px;border-radius:4px}}
+  .sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
+  @media(prefers-reduced-motion:reduce){{*,*::before,*::after{{animation:none!important;transition:none!important}}}}
+  button.tab{{background:none;font-family:inherit}}
+  /* ---- Live activity ticker ---- */
+  .ticker{{font-size:.75em;color:#9a9ab8;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+  /* ---- Pipeline board ---- */
+  .pipe-board{{display:grid;grid-template-columns:repeat(5,minmax(170px,1fr));gap:10px;align-items:start}}
+  @media(max-width:1100px){{.pipe-board{{grid-template-columns:repeat(3,1fr)}}}}
+  @media(max-width:640px){{.pipe-board{{grid-template-columns:1fr}}}}
+  .pipe-col{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:10px;padding:10px;min-height:130px}}
+  .pipe-col-hdr{{font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin-bottom:8px;font-weight:600;display:flex;justify-content:space-between;align-items:center}}
+  .pipe-count{{background:#1a1a3a;border-radius:10px;padding:1px 8px;color:#bcbcd8;font-size:.95em}}
+  .pipe-card{{display:block;width:100%;text-align:left;background:#111122;border:1px solid #22224a;border-radius:8px;padding:9px 10px;margin-bottom:8px;cursor:pointer;color:#c8c8dc;font-size:.8em;font-family:inherit;transition:border-color .15s}}
+  .pipe-card:hover{{border-color:#3a3a7a;background:#15152c}}
+  .pipe-card .pc-agent{{font-size:.82em;color:#bb99ff;font-weight:600}}
+  .pipe-card .pc-prompt{{display:block;margin-top:4px;color:#a8a8c0;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}}
+  .pipe-card .pc-time{{display:block;margin-top:5px;font-size:.85em;color:#77779a}}
+  .col-queued{{border-top:3px solid #5a5a9a}}
+  .col-wait{{border-top:3px solid #ffd700}}
+  .col-run{{border-top:3px solid #7ec8e3}}
+  .col-done{{border-top:3px solid #28c76f}}
+  .col-fail{{border-top:3px solid #ea5455}}
+  .feed{{margin-top:18px;background:#0d0d18;border:1px solid #1a1a3a;border-radius:10px;padding:12px 14px}}
+  .feed-item{{font-size:.78em;color:#a0a0bc;padding:4px 0;border-bottom:1px solid #14142a;display:flex;gap:8px;align-items:baseline}}
+  .feed-item:last-child{{border-bottom:none}}
+  .feed-ts{{color:#70708e;font-size:.9em;white-space:nowrap}}
+  /* ---- Task drawer ---- */
+  .drawer{{position:fixed;top:0;right:0;height:100vh;width:min(580px,95vw);background:#0f0f1d;border-left:1px solid #2a2a4a;z-index:350;display:none;flex-direction:column;box-shadow:-12px 0 40px rgba(0,0,0,.6)}}
+  .drawer.open{{display:flex}}
+  .drawer-head{{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1a1a3a;flex-wrap:wrap}}
+  .drawer-body{{flex:1;overflow-y:auto;padding:14px 18px}}
+  .drawer-foot{{padding:12px 18px;border-top:1px solid #1a1a3a;display:flex;gap:8px;flex-wrap:wrap}}
+  .timeline{{list-style:none;margin:10px 0 0;padding:0;position:relative}}
+  .timeline::before{{content:'';position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:#1f1f40}}
+  .tl-item{{position:relative;padding:0 0 14px 22px;font-size:.8em;color:#a8a8c0}}
+  .tl-item:last-child{{padding-bottom:2px}}
+  .tl-dot{{position:absolute;left:0;top:4px;width:12px;height:12px;border-radius:50%;border:2px solid #0f0f1d}}
+  .tl-status{{background:#7ec8e3}} .tl-error{{background:#ea5455}} .tl-chunk{{background:#5a5a9a}} .tl-ws{{background:#28c76f}}
+  .tl-ts{{color:#70708e;font-size:.88em;margin-left:6px}}
+  /* ---- Command palette ---- */
+  .palette{{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-start;justify-content:center;z-index:500;padding-top:12vh}}
+  .palette.open{{display:flex}}
+  .palette-box{{background:#13131f;border:1px solid #3a3a6a;border-radius:12px;width:min(540px,92vw);overflow:hidden;box-shadow:0 16px 60px rgba(0,0,0,.7)}}
+  .palette-box input{{width:100%;padding:14px 16px;background:#0d0d18;border:none;border-bottom:1px solid #1f1f40;color:#e0e0f0;font-size:1em}}
+  .palette-list{{max-height:320px;overflow-y:auto;margin:0;padding:6px;list-style:none}}
+  .palette-item{{padding:9px 12px;border-radius:7px;font-size:.88em;color:#b8b8d0;cursor:pointer;display:flex;justify-content:space-between;gap:10px}}
+  .palette-item[aria-selected="true"],.palette-item:hover{{background:#1c1c3a;color:#e8e8f8}}
+  .palette-hint{{color:#70708e;font-size:.85em}}
   /* ---- Help modal ---- */
   .help-modal{{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:300}}
   .help-modal.open{{display:flex}}
@@ -4492,7 +4590,9 @@ async def agent_dashboard(request: Request):
 <div class="topbar">
   <h1>⚡ Jarvis Agent Operations</h1>
   <div style="display:flex;align-items:center;gap:10px">
-    <span id="refresh-lbl" style="font-size:.75em;color:#555">auto-refresh 5s</span>
+    <span id="live-ticker" class="ticker" role="status" aria-live="polite"></span>
+    <button class="btn btn-run btn-sm" onclick="openPalette()" title="Command palette (Cmd+K)" aria-label="Open command palette" style="padding:4px 10px;font-size:.75em">⌘K</button>
+    <span id="refresh-lbl" style="font-size:.75em;color:#8888a4">auto-refresh 5s</span>
     <span id="pipeline-health-badge" class="badge" style="background:#0d1a2a;color:#7ec8e3;border:1px solid #1a3a5a;cursor:pointer;font-size:.72em"
           onclick="checkPipelineHealth()" title="Click to run pipeline health check">
       🔍 Pipeline Monitor
@@ -4502,20 +4602,43 @@ async def agent_dashboard(request: Request):
   </div>
 </div>
 
-<div class="tabs">
-  <div class="tab active" onclick="switchTab('queue')">⏳ Approval Queue <span id="queue-count" style="color:#ffd700"></span></div>
-  <div class="tab" onclick="switchTab('active')">▶ Active <span id="active-count" style="color:#7ec8e3"></span></div>
-  <div class="tab" onclick="switchTab('history')">📋 History</div>
-  <div class="tab" onclick="switchTab('assign')">＋ Assign Work</div>
-  <div class="tab" onclick="switchTab('agents')">🤖 Agents</div>
-  <div class="tab" onclick="switchTab('project')">🚀 Project</div>
-  <div class="tab" onclick="switchTab('evallog')">📊 Eval Log</div>
-  <div class="tab" onclick="switchTab('lessons')">🧠 Lessons <span id="lessons-count" style="color:#c084fc"></span></div>
-  <div class="tab" onclick="switchTab('routines')">⏰ Routines <span id="routines-count" style="color:#34d399"></span></div>
+<div class="tabs" role="tablist" aria-label="Dashboard sections">
+  <button class="tab active" role="tab" id="tab-pipeline" aria-controls="pane-pipeline" aria-selected="true" data-tab="pipeline" onclick="switchTab('pipeline')">🛰 Pipeline <span id="pipeline-count" style="color:#7ec8e3"></span></button>
+  <button class="tab" role="tab" id="tab-queue" aria-controls="pane-queue" aria-selected="false" data-tab="queue" tabindex="-1" onclick="switchTab('queue')">⏳ Approval Queue <span id="queue-count" style="color:#ffd700"></span></button>
+  <button class="tab" role="tab" id="tab-active" aria-controls="pane-active" aria-selected="false" data-tab="active" tabindex="-1" onclick="switchTab('active')">▶ Active <span id="active-count" style="color:#7ec8e3"></span></button>
+  <button class="tab" role="tab" id="tab-history" aria-controls="pane-history" aria-selected="false" data-tab="history" tabindex="-1" onclick="switchTab('history')">📋 History</button>
+  <button class="tab" role="tab" id="tab-assign" aria-controls="pane-assign" aria-selected="false" data-tab="assign" tabindex="-1" onclick="switchTab('assign')">＋ Assign Work</button>
+  <button class="tab" role="tab" id="tab-agents" aria-controls="pane-agents" aria-selected="false" data-tab="agents" tabindex="-1" onclick="switchTab('agents')">🤖 Agents</button>
+  <button class="tab" role="tab" id="tab-project" aria-controls="pane-project" aria-selected="false" data-tab="project" tabindex="-1" onclick="switchTab('project')">🚀 Project</button>
+  <button class="tab" role="tab" id="tab-evallog" aria-controls="pane-evallog" aria-selected="false" data-tab="evallog" tabindex="-1" onclick="switchTab('evallog')">📊 Eval Log</button>
+  <button class="tab" role="tab" id="tab-lessons" aria-controls="pane-lessons" aria-selected="false" data-tab="lessons" tabindex="-1" onclick="switchTab('lessons')">🧠 Lessons <span id="lessons-count" style="color:#c084fc"></span></button>
+  <button class="tab" role="tab" id="tab-routines" aria-controls="pane-routines" aria-selected="false" data-tab="routines" tabindex="-1" onclick="switchTab('routines')">⏰ Routines <span id="routines-count" style="color:#34d399"></span></button>
+</div>
+
+<!-- Pipeline board -->
+<div class="pane active" id="pane-pipeline" role="tabpanel" aria-labelledby="tab-pipeline">
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="pp-queued">—</div><div class="stat-lbl">Queued</div></div>
+    <div class="stat"><div class="stat-num" id="pp-wait">—</div><div class="stat-lbl">Awaiting Approval</div></div>
+    <div class="stat"><div class="stat-num" id="pp-run">—</div><div class="stat-lbl">Running</div></div>
+    <div class="stat"><div class="stat-num" id="pp-done">—</div><div class="stat-lbl">Succeeded</div></div>
+    <div class="stat"><div class="stat-num" id="pp-fail">—</div><div class="stat-lbl">Failed / Stopped</div></div>
+  </div>
+  <div class="pipe-board" id="pipe-board" aria-label="Task pipeline board">
+    <div class="pipe-col col-queued"><div class="pipe-col-hdr">Queued <span class="pipe-count" id="pc-queued">0</span></div><div id="col-queued"></div></div>
+    <div class="pipe-col col-wait"><div class="pipe-col-hdr">Awaiting Approval <span class="pipe-count" id="pc-wait">0</span></div><div id="col-wait"></div></div>
+    <div class="pipe-col col-run"><div class="pipe-col-hdr">Running <span class="pipe-count" id="pc-run">0</span></div><div id="col-run"></div></div>
+    <div class="pipe-col col-done"><div class="pipe-col-hdr">Succeeded <span class="pipe-count" id="pc-done">0</span></div><div id="col-done"></div></div>
+    <div class="pipe-col col-fail"><div class="pipe-col-hdr">Failed / Stopped <span class="pipe-count" id="pc-fail">0</span></div><div id="col-fail"></div></div>
+  </div>
+  <div class="feed">
+    <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin-bottom:8px;font-weight:600">Live Activity</div>
+    <div id="activity-feed" aria-live="off"><div class="empty" style="padding:12px">No activity yet — task status changes will appear here.</div></div>
+  </div>
 </div>
 
 <!-- Queue -->
-<div class="pane active" id="pane-queue">
+<div class="pane" id="pane-queue" role="tabpanel" aria-labelledby="tab-queue">
   <div class="stat-row">
     <div class="stat"><div class="stat-num" id="st-pending">—</div><div class="stat-lbl">Awaiting Approval</div></div>
     <div class="stat"><div class="stat-num" id="st-running">—</div><div class="stat-lbl">Active Tasks</div></div>
@@ -4525,12 +4648,12 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Active -->
-<div class="pane" id="pane-active">
+<div class="pane" id="pane-active" role="tabpanel" aria-labelledby="tab-active">
   <div id="active-list"><div class="empty">Loading…</div></div>
 </div>
 
 <!-- History -->
-<div class="pane" id="pane-history">
+<div class="pane" id="pane-history" role="tabpanel" aria-labelledby="tab-history">
   <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
     <button class="btn btn-deny btn-sm" onclick="clearHistory()" style="font-size:.8em">🗑 Clear History</button>
   </div>
@@ -4543,7 +4666,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Assign -->
-<div class="pane" id="pane-assign">
+<div class="pane" id="pane-assign" role="tabpanel" aria-labelledby="tab-assign">
   <div class="card">
     <div class="card-head"><strong>Assign Work to Agent</strong></div>
     <div style="padding:16px">
@@ -4597,7 +4720,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Agents — Virtual Office Floor -->
-<div class="pane" id="pane-agents">
+<div class="pane" id="pane-agents" role="tabpanel" aria-labelledby="tab-agents">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
     <span style="font-size:.75em;color:#555">Click a character to view agent details.</span>
     <button onclick="startMeeting()" style="background:#1a2a1a;border:1px solid #2a4a2a;color:#5a9a5a;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:600;letter-spacing:.05em">🪑 Meeting Room</button>
@@ -4615,7 +4738,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Project -->
-<div class="pane" id="pane-project">
+<div class="pane" id="pane-project" role="tabpanel" aria-labelledby="tab-project">
   <!-- Step 1: Goal input -->
   <div class="card" id="proj-card-goal">
     <div class="card-head"><strong>🚀 Project Orchestration</strong><span style="font-size:.75em;color:#555;margin-left:8px">Plan → Review → Execute</span></div>
@@ -4655,7 +4778,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Eval Log -->
-<div class="pane" id="pane-evallog">
+<div class="pane" id="pane-evallog" role="tabpanel" aria-labelledby="tab-evallog">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <strong style="font-size:.9em">AI Evaluation History</strong>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -4702,7 +4825,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Lessons -->
-<div class="pane" id="pane-lessons">
+<div class="pane" id="pane-lessons" role="tabpanel" aria-labelledby="tab-lessons">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <strong style="font-size:.9em">Agent Lessons (Pending Approval)</strong>
     <button class="btn btn-run btn-sm" onclick="loadPendingLessons()">Refresh</button>
@@ -4711,7 +4834,7 @@ async def agent_dashboard(request: Request):
 </div>
 
 <!-- Routines -->
-<div class="pane" id="pane-routines">
+<div class="pane" id="pane-routines" role="tabpanel" aria-labelledby="tab-routines">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
     <strong style="font-size:.9em">Scheduled Routines</strong>
     <button class="btn btn-approve btn-sm" onclick="showRoutineForm()">+ New Routine</button>
@@ -4758,7 +4881,7 @@ async def agent_dashboard(request: Request):
 
 <script>
   let token = {token_js};
-  let currentTab = 'queue';
+  let currentTab = 'pipeline';
   let refreshTimer = null;
 
   const AGENT_DESCRIPTIONS = {{
@@ -4801,9 +4924,11 @@ async def agent_dashboard(request: Request):
 
   function switchTab(name) {{
     currentTab = name;
-    document.querySelectorAll('.tab').forEach((t, i) => {{
-      const names = ['queue','active','history','assign','agents','project','evallog','lessons','routines'];
-      t.classList.toggle('active', names[i] === name);
+    document.querySelectorAll('[role="tab"]').forEach(t => {{
+      const sel = t.dataset.tab === name;
+      t.classList.toggle('active', sel);
+      t.setAttribute('aria-selected', sel ? 'true' : 'false');
+      t.setAttribute('tabindex', sel ? '0' : '-1');
     }});
     document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
     document.getElementById('pane-' + name).classList.add('active');
@@ -4811,6 +4936,26 @@ async def agent_dashboard(request: Request):
     if (name === 'lessons') loadPendingLessons();
     if (name === 'routines') loadRoutines();
     if (name !== 'project' && name !== 'lessons' && name !== 'routines') refresh();
+  }}
+
+  // Arrow-key navigation within the tablist (WAI-ARIA tabs pattern)
+  function _initTablistKeys() {{
+    const list = document.querySelector('[role="tablist"]');
+    if (!list) return;
+    list.addEventListener('keydown', (e) => {{
+      const tabs = [...list.querySelectorAll('[role="tab"]')];
+      const idx = tabs.indexOf(document.activeElement);
+      if (idx < 0) return;
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      if (next < 0) return;
+      e.preventDefault();
+      tabs[next].focus();
+      switchTab(tabs[next].dataset.tab);
+    }});
   }}
 
   function fmtTime(ts) {{
@@ -4848,7 +4993,11 @@ async def agent_dashboard(request: Request):
       document.getElementById('st-done').textContent = done.length;
       document.getElementById('queue-count').textContent = pending.length ? `(${{pending.length}})` : '';
       document.getElementById('active-count').textContent = running.length ? `(${{running.length}})` : '';
+      const inflight = tasks.filter(t => ['queued','assigned','running','streaming','waiting_approval'].includes(t.status)).length;
+      document.getElementById('pipeline-count').textContent = inflight ? `(${{inflight}})` : '';
 
+      _recordActivity(tasks);
+      if (currentTab === 'pipeline') renderPipeline(tasks);
       if (currentTab === 'queue') renderQueue(pending);
       if (currentTab === 'active') renderActive(running);
       if (currentTab === 'history') renderHistory(done);

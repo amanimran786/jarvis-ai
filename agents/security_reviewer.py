@@ -101,6 +101,116 @@ def _parse_llm_verdict(raw: str) -> SecurityVerdict:
         return _FALLBACK_VERDICT
 
 
+# ─── Cloud fallback for security gate ────────────────────────────────────────
+
+# Provider order: Gemini 2.5 Flash Lite (free tier) → GPT-4o-mini → Anthropic Haiku
+_CLOUD_SECURITY_PROVIDERS = [
+    ("gemini",    "gemini-2.5-flash-lite"),
+    ("openai",    "gpt-4o-mini"),
+    ("anthropic", "claude-haiku-4-5-20251001"),
+]
+
+
+def _cloud_security_review_allowed() -> bool:
+    """
+    Cloud security review is opt-in only: requires the explicit operator flag
+    AND a mode that permits cloud calls. Review payloads contain task content
+    and code — they must never leave the machine on a silent default path.
+    """
+    import os
+    flag = str(os.getenv("JARVIS_ALLOW_CLOUD_SECURITY_REVIEW") or "").strip().lower()
+    if flag not in {"1", "true", "yes", "on"}:
+        return False
+    try:
+        from model_router import is_open_source_mode
+        return not is_open_source_mode()
+    except Exception:
+        return False
+
+
+def _cloud_security_review(payload_str: str) -> str:
+    """
+    Call a cloud LLM to produce a security verdict when local LLM returns empty.
+    Tries Gemini free tier first, then OpenAI, then Anthropic.
+    Returns raw JSON string or empty string if all providers fail.
+    Gated by JARVIS_ALLOW_CLOUD_SECURITY_REVIEW; the gate itself fails closed
+    (empty output → _FALLBACK_VERDICT = manual review).
+    """
+    import os
+    if not _cloud_security_review_allowed():
+        log.info(
+            "Cloud security fallback skipped: JARVIS_ALLOW_CLOUD_SECURITY_REVIEW "
+            "not enabled or open-source mode active."
+        )
+        return ""
+    from config import AGENT_ROSTER
+    system = AGENT_ROSTER.get("security_reviewer", {}).get("system_prompt", "")
+    if not system:
+        return ""
+
+    _CLOUD_TIMEOUT = 20  # seconds per provider
+
+    for provider, model in _CLOUD_SECURITY_PROVIDERS:
+        try:
+            if provider == "gemini":
+                import os as _os
+                key = _os.getenv("GEMINI_API_KEY", "")
+                if not key:
+                    continue
+                from google import genai
+                from google.genai import types
+                client = genai.Client(api_key=key)
+                r = client.models.generate_content(
+                    model=model,
+                    contents=payload_str,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        response_mime_type="application/json",
+                        max_output_tokens=1024,
+                        timeout=_CLOUD_TIMEOUT,
+                    ),
+                )
+                raw = (r.text or "").strip()
+
+            elif provider == "openai":
+                key = os.getenv("OPENAI_API_KEY", "")
+                if not key:
+                    continue
+                import openai
+                client = openai.OpenAI(api_key=key, timeout=_CLOUD_TIMEOUT)
+                r = client.chat.completions.create(
+                    model=model, max_tokens=1024,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user",   "content": payload_str},
+                    ],
+                    response_format={"type": "json_object"},
+                )
+                raw = (r.choices[0].message.content or "").strip()
+
+            else:  # anthropic
+                key = os.getenv("ANTHROPIC_API_KEY", "")
+                if not key:
+                    continue
+                import anthropic
+                client = anthropic.Anthropic(api_key=key, timeout=_CLOUD_TIMEOUT)
+                msg = client.messages.create(
+                    model=model, max_tokens=1024, system=system,
+                    messages=[{"role": "user", "content": payload_str}],
+                )
+                raw = (msg.content[0].text or "").strip()
+
+            if raw:
+                log.info("Security gate used cloud fallback (%s/%s)", provider, model)
+                return raw
+
+        except Exception as exc:
+            log.debug("Cloud security fallback %s/%s failed: %s", provider, model, exc)
+
+    log.warning("All cloud security providers failed — returning empty")
+    return ""
+
+
 # ─── Pre-screen → LLM pipeline ───────────────────────────────────────────────
 
 def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
@@ -146,10 +256,13 @@ def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
             stage=stage,
         )
 
-    # Step 2: LLM deep analysis
+    # Step 2: LLM deep analysis — local first, cloud free-tier fallback
     from agent_dispatch import dispatch
     chunks = list(dispatch("security_reviewer", payload_str))
     raw_output = "".join(chunks)
+
+    if not raw_output.strip():
+        raw_output = _cloud_security_review(payload_str)
 
     verdict = _parse_llm_verdict(raw_output)
     verdict.task_id = task_id

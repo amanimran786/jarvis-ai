@@ -465,23 +465,76 @@ def _agent_daily_note(context: str = "") -> dict:
                 "result": f"Daily note error: {e}", "escalate": False}
 
 
+def _agent_calendar_upcoming(context: str = "") -> dict:
+    """Fetch next 3 calendar events for today, formatted as a short list."""
+    try:
+        gs = _safe_import("google_services")
+        if not gs or not hasattr(gs, "get_week_events"):
+            return {"agent": "calendar_upcoming", "status": "ok",
+                    "result": "Calendar not connected.", "escalate": False}
+        # get_week_events(days=1) returns today's events as "Day DD Mon HH:MM AM/PM — Title"
+        events = gs.get_week_events(days=1)
+        if not events:
+            return {"agent": "calendar_upcoming", "status": "ok",
+                    "result": "No events scheduled for today.", "escalate": False}
+        import re as _re
+        lines: list[str] = []
+        for raw in events[:3]:
+            # Strip the day/date prefix, keep time and title
+            # Input: "Sat 7 Jun 10:00 AM — Team standup"
+            # Output: "10:00 AM - Team standup"
+            stripped = _re.sub(r"^\w+\s+\d+\s+\w+\s+", "", raw)
+            stripped = stripped.replace(" — ", " - ")
+            lines.append(stripped)
+        result = "Upcoming today:\n" + "\n".join(f"  • {l}" for l in lines)
+        return {"agent": "calendar_upcoming", "status": "ok", "result": result,
+                "escalate": _needs_escalation(result)}
+    except Exception as e:
+        return {"agent": "calendar_upcoming", "status": "error",
+                "result": f"Calendar upcoming error: {e}", "escalate": False}
+
+
+def _agent_pending_alerts(context: str = "") -> dict:
+    """Fetch pending (non-dismissed) proactive watcher alerts."""
+    try:
+        pw = _safe_import("proactive_watcher")
+        if not pw or not hasattr(pw, "get_alerts"):
+            return {"agent": "pending_alerts", "status": "ok",
+                    "result": "", "escalate": False}
+        alerts = pw.get_alerts(include_dismissed=False)
+        if not alerts:
+            return {"agent": "pending_alerts", "status": "ok",
+                    "result": "", "escalate": False}
+        lines = [a.get("message", "") for a in alerts[:5] if a.get("message")]
+        if not lines:
+            return {"agent": "pending_alerts", "status": "ok",
+                    "result": "", "escalate": False}
+        result = "Pending alerts:\n" + "\n".join(f"  ⚠ {l}" for l in lines)
+        return {"agent": "pending_alerts", "status": "ok", "result": result, "escalate": True}
+    except Exception as e:
+        return {"agent": "pending_alerts", "status": "error",
+                "result": f"Alerts error: {e}", "escalate": False}
+
+
 # ── Agent registry ─────────────────────────────────────────────────────────────
 
 _AGENTS: dict[str, Callable[[str], dict]] = {
-    "calendar":        _agent_calendar,
-    "week":            _agent_week,
-    "tasks":           _agent_tasks,
-    "vault":           _agent_vault,
-    "code":            _agent_code,
-    "research":        _agent_research,
-    "email":           _agent_email,
-    "email_urgent":    _agent_email_urgent,
-    "weather":         _agent_weather,
-    "meeting_prep":    _agent_meeting_prep,
-    "board":           _agent_board,
-    "brain_sync":      _agent_brain_sync,
-    "task_extractor":  _agent_task_extractor,
-    "daily_note":      _agent_daily_note,
+    "calendar":           _agent_calendar,
+    "calendar_upcoming":  _agent_calendar_upcoming,
+    "week":               _agent_week,
+    "tasks":              _agent_tasks,
+    "vault":              _agent_vault,
+    "code":               _agent_code,
+    "research":           _agent_research,
+    "email":              _agent_email,
+    "email_urgent":       _agent_email_urgent,
+    "weather":            _agent_weather,
+    "meeting_prep":       _agent_meeting_prep,
+    "board":              _agent_board,
+    "brain_sync":         _agent_brain_sync,
+    "task_extractor":     _agent_task_extractor,
+    "daily_note":         _agent_daily_note,
+    "pending_alerts":     _agent_pending_alerts,
 }
 
 _BRIEFING_AGENTS      = ["weather", "calendar", "tasks", "vault", "email", "board"]
@@ -708,6 +761,7 @@ _SYNTH_SYSTEM = (
     "Convert the raw agent data below into a concise spoken briefing. "
     "Use natural sentences. Do not use bullet points or markdown. "
     "Prioritise urgent/escalated items first. "
+    "If calendar events are present, mention any events happening soon today. "
     "Keep the total response under 120 words. "
     "Start directly with the content — no 'Here is your briefing' preamble."
 )
@@ -779,7 +833,7 @@ def run_briefing() -> str:
     """
     graph = (
         AgentGraph("briefing")
-        .stage("weather", "calendar", "tasks", "email", "board")  # stage 0: fast, parallel
+        .stage("weather", "calendar", "calendar_upcoming", "tasks", "email_urgent", "board", "pending_alerts")  # stage 0: fast, parallel
         .stage("vault")                                             # stage 1: uses stage-0 context
     )
     results = graph.run()

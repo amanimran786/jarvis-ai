@@ -842,11 +842,17 @@ def smart_stream(
     skill_id: str | None = None,
     tool: str | None = "chat",
     extra_system: str = "",
+    prefer_local: bool = False,
 ) -> tuple:
     """
     Core routing function. Returns (stream, model_label).
     Strategy: local → mini → haiku → sonnet → opus
     Only escalates when the task genuinely requires it.
+
+    prefer_local: caller asserts this is internal runtime work (e.g. agent
+    task execution) whose prompt scaffolding would otherwise trip the
+    chat-tuned complexity heuristics. Routes local-first when a local model
+    is available; cloud fallback chain stays intact.
     """
     # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
@@ -933,7 +939,13 @@ def smart_stream(
 
     vault_extra = graph_extra = smem_ctx = mem0_extra = ""
     smem_hits: list[dict] = []
-    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx") as _pool:
+    # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins the
+    # worker threads, so one getter hung on a network call without a socket
+    # timeout would block this request forever despite the result() timeouts
+    # below (live incident 2026-06-10: agent task stuck in "streaming" for
+    # 50+ min behind a hung embedding request).
+    _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx")
+    try:
         _fv = _pool.submit(_get_vault)
         _fg = _pool.submit(_get_graph)
         _fs = _pool.submit(_get_smem)
@@ -954,6 +966,8 @@ def smart_stream(
             mem0_extra = _fm.result(timeout=4.0) or ""
         except Exception:
             pass
+    finally:
+        _pool.shutdown(wait=False, cancel_futures=True)
 
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
@@ -1010,19 +1024,24 @@ def smart_stream(
         )
         return _execute_forced_stream(plan, user_input, system_extra), candidate.label
 
-    tier = _classify_complexity(user_input, active_skills=resolved_skills)
-    apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
-    explicit_cloud = mode == "cloud"
-    if mode == "auto":
-        policy = cost_policy.route_decision(
-            user_input,
-            tier,
-            tool=tool,
-            local_available=local_available or apple_foundation_available,
-        )
-        tier = policy["tier"]
-        explicit_cloud = policy.get("provider") == "cloud"
+    if prefer_local and local_available and local_model and mode != "cloud":
+        tier = "local"
+        apple_foundation_available = False
+        explicit_cloud = False
+    else:
+        tier = _classify_complexity(user_input, active_skills=resolved_skills)
         apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
+        explicit_cloud = mode == "cloud"
+        if mode == "auto":
+            policy = cost_policy.route_decision(
+                user_input,
+                tier,
+                tool=tool,
+                local_available=local_available or apple_foundation_available,
+            )
+            tier = policy["tier"]
+            explicit_cloud = policy.get("provider") == "cloud"
+            apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
 
     plan = provider_router.build_plan(
 
