@@ -92,10 +92,42 @@ class CloudReviewCallTests(unittest.TestCase):
 class ReviewFailsClosedTests(unittest.TestCase):
     def test_empty_local_output_with_gate_denied_yields_manual_review_fail(self):
         with _env(GEMINI_API_KEY="k", OPENAI_API_KEY="k", ANTHROPIC_API_KEY="k"), \
-             patch("agent_dispatch.dispatch", return_value=iter([])):
+             patch("brains.brain_ollama.ask_local_structured", return_value=""):
             verdict = sr.review({"prompt": "benign payload"}, task_id="t1", stage=0)
         self.assertEqual(verdict.verdict, "FAIL")
         self.assertEqual(verdict.severity, "critical")
+        self.assertTrue(verdict.is_blocking())
+
+
+_GOOD_VERDICT_JSON = (
+    '{"verdict": "PASS", "severity": "none", "findings": [], '
+    '"summary": "No threats detected."}'
+)
+
+
+class LocalStructuredPathTests(unittest.TestCase):
+    """Item 9 root-cause fix: verdicts come from the schema-constrained local
+    call — no tool loop, no markdown/think stripping in the path."""
+
+    def test_structured_verdict_parsed_and_cloud_never_consulted(self):
+        with _env(GEMINI_API_KEY="k"), \
+             patch("brains.brain_ollama.ask_local_structured",
+                   return_value=_GOOD_VERDICT_JSON) as local_mock, \
+             patch.object(sr, "_cloud_security_review") as cloud_mock:
+            verdict = sr.review({"prompt": "benign payload"}, task_id="t9", stage=0)
+        self.assertEqual(verdict.verdict, "PASS")
+        self.assertEqual(verdict.severity, "none")
+        local_mock.assert_called_once()
+        cloud_mock.assert_not_called()
+        # schema is passed so JSON is grammar-enforced at generation time
+        self.assertEqual(local_mock.call_args.args[1], sr._VERDICT_SCHEMA)
+
+    def test_structured_path_exception_fails_closed(self):
+        with _env(), \
+             patch("brains.brain_ollama.ask_local_structured",
+                   side_effect=RuntimeError("ollama read timeout")):
+            verdict = sr.review({"prompt": "benign payload"}, task_id="t9", stage=0)
+        self.assertEqual(verdict.verdict, "FAIL")
         self.assertTrue(verdict.is_blocking())
 
 

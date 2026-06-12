@@ -177,9 +177,9 @@ from agents.security_reviewer import review, emit_to_dag
 def test_review_blocks_on_pre_screen_without_llm():
     """Pre-screen finds AWS key → FAIL returned without any LLM call."""
     payload = {"task": "Deploy using key AKIAIOSFODNN7EXAMPLE"}
-    with patch("agent_dispatch.dispatch") as mock_dispatch:
+    with patch("brains.brain_ollama.ask_local_structured") as mock_local:
         verdict = review(payload, task_id="test-001", stage=0)
-    mock_dispatch.assert_not_called()   # LLM never reached
+    mock_local.assert_not_called()   # LLM never reached
     assert verdict.verdict == "FAIL"
     assert verdict.task_id == "test-001"
     assert verdict.is_blocking()
@@ -190,9 +190,10 @@ def test_review_calls_llm_for_clean_payload():
     llm_response = json.dumps({
         "verdict": "PASS", "severity": "none", "findings": [], "summary": "Clean.",
     })
-    with patch("agent_dispatch.dispatch", return_value=iter([llm_response])) as mock_dispatch:
+    with patch("brains.brain_ollama.ask_local_structured", return_value=llm_response) as mock_local:
         verdict = review({"task": "Write a unit test."}, task_id="test-002", stage=1)
-    mock_dispatch.assert_called_once_with("security_reviewer", '{"task": "Write a unit test."}')
+    mock_local.assert_called_once()
+    assert mock_local.call_args.args[0] == '{"task": "Write a unit test."}'
     assert verdict.verdict == "PASS"
     assert verdict.task_id == "test-002"
     assert verdict.stage == 1
@@ -200,7 +201,7 @@ def test_review_calls_llm_for_clean_payload():
 
 def test_review_returns_fail_on_llm_parse_error():
     """If LLM returns unparseable output, verdict is FAIL for safety."""
-    with patch("agent_dispatch.dispatch", return_value=iter(["looks fine to me"])):
+    with patch("brains.brain_ollama.ask_local_structured", return_value="looks fine to me"):
         verdict = review({"task": "something"}, task_id="test-003")
     assert verdict.verdict == "FAIL"
 

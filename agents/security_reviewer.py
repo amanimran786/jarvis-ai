@@ -101,6 +101,60 @@ def _parse_llm_verdict(raw: str) -> SecurityVerdict:
         return _FALLBACK_VERDICT
 
 
+# ─── Structured local review (primary path) ──────────────────────────────────
+
+# Ollama grammar-enforced verdict shape. Forcing JSON at generation time fixes
+# the gate's "local LLM returned empty" failures at the root (tracker item 9):
+# the old path went through the agentic tool loop (needless 64k-ctx call that
+# blew the 45s client timeout under memory pressure) and then through the
+# TTS-oriented _strip_markdown, which deletes <think>…</think> blocks — a
+# reasoning model that answers inside its think block came back empty.
+_VERDICT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict":  {"type": "string", "enum": ["PASS", "FAIL", "REQUEST_CHANGES"]},
+        "severity": {"type": "string", "enum": ["none", "low", "medium", "high", "critical"]},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type":           {"type": "string"},
+                    "severity":       {"type": "string"},
+                    "location":       {"type": "string"},
+                    "description":    {"type": "string"},
+                    "recommendation": {"type": "string"},
+                },
+                "required": ["type", "severity", "location", "description", "recommendation"],
+            },
+        },
+        "summary": {"type": "string"},
+    },
+    "required": ["verdict", "severity", "findings", "summary"],
+}
+
+
+def _local_security_review(payload_str: str) -> str:
+    """
+    One non-streamed, schema-constrained local call for the verdict.
+    No tool loop, no markdown/think stripping, temperature 0, dedicated
+    structured-output timeout. Returns raw JSON string, or "" on failure
+    (callers fall through to the opt-in cloud path, then fail closed).
+    """
+    try:
+        from brains.brain_ollama import ask_local_structured
+        from config import AGENT_ROSTER
+        system = AGENT_ROSTER.get("security_reviewer", {}).get("system_prompt", "")
+        if not system:
+            return ""
+        return ask_local_structured(
+            payload_str, _VERDICT_SCHEMA, system=system, raise_on_error=False,
+        )
+    except Exception:
+        log.exception("structured local security review failed")
+        return ""
+
+
 # ─── Cloud fallback for security gate ────────────────────────────────────────
 
 # Provider order: Gemini 2.5 Flash Lite (free tier) → GPT-4o-mini → Anthropic Haiku
@@ -286,10 +340,8 @@ def review(payload: dict, task_id: str = "", stage: int = 0) -> SecurityVerdict:
         )
         return verdict
 
-    # Step 2: LLM deep analysis — local first, cloud free-tier fallback
-    from agent_dispatch import dispatch
-    chunks = list(dispatch("security_reviewer", payload_str))
-    raw_output = "".join(chunks)
+    # Step 2: LLM deep analysis — structured local first, cloud opt-in fallback
+    raw_output = _local_security_review(payload_str)
 
     if not raw_output.strip():
         raw_output = _cloud_security_review(payload_str)
