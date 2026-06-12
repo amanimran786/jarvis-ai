@@ -38,14 +38,12 @@ Exit code: 0 = clean, 1 = warnings only, 2 = at least one critical.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 # Pass threshold MUST mirror task_runtime._auto_verify (pass = score >= 0.65).
 # If task_runtime changes it, this constant is the single knob to update; the
@@ -96,14 +94,11 @@ def _verifiable_agents() -> frozenset[str]:
 
 
 # ─── Canonical hashing ────────────────────────────────────────────────────────
-
-def _canonical(obj: Any) -> str:
-    """Deterministic JSON for hashing: sorted keys, no whitespace, stable."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+# Tamper-evidence is provided by the shared infra._hashchain helper so this and
+# security_audit (S5) use one verified mechanism. Thin aliases keep call sites
+# and the on-disk ledger format identical to before the extraction.
+from infra import _hashchain as _hc
+from infra._hashchain import canonical as _canonical, sha256_hex as _sha256
 
 
 def prefix_sha(lines: list[str], n: int) -> str:
@@ -268,60 +263,113 @@ def audit_records(records: list[dict]) -> list[Finding]:
     return findings
 
 
+# ─── Cross-source reconciliation (projects.db) ────────────────────────────────
+
+def reconcile_projects_db(db_path: Path, verdict_task_ids: set[str]) -> list[Finding]:
+    """Audit the *rest* of the pipeline, not just the verifier's own log.
+
+    A verdict only exists for verifiable agents with auto-verify on. Tasks that
+    were dispatched and projects marked complete WITHOUT a recorded verdict are
+    the blind spot: a result shipped with no truthfulness check. We surface
+    those as warnings (absence of a verdict is an audit gap, not proof of a fake).
+
+    Read-only; never raises into the audit (a missing/locked DB just yields no
+    findings)."""
+    findings: list[Finding] = []
+    if not db_path.exists():
+        return findings
+    try:
+        import sqlite3
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+    except Exception:
+        return findings
+    verifiable = _verifiable_agents()
+    try:
+        # Map project -> dispatched (task_id, agent_id) and whether it completed.
+        dispatched: dict[str, list[tuple[str, str]]] = {}
+        completed: set[str] = set()
+        for row in con.execute("SELECT project_id, type, payload FROM project_events"):
+            pid = row["project_id"]
+            try:
+                payload = json.loads(row["payload"]) if row["payload"] else {}
+            except Exception:
+                payload = {}
+            if row["type"] == "task_dispatched":
+                dispatched.setdefault(pid, []).append(
+                    (str(payload.get("task_id", "")), str(payload.get("agent_id", "")))
+                )
+            elif row["type"] == "project_complete":
+                completed.add(pid)
+
+        try:
+            projects = {r["id"]: r for r in con.execute(
+                "SELECT id, status, goal, "
+                "(synthesis_result IS NOT NULL AND synthesis_result != '') AS has_syn "
+                "FROM projects")}
+        except Exception:
+            projects = {}
+
+        for pid, tasks in dispatched.items():
+            proj = projects.get(pid)
+            status = (proj["status"] if proj else "?")
+            proj_done = pid in completed or status in ("complete", "completed", "done", "succeeded")
+            verified_any = False
+            verifiable_task_count = 0
+            for task_id, agent_id in tasks:
+                if agent_id in verifiable:
+                    verifiable_task_count += 1
+                if task_id and task_id in verdict_task_ids:
+                    verified_any = True
+                    continue
+                # Only a verifiable agent's silent completion is concerning;
+                # non-verifiable agents legitimately have no verdict path.
+                if agent_id in verifiable and proj_done:
+                    findings.append(Finding(
+                        "UNVERIFIED_COMPLETION", WARNING, task_id or "?", agent_id or "?",
+                        f"verifiable task dispatched in project {pid} (status={status}) "
+                        f"but no verdict was recorded — completion never truth-checked",
+                    ))
+            # A project that shipped a synthesized result with zero verified
+            # underlying tasks is an unaudited deliverable.
+            if proj and proj["has_syn"] and proj_done and not verified_any and verifiable_task_count:
+                findings.append(Finding(
+                    "UNAUDITED_SYNTHESIS", WARNING, pid, "manager",
+                    f"project completed with a synthesis_result but none of its "
+                    f"{verifiable_task_count} verifiable dispatched task(s) have a recorded verdict",
+                ))
+    except Exception:
+        # Schema drift or a partial DB must not break the audit.
+        return findings
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+    return findings
+
+
 # ─── Ledger (tamper-evident hash chain) ───────────────────────────────────────
 
 def read_ledger(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    out = []
-    for ln in path.read_text(encoding="utf-8").splitlines():
-        if ln.strip():
-            try:
-                out.append(json.loads(ln))
-            except Exception:
-                out.append({"_corrupt": ln})
-    return out
+    return _hc.read_chain(path)
 
 
 def verify_ledger_chain(entries: list[dict]) -> list[Finding]:
     """Recompute the hash chain; any mismatch means a past ledger record was
-    edited after the fact."""
-    findings: list[Finding] = []
-    prev = "GENESIS"
-    for idx, e in enumerate(entries):
-        if "_corrupt" in e:
-            findings.append(Finding("LEDGER_CORRUPT", CRITICAL, f"ledger:{idx}", "-",
-                                    "unparseable ledger line"))
-            return findings
-        stored = e.get("this_hash")
-        body = {k: v for k, v in e.items() if k != "this_hash"}
-        recomputed = _sha256(prev + _canonical(body))
-        if stored != recomputed:
-            findings.append(Finding(
-                "LEDGER_TAMPERED", CRITICAL, f"ledger:{idx}", "-",
-                f"hash chain broken at run {e.get('run_id', idx)}: stored != recomputed",
-            ))
-            return findings  # everything after is unverifiable
-        if e.get("prev_hash") != prev:
-            findings.append(Finding(
-                "LEDGER_CHAIN_BREAK", CRITICAL, f"ledger:{idx}", "-",
-                "prev_hash does not match preceding record",
-            ))
-            return findings
-        prev = stored
-    return findings
+    edited after the fact. Wraps the shared verifier into audit Findings."""
+    ok, reason, idx = _hc.verify_chain(entries)
+    if ok:
+        return []
+    code = ("LEDGER_CORRUPT" if reason and "unparseable" in reason
+            else "LEDGER_CHAIN_BREAK" if reason and "prev_hash" in reason
+            else "LEDGER_TAMPERED")
+    return [Finding(code, CRITICAL, f"ledger:{idx}", "-", reason or "chain broken")]
 
 
 def append_ledger(path: Path, record: dict, entries: list[dict]) -> dict:
     """Append a run record, chaining it to the last verified entry's hash."""
-    prev = entries[-1].get("this_hash", "GENESIS") if entries else "GENESIS"
-    record = dict(record)
-    record["prev_hash"] = prev
-    record["this_hash"] = _sha256(prev + _canonical(record))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(_canonical(record) + "\n")
-    return record
+    return _hc.append_record(path, record, entries)
 
 
 # ─── Orchestration ────────────────────────────────────────────────────────────
@@ -335,6 +383,11 @@ def run_once(append: bool = True) -> dict:
     lines = load_verdict_lines(vpath)
     records, parse_findings = parse_verdicts(lines)
     findings = parse_findings + audit_records(records)
+
+    # Reconcile against the rest of the pipeline: dispatched/completed work in
+    # projects.db that never produced a verdict is the unaudited blind spot.
+    verdict_task_ids = {str(r.get("task_id")) for r in records if r.get("task_id")}
+    findings += reconcile_projects_db(projects_db_path(), verdict_task_ids)
 
     ledger_entries = read_ledger(lpath)
     findings += verify_ledger_chain(ledger_entries)
