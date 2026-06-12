@@ -48,6 +48,31 @@ class InheritedEvidenceVerifierTests(unittest.TestCase):
         self.assertNotIn("stale prior evidence", prompt)
 
 
+class VerifiedFailureEscalationTests(unittest.TestCase):
+    """First attempt runs local-first; verifier-rejected retries escalate."""
+
+    def setUp(self):
+        task_runtime.reset_for_tests()
+
+    def _capture_prefer_local(self, meta):
+        captured = {}
+
+        def fake_smart_stream(user_input, **kwargs):
+            captured.setdefault("prefer_local", kwargs.get("prefer_local"))
+            return iter(["done, nothing to execute"]), "M"
+
+        with patch.object(task_runtime, "smart_stream", side_effect=fake_smart_stream):
+            task = task_runtime.submit_task("say hi", kind="research", meta=meta)
+            task_runtime.wait_for_task(task["id"], timeout=5.0)
+        return captured["prefer_local"]
+
+    def test_first_attempt_prefers_local(self):
+        self.assertTrue(self._capture_prefer_local(meta=None))
+
+    def test_retry_escalates_off_local(self):
+        self.assertFalse(self._capture_prefer_local(meta={"retry_count": 1}))
+
+
 class EmptyResultFallbackTests(unittest.TestCase):
     def setUp(self):
         task_runtime.reset_for_tests()

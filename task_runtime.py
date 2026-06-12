@@ -16,6 +16,9 @@ from model_router import smart_stream
 import task_persistence
 import usage_tracker
 import worktree_manager
+from infra.security_audit import (
+    audit_event, APPROVAL_GRANTED, APPROVAL_DENIED, SECURITY_VERDICT,
+)
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +29,19 @@ _AGENT_LOCKS: dict[str, threading.Lock] = {}
 _AGENT_LOCKS_MUTEX = threading.Lock()
 # Global concurrency cap — prevents overwhelming a single Ollama instance with too many parallel
 # model calls. Cloud providers (OpenAI/Gemini) are not affected by this limit in practice.
-_MODEL_SEMAPHORE = threading.Semaphore(int(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "6")))
+def _parse_max_concurrent(raw: str | None) -> int:
+    # Clamp to [1, 32]: 0 would wedge the semaphore forever (silent DoS) and
+    # garbage must not crash module import.
+    try:
+        return max(1, min(int(raw), 32))
+    except (TypeError, ValueError):
+        log.warning("invalid JARVIS_MAX_CONCURRENT_TASKS=%r — using 6", raw)
+        return 6
+
+
+_MODEL_SEMAPHORE = threading.Semaphore(
+    _parse_max_concurrent(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "6"))
+)
 
 
 def _get_agent_lock(agent_id: str) -> threading.Lock:
@@ -950,7 +965,8 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
             '{"score": 0.0, "reason": "one sentence"}\n'
             "Score = average of the three criteria."
         )
-        raw = "".join(ask_stream(verify_prompt, model=GPT_MINI, track_context=False, bypass_local=True))
+        raw = "".join(ask_stream(verify_prompt, model=GPT_MINI, track_context=False,
+                                 bypass_local=True, bare_system=True))
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if not m:
             return {"pass": True, "score": 1.0, "reason": "parse error — failing open"}
@@ -972,9 +988,14 @@ _VERDICTS_PATH = Path.home() / ".jarvis" / "verifier_verdicts.jsonl"
 
 
 def _record_verdict(task_id: str, agent_id: str, verdict: dict,
-                    tool_calls: int, retry_count: int) -> None:
+                    tool_calls: int, retry_count: int,
+                    result: str = "", tool_transcript: str = "",
+                    inherited_transcript: str = "",
+                    fabricated_claim: str = "") -> None:
     """Append the verifier verdict to a JSONL log so calibration is measurable
-    (pass rate per agent, score distribution, retry effectiveness)."""
+    (pass rate per agent, score distribution, retry effectiveness). Provenance
+    hashes let the independent pipeline auditor detect post-hoc tampering."""
+    import hashlib as _hashlib
     import json as _json
     try:
         _VERDICTS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -987,11 +1008,21 @@ def _record_verdict(task_id: str, agent_id: str, verdict: dict,
             "reason": verdict.get("reason", ""),
             "tool_calls": tool_calls,
             "retry_count": retry_count,
+            "fabrication_flag": fabricated_claim,
+            "had_inherited_evidence": bool(inherited_transcript and tool_calls == 0),
+            "result_sha256": _hashlib.sha256(result.encode("utf-8")).hexdigest() if result else "",
+            "result_len": len(result or ""),
+            "transcript_sha256": _hashlib.sha256(tool_transcript.encode("utf-8")).hexdigest() if tool_transcript else "",
+            "transcript_len": len(tool_transcript or ""),
         }
         with open(_VERDICTS_PATH, "a", encoding="utf-8") as f:
             f.write(_json.dumps(entry) + "\n")
     except Exception:
         log.exception("failed to record verifier verdict for %s", task_id)
+    audit_event(
+        SECURITY_VERDICT, actor=agent_id, target=task_id,
+        decision="pass" if verdict.get("pass") else "fail", task_id=task_id,
+    )
 
 
 def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) -> None:
@@ -1014,7 +1045,7 @@ def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) 
             "next time it sees a similar task. Be concrete and actionable. "
             "No markdown headers, no preamble — just the rule text."
         )
-        stream, _ = smart_stream(lesson_prompt, tool="chat", prefer_local=True)
+        stream, _ = smart_stream(lesson_prompt, tool="chat", prefer_local=True, skip_dynamic_context=True)
         rule = "".join(chunk for chunk in stream).strip()
         if not rule:
             return
@@ -1354,6 +1385,7 @@ def _run_tool_loop(
     start_index: int,
     work_root: "Path | None" = None,
     allow_write: bool = False,
+    prefer_local: bool = True,
 ) -> tuple[str, str, int, int, str]:
     """
     Multi-turn tool-call loop.
@@ -1453,7 +1485,10 @@ def _run_tool_loop(
         )
 
         # Stream continuation response
-        stream, model = smart_stream(continuation_prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
+        stream, model = smart_stream(
+            continuation_prompt, tool="chat", extra_system=agent_ctx,
+            prefer_local=prefer_local, skip_dynamic_context=True,
+        )
         cont_chunks: list[str] = []
         for chunk in stream:
             with _LOCK:
@@ -1488,7 +1523,10 @@ def _run_tool_loop(
             t = _TASKS.get(task_id, {})
             if t.get("cancel_requested"):
                 return response, model, index, tool_calls_made, _transcript()
-        stream, model = smart_stream(wrapup_prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
+        stream, model = smart_stream(
+            wrapup_prompt, tool="chat", extra_system=agent_ctx,
+            prefer_local=prefer_local, skip_dynamic_context=True,
+        )
         final_chunks: list[str] = []
         for chunk in stream:
             final_chunks.append(chunk)
@@ -1706,7 +1744,14 @@ def _run_task(task_id: str) -> None:
                 lesson = _load_agent_lesson(agent_id)
                 if lesson:
                     agent_ctx = agent_ctx + lesson
-                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx, prefer_local=True)
+                # Verified-failure escalation: first attempt runs local-first
+                # (cheap); once the verifier has rejected an attempt, retries
+                # go to the stronger cloud tier instead of repeating the same
+                # local-model failure mode.
+                with _LOCK:
+                    _retry_count = int((_TASKS.get(task_id, {}).get("meta") or {}).get("retry_count", 0))
+                prefer_local_run = _retry_count == 0
+                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx, prefer_local=prefer_local_run)
                 chunks: list[str] = []
                 for index, chunk in enumerate(stream):
                     with _LOCK:
@@ -1732,6 +1777,7 @@ def _run_task(task_id: str) -> None:
                     index,
                     work_root=work_root,
                     allow_write=work_root is not None,
+                    prefer_local=prefer_local_run,
                 )
                 # Deterministic fabrication check: response claims execution
                 # but zero tool calls actually ran. Runs for ALL agents — no
@@ -1795,7 +1841,10 @@ def _run_task(task_id: str) -> None:
                     tool_transcript=tool_transcript,
                     inherited_transcript=inherited_transcript,
                 )
-                _record_verdict(task_id, agent_id, verdict, tool_calls_made, retry_count)
+                _record_verdict(task_id, agent_id, verdict, tool_calls_made, retry_count,
+                                result=response, tool_transcript=tool_transcript,
+                                inherited_transcript=inherited_transcript,
+                                fabricated_claim=fabricated_claim)
                 with _LOCK:
                     if task_id in _TASKS:
                         (_TASKS[task_id].setdefault("meta", {}))["verification"] = verdict
@@ -1967,7 +2016,13 @@ def approve_task(task_id: str) -> dict[str, Any] | None:
             audit["approval_reason"] = task.get("approval_reason", "")
         _set_task_status(task_id, "queued", approved_at=task["approved_at"])
         _start_task_thread(task_id)
-        return _copy(task)
+        snapshot = _copy(task)
+    audit_event(
+        APPROVAL_GRANTED, actor="operator",
+        target=str(snapshot.get("prompt") or "")[:80], task_id=task_id,
+        rollback_ref=str((snapshot.get("workspace") or {}).get("branch") or ""),
+    )
+    return snapshot
 
 
 def deny_task(task_id: str) -> dict[str, Any] | None:
@@ -1985,7 +2040,13 @@ def deny_task(task_id: str) -> dict[str, Any] | None:
         if isinstance(audit, dict):
             audit["denied_at"] = task["denied_at"]
         _set_task_status(task_id, "cancelled", finished_at=_now(), denied_at=task["denied_at"])
-        return _copy(task)
+        snapshot = _copy(task)
+    audit_event(
+        APPROVAL_DENIED, actor="operator",
+        target=str(snapshot.get("prompt") or "")[:80], task_id=task_id,
+        rollback_ref=str((snapshot.get("workspace") or {}).get("branch") or ""),
+    )
+    return snapshot
 
 
 def cancel_task(task_id: str) -> dict[str, Any] | None:

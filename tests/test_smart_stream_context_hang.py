@@ -44,5 +44,34 @@ class ContextAssemblyHangTests(unittest.TestCase):
         self.assertLess(elapsed, 20.0)
 
 
+class ContextSkipTests(unittest.TestCase):
+    """Tool-loop continuations skip dynamic retrieval (tokens + embed call)."""
+
+    def _retrieve_calls(self, skip: bool) -> int:
+        calls = []
+
+        def spy_retrieve(*a, **kw):
+            calls.append(1)
+            return []
+
+        with patch.object(model_router._smem, "retrieve", side_effect=spy_retrieve), \
+             patch.object(model_router, "_current_mode", "auto"), \
+             patch.object(model_router, "_is_mobile_web_active", return_value=False), \
+             patch.object(model_router, "forced_model_status", return_value={"active": False}), \
+             patch.object(model_router, "_has_local", return_value=True), \
+             patch.object(model_router, "_best_local", return_value="jarvis-local"):
+            model_router.smart_stream(
+                "continue the task", tool="chat",
+                prefer_local=True, skip_dynamic_context=skip,
+            )
+        return len(calls)
+
+    def test_skip_dynamic_context_skips_semantic_retrieval(self):
+        self.assertEqual(self._retrieve_calls(skip=True), 0)
+
+    def test_default_still_retrieves(self):
+        self.assertGreaterEqual(self._retrieve_calls(skip=False), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

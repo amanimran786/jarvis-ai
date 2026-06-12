@@ -1,0 +1,106 @@
+"""JARVIS_CLOUD_TOKENS_PER_HOUR rate guard (flag-gated, default off).
+
+When set to a positive integer and the last hour's cloud token usage meets it,
+auto-mode routing degrades to local instead of bursting into provider rate
+limits. Unset (the default) must change NOTHING — freeze requirement.
+"""
+
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import model_router
+import provider_router
+import usage_tracker
+
+AGENT_PROMPT = (
+    "You are agent backend-engineer. Analyze the task, review the codebase, "
+    "and write a comprehensive debrief of what you executed and verified."
+)
+
+_CLOUD_HEAVY = [{"local": False, "total_tokens": 500_000}]
+
+
+class BudgetHelperTests(unittest.TestCase):
+    def test_unset_flag_is_off_even_with_heavy_usage(self):
+        with patch.dict("os.environ", {}, clear=False), \
+             patch.object(usage_tracker, "entries", return_value=_CLOUD_HEAVY):
+            import os
+            os.environ.pop("JARVIS_CLOUD_TOKENS_PER_HOUR", None)
+            self.assertFalse(model_router._cloud_token_budget_exhausted())
+
+    def test_garbage_flag_is_off(self):
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "lots"}), \
+             patch.object(usage_tracker, "entries", return_value=_CLOUD_HEAVY):
+            self.assertFalse(model_router._cloud_token_budget_exhausted())
+
+    def test_under_budget_is_off(self):
+        rows = [{"local": False, "total_tokens": 100}]
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"}), \
+             patch.object(usage_tracker, "entries", return_value=rows):
+            self.assertFalse(model_router._cloud_token_budget_exhausted())
+
+    def test_over_budget_trips(self):
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"}), \
+             patch.object(usage_tracker, "entries", return_value=_CLOUD_HEAVY):
+            self.assertTrue(model_router._cloud_token_budget_exhausted())
+
+    def test_local_usage_does_not_count(self):
+        rows = [{"local": True, "total_tokens": 500_000}]
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"}), \
+             patch.object(usage_tracker, "entries", return_value=rows):
+            self.assertFalse(model_router._cloud_token_budget_exhausted())
+
+
+class BudgetRoutingTests(unittest.TestCase):
+    def _plan_for(self, env: dict):
+        captured = {}
+        real_build_plan = provider_router.build_plan
+
+        def spy_build_plan(**kwargs):
+            captured.update(kwargs)
+            return real_build_plan(**kwargs)
+
+        with patch.dict("os.environ", env), \
+             patch.object(usage_tracker, "entries", return_value=_CLOUD_HEAVY), \
+             patch.object(model_router, "_current_mode", "auto"), \
+             patch.object(model_router, "_is_mobile_web_active", return_value=False), \
+             patch.object(model_router, "forced_model_status", return_value={"active": False}), \
+             patch.object(model_router, "_has_local", return_value=True), \
+             patch.object(model_router, "_best_local", return_value="jarvis-local"), \
+             patch.object(model_router.provider_router, "build_plan", spy_build_plan):
+            # Lazy stream — never iterated, no model call happens.
+            model_router.smart_stream(AGENT_PROMPT, tool="chat")
+        return captured
+
+    def test_exhausted_budget_degrades_cloud_route_to_local(self):
+        kwargs = self._plan_for({"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"})
+        self.assertEqual(kwargs["tier"], "local")
+        self.assertFalse(kwargs["explicit_cloud"])
+        plan = provider_router.build_plan(**kwargs)
+        self.assertTrue(plan.candidates[0].local)
+
+    def test_flag_unset_keeps_cloud_route_unchanged(self):
+        import os
+        os.environ.pop("JARVIS_CLOUD_TOKENS_PER_HOUR", None)
+        kwargs = self._plan_for({})
+        self.assertEqual(kwargs["tier"], "sonnet")
+        self.assertTrue(kwargs["explicit_cloud"])
+
+
+class SemaphoreClampTests(unittest.TestCase):
+    """JARVIS_MAX_CONCURRENT_TASKS hardening: 0 wedges the semaphore (silent
+    DoS) and garbage must not crash module import."""
+
+    def test_clamps_and_defaults(self):
+        import task_runtime
+        cases = {"4": 4, "0": 1, "-3": 1, "100": 32, "banana": 6, None: 6}
+        for raw, expected in cases.items():
+            self.assertEqual(task_runtime._parse_max_concurrent(raw), expected, raw)
+
+
+if __name__ == "__main__":
+    unittest.main()
