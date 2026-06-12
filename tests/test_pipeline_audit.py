@@ -35,9 +35,11 @@ class AuditorTests(unittest.TestCase):
         self.lpath = d / "ledger.jsonl"
         os.environ["JARVIS_VERDICTS_PATH"] = str(self.vpath)
         os.environ["JARVIS_PIPELINE_AUDIT_PATH"] = str(self.lpath)
+        # Isolate from the real projects.db so reconciliation stays silent here.
+        os.environ["JARVIS_PROJECTS_DB"] = str(d / "no_such.db")
 
     def tearDown(self):
-        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH"):
+        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH", "JARVIS_PROJECTS_DB"):
             os.environ.pop(k, None)
         self.tmp.cleanup()
 
@@ -158,6 +160,81 @@ class AuditorTests(unittest.TestCase):
         self.assertNotIn("VERDICT_LOG_MUTATED", self._codes(report))
         self.assertNotIn("VERDICT_LOG_TRUNCATED", self._codes(report))
         self.assertEqual(report["severity_counts"][pa.CRITICAL], 0)
+
+
+class ReconciliationTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        self.vpath = d / "verdicts.jsonl"
+        self.lpath = d / "ledger.jsonl"
+        self.dbpath = d / "projects.db"
+        os.environ["JARVIS_VERDICTS_PATH"] = str(self.vpath)
+        os.environ["JARVIS_PIPELINE_AUDIT_PATH"] = str(self.lpath)
+        os.environ["JARVIS_PROJECTS_DB"] = str(self.dbpath)
+
+    def tearDown(self):
+        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH", "JARVIS_PROJECTS_DB"):
+            os.environ.pop(k, None)
+        self.tmp.cleanup()
+
+    def _build_db(self, status="complete", has_syn=True, agent="security-reviewer",
+                  task_id="task_orphan", complete_event=True):
+        import sqlite3
+        con = sqlite3.connect(str(self.dbpath))
+        con.execute("CREATE TABLE projects (id TEXT, goal TEXT, status TEXT, "
+                    "created_at TEXT, synthesis_result TEXT)")
+        con.execute("CREATE TABLE project_events (id INTEGER PRIMARY KEY, project_id TEXT, "
+                    "type TEXT, ts TEXT, payload TEXT)")
+        con.execute("INSERT INTO projects VALUES (?,?,?,?,?)",
+                    ("proj_1", "do thing", status, "2026-06-11", "synth" if has_syn else ""))
+        con.execute("INSERT INTO project_events (project_id,type,ts,payload) VALUES (?,?,?,?)",
+                    ("proj_1", "task_dispatched", "2026-06-11",
+                     json.dumps({"task_id": task_id, "agent_id": agent})))
+        if complete_event:
+            con.execute("INSERT INTO project_events (project_id,type,ts,payload) VALUES (?,?,?,?)",
+                        ("proj_1", "project_complete", "2026-06-11", "{}"))
+        con.commit(); con.close()
+
+    def _codes(self, report):
+        return {f["code"] for f in report["findings"]}
+
+    def test_unverified_completion_flagged(self):
+        # Completed project, verifiable agent dispatched, NO matching verdict.
+        self.vpath.write_text(_verdict(task_id="other", tool_calls=1) + "\n", encoding="utf-8")
+        self._build_db(task_id="task_orphan", agent="security-reviewer")
+        report = pa.run_once(append=False)
+        self.assertIn("UNVERIFIED_COMPLETION", self._codes(report))
+        self.assertIn("UNAUDITED_SYNTHESIS", self._codes(report))
+
+    def test_verified_task_not_flagged(self):
+        # Same project, but the dispatched task DOES have a verdict.
+        self.vpath.write_text(_verdict(task_id="task_orphan", tool_calls=2) + "\n", encoding="utf-8")
+        self._build_db(task_id="task_orphan", agent="security-reviewer")
+        report = pa.run_once(append=False)
+        self.assertNotIn("UNVERIFIED_COMPLETION", self._codes(report))
+        self.assertNotIn("UNAUDITED_SYNTHESIS", self._codes(report))
+
+    def test_non_verifiable_agent_not_flagged(self):
+        # A non-verifiable agent legitimately has no verdict path.
+        self.vpath.write_text(_verdict(task_id="other", tool_calls=1) + "\n", encoding="utf-8")
+        self._build_db(task_id="task_orphan", agent="frontend-designer")
+        report = pa.run_once(append=False)
+        self.assertNotIn("UNVERIFIED_COMPLETION", self._codes(report))
+        self.assertNotIn("UNAUDITED_SYNTHESIS", self._codes(report))
+
+    def test_incomplete_project_not_flagged(self):
+        # Still running: absence of a verdict is expected, not a gap.
+        self.vpath.write_text(_verdict(task_id="other", tool_calls=1) + "\n", encoding="utf-8")
+        self._build_db(task_id="task_orphan", status="running", complete_event=False)
+        report = pa.run_once(append=False)
+        self.assertNotIn("UNVERIFIED_COMPLETION", self._codes(report))
+
+    def test_missing_db_is_silent(self):
+        # No projects.db -> reconciliation contributes nothing, no crash.
+        self.vpath.write_text(_verdict(task_id="a", tool_calls=1) + "\n", encoding="utf-8")
+        report = pa.run_once(append=False)
+        self.assertNotIn("UNVERIFIED_COMPLETION", self._codes(report))
 
 
 if __name__ == "__main__":
