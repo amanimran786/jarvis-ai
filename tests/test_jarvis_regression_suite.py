@@ -5643,6 +5643,16 @@ class WebSearchSummaryTests(unittest.TestCase):
     def setUp(self):
         self._saved_mode = model_router.get_mode()
         model_router.set_mode(config.DEFAULT_MODE)
+        # Order-dependence fix (tracker item 10): a prior test leaving
+        # _awaiting_msg_recipient=True makes the recipient-capture flow
+        # swallow the search prompt (label "Messages" instead of "Search").
+        router._clear_pending_recipient()
+        router._clear_pending_message_draft()
+        router._clear_pending_email_draft()
+        router._awaiting_msg_recipient = False
+        router._last_msg_recipient = ""
+        router._last_message_send_result = None
+        router._fuzzy_contact_suggestions.clear()
 
     def tearDown(self):
         model_router.set_mode(self._saved_mode)
