@@ -400,7 +400,7 @@ class PersistentJarvisRuntimePersistenceTests(unittest.TestCase):
 
     def test_webhook_task_persistence_snapshot_is_redacted_after_reboot(self) -> None:
         prompt = "sensitive inbound webhook prompt"
-        with patch("task_runtime.route_stream", return_value=(iter(["ok"]), "UnitTestModel")), patch(
+        with patch("task_runtime.smart_stream", return_value=(iter(["ok"]), "UnitTestModel")), patch(
             "task_runtime.evals.log_interaction",
             return_value={"id": "interaction_test"},
         ):
