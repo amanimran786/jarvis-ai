@@ -85,7 +85,7 @@ def test_security_reviewer_verdict_emits_security_audit(tmp_path, monkeypatch):
         "findings": [],
         "summary": "No issues found.",
     })
-    with patch("agent_dispatch.dispatch", return_value=iter([raw])):
+    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
         verdict = sr.review({"task": "read local docs"}, task_id="task-audit-1", stage=2)
 
     assert verdict.verdict == "PASS"

@@ -17,6 +17,39 @@ import vault
 _CANDIDATES_DIR = "wiki/candidates"
 
 
+def _backup_for_rollback(path: Path, raw: str) -> str:
+    """
+    Save the pre-write note content to ~/.jarvis/vault_backups so the audit
+    entry's rollback_ref points at a real restore artifact, not a label.
+    Returns the backup path, or "" if backup failed (write proceeds anyway).
+    """
+    try:
+        backup_dir = Path.home() / ".jarvis" / "vault_backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+        backup = backup_dir / f"{stamp}-{path.name}"
+        backup.write_text(raw, encoding="utf-8")
+        return str(backup)
+    except OSError:
+        return ""
+
+
+def _audit_vault_write(path: Path, *, decision: str, rollback_ref: str, reason: str = "") -> None:
+    """Best-effort security audit emit; never breaks the vault write."""
+    try:
+        from infra.security_audit import audit_event, VAULT_WRITE
+        audit_event(
+            VAULT_WRITE,
+            actor="jarvis",
+            target=str(path),
+            decision=decision,
+            reason=reason,
+            rollback_ref=rollback_ref,
+        )
+    except Exception:
+        pass
+
+
 def _normalize_note_ref(note_ref: str) -> str:
     text = (note_ref or "").strip()
     text = re.sub(r"^\[\[|\]\]$", "", text)
@@ -236,10 +269,13 @@ def append_under_heading(note_ref: str, heading: str, content: str) -> dict:
 
     updated = _append_to_raw_under_heading(raw, heading, block)
 
+    backup_ref = _backup_for_rollback(path, raw)
     try:
         path.write_text(updated, encoding="utf-8")
     except OSError as exc:
         return {"ok": False, "error": f"Could not update note: {exc}"}
+    _audit_vault_write(path, decision="appended", rollback_ref=backup_ref,
+                       reason=f"under heading {heading.strip()!r}")
     vault.refresh_index()
     return {
         "ok": True,
@@ -247,6 +283,7 @@ def append_under_heading(note_ref: str, heading: str, content: str) -> dict:
         "heading": heading.strip(),
         "action": "appended",
         "write_policy": write_policy or "unspecified",
+        "rollback_ref": backup_ref,
     }
 
 
@@ -435,10 +472,13 @@ def promote_candidate_update(candidate_ref: str, canonical_ref: str | None = Non
         promoted_block += f"\n\n_Source: promoted from [[{candidate_path.stem}]] on {timestamp}._"
     updated_canonical = _append_to_raw_under_heading(canonical_raw, target_heading, promoted_block)
     updated_canonical = _touch_frontmatter(updated_canonical, when=datetime.now().strftime("%Y-%m-%d"))
+    backup_ref = _backup_for_rollback(canonical_path, canonical_raw)
     try:
         canonical_path.write_text(updated_canonical, encoding="utf-8")
     except OSError as exc:
         return {"ok": False, "error": f"Could not update canonical note: {exc}"}
+    _audit_vault_write(canonical_path, decision="promoted", rollback_ref=backup_ref,
+                       reason=f"candidate {candidate_path.stem!r} promoted under {target_heading!r}")
 
     promotion_log = "\n".join(
         [

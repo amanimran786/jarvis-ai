@@ -24,12 +24,17 @@ agents/security_reviewer.py cloud fallback.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
+from infra._hashchain import (
+    GENESIS, HASH_FIELD, PREV_FIELD, canonical, compute_hash, verify_chain,
+)
 
 log = logging.getLogger("jarvis.security_audit")
 
@@ -91,6 +96,88 @@ def human_line(entry: dict) -> str:
         return "security event (unrenderable)"
 
 
+def _tail_hash(f) -> str:
+    """Last record's this_hash from an open file, or GENESIS. Reads only the
+    file tail so appends stay O(1) as the ledger grows."""
+    try:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - 65536))
+        tail = f.read()
+        for raw in reversed(tail.splitlines()):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                return json.loads(raw).get(HASH_FIELD, GENESIS)
+            except json.JSONDecodeError:
+                continue  # partial first line of the tail window, or legacy junk
+        return GENESIS
+    except OSError:
+        return GENESIS
+
+
+def _append_chained(path: Path, entry: dict) -> None:
+    """
+    Tamper-evident append (S5): GENESIS→prev_hash→this_hash chain in the same
+    format as infra/pipeline_audit (shared infra/_hashchain.py helpers).
+    Unlike pipeline_audit's single-writer ledger, this stream is appended from
+    multiple processes (API server, agents, app), so the tail-read + write is
+    held under an exclusive flock — without it two concurrent writers would
+    read the same tail hash and fork the chain.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            prev = _tail_hash(f)
+            entry[PREV_FIELD] = prev
+            entry[HASH_FIELD] = compute_hash(prev, entry)
+            f.seek(0, os.SEEK_END)
+            f.write(canonical(entry) + "\n")
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def verify_integrity() -> dict:
+    """
+    Verify the audit stream's hash chain. Entries written before S5 adoption
+    have no chain fields — they form a 'legacy' prefix that predates
+    tamper-evidence and is reported, not failed. Never raises.
+    """
+    try:
+        path = _audit_path()
+        if not path.exists():
+            return {"ok": True, "checked": 0, "legacy": 0, "reason": None, "index": -1}
+        entries: list[dict] = []
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                entries.append(json.loads(raw))
+            except json.JSONDecodeError:
+                entries.append({"_corrupt": raw})
+        legacy = 0
+        while legacy < len(entries) and HASH_FIELD not in entries[legacy] \
+                and "_corrupt" not in entries[legacy]:
+            legacy += 1
+        chained = entries[legacy:]
+        ok, reason, idx = verify_chain(chained)
+        return {
+            "ok": ok,
+            "checked": len(chained),
+            "legacy": legacy,
+            "reason": reason,
+            "index": (legacy + idx) if idx >= 0 else -1,
+        }
+    except Exception:
+        log.exception("security audit integrity check failed")
+        return {"ok": False, "checked": 0, "legacy": 0,
+                "reason": "integrity check crashed", "index": -1}
+
+
 def audit_event(
     action: str,
     *,
@@ -127,11 +214,8 @@ def audit_event(
                               if str(k) not in entry}
         entry["summary"] = human_line(entry)
         path = _audit_path()
-        line = json.dumps(entry, ensure_ascii=False)
         with _LOCK:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(line + "\n")
+            _append_chained(path, entry)
         if severity in ("warning", "critical"):
             log.warning("AUDIT %s: %s", severity, entry["summary"])
         return entry
@@ -217,4 +301,5 @@ def summarize(limit: int = 1000) -> dict:
         "rollbackable": rollbackable,
         "recent_critical": recent_critical,
         "plain_language": [e.get("summary") or human_line(e) for e in events[:20]],
+        "integrity": verify_integrity(),
     }

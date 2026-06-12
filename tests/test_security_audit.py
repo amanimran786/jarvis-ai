@@ -136,6 +136,69 @@ class AuditReadTests(_AuditTmpDir):
             self.assertTrue(line and isinstance(line, str))
 
 
+class TamperEvidenceTests(_AuditTmpDir):
+    """S5: the stream is hash-chained (shared format with infra/pipeline_audit)."""
+
+    def test_entries_carry_chain_fields_and_verify(self):
+        sa.audit_event(sa.APPROVAL_GRANTED, actor="aman", target="task a")
+        sa.audit_event(sa.APPROVAL_DENIED, actor="aman", target="task b")
+        lines = [json.loads(l) for l in self.audit_path.read_text().splitlines()]
+        self.assertEqual(lines[0]["prev_hash"], "GENESIS")
+        self.assertEqual(lines[1]["prev_hash"], lines[0]["this_hash"])
+        result = sa.verify_integrity()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["checked"], 2)
+        self.assertEqual(result["legacy"], 0)
+
+    def test_edited_record_breaks_chain_at_right_index(self):
+        for i in range(3):
+            sa.audit_event(sa.SECURITY_VERDICT, target=f"t{i}", decision="PASS")
+        lines = self.audit_path.read_text().splitlines()
+        forged = json.loads(lines[1])
+        forged["decision"] = "FAIL"  # rewrite history
+        lines[1] = json.dumps(forged, sort_keys=True, separators=(",", ":"))
+        self.audit_path.write_text("\n".join(lines) + "\n")
+
+        result = sa.verify_integrity()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["index"], 1)
+
+    def test_deleted_record_breaks_chain(self):
+        for i in range(3):
+            sa.audit_event(sa.RBAC_DENY, actor=f"a{i}")
+        lines = self.audit_path.read_text().splitlines()
+        self.audit_path.write_text("\n".join([lines[0], lines[2]]) + "\n")
+        self.assertFalse(sa.verify_integrity()["ok"])
+
+    def test_legacy_prefix_reported_not_failed(self):
+        # entries written before S5 adoption have no chain fields
+        self.audit_path.write_text('{"ts": "old", "action": "vault_write"}\n')
+        sa.audit_event(sa.VAULT_WRITE, target="note")
+        result = sa.verify_integrity()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["legacy"], 1)
+        self.assertEqual(result["checked"], 1)
+
+    def test_concurrent_writers_keep_chain_intact(self):
+        def write_batch(worker: int):
+            for i in range(10):
+                sa.audit_event(sa.SECURITY_TOOL_EXEC, actor=f"w{worker}", target=f"r{i}")
+
+        threads = [threading.Thread(target=write_batch, args=(w,)) for w in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        result = sa.verify_integrity()
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["checked"], 50)
+
+    def test_summarize_includes_integrity(self):
+        sa.audit_event(sa.APPROVAL_GRANTED, target="x")
+        summary = sa.summarize()
+        self.assertTrue(summary["integrity"]["ok"])
+
+
 class HumanLineTests(unittest.TestCase):
     def test_every_known_action_renders(self):
         for action in (sa.APPROVAL_GRANTED, sa.APPROVAL_DENIED, sa.APPROVAL_REQUESTED,
