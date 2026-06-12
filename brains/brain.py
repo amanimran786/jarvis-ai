@@ -72,6 +72,7 @@ def ask_stream(
     system_extra: str = "",
     track_context: bool = False,
     bypass_local: bool = False,
+    bare_system: bool = False,
 ):
     # Local-first gate. The OpenAI lane was the largest cloud-leak source (~45%
     # of all calls historically). Route to Ollama first when local-first is on,
@@ -104,7 +105,10 @@ def ask_stream(
     if client is None:
         raise RuntimeError("OpenAI API key is not configured.")
 
-    system_base = SYSTEM_PROMPT + mem.get_context()
+    # bare_system: utility calls (verifier, summarizers) that need neither the
+    # Jarvis persona nor user memory — injecting them wastes ~1.4K tokens per
+    # call and biases judge-style prompts with the persona they are judging.
+    system_base = "" if bare_system else SYSTEM_PROMPT + mem.get_context()
     if track_context:
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
@@ -112,8 +116,10 @@ def ask_stream(
     else:
         system = system_base
         if system_extra:
-            system += "\n\n" + system_extra
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": user_input}]
+            system += ("\n\n" if system else "") + system_extra
+        messages = ([{"role": "system", "content": system}] if system else []) + [
+            {"role": "user", "content": user_input}
+        ]
 
     stream = client.chat.completions.create(
         model=model,

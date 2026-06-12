@@ -830,6 +830,38 @@ def _classify_complexity(text: str, skill_id: str | None = None, active_skills: 
     return "local"
 
 
+def _cloud_token_budget_exhausted() -> bool:
+    """Tokens-per-hour rate guard. Inactive unless JARVIS_CLOUD_TOKENS_PER_HOUR
+    is set to a positive integer; once the last hour's cloud token usage meets
+    the budget, auto-mode routing degrades to local instead of bursting into
+    provider rate limits. Fails open: any error means "not exhausted"."""
+    import logging
+    import os
+    raw = os.getenv("JARVIS_CLOUD_TOKENS_PER_HOUR", "").strip()
+    try:
+        budget = int(raw)
+    except ValueError:
+        return False
+    if budget <= 0:
+        return False
+    try:
+        import usage_tracker
+        used = sum(
+            int(r.get("total_tokens") or 0)
+            for r in usage_tracker.entries(hours=1)
+            if not r.get("local")
+        )
+    except Exception:
+        return False
+    if used >= budget:
+        logging.getLogger(__name__).warning(
+            "cloud token budget exhausted (%d/%d tokens in last hour) — routing local",
+            used, budget,
+        )
+        return True
+    return False
+
+
 def _capture_cloud_stream(prompt, tier, candidate, raw_stream, source: str = "model_router_cloud_teacher"):
     """Thin shim around brains._teacher_capture.wrap_stream so callers in this
     module can keep their existing import surface."""
@@ -843,6 +875,7 @@ def smart_stream(
     tool: str | None = "chat",
     extra_system: str = "",
     prefer_local: bool = False,
+    skip_dynamic_context: bool = False,
 ) -> tuple:
     """
     Core routing function. Returns (stream, model_label).
@@ -853,6 +886,11 @@ def smart_stream(
     task execution) whose prompt scaffolding would otherwise trip the
     chat-tuned complexity heuristics. Routes local-first when a local model
     is available; cloud fallback chain stays intact.
+
+    skip_dynamic_context: skip vault/graph/semantic-memory/mem0 retrieval.
+    For tool-loop continuations the task context hasn't changed since turn 1,
+    so re-retrieval only adds tokens, an embedding call per turn, and prompt-
+    prefix churn that defeats Ollama's KV prefix cache.
     """
     # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
@@ -939,35 +977,36 @@ def smart_stream(
 
     vault_extra = graph_extra = smem_ctx = mem0_extra = ""
     smem_hits: list[dict] = []
-    # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins the
-    # worker threads, so one getter hung on a network call without a socket
-    # timeout would block this request forever despite the result() timeouts
-    # below (live incident 2026-06-10: agent task stuck in "streaming" for
-    # 50+ min behind a hung embedding request).
-    _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx")
-    try:
-        _fv = _pool.submit(_get_vault)
-        _fg = _pool.submit(_get_graph)
-        _fs = _pool.submit(_get_smem)
-        _fm = _pool.submit(_get_mem0)
+    if not skip_dynamic_context:
+        # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins
+        # the worker threads, so one getter hung on a network call without a
+        # socket timeout would block this request forever despite the result()
+        # timeouts below (live incident 2026-06-10: agent task stuck in
+        # "streaming" for 50+ min behind a hung embedding request).
+        _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx")
         try:
-            vault_extra = _fv.result(timeout=2.0) or ""
-        except Exception:
-            pass
-        try:
-            graph_extra = _fg.result(timeout=2.0) or ""
-        except Exception:
-            pass
-        try:
-            smem_hits, smem_ctx = _fs.result(timeout=4.0)
-        except Exception:
-            pass
-        try:
-            mem0_extra = _fm.result(timeout=4.0) or ""
-        except Exception:
-            pass
-    finally:
-        _pool.shutdown(wait=False, cancel_futures=True)
+            _fv = _pool.submit(_get_vault)
+            _fg = _pool.submit(_get_graph)
+            _fs = _pool.submit(_get_smem)
+            _fm = _pool.submit(_get_mem0)
+            try:
+                vault_extra = _fv.result(timeout=2.0) or ""
+            except Exception:
+                pass
+            try:
+                graph_extra = _fg.result(timeout=2.0) or ""
+            except Exception:
+                pass
+            try:
+                smem_hits, smem_ctx = _fs.result(timeout=4.0)
+            except Exception:
+                pass
+            try:
+                mem0_extra = _fm.result(timeout=4.0) or ""
+            except Exception:
+                pass
+        finally:
+            _pool.shutdown(wait=False, cancel_futures=True)
 
     if vault_extra:
         system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
@@ -1042,6 +1081,10 @@ def smart_stream(
             tier = policy["tier"]
             explicit_cloud = policy.get("provider") == "cloud"
             apple_foundation_available = _apple_foundation_available_for(user_input, tool, tier, system_extra)
+            if explicit_cloud and local_available and local_model and _cloud_token_budget_exhausted():
+                tier = "local"
+                explicit_cloud = False
+                apple_foundation_available = False
 
     plan = provider_router.build_plan(
 

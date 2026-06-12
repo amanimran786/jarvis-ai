@@ -15,6 +15,14 @@ import sys
 # smart_stream still leak real GPT_MINI calls (and pollute the verdict log).
 os.environ.setdefault("JARVIS_AUTO_VERIFY", "0")
 
+# Keep test-generated security audit entries out of the real operator ledger
+# (~/.jarvis/security_audit.jsonl) — approve/deny/verdict paths emit on call.
+import tempfile as _tempfile  # noqa: E402
+os.environ.setdefault(
+    "JARVIS_SECURITY_AUDIT_PATH",
+    os.path.join(_tempfile.mkdtemp(prefix="jarvis_test_audit_"), "security_audit.jsonl"),
+)
+
 _EARLY_IMPORTS = [
     "brains.brain_apple_foundation",
     "brains.brain_ollama",
