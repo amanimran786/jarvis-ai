@@ -38,6 +38,13 @@ def _run_ask_stream(**kwargs):
 
 
 class BareSystemTests(unittest.TestCase):
+    def setUp(self):
+        self._prompt = patch.object(brain, "SYSTEM_PROMPT", "Jarvis system prompt for tests.")
+        self._prompt.start()
+
+    def tearDown(self):
+        self._prompt.stop()
+
     def test_bare_system_omits_persona_and_memory(self):
         with patch.object(brain.mem, "get_context") as mock_mem:
             messages = _run_ask_stream(bare_system=True)
