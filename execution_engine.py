@@ -217,7 +217,7 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
     return True, ask_claude(prompt, model=SONNET, system_extra=system_extra)
 
 
-def execute_step(step: TaskStep, step_results: dict[int, str]) -> tuple[bool, str]:
+def execute_step(step: TaskStep, step_results: dict[int, str], run_id: str = "") -> tuple[bool, str]:
     resolved = resolve_params(step.params, step_results)
     tool = (step.tool or "chat").strip().lower()
     spec = tool_registry.get_tool_spec(tool)
@@ -231,6 +231,7 @@ def execute_step(step: TaskStep, step_results: dict[int, str]) -> tuple[bool, st
         trace_path = _trace_step(
             {
                 "timestamp": _now_iso(),
+                "run_id": run_id,
                 "step_number": step.number,
                 "description": step.description,
                 "tool": tool,
@@ -248,7 +249,9 @@ def execute_step(step: TaskStep, step_results: dict[int, str]) -> tuple[bool, st
     last_result = ""
     last_error = ""
     success = False
+    attempts_used = 0
     for attempt in range(1, attempts + 1):
+        attempts_used = attempt
         call_ok, result = _execute_tool_call(tool, normalized, step, step_results)
         last_result = result
         if not call_ok:
@@ -264,13 +267,14 @@ def execute_step(step: TaskStep, step_results: dict[int, str]) -> tuple[bool, st
     elapsed_ms = int((time.time() - started) * 1000)
     trace = {
         "timestamp": _now_iso(),
+        "run_id": run_id,
         "step_number": step.number,
         "description": step.description,
         "tool": tool,
         "params": resolved,
         "normalized_params": normalized,
         "ok": success,
-        "attempts": attempts,
+        "attempts": attempts_used,
         "elapsed_ms": elapsed_ms,
         "side_effects": spec.side_effects,
         "idempotent": spec.idempotent,

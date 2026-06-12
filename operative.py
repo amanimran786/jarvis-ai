@@ -16,6 +16,7 @@ Usage:
 """
 
 import threading
+import uuid
 from typing import Callable
 
 from brains.brain_claude import ask_claude
@@ -54,6 +55,8 @@ def run_task(
         if on_progress:
             on_progress(msg, detail)
 
+    run_id = f"run_{uuid.uuid4().hex[:12]}"
+
     _prog("Planning task", task)
     steps = plan_task(task)
     _prog(f"Plan ready — {len(steps)} steps",
@@ -63,7 +66,7 @@ def run_task(
 
     for step in steps:
         _prog(f"Step {step.number}: {step.description}")
-        ok, result = execute_step(step, step_results)
+        ok, result = execute_step(step, step_results, run_id=run_id)
         step.ok     = ok
         step.result = result
         step_results[step.number] = result
