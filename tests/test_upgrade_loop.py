@@ -1,4 +1,6 @@
 import json
+import importlib.util
+import argparse
 from pathlib import Path
 
 from core import upgrade_loop
@@ -160,6 +162,43 @@ def test_run_cycle_can_create_tickets_and_attach_sandbox_result(tmp_path: Path, 
     assert record["tickets_created"] == 1
     assert record["tickets"][0]["status"] == "promoted_to_backlog"
     assert record["sandbox_smoke"]["ok"] is True
+
+
+def test_cli_cycle_inputs_refetches_watchlist_each_cycle(monkeypatch):
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "upgrade_loop.py"
+    spec = importlib.util.spec_from_file_location("jarvis_upgrade_loop_cli", script_path)
+    cli = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(cli)
+    calls = []
+
+    def fake_fetch_watchlist_signals(force=False):
+        calls.append(force)
+        signal = upgrade_loop.UpgradeSignal(
+            title=f"Signal {len(calls)}",
+            summary="local latency metric changed",
+            source="watchlist_fetch",
+            category="local_runtime",
+        )
+        return [signal], {"cycle": len(calls)}
+
+    monkeypatch.setattr(cli.upgrade_loop, "fetch_watchlist_signals", fake_fetch_watchlist_signals)
+    args = argparse.Namespace(
+        brief=None,
+        brief_file=None,
+        watchlist=False,
+        fetch_watchlist=True,
+        force_fetch_signal=False,
+    )
+
+    first, first_report = cli._cycle_inputs(args)
+    second, second_report = cli._cycle_inputs(args)
+
+    assert len(calls) == 2
+    assert "Signal 1" in first[0]
+    assert "Signal 2" in second[0]
+    assert first_report["cycle"] == 1
+    assert second_report["cycle"] == 2
 
 
 def test_empty_summary_is_stable(tmp_path: Path):
