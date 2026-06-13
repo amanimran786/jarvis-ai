@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.jarvis.upgrade-loop</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/truthseeker/jarvis-ai/scripts/jarvis_upgrade_worker.sh</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>21600</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/truthseeker/jarvis-ai</string>
+	<key>StandardOutPath</key>
+	<string>/Users/truthseeker/Library/Logs/jarvis-upgrade-loop-launchd.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/truthseeker/Library/Logs/jarvis-upgrade-loop-launchd-error.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/truthseeker</string>
+		<key>JARVIS_UPGRADE_LIMIT</key>
+		<string>10</string>
+		<key>JARVIS_UPGRADE_SANDBOX_SMOKE</key>
+		<string>0</string>
+		<key>JARVIS_UPGRADE_SOURCE</key>
+		<string>launchd_watchlist</string>
+		<key>PATH</key>
+		<string>/Users/truthseeker/jarvis-ai/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>KeepAlive</key>
+	<false/>
+</dict>
+</plist>

@@ -33,6 +33,17 @@ def _read_inputs(args: argparse.Namespace) -> list[str]:
     return briefs
 
 
+def _cycle_inputs(args: argparse.Namespace) -> tuple[list[str], dict]:
+    """Read cycle inputs fresh so --watch can detect new source changes."""
+    briefs = _read_inputs(args)
+    fetch_report = {}
+    if args.fetch_watchlist:
+        signals, fetch_report = upgrade_loop.fetch_watchlist_signals(force=args.force_fetch_signal)
+        if signals:
+            briefs.append(json.dumps({"signals": [s.__dict__ for s in signals]}))
+    return briefs, fetch_report
+
+
 def _print(payload: dict, as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -83,16 +94,11 @@ def main(argv: list[str] | None = None) -> int:
         _print(payload, args.json)
         return 0
 
-    briefs = _read_inputs(args)
-    fetch_report = {}
-    if args.fetch_watchlist:
-        signals, fetch_report = upgrade_loop.fetch_watchlist_signals(force=args.force_fetch_signal)
-        if signals:
-            briefs.append(json.dumps({"signals": [s.__dict__ for s in signals]}))
-    if not briefs:
+    if not any([args.brief, args.brief_file, args.watchlist, args.fetch_watchlist]):
         parser.error("provide --brief, --brief-file, --watchlist, or --fetch-watchlist")
 
     while True:
+        briefs, fetch_report = _cycle_inputs(args)
         payload = upgrade_loop.run_cycle(
             briefs,
             source=args.source,
