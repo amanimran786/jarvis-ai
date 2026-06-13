@@ -18,6 +18,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import urllib.error
+import urllib.request
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -123,6 +126,20 @@ def ledger_path() -> Path:
     return runtime_state.writable_data_path("upgrade_loop", "upgrade_cycles.jsonl")
 
 
+def ticket_path() -> Path:
+    override = os.getenv("JARVIS_UPGRADE_TICKET_PATH", "").strip()
+    if override:
+        return Path(override)
+    return runtime_state.writable_data_path("upgrade_loop", "upgrade_tickets.jsonl")
+
+
+def source_state_path() -> Path:
+    override = os.getenv("JARVIS_UPGRADE_SOURCE_STATE_PATH", "").strip()
+    if override:
+        return Path(override)
+    return runtime_state.writable_data_path("upgrade_loop", "source_state.json")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -130,6 +147,11 @@ def _now() -> str:
 def _candidate_id(title: str, source: str) -> str:
     seed = f"{source}:{title}".encode("utf-8", errors="ignore")
     return "upg_" + uuid.uuid5(uuid.NAMESPACE_URL, seed.decode("utf-8", errors="ignore")).hex[:12]
+
+
+def _sha256(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _detect_category(text: str) -> str:
@@ -360,8 +382,168 @@ def append_record(record: dict[str, Any], path: Path | None = None) -> None:
         f.write(json.dumps(record, sort_keys=True, ensure_ascii=False) + "\n")
 
 
+def _fetch_url(url: str, *, timeout: float = 10.0) -> tuple[str, str]:
+    request = urllib.request.Request(url, headers={"User-Agent": "JarvisUpgradeLoop/1.0"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            content_type = response.headers.get("content-type", "")
+            raw = response.read(300_000)
+        return raw.decode("utf-8", errors="replace"), content_type
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return "", f"error:{exc}"
+
+
+def _load_source_state(path: Path | None = None) -> dict[str, Any]:
+    path = path or source_state_path()
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_source_state(state: dict[str, Any], path: Path | None = None) -> None:
+    path = path or source_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def fetch_watchlist_signals(*, state_path: Path | None = None, force: bool = False) -> tuple[list[UpgradeSignal], dict[str, Any]]:
+    """Fetch configured public watchlist sources only when explicitly requested.
+
+    This is network-capable by design, but never calls LLMs and never executes
+    source content. A changed digest becomes an upgrade signal for review.
+    """
+    state = _load_source_state(state_path)
+    signals: list[UpgradeSignal] = []
+    source_reports: dict[str, Any] = {}
+    for item in DEFAULT_WATCHLIST:
+        url = str(item.get("source_url", ""))
+        title = str(item.get("title", "Upgrade source"))
+        if url.startswith("local:"):
+            continue
+        body, content_type = _fetch_url(url)
+        digest = _sha256(body) if body else ""
+        previous = str(state.get(url, {}).get("digest", ""))
+        changed = bool(digest and (force or digest != previous))
+        source_reports[url] = {
+            "title": title,
+            "ok": bool(body),
+            "changed": changed,
+            "digest": digest[:16],
+            "content_type": content_type,
+        }
+        if not body:
+            continue
+        state[url] = {"digest": digest, "checked_at": _now(), "title": title}
+        if changed:
+            signals.append(UpgradeSignal(
+                title=f"Watchlist changed: {title}",
+                summary=str(item.get("why") or title),
+                source="watchlist_fetch",
+                source_url=url,
+                category=str(item.get("category", "")),
+                evidence=[f"content_type={content_type}", f"digest={digest[:16]}"],
+            ))
+    _save_source_state(state, state_path)
+    return signals, source_reports
+
+
+def read_tickets(path: Path | None = None) -> list[dict[str, Any]]:
+    path = path or ticket_path()
+    if not path.exists():
+        return []
+    tickets: list[dict[str, Any]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                tickets.append(obj)
+        except json.JSONDecodeError:
+            continue
+    return tickets
+
+
+def create_tickets(candidates: list[UpgradeCandidate], *, path: Path | None = None,
+                   auto_promote: bool = False, min_score: int = 25) -> list[dict[str, Any]]:
+    """Append durable local upgrade tickets. Promotion means backlog promotion,
+    not code merge, push, deploy, or execution."""
+    path = path or ticket_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_ids = {str(t.get("candidate_id", "")) for t in read_tickets(path)}
+    created: list[dict[str, Any]] = []
+    with open(path, "a", encoding="utf-8") as f:
+        for candidate in candidates:
+            if candidate.candidate_id in existing_ids:
+                continue
+            status = "promoted_to_backlog" if (
+                auto_promote and candidate.score >= min_score and candidate.risk_level == "low"
+            ) else "proposed"
+            ticket = {
+                "type": "upgrade_ticket",
+                "ticket_id": "ticket_" + uuid.uuid4().hex[:12],
+                "candidate_id": candidate.candidate_id,
+                "title": candidate.title,
+                "category": candidate.category,
+                "score": candidate.score,
+                "priority": candidate.priority,
+                "risk_level": candidate.risk_level,
+                "requires_review": candidate.requires_review,
+                "status": status,
+                "created_at": _now(),
+                "source": candidate.source,
+                "source_url": candidate.source_url,
+                "work_order": candidate.work_order,
+            }
+            f.write(json.dumps(ticket, sort_keys=True, ensure_ascii=False) + "\n")
+            created.append(ticket)
+    return created
+
+
+def sandbox_smoke(cmd: list[str] | None = None) -> dict[str, Any]:
+    """Run a local smoke command for the upgrade loop itself.
+
+    This does not test arbitrary downloaded content. It proves the local ticket
+    and safety plumbing still composes with work-order, sandbox, and audit tests.
+    """
+    cmd = cmd or [
+        "./venv/bin/python", "-m", "pytest",
+        "tests/test_upgrade_loop.py",
+        "tests/test_work_order.py",
+        "tests/test_task_runtime_sandbox.py",
+        "-q",
+    ]
+    started = _now()
+    try:
+        proc = subprocess.run(cmd, cwd=str(runtime_state.source_root()), capture_output=True,
+                              text=True, timeout=120, check=False)
+        ok = proc.returncode == 0
+        return {
+            "ok": ok,
+            "started_at": started,
+            "finished_at": _now(),
+            "cmd": cmd,
+            "returncode": proc.returncode,
+            "stdout_tail": proc.stdout[-4000:],
+            "stderr_tail": proc.stderr[-4000:],
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "started_at": started,
+            "finished_at": _now(),
+            "cmd": cmd,
+            "returncode": -1,
+            "stdout_tail": "",
+            "stderr_tail": str(exc),
+        }
+
+
 def run_cycle(briefs: list[str] | str, *, source: str = "manual", limit: int = 10,
-              append: bool = True, path: Path | None = None) -> dict[str, Any]:
+              append: bool = True, path: Path | None = None,
+              create_ticket_records: bool = False, auto_promote: bool = False,
+              sandbox_test: bool = False) -> dict[str, Any]:
     """Run one upgrade-loop pass and optionally append it to the ledger."""
     if isinstance(briefs, str):
         briefs = [briefs]
@@ -380,6 +562,12 @@ def run_cycle(briefs: list[str] | str, *, source: str = "manual", limit: int = 1
         "execute": False,
         "note": "Preview only. Human approval is required before dispatch, merge, push, or deploy.",
     }
+    if create_ticket_records:
+        tickets = create_tickets(candidates, auto_promote=auto_promote)
+        record["tickets_created"] = len(tickets)
+        record["tickets"] = tickets
+    if sandbox_test:
+        record["sandbox_smoke"] = sandbox_smoke()
     if append:
         append_record(record, path)
     return record
@@ -430,6 +618,7 @@ def summarize(path: Path | None = None) -> dict[str, Any]:
     return {
         "cycle_count": len(cycles),
         "candidate_count": len(candidates),
+        "ticket_count": len(read_tickets()),
         "decision_count": len(decisions),
         "decisions": dict(sorted(decision_counts.items())),
         "by_category": dict(sorted(category_counts.items())),

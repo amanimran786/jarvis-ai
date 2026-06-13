@@ -38,6 +38,7 @@ Exit code: 0 = clean, 1 = warnings only, 2 = at least one critical.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -80,6 +81,10 @@ def ledger_path() -> Path:
 
 def projects_db_path() -> Path:
     return Path(os.getenv("JARVIS_PROJECTS_DB", str(_home_jarvis() / "projects.db")))
+
+
+def triage_path() -> Path:
+    return Path(os.getenv("JARVIS_PIPELINE_AUDIT_TRIAGE_PATH", str(_home_jarvis() / "pipeline_audit_triage.jsonl")))
 
 
 def _verifiable_agents() -> frozenset[str]:
@@ -125,7 +130,83 @@ class Finding:
             "task_id": self.task_id,
             "agent_id": self.agent_id,
             "detail": self.detail,
+            "fingerprint": finding_fingerprint(self),
         }
+
+
+def finding_fingerprint(finding: "Finding | dict") -> str:
+    """Stable id for triaging known historical warnings without mutating logs."""
+    if isinstance(finding, Finding):
+        parts = (finding.code, finding.severity, finding.task_id, finding.agent_id, finding.detail)
+    else:
+        parts = (
+            str(finding.get("code", "")),
+            str(finding.get("severity", "")),
+            str(finding.get("task_id", "")),
+            str(finding.get("agent_id", "")),
+            str(finding.get("detail", "")),
+        )
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def read_triage(path: Path | None = None) -> dict[str, dict]:
+    path = path or triage_path()
+    if not path.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            item = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        fp = str(item.get("fingerprint", ""))
+        if fp:
+            out[fp] = item
+    return out
+
+
+def acknowledge_findings(findings: list[dict], *, reason: str, actor: str = "operator",
+                         path: Path | None = None) -> list[dict]:
+    """Append triage acknowledgements. Does not edit verdict or audit ledgers."""
+    path = path or triage_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    records: list[dict] = []
+    with open(path, "a", encoding="utf-8") as f:
+        for finding in findings:
+            if finding.get("severity") != WARNING:
+                continue
+            rec = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "fingerprint": finding_fingerprint(finding),
+                "code": finding.get("code", ""),
+                "task_id": finding.get("task_id", ""),
+                "agent_id": finding.get("agent_id", ""),
+                "reason": reason,
+                "actor": actor,
+            }
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+            records.append(rec)
+    return records
+
+
+def _apply_triage(findings: list[Finding]) -> tuple[list[Finding], list[dict]]:
+    triage = read_triage()
+    if not triage:
+        return findings, []
+    active: list[Finding] = []
+    acknowledged: list[dict] = []
+    for finding in findings:
+        fp = finding_fingerprint(finding)
+        if finding.severity == WARNING and fp in triage:
+            item = finding.to_dict()
+            item["acknowledged"] = True
+            item["triage"] = triage[fp]
+            acknowledged.append(item)
+        else:
+            active.append(finding)
+    return active, acknowledged
 
 
 # ─── Verdict loading ──────────────────────────────────────────────────────────
@@ -412,6 +493,8 @@ def run_once(append: bool = True) -> dict:
                 f"verdict log shrank from {prev_n} to {len(lines)} lines — records deleted",
             ))
 
+    findings, acknowledged = _apply_triage(findings)
+
     sev_counts = {CRITICAL: 0, WARNING: 0, INFO: 0}
     for f in findings:
         sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
@@ -429,6 +512,8 @@ def run_once(append: bool = True) -> dict:
         "fail_count": fails,
         "severity_counts": sev_counts,
         "findings": [f.to_dict() for f in findings],
+        "acknowledged_findings": acknowledged,
+        "acknowledged_count": len(acknowledged),
         "verdict": ("CRITICAL" if sev_counts[CRITICAL]
                     else "WARN" if sev_counts[WARNING] else "CLEAN"),
     }
@@ -472,6 +557,8 @@ def format_report(report: dict) -> str:
     ]
     if report.get("ledger_hash"):
         lines.append(f"  ledger: {report['ledger_hash'][:16]}…  ({ledger_path()})")
+    if report.get("acknowledged_count"):
+        lines.append(f"  acknowledged historical warnings: {report['acknowledged_count']}  ({triage_path()})")
     sev_order = {CRITICAL: 0, WARNING: 1, INFO: 2}
     for f in sorted(report["findings"], key=lambda x: sev_order.get(x["severity"], 9)):
         mark = "✗" if f["severity"] == CRITICAL else ("⚠" if f["severity"] == WARNING else "·")
@@ -506,6 +593,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--interval", type=float, default=30.0, help="watch poll interval seconds")
     ap.add_argument("--json", action="store_true", help="emit JSON report")
     ap.add_argument("--no-append", action="store_true", help="do not write to the ledger")
+    ap.add_argument("--ack-current-warnings", action="store_true",
+                    help="acknowledge current warning findings as historical triage")
+    ap.add_argument("--ack-reason", default="historical baseline acknowledged by operator",
+                    help="reason stored with --ack-current-warnings")
     args = ap.parse_args(argv)
 
     if args.watch:
@@ -513,6 +604,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     report = run_once(append=not args.no_append)
+    if args.ack_current_warnings:
+        acknowledged = acknowledge_findings(report.get("findings", []), reason=args.ack_reason)
+        report["acknowledged_now"] = acknowledged
+        report = run_once(append=not args.no_append)
     if args.json:
         print(json.dumps(report, indent=2))
     else:
