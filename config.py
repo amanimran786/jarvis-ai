@@ -146,6 +146,7 @@ OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 LOCAL_STT_ENGINE  = os.getenv("LOCAL_STT_ENGINE", "auto")
 LOCAL_STT_MODEL   = os.getenv("LOCAL_STT_MODEL", "base.en")
 LOCAL_STT_DEVICE  = os.getenv("LOCAL_STT_DEVICE", "cpu")
@@ -172,6 +173,22 @@ GEMINI_PRO   = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
 HAIKU      = "claude-haiku-4-5-20251001"
 SONNET     = "claude-sonnet-4-6"
 OPUS       = "claude-opus-4-6"
+
+# ── Kimi K2.7 Code (Moonshot, via OpenRouter) — STAGED CANDIDATE, default OFF ──
+# 1T-param MoE coder (32B active, 256K ctx). Onboarded as an isolated, flagged
+# candidate only — NOT wired into model_router/provider_router tiers. As of its
+# 2026-06-12 release every published benchmark is Moonshot's own proprietary
+# suite; no independent SWE-bench/Terminal-Bench numbers exist. Promote into the
+# coder tier only after kimi_eval.py shows parity against incumbent coders.
+# OpenRouter is OpenAI-wire-compatible, so brain_kimi reuses the OpenAI client.
+KIMI_ENABLED   = _env_flag("JARVIS_KIMI_ENABLED", False)
+KIMI_API_KEY   = os.getenv("JARVIS_KIMI_API_KEY") or OPENROUTER_API_KEY
+KIMI_BASE_URL  = os.getenv("JARVIS_KIMI_BASE_URL", "https://openrouter.ai/api/v1").strip() or "https://openrouter.ai/api/v1"
+KIMI_CODER     = os.getenv("JARVIS_KIMI_MODEL", "moonshotai/kimi-k2.7-code").strip() or "moonshotai/kimi-k2.7-code"
+KIMI_TIMEOUT_SECONDS = _env_float("JARVIS_KIMI_TIMEOUT_SECONDS", 120.0)
+# OpenRouter list price per 1M tokens (USD), 2026-06-12: $0.95 in / $4.00 out.
+KIMI_PRICE_IN_PER_M  = _env_float("JARVIS_KIMI_PRICE_IN_PER_M", 0.95)
+KIMI_PRICE_OUT_PER_M = _env_float("JARVIS_KIMI_PRICE_OUT_PER_M", 4.00)
 
 # Local model tiers (Ollama — no restrictions, fully private)
 LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
