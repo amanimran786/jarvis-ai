@@ -33,13 +33,16 @@ class AuditorTests(unittest.TestCase):
         d = Path(self.tmp.name)
         self.vpath = d / "verdicts.jsonl"
         self.lpath = d / "ledger.jsonl"
+        self.tpath = d / "triage.jsonl"
         os.environ["JARVIS_VERDICTS_PATH"] = str(self.vpath)
         os.environ["JARVIS_PIPELINE_AUDIT_PATH"] = str(self.lpath)
+        os.environ["JARVIS_PIPELINE_AUDIT_TRIAGE_PATH"] = str(self.tpath)
         # Isolate from the real projects.db so reconciliation stays silent here.
         os.environ["JARVIS_PROJECTS_DB"] = str(d / "no_such.db")
 
     def tearDown(self):
-        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH", "JARVIS_PROJECTS_DB"):
+        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH",
+                  "JARVIS_PIPELINE_AUDIT_TRIAGE_PATH", "JARVIS_PROJECTS_DB"):
             os.environ.pop(k, None)
         self.tmp.cleanup()
 
@@ -105,6 +108,21 @@ class AuditorTests(unittest.TestCase):
         report = pa.run_once(append=False)
         self.assertIn("RETRY_EXHAUSTION_FAIL", self._codes(report))
 
+    def test_acknowledged_warning_no_longer_blocks_clean_current_audit(self):
+        self._write(_verdict(
+            task_id="r", tool_calls=1, score=0.3, **{"pass": False}, retry_count=2,
+        ))
+        first = pa.run_once(append=False)
+        self.assertEqual(first["verdict"], "WARN")
+        pa.acknowledge_findings(first["findings"], reason="historical baseline")
+
+        second = pa.run_once(append=False)
+
+        self.assertEqual(second["verdict"], "CLEAN")
+        self.assertEqual(second["severity_counts"][pa.WARNING], 0)
+        self.assertEqual(second["acknowledged_count"], 1)
+        self.assertEqual(second["acknowledged_findings"][0]["code"], "RETRY_EXHAUSTION_FAIL")
+
     def test_malformed_record_warns(self):
         self.vpath.write_text("{not json}\n" + _verdict() + "\n", encoding="utf-8")
         report = pa.run_once(append=False)
@@ -169,12 +187,15 @@ class ReconciliationTests(unittest.TestCase):
         self.vpath = d / "verdicts.jsonl"
         self.lpath = d / "ledger.jsonl"
         self.dbpath = d / "projects.db"
+        self.tpath = d / "triage.jsonl"
         os.environ["JARVIS_VERDICTS_PATH"] = str(self.vpath)
         os.environ["JARVIS_PIPELINE_AUDIT_PATH"] = str(self.lpath)
         os.environ["JARVIS_PROJECTS_DB"] = str(self.dbpath)
+        os.environ["JARVIS_PIPELINE_AUDIT_TRIAGE_PATH"] = str(self.tpath)
 
     def tearDown(self):
-        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH", "JARVIS_PROJECTS_DB"):
+        for k in ("JARVIS_VERDICTS_PATH", "JARVIS_PIPELINE_AUDIT_PATH",
+                  "JARVIS_PIPELINE_AUDIT_TRIAGE_PATH", "JARVIS_PROJECTS_DB"):
             os.environ.pop(k, None)
         self.tmp.cleanup()
 

@@ -55,6 +55,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", default="manual", help="Source label for the cycle")
     parser.add_argument("--limit", type=int, default=10, help="Maximum candidates to keep")
     parser.add_argument("--watchlist", action="store_true", help="Include built-in upgrade watchlist seeds")
+    parser.add_argument("--fetch-watchlist", action="store_true",
+                        help="Fetch built-in public watchlist sources and create signals on content changes")
+    parser.add_argument("--force-fetch-signal", action="store_true",
+                        help="Treat fetched watchlist sources as changed even if digest is unchanged")
+    parser.add_argument("--create-tickets", action="store_true", help="Append durable local upgrade tickets")
+    parser.add_argument("--auto-promote", action="store_true",
+                        help="Promote low-risk high-scoring tickets to local backlog only")
+    parser.add_argument("--sandbox-smoke", action="store_true",
+                        help="Run local upgrade-loop safety smoke tests after candidate generation")
     parser.add_argument("--summary", action="store_true", help="Print ledger summary instead of running a cycle")
     parser.add_argument("--decision", choices=["accepted", "rejected", "deferred", "needs_more_research"], help="Record a human decision")
     parser.add_argument("--candidate-id", help="Candidate id for --decision")
@@ -75,11 +84,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     briefs = _read_inputs(args)
+    fetch_report = {}
+    if args.fetch_watchlist:
+        signals, fetch_report = upgrade_loop.fetch_watchlist_signals(force=args.force_fetch_signal)
+        if signals:
+            briefs.append(json.dumps({"signals": [s.__dict__ for s in signals]}))
     if not briefs:
-        parser.error("provide --brief, --brief-file, or --watchlist")
+        parser.error("provide --brief, --brief-file, --watchlist, or --fetch-watchlist")
 
     while True:
-        payload = upgrade_loop.run_cycle(briefs, source=args.source, limit=args.limit)
+        payload = upgrade_loop.run_cycle(
+            briefs,
+            source=args.source,
+            limit=args.limit,
+            create_ticket_records=args.create_tickets,
+            auto_promote=args.auto_promote,
+            sandbox_test=args.sandbox_smoke,
+        )
+        if fetch_report:
+            payload["fetch_report"] = fetch_report
         _print(payload, args.json)
         if not args.watch:
             return 0

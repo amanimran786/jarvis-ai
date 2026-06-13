@@ -87,6 +87,81 @@ def test_decisions_are_recorded_and_summarized(tmp_path: Path):
     assert summary["decisions"]["accepted"] == 1
 
 
+def test_create_tickets_dedupes_and_auto_promotes_low_risk(tmp_path: Path):
+    signals = upgrade_loop.parse_signals(
+        "- FastEmbed memory: install local embeddings and measure recall latency",
+        source="test",
+    )
+    candidates = upgrade_loop.build_candidates(signals)
+    path = tmp_path / "tickets.jsonl"
+
+    first = upgrade_loop.create_tickets(candidates, path=path, auto_promote=True, min_score=1)
+    second = upgrade_loop.create_tickets(candidates, path=path, auto_promote=True, min_score=1)
+
+    assert len(first) == 1
+    assert second == []
+    assert first[0]["status"] == "promoted_to_backlog"
+    assert upgrade_loop.read_tickets(path)[0]["candidate_id"] == candidates[0].candidate_id
+
+
+def test_fetch_watchlist_signals_tracks_changed_digest(tmp_path: Path, monkeypatch):
+    state = tmp_path / "state.json"
+    calls = []
+
+    def fake_fetch(url):
+        calls.append(url)
+        return f"body {len(calls)}", "text/plain"
+
+    monkeypatch.setattr(upgrade_loop, "_fetch_url", fake_fetch)
+    monkeypatch.setattr(upgrade_loop, "DEFAULT_WATCHLIST", [
+        {"title": "Ollama docs", "source_url": "https://example.test/ollama", "category": "local_runtime"},
+        {"title": "Local audit", "source_url": "local:pipeline", "category": "evaluation"},
+    ])
+
+    first, first_report = upgrade_loop.fetch_watchlist_signals(state_path=state)
+    second, second_report = upgrade_loop.fetch_watchlist_signals(state_path=state)
+
+    assert len(first) == 1
+    assert first[0].title == "Watchlist changed: Ollama docs"
+    assert first_report["https://example.test/ollama"]["changed"] is True
+    assert len(second) == 1
+    assert second_report["https://example.test/ollama"]["changed"] is True
+
+
+def test_fetch_watchlist_no_signal_when_digest_unchanged(tmp_path: Path, monkeypatch):
+    state = tmp_path / "state.json"
+
+    monkeypatch.setattr(upgrade_loop, "_fetch_url", lambda url: ("same body", "text/plain"))
+    monkeypatch.setattr(upgrade_loop, "DEFAULT_WATCHLIST", [
+        {"title": "Apple docs", "source_url": "https://example.test/apple", "category": "apple_on_device"},
+    ])
+
+    first, _ = upgrade_loop.fetch_watchlist_signals(state_path=state)
+    second, report = upgrade_loop.fetch_watchlist_signals(state_path=state)
+
+    assert len(first) == 1
+    assert second == []
+    assert report["https://example.test/apple"]["changed"] is False
+
+
+def test_run_cycle_can_create_tickets_and_attach_sandbox_result(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("JARVIS_UPGRADE_TICKET_PATH", str(tmp_path / "tickets.jsonl"))
+    monkeypatch.setattr(upgrade_loop, "sandbox_smoke", lambda: {"ok": True, "cmd": ["pytest"]})
+
+    record = upgrade_loop.run_cycle(
+        "- Agent eval: add trace metric regression test",
+        source="test",
+        create_ticket_records=True,
+        auto_promote=True,
+        sandbox_test=True,
+        path=tmp_path / "ledger.jsonl",
+    )
+
+    assert record["tickets_created"] == 1
+    assert record["tickets"][0]["status"] == "promoted_to_backlog"
+    assert record["sandbox_smoke"]["ok"] is True
+
+
 def test_empty_summary_is_stable(tmp_path: Path):
     summary = upgrade_loop.summarize(tmp_path / "missing.jsonl")
 
