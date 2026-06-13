@@ -125,6 +125,7 @@ hiddenimports = sorted(set(
         "core",
         "core.manager",
         "core.work_order",
+        "core.upgrade_loop",
         # infra layer
         "infra",
         "infra.checkpointer",
@@ -133,6 +134,9 @@ hiddenimports = sorted(set(
         "infra.memory",
         "infra.rbac",
         "infra.threat_screen",
+        "infra.pipeline_audit",
+        "infra.security_audit",
+        "infra._hashchain",
         # security
         "security_roe",
         # existing
