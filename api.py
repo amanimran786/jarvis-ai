@@ -2735,6 +2735,78 @@ def security_summary(limit: int = 1000):
     return {"ok": True, "summary": summarize(limit=limit)}
 
 
+def _safe_pipeline_audit_summary() -> dict:
+    try:
+        from infra import pipeline_audit
+        report = pipeline_audit.run_once(append=False)
+        return {
+            "ok": True,
+            "verdict": report.get("verdict", "UNKNOWN"),
+            "severity_counts": report.get("severity_counts", {}),
+            "acknowledged_count": report.get("acknowledged_count", 0),
+            "verdicts_count": report.get("verdicts_count", 0),
+            "records_parsed": report.get("records_parsed", 0),
+            "findings": report.get("findings", [])[:10],
+        }
+    except Exception as exc:
+        return {"ok": False, "verdict": "UNKNOWN", "error": str(exc)}
+
+
+def _safe_upgrade_loop_state() -> dict:
+    try:
+        from core import upgrade_loop
+        summary = upgrade_loop.summarize()
+        tickets = upgrade_loop.read_tickets()
+        recent = list(reversed(tickets[-50:]))
+        return {
+            "ok": True,
+            "summary": summary,
+            "tickets": recent,
+            "watchlist": upgrade_loop.DEFAULT_WATCHLIST,
+        }
+    except Exception as exc:
+        return {"ok": False, "summary": {}, "tickets": [], "watchlist": [], "error": str(exc)}
+
+
+@app.get("/dashboard/state")
+def dashboard_state(request: Request):
+    """Aggregated local Manager Console state for the dashboard."""
+    _token_authorized(request)
+    tasks = task_runtime.list_tasks(limit=200)
+    active_statuses = {"queued", "assigned", "waiting_approval", "running", "streaming"}
+    completed_statuses = {"succeeded", "completed"}
+    failed_statuses = {"failed", "cancelled", "denied"}
+    try:
+        training_status = local_training.status()
+    except Exception as exc:
+        training_status = {"ok": False, "error": str(exc)}
+    try:
+        eval_status = local_model_eval.status()
+    except Exception as exc:
+        eval_status = {"ok": False, "error": str(exc)}
+    try:
+        from infra.security_audit import summarize as _security_summarize
+        security = _security_summarize(limit=1000)
+    except Exception as exc:
+        security = {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "tasks": {
+            "total": len(tasks),
+            "active": sum(1 for t in tasks if t.get("status") in active_statuses),
+            "awaiting_approval": sum(1 for t in tasks if t.get("status") == "waiting_approval"),
+            "completed": sum(1 for t in tasks if t.get("status") in completed_statuses),
+            "failed": sum(1 for t in tasks if t.get("status") in failed_statuses),
+        },
+        "agents": _get_agent_stats_data(),
+        "pipeline_audit": _safe_pipeline_audit_summary(),
+        "upgrade_loop": _safe_upgrade_loop_state(),
+        "training": training_status,
+        "evals": eval_status,
+        "security": security,
+    }
+
+
 @app.post("/tasks")
 def create_task(req: TaskRequest):
     task = task_runtime.submit_task(
@@ -3946,7 +4018,7 @@ function initWorldIfNeeded(){
   _3wInited=true;
 
   const W=canvas.parentElement.clientWidth||900;
-  const H=Math.round(W*15/22);
+  const H=Math.round(Math.max(340, Math.min(620, W*9/16)));
   canvas.style.height=H+'px';
 
   _3wRenderer=new THREE.WebGLRenderer({canvas,antialias:true});
@@ -3999,7 +4071,7 @@ function _3wSetupCamera(W,H){
 function _3wOnResize(){
   if(!_3wCanvas||!_3wRenderer||!_3wCamera) return;
   const W=_3wCanvas.parentElement.clientWidth||900;
-  const H=Math.round(W*15/22);
+  const H=Math.round(Math.max(340, Math.min(620, W*9/16)));
   _3wCanvas.style.height=H+'px';
   _3wRenderer.setSize(W,H,false);
   const fH=15, aspect=W/H;
@@ -4443,8 +4515,8 @@ async def agent_dashboard(request: Request):
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0a0a0f;color:#d0d0e0;min-height:100vh}}
-  .topbar{{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:#111120;border-bottom:1px solid #222244;position:sticky;top:0;z-index:100}}
-  .topbar h1{{font-size:1.1em;font-weight:600;color:#7ec8e3;letter-spacing:.04em}}
+  .topbar{{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 24px;background:#111120;border-bottom:1px solid #222244;position:sticky;top:0;z-index:100;flex-wrap:wrap}}
+  .topbar h1{{font-size:1.1em;font-weight:600;color:#7ec8e3;letter-spacing:.04em;line-height:1.25}}
   .badge{{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:.75em;font-weight:600}}
   .badge-ok{{background:#0d2a1a;color:#28c76f;border:1px solid #1a4a2a}}
   .badge-warn{{background:#2a1a0a;color:#ff9f43;border:1px solid #4a2a0a}}
@@ -4463,7 +4535,7 @@ async def agent_dashboard(request: Request):
   .btn-run{{background:#1a1a3a;color:#7ec8e3;border:1px solid #2a2a5a}}
   .btn-run:hover{{background:#2a2a5a}}
   .btn-sm{{padding:5px 12px;font-size:.8em}}
-  .tabs{{display:flex;gap:4px;padding:12px 24px;border-bottom:1px solid #1a1a3a;overflow-x:auto}}
+  .tabs{{display:flex;gap:4px;padding:12px 24px;border-bottom:1px solid #1a1a3a;overflow-x:auto;scrollbar-width:thin}}
   .tab{{padding:8px 18px;border-radius:8px;font-size:.88em;cursor:pointer;color:#a0a0b8;border:1px solid transparent;white-space:nowrap}}
   .tab.active{{color:#7ec8e3;background:#111128;border-color:#2a2a5a}}
   .tab:hover:not(.active){{color:#c8c8da}}
@@ -4511,8 +4583,9 @@ async def agent_dashboard(request: Request):
   th{{text-align:left;padding:8px 10px;color:#666;border-bottom:1px solid #1a1a3a;font-weight:500}}
   td{{padding:8px 10px;border-bottom:1px solid #111128;vertical-align:top}}
   .truncate{{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-  @media(max-width:600px){{.form-grid{{grid-template-columns:1fr}}.stat-row{{flex-direction:column}}}}
+  @media(max-width:600px){{.form-grid{{grid-template-columns:1fr}}.stat-row{{flex-direction:column}}.topbar{{align-items:flex-start}}.topbar h1{{font-size:1em;max-width:220px}}}}
   /* ---- Virtual Office Floor ---- */
+  .office-stage{{position:relative;border-radius:8px;overflow:hidden;background:#0d1117;border:1px solid #1e2430;min-height:340px}}
   .floor-plan{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0}}
   .floor-zone{{background:#111120;border:1px solid #1a1a3a;border-radius:10px;padding:12px}}
   .floor-zone.zone-eng{{border-color:#1a3a5a;background:linear-gradient(135deg,#0a111a,#111120)}}
@@ -4605,6 +4678,31 @@ async def agent_dashboard(request: Request):
   .help-sec p{{font-size:.76em;color:#666;line-height:1.55}}
   /* ---- Eval Log tab ---- */
   #eval-filter-agent,#eval-filter-verdict{{background:#0a0a0f;border:1px solid #2a2a4a;border-radius:6px;color:#d0d0e0;padding:5px 8px;font-size:.8em}}
+  /* ---- Manager Console + Upgrade Loop ---- */
+  .console-grid{{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:14px;align-items:start}}
+  .console-rail{{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:14px}}
+  .console-tile{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:8px;padding:12px;min-height:92px}}
+  .console-tile .kpi{{font-size:1.8em;font-weight:750;color:#7ec8e3;font-variant-numeric:tabular-nums;line-height:1.1}}
+  .console-tile .kpi.ok{{color:#28c76f}} .console-tile .kpi.warn{{color:#ffd700}} .console-tile .kpi.bad{{color:#ea5455}}
+  .console-tile .label{{font-size:.75em;color:#9a9ab0;line-height:1.35;margin-top:7px}}
+  .manager-layout{{display:grid;grid-template-columns:220px minmax(0,1fr);gap:10px}}
+  .manager-nav{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:8px;padding:8px}}
+  .manager-nav-row{{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 9px;border-radius:6px;color:#b8b8d0;font-size:.82em;margin-bottom:3px;background:transparent;border:0;width:100%;text-align:left;font-family:inherit}}
+  .manager-nav-row.active,.manager-nav-row:hover{{background:#17172c;color:#e8e8f8}}
+  .decision-list{{display:flex;flex-direction:column;gap:8px}}
+  .decision-item{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:8px;padding:10px 12px}}
+  .decision-item strong{{display:block;color:#d8d8e8;font-size:.85em;margin-bottom:5px}}
+  .decision-item p{{color:#8f8fac;font-size:.78em;line-height:1.45;margin:0 0 8px}}
+  .upgrade-board{{display:grid;grid-template-columns:repeat(4,minmax(180px,1fr));gap:10px;align-items:start}}
+  .upgrade-col{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:8px;padding:10px;min-height:180px}}
+  .upgrade-col h3{{font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center}}
+  .upgrade-ticket{{background:#111122;border:1px solid #22224a;border-radius:8px;padding:10px;margin-bottom:8px}}
+  .upgrade-ticket strong{{display:block;font-size:.83em;color:#e0e0ec;line-height:1.35;margin-bottom:6px}}
+  .upgrade-ticket p{{font-size:.76em;color:#9999b4;line-height:1.42;margin:0 0 8px}}
+  .source-row{{display:grid;grid-template-columns:minmax(140px,1fr) auto;gap:8px;align-items:center;border-bottom:1px solid #17172a;padding:8px 0;font-size:.8em}}
+  .source-row:last-child{{border-bottom:0}}
+  @media(max-width:1200px){{.console-grid{{grid-template-columns:1fr}}.console-rail{{grid-template-columns:repeat(2,1fr)}}.upgrade-board{{grid-template-columns:repeat(2,1fr)}}}}
+  @media(max-width:700px){{.manager-layout{{grid-template-columns:1fr}}.console-rail,.upgrade-board{{grid-template-columns:1fr}}}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 </head>
@@ -4614,7 +4712,7 @@ async def agent_dashboard(request: Request):
   <div class="auth-box">
     <h2>Jarvis Agent Ops</h2>
     <p style="color:#777;font-size:.85em;margin-bottom:16px">Enter your API token to continue</p>
-    <input type="password" id="auth-input" placeholder="API token">
+    <input type="password" id="auth-input" placeholder="API token" aria-label="API token">
     <button class="btn btn-primary" style="width:100%" onclick="doAuth()">Connect</button>
   </div>
 </div>
@@ -4629,13 +4727,15 @@ async def agent_dashboard(request: Request):
           onclick="checkPipelineHealth()" title="Click to run pipeline health check">
       🔍 Pipeline Monitor
     </span>
-    <button class="btn btn-run btn-sm" onclick="document.getElementById('help-modal').classList.add('open')" title="How to use this dashboard" style="padding:4px 12px;font-size:.78em">? Help</button>
+    <button class="btn btn-run btn-sm" onclick="openHelp()" title="How to use this dashboard" style="padding:4px 12px;font-size:.78em">? Help</button>
     <span id="status-badge" class="badge badge-ok"><span class="dot dot-green"></span>Online</span>
   </div>
 </div>
 
 <div class="tabs" role="tablist" aria-label="Dashboard sections">
-  <button class="tab active" role="tab" id="tab-pipeline" aria-controls="pane-pipeline" aria-selected="true" data-tab="pipeline" onclick="switchTab('pipeline')">🛰 Pipeline <span id="pipeline-count" style="color:#7ec8e3"></span></button>
+  <button class="tab active" role="tab" id="tab-console" aria-controls="pane-console" aria-selected="true" data-tab="console" onclick="switchTab('console')">⌁ Manager Console</button>
+  <button class="tab" role="tab" id="tab-upgrades" aria-controls="pane-upgrades" aria-selected="false" data-tab="upgrades" tabindex="-1" onclick="switchTab('upgrades')">↟ Upgrade Loop <span id="upgrade-count" style="color:#7ec8e3"></span></button>
+  <button class="tab" role="tab" id="tab-pipeline" aria-controls="pane-pipeline" aria-selected="false" data-tab="pipeline" tabindex="-1" onclick="switchTab('pipeline')">🛰 Pipeline <span id="pipeline-count" style="color:#7ec8e3"></span></button>
   <button class="tab" role="tab" id="tab-queue" aria-controls="pane-queue" aria-selected="false" data-tab="queue" tabindex="-1" onclick="switchTab('queue')">⏳ Approval Queue <span id="queue-count" style="color:#ffd700"></span></button>
   <button class="tab" role="tab" id="tab-active" aria-controls="pane-active" aria-selected="false" data-tab="active" tabindex="-1" onclick="switchTab('active')">▶ Active <span id="active-count" style="color:#7ec8e3"></span></button>
   <button class="tab" role="tab" id="tab-history" aria-controls="pane-history" aria-selected="false" data-tab="history" tabindex="-1" onclick="switchTab('history')">📋 History</button>
@@ -4645,16 +4745,83 @@ async def agent_dashboard(request: Request):
   <button class="tab" role="tab" id="tab-evallog" aria-controls="pane-evallog" aria-selected="false" data-tab="evallog" tabindex="-1" onclick="switchTab('evallog')">📊 Eval Log</button>
   <button class="tab" role="tab" id="tab-lessons" aria-controls="pane-lessons" aria-selected="false" data-tab="lessons" tabindex="-1" onclick="switchTab('lessons')">🧠 Lessons <span id="lessons-count" style="color:#c084fc"></span></button>
   <button class="tab" role="tab" id="tab-routines" aria-controls="pane-routines" aria-selected="false" data-tab="routines" tabindex="-1" onclick="switchTab('routines')">⏰ Routines <span id="routines-count" style="color:#34d399"></span></button>
+  <button class="tab" role="tab" id="tab-security" aria-controls="pane-security" aria-selected="false" data-tab="security" tabindex="-1" onclick="switchTab('security')">🛡 Security <span id="security-count" style="color:#ea5455"></span></button>
+  <button class="tab" role="tab" id="tab-tokens" aria-controls="pane-tokens" aria-selected="false" data-tab="tokens" tabindex="-1" onclick="switchTab('tokens')">💸 Tokens <span id="tokens-count" style="color:#ffd700"></span></button>
+</div>
+
+<!-- Manager Console -->
+<div class="pane active" id="pane-console" role="tabpanel" aria-labelledby="tab-console">
+  <div class="console-rail">
+    <div class="console-tile"><div class="kpi" id="mc-audit">—</div><div class="label">Pipeline truthfulness verdict</div></div>
+    <div class="console-tile"><div class="kpi" id="mc-active">—</div><div class="label">Active or approval-gated tasks</div></div>
+    <div class="console-tile"><div class="kpi" id="mc-upgrades">—</div><div class="label">Upgrade tickets in local backlog</div></div>
+    <div class="console-tile"><div class="kpi" id="mc-security">—</div><div class="label">Security denials / critical events</div></div>
+  </div>
+  <div class="console-grid">
+    <section class="card">
+      <div class="card-head"><strong>Manager Operating Picture</strong><button class="btn btn-run btn-sm" onclick="loadManagerConsole()">Refresh</button></div>
+      <div class="card-body" style="max-height:none">
+        <div class="manager-layout">
+          <div class="manager-nav" aria-label="Manager console sections">
+            <button class="manager-nav-row active" onclick="switchTab('upgrades')"><span>Upgrade Loop</span><span id="mc-nav-upgrades">—</span></button>
+            <button class="manager-nav-row" onclick="switchTab('pipeline')"><span>Pipeline Board</span><span id="mc-nav-pipeline">—</span></button>
+            <button class="manager-nav-row" onclick="switchTab('security')"><span>Security Gates</span><span id="mc-nav-security">—</span></button>
+            <button class="manager-nav-row" onclick="switchTab('agents')"><span>Agent Team</span><span id="mc-nav-agents">—</span></button>
+            <button class="manager-nav-row" onclick="switchTab('evallog')"><span>Training / Evals</span><span id="mc-nav-evals">—</span></button>
+          </div>
+          <div>
+            <div id="mc-narrative" style="font-size:.86em;color:#b8b8d0;line-height:1.65;margin-bottom:12px">Loading manager state…</div>
+            <div class="decision-list" id="mc-decisions"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <aside class="card">
+      <div class="card-head"><strong>Human Review Queue</strong><span class="tag tag-wait" id="mc-review-count">—</span></div>
+      <div class="card-body" id="mc-review-list" style="max-height:520px">Loading…</div>
+    </aside>
+  </div>
+</div>
+
+<!-- Upgrade Loop -->
+<div class="pane" id="pane-upgrades" role="tabpanel" aria-labelledby="tab-upgrades">
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="up-cycles">—</div><div class="stat-lbl">Research Cycles</div></div>
+    <div class="stat"><div class="stat-num" id="up-candidates">—</div><div class="stat-lbl">Candidates Ranked</div></div>
+    <div class="stat"><div class="stat-num" id="up-tickets">—</div><div class="stat-lbl">Tickets Created</div></div>
+    <div class="stat"><div class="stat-num" id="up-decisions">—</div><div class="stat-lbl">Human Decisions</div></div>
+  </div>
+  <div class="upgrade-board" id="upgrade-board">
+    <div class="upgrade-col"><h3>Signals <span id="up-signal-count">0</span></h3><div id="up-col-signals"></div></div>
+    <div class="upgrade-col"><h3>Proposed <span id="up-proposed-count">0</span></h3><div id="up-col-proposed"></div></div>
+    <div class="upgrade-col"><h3>Backlog <span id="up-backlog-count">0</span></h3><div id="up-col-backlog"></div></div>
+    <div class="upgrade-col"><h3>Needs Review <span id="up-review-count">0</span></h3><div id="up-col-review"></div></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="card-head"><strong>Watched Upgrade Sources</strong><button class="btn btn-run btn-sm" onclick="loadUpgradeLoop()">Refresh</button></div>
+    <div class="card-body" id="up-watchlist" style="max-height:none">Loading…</div>
+  </div>
 </div>
 
 <!-- Pipeline board -->
-<div class="pane active" id="pane-pipeline" role="tabpanel" aria-labelledby="tab-pipeline">
+<div class="pane" id="pane-pipeline" role="tabpanel" aria-labelledby="tab-pipeline">
   <div class="stat-row">
     <div class="stat"><div class="stat-num" id="pp-queued">—</div><div class="stat-lbl">Queued</div></div>
     <div class="stat"><div class="stat-num" id="pp-wait">—</div><div class="stat-lbl">Awaiting Approval</div></div>
     <div class="stat"><div class="stat-num" id="pp-run">—</div><div class="stat-lbl">Running</div></div>
     <div class="stat"><div class="stat-num" id="pp-done">—</div><div class="stat-lbl">Succeeded</div></div>
     <div class="stat"><div class="stat-num" id="pp-fail">—</div><div class="stat-lbl">Failed / Stopped</div></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <label for="pipe-filter-text" class="sr-only">Filter tasks by text</label>
+    <input type="text" id="pipe-filter-text" placeholder="🔍 Filter tasks — agent or prompt text…" oninput="renderPipelineFromCache()"
+           style="flex:1;min-width:180px;font-size:.82em;padding:7px 10px" autocomplete="off">
+    <label for="pipe-filter-agent" class="sr-only">Filter tasks by agent</label>
+    <select id="pipe-filter-agent" onchange="renderPipelineFromCache()" style="font-size:.8em;padding:6px 8px">
+      <option value="">All agents</option>
+    </select>
+    <span id="pipe-filter-count" style="font-size:.75em;color:#9a9ab0;white-space:nowrap"></span>
+    <button class="btn btn-run btn-sm" onclick="clearPipeFilter()" style="font-size:.78em">Clear</button>
   </div>
   <div class="pipe-board" id="pipe-board" aria-label="Task pipeline board">
     <div class="pipe-col col-queued"><div class="pipe-col-hdr">Queued <span class="pipe-count" id="pc-queued">0</span></div><div id="col-queued"></div></div>
@@ -4757,7 +4924,7 @@ async def agent_dashboard(request: Request):
     <span style="font-size:.75em;color:#555">Click a character to view agent details.</span>
     <button onclick="startMeeting()" style="background:#1a2a1a;border:1px solid #2a4a2a;color:#5a9a5a;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:.8em;font-weight:600;letter-spacing:.05em">🪑 Meeting Room</button>
   </div>
-  <div style="position:relative;border-radius:8px;overflow:hidden;background:#0d1117;border:1px solid #1e2430">
+  <div class="office-stage">
     <canvas id="office-canvas" style="display:block;width:100%;cursor:pointer"></canvas>
     <div style="position:absolute;bottom:8px;left:12px;font-size:.68em;color:#444;pointer-events:none;line-height:1.6">
       Click a character to assign work &nbsp;•&nbsp;
@@ -4893,10 +5060,133 @@ async def agent_dashboard(request: Request):
   <div id="routines-list"><div class="empty">Loading…</div></div>
 </div>
 
+<!-- Security -->
+<div class="pane" id="pane-security" role="tabpanel" aria-labelledby="tab-security">
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="sec-total">—</div><div class="stat-lbl">Audited Actions</div></div>
+    <div class="stat"><div class="stat-num" id="sec-denials" style="color:#ea5455">—</div><div class="stat-lbl">Denials</div></div>
+    <div class="stat"><div class="stat-num" id="sec-blocks" style="color:#ff9f43">—</div><div class="stat-lbl">Threat Blocks</div></div>
+    <div class="stat"><div class="stat-num" id="sec-cloud" style="color:#ffd700">—</div><div class="stat-lbl">Cloud Calls</div></div>
+    <div class="stat"><div class="stat-num" id="sec-rollback" style="color:#28c76f">—</div><div class="stat-lbl">Rollback-able</div></div>
+  </div>
+  <div id="sec-critical" style="margin-bottom:14px"></div>
+  <div class="card">
+    <div class="card-head"><strong style="font-size:.9em">What happened (plain language)</strong>
+      <button class="btn btn-run btn-sm" onclick="loadSecurity()">Refresh</button></div>
+    <div id="sec-plain" style="padding:12px 16px;font-size:.84em;color:#b8b8d0;line-height:1.7"><div class="empty">Loading…</div></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:.85em">Audit Events (technical)</strong>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label for="sec-filter-action" class="sr-only">Filter by action / source</label>
+      <select id="sec-filter-action" onchange="loadSecurity()" style="font-size:.8em;padding:5px 8px">
+        <option value="">All actions</option>
+      </select>
+      <label for="sec-filter-severity" class="sr-only">Filter by severity</label>
+      <select id="sec-filter-severity" onchange="loadSecurity()" style="font-size:.8em;padding:5px 8px">
+        <option value="">All severities</option>
+        <option value="info">info</option>
+        <option value="notice">notice</option>
+        <option value="warning">warning</option>
+        <option value="critical">critical</option>
+      </select>
+    </div>
+  </div>
+  <div class="scroll-table">
+    <table id="sec-events-table" style="table-layout:auto">
+      <thead><tr><th>Time</th><th>Severity</th><th>Action</th><th>Actor</th><th>Target</th><th>Decision</th><th>Task</th></tr></thead>
+      <tbody id="sec-events-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Tokens / rate-limit -->
+<div class="pane" id="pane-tokens" role="tabpanel" aria-labelledby="tab-tokens">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:.9em">Token &amp; Cost Usage</strong>
+    <div style="display:flex;gap:8px;align-items:center">
+      <label for="tok-window" class="sr-only">Time window</label>
+      <select id="tok-window" onchange="loadTokens()" style="font-size:.8em;padding:5px 8px">
+        <option value="1">Last 1 hour</option>
+        <option value="24" selected>Last 24 hours</option>
+        <option value="168">Last 7 days</option>
+      </select>
+      <button class="btn btn-run btn-sm" onclick="loadTokens()">Refresh</button>
+    </div>
+  </div>
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num" id="tok-total">—</div><div class="stat-lbl">Total Tokens</div></div>
+    <div class="stat"><div class="stat-num" id="tok-cloud" style="color:#ffd700">—</div><div class="stat-lbl">Cloud Tokens</div></div>
+    <div class="stat"><div class="stat-num" id="tok-local" style="color:#28c76f">—</div><div class="stat-lbl">Local Tokens</div></div>
+    <div class="stat"><div class="stat-num" id="tok-cost" style="color:#7ec8e3">—</div><div class="stat-lbl">Est. Cost (USD)</div></div>
+    <div class="stat"><div class="stat-num" id="tok-calls">—</div><div class="stat-lbl">Calls (cloud/local)</div></div>
+  </div>
+
+  <!-- Cloud rate-limit budget guard -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head"><strong style="font-size:.88em">⚡ Cloud Rate Guard — last 60 min</strong>
+      <span style="font-size:.72em;color:#9a9ab0">meters <code style="color:#ffd700">JARVIS_CLOUD_TOKENS_PER_HOUR</code></span></div>
+    <div style="padding:14px 16px">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+        <span style="font-size:1.8em;font-weight:700;color:#ffd700" id="tok-hourly">—</span>
+        <span style="font-size:.8em;color:#9a9ab0">cloud tokens used in the last hour</span>
+      </div>
+      <div style="position:relative;height:14px;background:#0a0a14;border:1px solid #1a1a3a;border-radius:7px;overflow:hidden" role="img" aria-label="Cloud token usage vs observed range">
+        <div id="tok-gauge-fill" style="height:100%;width:0%;background:linear-gradient(90deg,#28c76f,#ffd700);transition:width .4s"></div>
+        <div style="position:absolute;top:0;bottom:0;left:13.3%;width:1px;background:#5a5a9a" title="observed median 40K"></div>
+        <div style="position:absolute;top:0;bottom:0;left:73%;width:1px;background:#ff9f43" title="observed p90 219K"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.68em;color:#70708e;margin-top:4px">
+        <span>0</span><span>median 40K</span><span>p90 219K</span><span>300K suggested cap</span>
+      </div>
+      <p style="font-size:.78em;color:#a8a8c0;line-height:1.6;margin-top:10px">
+        This is the exact figure F's guard meters: when the last hour's cloud token total reaches
+        <code style="color:#ffd700">JARVIS_CLOUD_TOKENS_PER_HOUR</code>, auto-mode cloud routing degrades to local
+        (explicit cloud and forced models are unaffected; the guard is dormant unless the env var is set to a positive int).
+        Observed 7-day range: median 40K/hr, p90 219K/hr, max 486K/hr — F's data-driven suggestion is
+        <strong style="color:#ffd700">300000</strong> (clears healthy operation, catches runaway bursts).
+      </p>
+    </div>
+  </div>
+
+  <!-- Context budget governor -->
+  <div class="card" style="margin-bottom:14px">
+    <div class="card-head"><strong style="font-size:.88em">🧭 Context Governor</strong>
+      <span style="font-size:.72em;color:#9a9ab0">local prompt budget compiler</span></div>
+    <div style="padding:14px 16px">
+      <div class="stat-row" style="margin-bottom:10px">
+        <div class="stat"><div class="stat-num" id="ctx-calls">—</div><div class="stat-lbl">Budgeted Calls</div></div>
+        <div class="stat"><div class="stat-num" id="ctx-selected" style="color:#28c76f">—</div><div class="stat-lbl">Context Blocks Used</div></div>
+        <div class="stat"><div class="stat-num" id="ctx-dropped" style="color:#ff9f43">—</div><div class="stat-lbl">Blocks Dropped</div></div>
+        <div class="stat"><div class="stat-num" id="ctx-turns" style="color:#ffd700">—</div><div class="stat-lbl">Old Turns Dropped</div></div>
+        <div class="stat"><div class="stat-num" id="ctx-avg" style="color:#7ec8e3">—</div><div class="stat-lbl">Avg Context Tokens</div></div>
+      </div>
+      <div id="ctx-recent" style="font-size:.78em;color:#a8a8c0;line-height:1.55">No context-governed calls recorded in this window yet.</div>
+      <div id="ctx-conv-recent" style="font-size:.78em;color:#a8a8c0;line-height:1.55;margin-top:8px">No conversation-history trims recorded in this window yet.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><strong style="font-size:.85em">By Model</strong></div>
+    <div class="scroll-table">
+      <table id="tok-model-table" style="table-layout:auto">
+        <thead><tr><th>Model</th><th>Where</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Total</th><th>Cost</th></tr></thead>
+        <tbody id="tok-model-body"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- Help Modal -->
-<div class="help-modal" id="help-modal" onclick="if(event.target===this)this.classList.remove('open')">
+<div class="help-modal" id="help-modal" role="dialog" aria-label="Dashboard help" onclick="if(event.target===this)closeHelp()">
   <div class="help-box">
     <h2>⚡ How to Use Jarvis Agent Ops</h2>
+    <div class="help-sec"><h3>🛰 Pipeline</h3><p>Every task flows left to right: Queued → Awaiting Approval → Running → Succeeded / Failed. Click any card to open the task drawer with its full event timeline, live output, and actions (approve, deny, stop, re-run, copy). The Live Activity feed below the board shows every status transition as it happens.</p></div>
+    <div class="help-sec"><h3>⌁ Manager Console</h3><p>The default operating view for Aman-as-PM: audit verdict, active tasks, upgrade backlog, human review gates, agent health, training/eval state, and security counters in one place.</p></div>
+    <div class="help-sec"><h3>↟ Upgrade Loop</h3><p>Shows the continuous local-first improvement loop: watched AI/MLX/Ollama/Apple sources, ranked tickets, sandbox-ready backlog items, and items that require human approval before execution.</p></div>
+    <div class="help-sec"><h3>🛡 Security</h3><p>Dual-audience audit view over the append-only security log. The plain-language panel says what happened in human terms; the events table below gives the technical record (action, actor, target, decision, severity) with links into the task drawer. Stat tiles count denials, threat blocks, cloud calls, and how many actions carry a rollback reference.</p></div>
+    <div class="help-sec"><h3>💸 Tokens</h3><p>Token and cost usage from the usage tracker, switchable across 1h / 24h / 7d. The <strong>Cloud Rate Guard</strong> card shows the exact figure Jarvis's rate guard meters — cloud tokens used in the last 60 minutes — against the observed range (median 40K, p90 219K) so you can pick a value for <code>JARVIS_CLOUD_TOKENS_PER_HOUR</code>. When set, auto-mode cloud routing degrades to local once the hourly cloud total hits that cap. The By Model table breaks down calls, prompt/completion tokens, and cost per model.</p></div>
+    <div class="help-sec"><h3>⌘K Command Palette</h3><p>Press <code>Cmd+K</code> (or <code>Ctrl+K</code>) anywhere to open the palette. Type to filter, arrows to navigate, Enter to run: jump to any tab, assign work to a specific agent, run a pipeline health check, or start a standup. <code>Esc</code> closes any open drawer, palette, or dialog. Press <code>?</code> for this help. Tabs support ←/→ arrow keys.</p></div>
     <div class="help-sec"><h3>⏳ Approval Queue</h3><p>Tasks flagged by the security gate land here before running. Approve to execute or Deny to cancel. Risk tasks from risky prompts (vault writes, exec, external calls) route here automatically.</p></div>
     <div class="help-sec"><h3>▶ Active</h3><p>Tasks currently running or queued. Shows which agent is working and a live output preview. Use Stop to cancel a running task.</p></div>
     <div class="help-sec"><h3>📋 History</h3><p>All completed tasks. Click a row to expand the full output. Use Clear History to reset. Results persist until cleared or server restart.</p></div>
@@ -4907,13 +5197,42 @@ async def agent_dashboard(request: Request):
     <div class="help-sec"><h3>📊 Eval Log</h3><p>Persistent history of every AI Evaluation Lab result across all project runs and direct agent evals. Filter by agent or verdict. Create custom rubrics to add extra criteria to any eval.</p></div>
     <div class="help-sec"><h3>⏰ Routines</h3><p>Schedule recurring agent tasks. Supports cron expressions (<code>0 9 * * 1</code>), macros (<code>@daily</code>, <code>@hourly</code>, <code>@weekly</code>), and intervals (<code>interval:3600</code>). The scheduler fires every 30 seconds and dispatches due tasks via <code>submit_task</code>. Toggle enabled/disabled without deleting. Click the trash icon to remove a routine.</p></div>
     <div class="help-sec"><h3>🔍 Pipeline Monitor (top bar)</h3><p>Click to sweep all active tasks for stalls, short outputs, or garbage. Shows alert count or green if healthy. Alerts persist for 8s then reset.</p></div>
-    <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="document.getElementById('help-modal').classList.remove('open')">Got it</button>
+    <button class="btn btn-primary" style="margin-top:16px;width:100%" onclick="closeHelp()">Got it</button>
+  </div>
+</div>
+
+<!-- Task Detail Drawer -->
+<aside id="task-drawer" class="drawer" role="dialog" aria-labelledby="drawer-title" aria-describedby="drawer-prompt">
+  <div class="drawer-head">
+    <strong id="drawer-title" style="font-size:.95em;color:#7ec8e3">Task Details</strong>
+    <span class="tag tag-agent" id="drawer-agent">—</span>
+    <span id="drawer-status"></span>
+    <code id="drawer-id" style="font-size:.7em;color:#70708e"></code>
+    <button id="drawer-close" class="btn btn-run btn-sm" style="margin-left:auto" onclick="closeTaskDrawer()" aria-label="Close task details">✕ Close</button>
+  </div>
+  <div class="drawer-body">
+    <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin-bottom:6px;font-weight:600">Prompt</div>
+    <div id="drawer-prompt" style="font-size:.84em;color:#c8c8dc;background:#0a0a14;border:1px solid #1a1a3a;border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;max-height:140px;overflow-y:auto"></div>
+    <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin:16px 0 4px;font-weight:600">Event Timeline</div>
+    <div id="drawer-timeline"><div class="empty" style="padding:12px">Loading…</div></div>
+    <div style="font-size:.7em;text-transform:uppercase;letter-spacing:.1em;color:#9a9ab0;margin:16px 0 6px;font-weight:600">Output</div>
+    <pre id="drawer-output" style="white-space:pre-wrap;word-break:break-word;font-size:.8em;color:#a8d8c0;background:#060610;border:1px solid #1a1a3a;border-radius:8px;padding:10px 12px;margin:0;max-height:320px;overflow-y:auto;min-height:48px"></pre>
+  </div>
+  <div class="drawer-foot" id="drawer-actions"></div>
+</aside>
+
+<!-- Command Palette -->
+<div id="cmd-palette" class="palette" role="dialog" aria-label="Command palette" onclick="if(event.target===this)closePalette()">
+  <div class="palette-box">
+    <input id="palette-input" type="text" placeholder="Type a command — tabs, agents, actions…"
+           role="combobox" aria-expanded="true" aria-controls="palette-list" aria-label="Search commands" autocomplete="off">
+    <ul id="palette-list" class="palette-list" role="listbox" aria-label="Commands"></ul>
   </div>
 </div>
 
 <script>
   let token = {token_js};
-  let currentTab = 'pipeline';
+  let currentTab = 'console';
   let refreshTimer = null;
 
   const AGENT_DESCRIPTIONS = {{
@@ -4967,7 +5286,11 @@ async def agent_dashboard(request: Request):
     if (name === 'agents') initWorldIfNeeded();
     if (name === 'lessons') loadPendingLessons();
     if (name === 'routines') loadRoutines();
-    if (name !== 'project' && name !== 'lessons' && name !== 'routines') refresh();
+    if (name === 'security') loadSecurity();
+    if (name === 'tokens') loadTokens();
+    if (name === 'upgrades') loadUpgradeLoop();
+    if (name === 'console') loadManagerConsole();
+    if (!['project','lessons','routines','security','upgrades','console'].includes(name)) refresh();
   }}
 
   // Arrow-key navigation within the tablist (WAI-ARIA tabs pattern)
@@ -5035,9 +5358,169 @@ async def agent_dashboard(request: Request):
       if (currentTab === 'history') renderHistory(done);
       if (currentTab === 'agents') renderOfficeFloor(agents, tasks);
       if (currentTab === 'evallog') loadEvalLog();
+      if (currentTab === 'console') loadManagerConsole();
     }} catch(e) {{
       if (e.message !== 'unauthorized')
         document.getElementById('status-badge').className = 'badge badge-err';
+    }}
+  }}
+
+  function _setKpi(id, value, cls='') {{
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    el.className = 'kpi ' + cls;
+  }}
+
+  function _ticketStatusGroup(t) {{
+    const status = (t.status || 'proposed').toLowerCase();
+    if (t.requires_review || t.risk_level === 'high') return 'review';
+    if (status.includes('backlog') || status.includes('promoted')) return 'backlog';
+    return 'proposed';
+  }}
+
+  function _upgradeTicketHtml(t) {{
+    const risk = t.risk_level || 'low';
+    const riskCls = risk === 'high' ? 'tag-fail' : risk === 'medium' ? 'tag-wait' : 'tag-done';
+    const title = escHtml(t.title || 'Upgrade ticket');
+    const summary = escHtml((t.work_order?.tasks?.[0]?.description || t.source_url || '').slice(0, 180));
+    return `<div class="upgrade-ticket">
+      <strong>${{title}}</strong>
+      <p>${{summary || 'Local preview ticket. Human approval required before execution.'}}</p>
+      <div style="display:flex;gap:5px;flex-wrap:wrap">
+        <span class="tag tag-agent">${{escHtml(t.category || 'general')}}</span>
+        <span class="tag ${{riskCls}}">${{escHtml(risk)}}</span>
+        <span class="tag tag-run">score ${{t.score ?? '—'}}</span>
+        ${{t.status ? `<span class="tag">${{escHtml(t.status)}}</span>` : ''}}
+      </div>
+    </div>`;
+  }}
+
+  function _renderUpgradeData(upgrade) {{
+    const summary = upgrade.summary || {{}};
+    const tickets = upgrade.tickets || [];
+    document.getElementById('up-cycles').textContent = summary.cycle_count ?? 0;
+    document.getElementById('up-candidates').textContent = summary.candidate_count ?? 0;
+    document.getElementById('up-tickets').textContent = summary.ticket_count ?? tickets.length;
+    document.getElementById('up-decisions').textContent = summary.decision_count ?? 0;
+    document.getElementById('upgrade-count').textContent = tickets.length ? `(${{tickets.length}})` : '';
+
+    const groups = {{proposed: [], backlog: [], review: []}};
+    tickets.forEach(t => groups[_ticketStatusGroup(t)].push(t));
+    const fill = (id, list) => {{
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = list.length ? list.slice(0, 12).map(_upgradeTicketHtml).join('')
+        : '<div style="font-size:.75em;color:#70708e;padding:6px 2px">—</div>';
+    }};
+    fill('up-col-proposed', groups.proposed);
+    fill('up-col-backlog', groups.backlog);
+    fill('up-col-review', groups.review);
+    document.getElementById('up-proposed-count').textContent = groups.proposed.length;
+    document.getElementById('up-backlog-count').textContent = groups.backlog.length;
+    document.getElementById('up-review-count').textContent = groups.review.length;
+
+    const watch = upgrade.watchlist || [];
+    document.getElementById('up-signal-count').textContent = watch.length;
+    document.getElementById('up-col-signals').innerHTML = watch.length ? watch.map(s => `
+      <div class="upgrade-ticket">
+        <strong>${{escHtml(s.title || 'Watch source')}}</strong>
+        <p>${{escHtml(s.why || s.source_url || '')}}</p>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          <span class="tag tag-agent">${{escHtml(s.category || 'source')}}</span>
+          <span class="tag tag-run">${{String(s.source_url||'').startsWith('local:') ? 'local' : 'public'}}</span>
+        </div>
+      </div>`).join('') : '<div style="font-size:.75em;color:#70708e;padding:6px 2px">No watchlist sources configured.</div>';
+    document.getElementById('up-watchlist').innerHTML = watch.length ? watch.map(s => `
+      <div class="source-row">
+        <div>
+          <strong style="font-size:.86em;color:#d8d8e8">${{escHtml(s.title || 'Source')}}</strong>
+          <div style="font-size:.75em;color:#8a8aa4;margin-top:3px">${{escHtml(s.why || '')}}</div>
+        </div>
+        <span class="tag tag-agent">${{escHtml(s.category || 'source')}}</span>
+      </div>`).join('') : '<div class="empty" style="padding:8px">No watchlist sources configured.</div>';
+  }}
+
+  async function loadUpgradeLoop() {{
+    try {{
+      const state = await apiFetch('/dashboard/state');
+      _renderUpgradeData(state.upgrade_loop || {{}});
+    }} catch(e) {{
+      if (e.message !== 'unauthorized') {{
+        document.getElementById('up-col-proposed').innerHTML = `<div class="empty">Failed to load upgrade loop: ${{escHtml(e.message)}}</div>`;
+      }}
+    }}
+  }}
+
+  function _reviewItemsFromState(state) {{
+    const tickets = (state.upgrade_loop?.tickets || []).filter(t => t.requires_review || t.risk_level === 'high');
+    const out = tickets.slice(0, 6).map(t => ({{
+      title: t.title || 'Upgrade requires review',
+      copy: `${{t.category || 'general'}} · ${{t.risk_level || 'risk unknown'}} · score ${{t.score ?? '—'}}`,
+      tag: 'upgrade',
+    }}));
+    const security = state.security || {{}};
+    const critical = (security.recent_critical || []).slice(0, 3);
+    critical.forEach(e => out.push({{
+      title: e.action || 'Security event requires review',
+      copy: e.reason || e.target || 'Critical security event in audit log.',
+      tag: 'security',
+    }}));
+    if (state.tasks?.awaiting_approval) out.unshift({{
+      title: `${{state.tasks.awaiting_approval}} task(s) waiting for approval`,
+      copy: 'Review the Approval Queue before any risky action executes.',
+      tag: 'task gate',
+    }});
+    return out;
+  }}
+
+  async function loadManagerConsole() {{
+    try {{
+      const state = await apiFetch('/dashboard/state');
+      const audit = state.pipeline_audit || {{}};
+      const verdict = audit.verdict || 'UNKNOWN';
+      const vCls = verdict === 'CLEAN' ? 'ok' : verdict === 'WARN' ? 'warn' : 'bad';
+      const active = state.tasks?.active ?? 0;
+      const upgrades = state.upgrade_loop?.summary?.ticket_count ?? (state.upgrade_loop?.tickets || []).length;
+      const denials = state.security?.denials ?? 0;
+      const critical = state.security?.by_severity?.critical ?? 0;
+      _setKpi('mc-audit', verdict, vCls);
+      _setKpi('mc-active', active, active ? 'warn' : 'ok');
+      _setKpi('mc-upgrades', upgrades, upgrades ? 'warn' : '');
+      _setKpi('mc-security', `${{denials}}/${{critical}}`, critical ? 'bad' : denials ? 'warn' : 'ok');
+      document.getElementById('mc-nav-upgrades').textContent = upgrades;
+      document.getElementById('mc-nav-pipeline').textContent = active;
+      document.getElementById('mc-nav-security').textContent = critical ? 'critical' : 'ok';
+      document.getElementById('mc-nav-agents').textContent = state.agents?.total ?? 0;
+      document.getElementById('mc-nav-evals').textContent = state.evals?.ok === false ? 'check' : 'ok';
+      document.getElementById('upgrade-count').textContent = upgrades ? `(${{upgrades}})` : '';
+
+      const acknowledged = audit.acknowledged_count ?? 0;
+      const warnCount = audit.severity_counts?.warning ?? 0;
+      document.getElementById('mc-narrative').innerHTML =
+        `<strong style="color:#e0e0ef">Current read:</strong> pipeline audit is <span style="color:${{verdict==='CLEAN'?'#28c76f':verdict==='WARN'?'#ffd700':'#ea5455'}}">${{escHtml(verdict)}}</span>, ` +
+        `${{acknowledged}} historical warning(s) are triaged, ${{warnCount}} warning(s) are active, and the upgrade loop has ${{upgrades}} local ticket(s). ` +
+        `Jarvis can rank and prepare work orders, but execution, package installs, cloud escalation, risky security tooling, merge, push, and deploy still require human approval.`;
+
+      const decisions = [
+        ['Upgrade scout', upgrades ? `${{upgrades}} ticket(s) need review or promotion.` : 'No upgrade tickets waiting.'],
+        ['Training signal', state.training?.ok === false ? 'Training status endpoint reported a problem.' : 'Training status endpoint is reachable.'],
+        ['Pipeline trust', verdict === 'CLEAN' ? 'No active truthfulness warnings.' : 'Review active audit findings before treating outputs as complete.'],
+      ];
+      document.getElementById('mc-decisions').innerHTML = decisions.map(([title, copy]) => `
+        <div class="decision-item"><strong>${{escHtml(title)}}</strong><p>${{escHtml(copy)}}</p></div>`).join('');
+
+      const reviews = _reviewItemsFromState(state);
+      document.getElementById('mc-review-count').textContent = reviews.length;
+      document.getElementById('mc-review-list').innerHTML = reviews.length ? reviews.map(item => `
+        <div class="review-item">
+          <div class="review-title">${{escHtml(item.title)}}</div>
+          <div class="review-copy">${{escHtml(item.copy)}}</div>
+          <div class="meta"><span class="tag tag-wait">${{escHtml(item.tag)}}</span></div>
+        </div>`).join('') : '<div class="empty" style="padding:8px">No human review items right now.</div>';
+      _renderUpgradeData(state.upgrade_loop || {{}});
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        document.getElementById('mc-narrative').textContent = 'Failed to load manager console: ' + e.message;
     }}
   }}
 
@@ -5058,9 +5541,560 @@ async def agent_dashboard(request: Request):
         <div class="card-foot">
           <button class="btn btn-approve btn-sm" onclick="approveTask('${{t.id}}')">✓ Approve</button>
           <button class="btn btn-deny btn-sm" onclick="denyTask('${{t.id}}')">✗ Deny</button>
+          <button class="btn btn-run btn-sm" onclick="openTaskDrawer('${{t.id}}')">☰ Details</button>
           <span style="font-size:.75em;color:#555;margin-left:auto">${{t.id}}</span>
         </div>
       </div>`).join('');
+  }}
+
+  // ── Pipeline board ────────────────────────────────────────────────────────
+  const _PIPE_BUCKETS = {{
+    queued: ['queued','assigned'],
+    wait:   ['waiting_approval'],
+    run:    ['running','streaming'],
+    done:   ['succeeded','completed'],
+    fail:   ['failed','cancelled','denied'],
+  }};
+
+  function _pipeCard(t) {{
+    const when = fmtTime(t.updated_at || t.finished_at || t.started_at || t.created_at);
+    return `<button class="pipe-card" onclick="openTaskDrawer('${{t.id}}')" aria-label="Open task ${{t.id}} details">
+      <span class="pc-agent">${{escHtml(t.assigned_agent_id || 'unassigned')}}</span>
+      <span class="pc-prompt">${{escHtml((t.prompt||'').slice(0,160))}}</span>
+      <span class="pc-time">${{statusTag(t.status)}} ${{when}}</span>
+    </button>`;
+  }}
+
+  let _pipeTasksCache = [];
+
+  function renderPipeline(tasks) {{
+    _pipeTasksCache = tasks;
+    // Agent filter options auto-discovered from current tasks (preserve selection)
+    const agents = [...new Set(tasks.map(t => t.assigned_agent_id).filter(Boolean))].sort();
+    _syncPipeAgentFilter(agents);
+    const sorted = tasks.slice().sort((a,b) =>
+      new Date(b.updated_at||b.created_at||0) - new Date(a.updated_at||a.created_at||0));
+    const text = (document.getElementById('pipe-filter-text')?.value || '').trim().toLowerCase();
+    const agent = document.getElementById('pipe-filter-agent')?.value || '';
+    const match = t => (!agent || t.assigned_agent_id === agent)
+      && (!text || ((t.prompt||'') + ' ' + (t.assigned_agent_id||'')).toLowerCase().includes(text));
+    const stats = {{queued:'pp-queued',wait:'pp-wait',run:'pp-run',done:'pp-done',fail:'pp-fail'}};
+    let shown = 0, total = 0;
+    for (const [key, statuses] of Object.entries(_PIPE_BUCKETS)) {{
+      const all = sorted.filter(t => statuses.includes(t.status));
+      const filtered = all.filter(match);
+      total += all.length; shown += filtered.length;
+      const bucket = filtered.slice(0, 25);
+      const col = document.getElementById('col-' + key);
+      if (col) col.innerHTML = bucket.length ? bucket.map(_pipeCard).join('')
+        : '<div style="font-size:.75em;color:#70708e;padding:6px 2px">—</div>';
+      const cnt = document.getElementById('pc-' + key);
+      if (cnt) cnt.textContent = filtered.length;
+      // Stat tiles always reflect total pipeline health (unaffected by filter)
+      const stat = document.getElementById(stats[key]);
+      if (stat) stat.textContent = all.length;
+    }}
+    const filterActive = text || agent;
+    const cntEl = document.getElementById('pipe-filter-count');
+    if (cntEl) cntEl.textContent = filterActive ? `showing ${{shown}} of ${{total}}` : '';
+  }}
+
+  // Re-render from the last fetched tasks without an API round-trip (filter typing).
+  function renderPipelineFromCache() {{ renderPipeline(_pipeTasksCache); }}
+
+  function clearPipeFilter() {{
+    const t = document.getElementById('pipe-filter-text'); if (t) t.value = '';
+    const a = document.getElementById('pipe-filter-agent'); if (a) a.value = '';
+    renderPipelineFromCache();
+  }}
+
+  function _syncPipeAgentFilter(agents) {{
+    const sel = document.getElementById('pipe-filter-agent');
+    if (!sel) return;
+    const want = ['', ...agents].join('|');
+    if (sel.dataset.signature === want) return;  // unchanged — don't clobber selection
+    const current = sel.value;
+    sel.dataset.signature = want;
+    sel.innerHTML = '<option value="">All agents</option>' +
+      agents.map(a => `<option value="${{escHtml(a)}}"${{a===current?' selected':''}}>${{escHtml(a)}}</option>`).join('');
+    sel.value = current;
+  }}
+
+  // ── Live activity feed + ticker ──────────────────────────────────────────
+  let _prevStatuses = null;  // null until first refresh (seed silently)
+  const _activityLog = [];
+
+  function _recordActivity(tasks) {{
+    const now = {{}};
+    tasks.forEach(t => {{ now[t.id] = t.status; }});
+    if (_prevStatuses !== null) {{
+      tasks.forEach(t => {{
+        const prev = _prevStatuses[t.id];
+        if (prev === t.status) return;
+        const agent = t.assigned_agent_id || 'unassigned';
+        const text = prev === undefined
+          ? `${{agent}}: new task ${{t.status}}`
+          : `${{agent}}: ${{prev}} → ${{t.status}}`;
+        _activityLog.unshift({{ts: new Date(), text, prompt: (t.prompt||'').slice(0,60), id: t.id}});
+      }});
+      if (_activityLog.length > 30) _activityLog.length = 30;
+      if (_activityLog.length) {{
+        const latest = _activityLog[0];
+        document.getElementById('live-ticker').textContent = `${{latest.text}} — ${{latest.prompt}}`;
+      }}
+    }}
+    _prevStatuses = now;
+    const feed = document.getElementById('activity-feed');
+    if (feed && currentTab === 'pipeline' && _activityLog.length) {{
+      feed.innerHTML = _activityLog.map(a => `
+        <div class="feed-item">
+          <span class="feed-ts">${{a.ts.toLocaleTimeString([], {{hour:'2-digit',minute:'2-digit',second:'2-digit'}})}}</span>
+          <span>${{escHtml(a.text)}}</span>
+          <button class="btn btn-run btn-sm" style="font-size:.85em;padding:1px 8px;margin-left:auto" onclick="openTaskDrawer('${{a.id}}')" aria-label="Open task details">view</button>
+        </div>`).join('');
+    }}
+  }}
+
+  // ── Task detail drawer ────────────────────────────────────────────────────
+  let _drawerTaskId = null;
+  let _drawerTimer = null;
+  let _drawerStream = null;
+  let _drawerReturnFocus = null;
+  let _drawerLastTask = null;
+
+  async function openTaskDrawer(id) {{
+    if (_drawerStream) {{ _drawerStream.close(); _drawerStream = null; }}
+    _drawerTaskId = id;
+    _drawerLastTask = null;
+    _drawerReturnFocus = document.activeElement;
+    const drawer = document.getElementById('task-drawer');
+    drawer.classList.add('open');
+    document.getElementById('drawer-close').focus();
+    await _refreshDrawer();
+    if (_drawerTimer) clearInterval(_drawerTimer);
+    _drawerTimer = setInterval(() => {{
+      const t = _drawerLastTask;
+      if (t && ['queued','assigned','waiting_approval'].includes(t.status)) _refreshDrawer();
+    }}, 3000);
+  }}
+
+  function closeTaskDrawer() {{
+    document.getElementById('task-drawer').classList.remove('open');
+    _drawerTaskId = null;
+    if (_drawerTimer) {{ clearInterval(_drawerTimer); _drawerTimer = null; }}
+    if (_drawerStream) {{ _drawerStream.close(); _drawerStream = null; }}
+    if (_drawerReturnFocus && _drawerReturnFocus.focus) _drawerReturnFocus.focus();
+  }}
+
+  function _timelineHtml(events) {{
+    if (!events.length) return '<div class="empty" style="padding:12px">No events recorded.</div>';
+    // Collapse consecutive chunk events into one summary item
+    const items = [];
+    let chunkRun = 0;
+    const flushChunks = () => {{
+      if (chunkRun > 0) {{
+        items.push({{cls:'tl-chunk', label:`output streamed (${{chunkRun}} chunk${{chunkRun>1?'s':''}})`, ts:null}});
+        chunkRun = 0;
+      }}
+    }};
+    events.forEach(ev => {{
+      if (ev.type === 'chunk') {{ chunkRun++; return; }}
+      flushChunks();
+      if (ev.type === 'status') items.push({{cls:'tl-status', label:`status: ${{ev.status||'?'}}${{ev.reason?' — '+ev.reason:''}}`, ts:ev.ts}});
+      else if (ev.type === 'error') items.push({{cls:'tl-error', label:`error: ${{ev.error||'unknown'}}`, ts:ev.ts}});
+      else if (ev.type === 'workspace' || ev.type === 'workspace_diff') items.push({{cls:'tl-ws', label:ev.type.replace('_',' '), ts:ev.ts}});
+      else items.push({{cls:'tl-status', label:ev.type, ts:ev.ts}});
+    }});
+    flushChunks();
+    return '<ol class="timeline">' + items.map(i => `
+      <li class="tl-item"><span class="tl-dot ${{i.cls}}" aria-hidden="true"></span>${{escHtml(i.label)}}${{i.ts?`<span class="tl-ts">${{fmtTime(i.ts)}}</span>`:''}}</li>`).join('') + '</ol>';
+  }}
+
+  async function _refreshDrawer() {{
+    if (!_drawerTaskId) return;
+    const id = _drawerTaskId;
+    try {{
+      const [td, ed] = await Promise.all([
+        apiFetch(`/tasks/${{id}}`),
+        apiFetch(`/tasks/${{id}}/events`),
+      ]);
+      const t = td.task || td;
+      _drawerLastTask = t;
+      document.getElementById('drawer-agent').textContent = t.assigned_agent_id || 'unassigned';
+      document.getElementById('drawer-status').innerHTML = statusTag(t.status);
+      document.getElementById('drawer-id').textContent = t.id;
+      document.getElementById('drawer-prompt').textContent = t.prompt || '(no prompt)';
+      document.getElementById('drawer-timeline').innerHTML = _timelineHtml(ed.events || []);
+      const out = document.getElementById('drawer-output');
+      out.textContent = t.result || '';
+      if (t.error) out.textContent += (out.textContent ? '\\n\\n' : '') + 'Error: ' + t.error;
+      // Live-follow output while running
+      if (['running','streaming'].includes(t.status) && !_drawerStream) {{
+        const src = new EventSource(`/tasks/${{id}}/stream`);
+        _drawerStream = src;
+        src.onmessage = (e) => {{
+          if (e.data === '[DONE]') {{ src.close(); _drawerStream = null; _refreshDrawer(); return; }}
+          try {{
+            const d = JSON.parse(e.data);
+            if (d.chunk) {{ out.textContent += d.chunk; out.scrollTop = out.scrollHeight; }}
+            if (d.type === 'done') {{ src.close(); _drawerStream = null; _refreshDrawer(); }}
+          }} catch {{}}
+        }};
+        src.onerror = () => {{ src.close(); _drawerStream = null; }};
+      }}
+      // Action buttons depend on status
+      const foot = document.getElementById('drawer-actions');
+      const btns = [];
+      if (t.status === 'waiting_approval') {{
+        btns.push(`<button class="btn btn-approve" onclick="_drawerAct('approve')">✓ Approve</button>`);
+        btns.push(`<button class="btn btn-deny" onclick="_drawerAct('deny')">✗ Deny</button>`);
+      }}
+      if (['queued','assigned','running','streaming'].includes(t.status))
+        btns.push(`<button class="btn btn-deny" onclick="_drawerAct('cancel')">■ Stop</button>`);
+      if (['succeeded','completed','failed','cancelled','denied'].includes(t.status))
+        btns.push(`<button class="btn btn-run" onclick="rerunDrawerTask()">↻ Re-run</button>`);
+      if (t.result) btns.push(`<button class="btn btn-run" onclick="copyDrawerOutput(this)">⧉ Copy output</button>`);
+      foot.innerHTML = btns.join('') + `<span style="margin-left:auto;font-size:.72em;color:#70708e;align-self:center">${{fmtTime(t.created_at)}} → ${{fmtTime(t.finished_at)}}</span>`;
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        document.getElementById('drawer-timeline').innerHTML = `<div class="empty">Failed to load task: ${{escHtml(e.message)}}</div>`;
+    }}
+  }}
+
+  async function _drawerAct(action) {{
+    if (!_drawerTaskId) return;
+    await apiFetch(`/tasks/${{_drawerTaskId}}/${{action}}`, {{method:'POST'}});
+    await _refreshDrawer();
+    refresh();
+  }}
+
+  async function rerunDrawerTask() {{
+    const t = _drawerLastTask;
+    if (!t || !t.prompt) return;
+    const kinds = ['chat','code','research','review','plan'];
+    const data = await apiFetch('/tasks', {{
+      method: 'POST',
+      headers: {{ ...hdrs(), 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ prompt: t.prompt, kind: kinds.includes(t.kind) ? t.kind : 'chat', source: 'dashboard' }}),
+    }});
+    if (data.ok && data.task) {{
+      await openTaskDrawer(data.task.id);
+      refresh();
+    }}
+  }}
+
+  function copyDrawerOutput(btn) {{
+    const out = document.getElementById('drawer-output');
+    navigator.clipboard.writeText(out.textContent || '').then(() => {{
+      const old = btn.textContent;
+      btn.textContent = '✓ Copied';
+      setTimeout(() => {{ btn.textContent = old; }}, 1500);
+    }});
+  }}
+
+  // ── Token / rate-limit panel (renders /usage; cloud-rate guard = F's metric) ─
+  function _fmtTokens(n) {{
+    n = Number(n) || 0;
+    if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+    return String(n);
+  }}
+
+  async function loadTokens() {{
+    try {{
+      const hours = parseInt(document.getElementById('tok-window')?.value || '24', 10);
+      // 24h-style window for the totals, plus a fixed 1h window for the rate guard.
+      const [winData, hourData] = await Promise.all([
+        apiFetch('/usage?hours=' + hours + '&recent=0'),
+        apiFetch('/usage?hours=1&recent=0'),
+      ]);
+      const u = winData.usage || {{}};
+      document.getElementById('tok-total').textContent = _fmtTokens(u.total_tokens);
+      const cloudTokens = (u.total_tokens || 0) - _localTokens(u);
+      document.getElementById('tok-cloud').textContent = _fmtTokens(cloudTokens);
+      document.getElementById('tok-local').textContent = _fmtTokens(_localTokens(u));
+      document.getElementById('tok-cost').textContent = '$' + (Number(u.estimated_cost_usd) || 0).toFixed(4);
+      document.getElementById('tok-calls').textContent = `${{u.cloud_call_count || 0}} / ${{u.local_call_count || 0}}`;
+
+      const ctx = u.context_budget || {{}};
+      document.getElementById('ctx-calls').textContent = ctx.call_count || 0;
+      document.getElementById('ctx-selected').textContent = ctx.selected_block_count || 0;
+      document.getElementById('ctx-dropped').textContent = ctx.dropped_block_count || 0;
+      document.getElementById('ctx-avg').textContent = _fmtTokens(ctx.average_used_tokens || 0);
+      const conv = u.conversation_budget || {{}};
+      document.getElementById('ctx-turns').textContent = conv.dropped_message_count || 0;
+      const recentCtx = (ctx.recent || []).slice().reverse().slice(0, 4);
+      document.getElementById('ctx-recent').innerHTML = recentCtx.length ? recentCtx.map(item => `
+        <div style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid #17172a;padding:7px 0">
+          <span>${{escHtml(item.model || 'local')}}</span>
+          <span style="color:#8f8fac">${{_fmtTokens(item.context_used_tokens || 0)}} / ${{_fmtTokens(item.context_budget_tokens || 0)}} ctx tokens</span>
+          <span style="color:${{(item.dropped || []).length ? '#ff9f43' : '#28c76f'}}">${{(item.dropped || []).length}} dropped</span>
+        </div>`).join('') : 'No context-governed calls recorded in this window yet.';
+      const recentConv = (conv.recent || []).slice().reverse().slice(0, 3);
+      document.getElementById('ctx-conv-recent').innerHTML = recentConv.length ? recentConv.map(item => `
+        <div style="display:flex;justify-content:space-between;gap:10px;border-top:1px solid #17172a;padding:7px 0">
+          <span>${{escHtml(item.model || 'local')}} conversation</span>
+          <span style="color:#8f8fac">${{_fmtTokens(item.original_prompt_tokens || 0)}} → ${{_fmtTokens(item.final_prompt_tokens || 0)}} prompt tokens</span>
+          <span style="color:${{item.dropped_message_count ? '#ffd700' : '#28c76f'}}">${{item.dropped_message_count || 0}} old turns</span>
+        </div>`).join('') : 'No conversation-history trims recorded in this window yet.';
+
+      // Rate guard: last-hour cloud tokens — the exact quantity F's guard sums.
+      const hu = hourData.usage || {{}};
+      const hourlyCloud = (hu.total_tokens || 0) - _localTokens(hu);
+      document.getElementById('tok-hourly').textContent = _fmtTokens(hourlyCloud);
+      // Gauge scaled so 300K suggested cap ≈ full bar.
+      const pct = Math.min(100, (hourlyCloud / 300000) * 100);
+      const fill = document.getElementById('tok-gauge-fill');
+      fill.style.width = pct + '%';
+      fill.style.background = hourlyCloud >= 219000 ? 'linear-gradient(90deg,#ff9f43,#ea5455)'
+        : hourlyCloud >= 40000 ? 'linear-gradient(90deg,#28c76f,#ffd700)' : '#28c76f';
+      document.getElementById('tokens-count').textContent = hourlyCloud >= 219000 ? '(high)' : '';
+
+      // By-model table (sorted by total tokens desc)
+      const models = Object.entries(u.by_model || {{}})
+        .map(([name, m]) => ({{name, ...m}}))
+        .sort((a, b) => (b.total_tokens || 0) - (a.total_tokens || 0));
+      const tbody = document.getElementById('tok-model-body');
+      tbody.innerHTML = models.length ? models.map(m => `
+        <tr>
+          <td style="font-size:.8em;color:#c8c8dc;white-space:nowrap">${{escHtml(m.name)}}</td>
+          <td><span class="tag ${{m.local ? 'tag-done' : 'tag-wait'}}" style="font-size:.7em">${{m.local ? 'local' : 'cloud'}}</span></td>
+          <td style="font-size:.8em;color:#9a9ab8">${{m.call_count || 0}}</td>
+          <td style="font-size:.8em;color:#9a9ab8">${{_fmtTokens(m.prompt_tokens)}}</td>
+          <td style="font-size:.8em;color:#9a9ab8">${{_fmtTokens(m.completion_tokens)}}</td>
+          <td style="font-size:.8em;color:#c8c8dc;font-weight:600">${{_fmtTokens(m.total_tokens)}}</td>
+          <td style="font-size:.8em;color:#7ec8e3">$${{(Number(m.estimated_cost_usd)||0).toFixed(4)}}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="7" class="empty">No usage recorded in this window.</td></tr>';
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        document.getElementById('tok-model-body').innerHTML = `<tr><td colspan="7" class="empty">Failed to load usage: ${{escHtml(e.message)}}</td></tr>`;
+    }}
+  }}
+
+  // Local token total = sum of by_model buckets flagged local (summary has no
+  // direct local-token field; cloud = total − local).
+  function _localTokens(u) {{
+    return Object.values(u.by_model || {{}})
+      .filter(m => m && m.local)
+      .reduce((s, m) => s + (Number(m.total_tokens) || 0), 0);
+  }}
+
+  // ── Security panel (renders C's /security/summary + /security/events) ─────
+  const _SEV_COLORS = {{info:'#7ec8e3', notice:'#a78bfa', warning:'#ff9f43', critical:'#ea5455'}};
+
+  // Keep the action/source <select> in sync with the actions actually present,
+  // preserving the current selection. plan_precheck (PreFlect, D's lane) shows
+  // up automatically once those events start flowing through /security/events.
+  function _syncActionFilter(actions, current) {{
+    const sel = document.getElementById('sec-filter-action');
+    if (!sel) return;
+    const want = ['', ...actions].join('|');
+    if (sel.dataset.signature === want) return;  // unchanged — don't clobber focus
+    sel.dataset.signature = want;
+    sel.innerHTML = '<option value="">All actions</option>' +
+      actions.map(a => `<option value="${{escHtml(a)}}"${{a===current?' selected':''}}>${{escHtml(a)}}</option>`).join('');
+    sel.value = current;
+  }}
+
+  async function loadSecurity() {{
+    try {{
+      const severity = document.getElementById('sec-filter-severity')?.value || '';
+      const action = document.getElementById('sec-filter-action')?.value || '';
+      const params = new URLSearchParams({{limit: 100}});
+      if (severity) params.set('severity', severity);
+      if (action) params.set('action', action);
+      const [sumData, evData] = await Promise.all([
+        apiFetch('/security/summary'),
+        apiFetch('/security/events?' + params),
+      ]);
+      const s = sumData.summary || {{}};
+      // Populate the action/source filter from observed actions (auto-includes
+      // plan_precheck once PreFlect lands — D's lane emits via audit_event).
+      _syncActionFilter(Object.keys(s.by_action || {{}}).sort(), action);
+      document.getElementById('sec-total').textContent = s.total ?? 0;
+      document.getElementById('sec-denials').textContent = s.denials ?? 0;
+      document.getElementById('sec-blocks').textContent = s.threat_blocks ?? 0;
+      document.getElementById('sec-cloud').textContent = s.cloud_calls ?? 0;
+      document.getElementById('sec-rollback').textContent = s.rollbackable ?? 0;
+      const critCount = (s.by_severity||{{}}).critical || 0;
+      document.getElementById('security-count').textContent = critCount ? `(${{critCount}})` : '';
+      // Critical banner cards
+      const critEl = document.getElementById('sec-critical');
+      const crits = s.recent_critical || [];
+      critEl.innerHTML = crits.length ? crits.map(e => `
+        <div class="card" style="border-color:#4a0a0a;margin-bottom:8px">
+          <div style="padding:10px 14px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+            <span class="tag tag-fail">critical</span>
+            <strong style="font-size:.84em;color:#ea5455">${{escHtml(e.action||'?')}}</strong>
+            <span style="font-size:.8em;color:#c8c8dc">${{escHtml(e.reason || e.target || '')}}</span>
+            <span style="font-size:.72em;color:#70708e;margin-left:auto">${{fmtTime(e.ts)}}</span>
+          </div>
+        </div>`).join('') : '';
+      // Plain-language panel
+      const plain = s.plain_language || [];
+      document.getElementById('sec-plain').innerHTML = plain.length
+        ? plain.map(l => `<div>• ${{escHtml(l)}}</div>`).join('')
+        : '<div class="empty" style="padding:8px">No security activity recorded yet.</div>';
+      // Technical events table
+      const events = evData.events || [];
+      const tbody = document.getElementById('sec-events-body');
+      tbody.innerHTML = events.length ? events.map(e => `
+        <tr>
+          <td style="white-space:nowrap;color:#70708e;font-size:.75em">${{fmtTime(e.ts)}}</td>
+          <td><span style="color:${{_SEV_COLORS[e.severity]||'#888'}};font-size:.78em;font-weight:600">${{escHtml(e.severity||'?')}}</span></td>
+          <td style="font-size:.78em;color:#b8b8d0;white-space:nowrap">${{escHtml(e.action||'?')}}</td>
+          <td style="font-size:.78em;color:#bb99ff">${{escHtml(e.actor||'—')}}</td>
+          <td style="font-size:.76em;color:#9a9ab8;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${{escHtml(e.target||'')}}">${{escHtml((e.target||'—').slice(0,80))}}</td>
+          <td style="font-size:.78em;color:${{e.decision==='fail'||e.decision==='deny'?'#ea5455':'#a8d8c0'}}">${{escHtml(e.decision||'—')}}</td>
+          <td>${{e.task_id ? `<button class="btn btn-run btn-sm" style="font-size:.85em;padding:1px 8px" onclick="openTaskDrawer('${{escHtml(e.task_id)}}')">view</button>` : '—'}}</td>
+        </tr>`).join('')
+        : '<tr><td colspan="7" class="empty">No audit events match.</td></tr>';
+    }} catch(e) {{
+      if (e.message !== 'unauthorized')
+        document.getElementById('sec-plain').innerHTML = `<div class="empty">Failed to load security data: ${{escHtml(e.message)}}</div>`;
+    }}
+  }}
+
+  // ── Command palette (Cmd+K) ───────────────────────────────────────────────
+  let _paletteIdx = 0;
+  let _paletteReturnFocus = null;
+  let _paletteFiltered = [];
+
+  function _paletteActions() {{
+    const acts = [
+      {{label:'⌁ Go to Manager Console', hint:'tab', run:() => switchTab('console')}},
+      {{label:'↟ Go to Upgrade Loop', hint:'tab', run:() => switchTab('upgrades')}},
+      {{label:'🛰 Go to Pipeline', hint:'tab', run:() => switchTab('pipeline')}},
+      {{label:'⏳ Go to Approval Queue', hint:'tab', run:() => switchTab('queue')}},
+      {{label:'▶ Go to Active', hint:'tab', run:() => switchTab('active')}},
+      {{label:'📋 Go to History', hint:'tab', run:() => switchTab('history')}},
+      {{label:'＋ Go to Assign Work', hint:'tab', run:() => switchTab('assign')}},
+      {{label:'🤖 Go to Agents (Office Floor)', hint:'tab', run:() => switchTab('agents')}},
+      {{label:'🚀 Go to Project', hint:'tab', run:() => switchTab('project')}},
+      {{label:'📊 Go to Eval Log', hint:'tab', run:() => switchTab('evallog')}},
+      {{label:'🧠 Go to Lessons', hint:'tab', run:() => switchTab('lessons')}},
+      {{label:'⏰ Go to Routines', hint:'tab', run:() => switchTab('routines')}},
+      {{label:'🛡 Go to Security', hint:'tab', run:() => switchTab('security')}},
+      {{label:'💸 Go to Tokens / cost usage', hint:'tab', run:() => switchTab('tokens')}},
+      {{label:'🔍 Run pipeline health check', hint:'action', run:() => checkPipelineHealth()}},
+      {{label:'🪑 Start standup meeting', hint:'action', run:() => {{ switchTab('agents'); setTimeout(startMeeting, 300); }}}},
+      {{label:'? Open help', hint:'action', run:() => openHelp()}},
+    ];
+    Object.keys(AGENT_DESCRIPTIONS).filter(a => a !== 'agent_worker').forEach(a => {{
+      acts.push({{label:`✎ Assign work to ${{a}}`, hint:'agent', run:() => quickAssign(a)}});
+    }});
+    return acts;
+  }}
+
+  function openPalette() {{
+    _paletteReturnFocus = document.activeElement;
+    const pal = document.getElementById('cmd-palette');
+    pal.classList.add('open');
+    const input = document.getElementById('palette-input');
+    input.value = '';
+    _paletteIdx = 0;
+    _renderPaletteList('');
+    input.focus();
+  }}
+
+  function closePalette() {{
+    document.getElementById('cmd-palette').classList.remove('open');
+    if (_paletteReturnFocus && _paletteReturnFocus.focus) _paletteReturnFocus.focus();
+  }}
+
+  function _renderPaletteList(q) {{
+    const list = document.getElementById('palette-list');
+    const acts = _paletteActions().filter(a => a.label.toLowerCase().includes(q.toLowerCase()));
+    _paletteFiltered = acts;
+    if (_paletteIdx >= acts.length) _paletteIdx = Math.max(0, acts.length - 1);
+    list.innerHTML = acts.length ? acts.map((a, i) => `
+      <li class="palette-item" role="option" id="pal-opt-${{i}}" aria-selected="${{i===_paletteIdx}}" onclick="_runPaletteIdx(${{i}})">
+        <span>${{escHtml(a.label)}}</span><span class="palette-hint">${{a.hint}}</span>
+      </li>`).join('') : '<li class="palette-item" aria-disabled="true">No matching commands</li>';
+    document.getElementById('palette-input').setAttribute('aria-activedescendant', acts.length ? `pal-opt-${{_paletteIdx}}` : '');
+  }}
+
+  function _runPaletteIdx(i) {{
+    const act = _paletteFiltered[i];
+    closePalette();
+    if (act) act.run();
+  }}
+
+  function _initPalette() {{
+    const input = document.getElementById('palette-input');
+    input.addEventListener('input', () => {{ _paletteIdx = 0; _renderPaletteList(input.value); }});
+    input.addEventListener('keydown', (e) => {{
+      if (e.key === 'ArrowDown') {{ e.preventDefault(); _paletteIdx = Math.min(_paletteIdx + 1, _paletteFiltered.length - 1); _renderPaletteList(input.value); }}
+      else if (e.key === 'ArrowUp') {{ e.preventDefault(); _paletteIdx = Math.max(_paletteIdx - 1, 0); _renderPaletteList(input.value); }}
+      else if (e.key === 'Enter') {{ e.preventDefault(); _runPaletteIdx(_paletteIdx); }}
+    }});
+  }}
+
+  // ── Help modal focus management ───────────────────────────────────────────
+  let _helpReturnFocus = null;
+  function openHelp() {{
+    _helpReturnFocus = document.activeElement;
+    const m = document.getElementById('help-modal');
+    m.classList.add('open');
+    const btn = m.querySelector('.btn-primary');
+    if (btn) btn.focus();
+  }}
+  function closeHelp() {{
+    document.getElementById('help-modal').classList.remove('open');
+    if (_helpReturnFocus && _helpReturnFocus.focus) _helpReturnFocus.focus();
+  }}
+
+  // ── Global keyboard shortcuts ─────────────────────────────────────────────
+  // The currently-open modal dialog (palette > drawer > help), or null. Used to
+  // trap Tab focus inside it — an open role="dialog" must not leak focus to the
+  // page behind it (WCAG 2.4.3 focus order; ARIA dialog pattern).
+  function _openDialog() {{
+    for (const id of ['cmd-palette', 'task-drawer', 'help-modal']) {{
+      const el = document.getElementById(id);
+      if (el && el.classList.contains('open')) return el;
+    }}
+    return null;
+  }}
+
+  function _focusables(container) {{
+    return [...container.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter(el => el.offsetParent !== null);  // visible only
+  }}
+
+  function _trapTab(e, container) {{
+    const items = _focusables(container);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey) {{
+      if (active === first || !container.contains(active)) {{ e.preventDefault(); last.focus(); }}
+    }} else {{
+      if (active === last || !container.contains(active)) {{ e.preventDefault(); first.focus(); }}
+    }}
+  }}
+
+  function _initGlobalKeys() {{
+    document.addEventListener('keydown', (e) => {{
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {{
+        e.preventDefault();
+        const pal = document.getElementById('cmd-palette');
+        pal.classList.contains('open') ? closePalette() : openPalette();
+        return;
+      }}
+      if (e.key === 'Escape') {{
+        if (document.getElementById('cmd-palette').classList.contains('open')) {{ closePalette(); return; }}
+        if (document.getElementById('task-drawer').classList.contains('open')) {{ closeTaskDrawer(); return; }}
+        if (document.getElementById('help-modal').classList.contains('open')) {{ closeHelp(); return; }}
+      }}
+      if (e.key === 'Tab') {{
+        const dialog = _openDialog();
+        if (dialog) {{ _trapTab(e, dialog); return; }}
+      }}
+      const typing = ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+      if (e.key === '?' && !typing) {{ e.preventDefault(); openHelp(); }}
+    }});
   }}
 
   const _liveStreams = {{}};  // task_id → EventSource
@@ -5104,6 +6138,7 @@ async def agent_dashboard(request: Request):
         </div>
         <div class="card-foot">
           <button class="btn btn-deny btn-sm" onclick="cancelTask('${{t.id}}')">Stop</button>
+          <button class="btn btn-run btn-sm" onclick="openTaskDrawer('${{t.id}}')">☰ Details</button>
           <span style="font-size:.72em;color:#444;margin-left:auto">${{t.id}}</span>
         </div>
       </div>`;
@@ -5132,7 +6167,8 @@ async def agent_dashboard(request: Request):
             ${{resultPreview ? `<div style="font-size:.72em;color:#5a8a5a;margin-top:4px;white-space:normal;line-height:1.4">${{resultPreview}}</div>` : ''}}
           </td>
           <td>${{statusTag(t.status)}}</td>
-          <td style="font-size:.75em;color:#777">${{fmtTime(t.finished_at)}}</td>
+          <td style="font-size:.75em;color:#777">${{fmtTime(t.finished_at)}}<br>
+            <button class="btn btn-run btn-sm" style="font-size:.85em;padding:2px 8px;margin-top:4px" onclick="event.stopPropagation();openTaskDrawer('${{t.id}}')">☰ Details</button></td>
         </tr>
         <tr id="result-${{t.id}}" style="display:none">
           <td colspan="5" style="padding:0">
@@ -5747,7 +6783,7 @@ async def agent_dashboard(request: Request):
         switchTab('active');
         ta.value = '';
       }} else if (cmd === 'help') {{
-        document.getElementById('help-modal').classList.add('open');
+        openHelp();
         ta.value = '';
       }}
     }});
@@ -5884,13 +6920,34 @@ async def agent_dashboard(request: Request):
     return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }}
 
+  let _initialTab = '';
+
   function start() {{
+    if (_initialTab && document.getElementById('pane-' + _initialTab)) switchTab(_initialTab);
     refresh();
     loadRubrics();
     _initSlashCommands();
+    _initTablistKeys();
+    _initPalette();
+    _initGlobalKeys();
     if (refreshTimer) clearInterval(refreshTimer);
     refreshTimer = setInterval(refresh, 5000);
   }}
+
+  // Accept token passed via URL (#token=… from bridge links, ?token=… from the
+  // root redirect), persist it, then scrub it from the address bar.
+  (function _tokenFromUrl() {{
+    const hashMatch = window.location.hash.match(/token=([^&]+)/);
+    const queryMatch = window.location.search.match(/[?&]token=([^&]+)/);
+    const urlToken = hashMatch ? hashMatch[1] : (queryMatch ? queryMatch[1] : '');
+    const tabMatch = window.location.hash.match(/tab=([a-z]+)/);
+    if (tabMatch) _initialTab = tabMatch[1];
+    if (urlToken) {{
+      token = decodeURIComponent(urlToken);
+      localStorage.setItem('jarvis_auth_token', token);
+      history.replaceState(null, '', window.location.pathname);
+    }}
+  }})();
 
   // Init
   if (token) {{
