@@ -61,12 +61,18 @@ _pp_mod._ask_openai = MagicMock(return_value="cloud answer")  # type: ignore[att
 
 @pytest.fixture(autouse=True)
 def _install_stubs_during_test():
+    import importlib as _importlib
     saved = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
     sys.modules["capability_evals"] = _cap_evals_mod
     sys.modules["config"] = _config_mod
     sys.modules["brains"] = _brains_mod
     sys.modules["brains.brain_ollama"] = _brain_ollama_mod
     sys.modules["provider_priority"] = _pp_mod
+    # Re-bind eval_delta's internal module references to our stubs.
+    # test_eval_delta.py calls importlib.reload(eval_delta) during its tests,
+    # which re-points eval_delta's internals to real modules; reload here
+    # after stubs are active to restore correct bindings.
+    _importlib.reload(eval_delta)
     try:
         yield
     finally:
