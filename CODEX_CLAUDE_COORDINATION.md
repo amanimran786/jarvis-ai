@@ -428,6 +428,103 @@ Codex local lane while agents run:
 
 ---
 
+## Codex Final Takeover Handoff To Claude - 2026-06-06
+
+Codex is handing control back to Claude due to usage limit pressure. Claude
+should take over release hardening, staging, packaged verification, and commit.
+
+Current verified source baseline from Codex:
+
+```bash
+./venv/bin/python -m pytest tests/ -q --tb=no
+# 1580 passed, 14 skipped, 3 warnings, 10 subtests passed
+
+git diff --check
+# passed
+```
+
+Important: source tests are green, but release is not ready to stage blindly.
+The tree is mixed Claude/Codex/user dirty work and includes generated/user data.
+
+Do not stage without explicit approval:
+- `vault/indexes/index.json`
+- `vault/wiki/brain/90 Task Hub.md`
+- `workspace/security_results/*`
+- `CODEX_HANDOFF.md`
+- `CODEX_CLAUDE_COORDINATION.md` unless Aman wants coordination history in git
+
+Codex-owned work that is not merged/committed yet:
+- `core/work_order.py`
+- `/manager/work-order` changes in `api.py`
+- cloud research gate changes in `core/manager.py` and `agents/researcher.py`
+- `tests/test_work_order.py`
+- `tests/test_cloud_research_gate.py`
+- `tests/test_researcher_agent.py`
+- test and training drift fixes:
+  - `tests/test_messages_contacts.py`
+  - `tests/test_persistent_jarvis_v1.py`
+  - `tests/test_mlx_training.py`
+  - `tests/test_overnight_trainer.py`
+  - `local_runtime/local_finetune_scheduler.py`
+  - `training/dashboard_generator.py`
+
+Dedicated-agent findings Claude should handle before merge:
+
+1. Security/local-first must-fix:
+   - `infra/event_bus.py` accepts `/tasks` directly and can bypass Manager gates.
+     If `researcher_worker` is running and cloud env is enabled, a task context
+     can currently request cloud research without a verifiable human approval
+     record.
+   - Approval endpoints in `infra/event_bus.py` are unauthenticated and approval
+     events appear to be result-review bookkeeping, not a pre-execution gate.
+   - `agents/researcher.py` currently trusts `context.cloud_research_approved`
+     plus env flag. Replace context-only approval with verifiable human approval
+     metadata or block cloud research unless routed through a trusted Manager
+     approval path.
+   - `tools/security/hackingtool_adapter.py` reportedly has a static fallback
+     approval token if `JARVIS_SECURITY_APPROVAL_TOKEN` is unset. Remove the
+     known default; fail closed unless a real token/session approval is present.
+
+2. Runtime/package readiness:
+   - Rebuild `/Users/truthseeker/Applications/Jarvis.app` before release because
+     `api.py`, `local_runtime/`, agent worker, manager, memory, event bus, and
+     new dynamically imported modules changed.
+   - Check `Jarvis.spec` hidden imports for dynamically imported modules,
+     especially `agents.researcher`, `agents.agent_worker`, `core.work_order`,
+     `core.manager`, `infra.event_bus`, and `infra.memory`.
+   - Run package smoke after rebuild:
+
+```bash
+./scripts/install_jarvis_app.sh --applications-only
+
+SMOKE_DIR="$(mktemp -d /tmp/jarvis-packaged-smoke.XXXXXX)"
+JARVIS_DATA_DIR="$SMOKE_DIR" JARVIS_API_PORT=8779 JARVIS_QUIET_BOOT=1 \
+  /Users/truthseeker/Applications/Jarvis.app/Contents/MacOS/Jarvis --no-ui &
+JARVIS_PID=$!
+
+sleep 8
+curl -fsS http://127.0.0.1:8779/status
+TOKEN="$(python3 -c 'import json, pathlib, sys; print(json.loads((pathlib.Path(sys.argv[1]) / ".jarvis_runtime.json").read_text())["token"])' "$SMOKE_DIR")"
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8779/agents
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8779/local/training/status
+curl -fsS -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8779/memory/status
+curl -fsS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"source":"claude","brief":"- researcher: summarize local project docs without cloud research"}' \
+  http://127.0.0.1:8779/manager/work-order
+kill "$JARVIS_PID"
+```
+
+3. Suggested staging groups:
+   - Managed agents/ADE/event bus/researcher worker together.
+   - Manager work-order/API normalization together.
+   - Memory/Qdrant compatibility together.
+   - Test contamination/stale-test fixes together.
+   - Training/dashboard alignment together.
+
+Claude should now take over from Codex.
+
+---
+
 ## Claude Session 4 Completion - 2026-06-06
 
 ### Changes made this session:
@@ -463,3 +560,177 @@ Codex local lane while agents run:
 - Packaged app rebuild: `scripts/install_jarvis_app.sh --applications-only`
 - Staging/commit scope (coordinate with Codex — do not commit unilaterally)
 
+
+---
+
+## Claude Session 5 — 2026-06-06 (taking over Codex lane)
+
+### Status at handoff
+- Full test suite: 1588 passed, 0 failed, 14 skipped
+- Packaged app rebuilt and installed at 18:32 (contains WorkOrderPanel + ApprovalPanel)
+- All test contamination issues resolved (tools object identity, mode leakage, RouterTests/WebSearchSummaryTests)
+
+### Claude now owns ALL lanes (Codex + Claude combined)
+
+### Agent teams running in parallel
+
+**Agent A: Email reply flow + Reminder fast-path**
+- Worktree: isolated
+- Files: router.py (email reply sections), google_services.py (create_event if missing), tests/test_email_reply_reminder.py (new)
+- Goal: wire "reply to email from X" end-to-end + add "remind me at X to Y" fast-path
+
+**Agent B: Email digest + Briefing improvements**
+- Worktree: isolated
+- Files: router.py (digest detection), jarvis_agents.py (_agent_calendar_upcoming, _agent_pending_alerts), tests/test_email_digest_briefing.py (new)
+- Goal: "what are my emails about today?" fast-path + parallel briefing agents
+
+**Agent C: Commit staging plan (read-only)**
+- Analyzing dirty tree → logical commit groups
+- No writes
+
+### Jarvis.spec updated this session
+- Added: proactive_watcher, jarvis_watcher, ade.*, ade_cmd, jarvis_cli to hiddenimports
+- These were missing and would cause import errors in the packaged app
+
+### API shape fix
+- WorkOrderPanel._preview_worker: now unwraps `body.get("work_order", body)` before extracting tasks
+- API returns `{"ok": True, "work_order": {"tasks": [...]}}` — panel was looking at top level
+
+### What's pending
+- Merge agent A and B worktrees into main (after review)
+- Run full suite after merge to confirm 0 failures
+- Rebuild packaged app (Jarvis.spec changed — proactive_watcher + ADE hidden imports added)
+- Stage and commit per staging agent's plan
+
+---
+
+## Session 6 — Claude (Boris Architecture + Phase 2 Agents) — 2026-06-06
+
+**Status: Complete. Zero regressions. App rebuilt.**
+
+### Security must-fixes (agent afbff727ea99d9950)
+- `infra/event_bus.py`: POST /tasks now screens payloads via `_inline_threat_screen()` with keyword blocklist fallback
+- Approval endpoints (POST/DELETE /approvals/{id}) now require `Authorization: Bearer <token>` — fail closed if `JARVIS_EVENT_BUS_APPROVAL_TOKEN` unset
+- `core/work_order.py`: `cloud_research_approved` in raw context cannot grant access — explicit comment + existing `_sanitize_context` gate confirmed
+- `tools/security/hackingtool_adapter.py`: removed static fallback `_DEFAULT_HUMAN_APPROVAL_TOKEN`, now raises `ValueError` if env var unset
+
+### Email digest + briefing (agent ad07031cc68aa9ca2)
+- `router.py`: `_is_email_digest_query` expanded (any emails? / summarize my inbox), digest fast-path streams via `brain_ollama.ask_local_stream`, label "Email Digest"
+- `jarvis_agents.py`: `_agent_calendar_upcoming()` + `_agent_pending_alerts()` added, wired into `run_briefing()` stage 0
+- `tests/test_email_digest_briefing.py`: 25 tests green
+
+### Phase 2 domain agents (new files)
+- `agents/career_agent.py`: resume_tailor, star_match, job_score, apply_prep — local LLM + vector memory
+- `agents/automation_engineer.py`: shell_script, file_pipeline, macro_compose, run_script — list-args + shell=False, path traversal rejected
+- `agents/ai_safety_agent.py`: risk_triage, threat_score, pre_exec_review, policy_check — 6 harm categories, 0–100 score, BLOCK/FLAG/PASS verdict
+- `config.py`: 3 new entries in AGENT_ROSTER
+- `tests/test_phase2_agents.py`: 38 tests green
+
+### JARVIS.md system (infra)
+- `JARVIS.md`: system intelligence regression file — Architecture Invariants, Test Isolation Rules, Memory Layer Rules, Agent Security Rules, Plan Mode Rules, Known Failure Patterns, Regression Log
+- `infra/jarvis_md.py`: load(), get_invariants(), propose_regression_entry(), append_regression() — agents call this post-QA-failure; humans approve writes
+- `infra/checkpointer.py`: TaskCheckpoint dataclass, save/load/delete/list, teleport() re-enqueues via event bus, CheckpointManager context manager with automatic failure preservation
+- `tests/test_checkpointer.py`: 19 tests green
+
+### ADE post-tool hooks + fleet orchestration
+- `ade/loop.py`: `run_post_tool_hook()` runs ruff + mypy after every file modification; `_propose_jarvis_md_entry()` emits regression entry proposal on test failure
+- `ade/fleet.py`: `cmd_status/start/teleport/cancel` — tmux session management, git worktree isolation per worker, worker pool in `runtime/fleet/`
+
+### Test isolation: sys.modules["router"] pop bug
+- `test_email_digest_briefing.py` tearDownClass pops `sys.modules["router"]`, causing `patch("router.X")` in `test_email_reply_reminder.py` to reimport a fresh module (different object from generator's namespace)
+- Fix: `setUp` of `TestReminderFastPath` now does `sys.modules["router"] = router` to re-anchor before patches land
+- Previously-failing `test_reminder_route_falls_back_to_osascript_when_calendar_unavailable` now passes in full suite
+
+### Package upgrades (all upgraded 2026-06-06)
+anthropic 0.92→0.107, fastapi 0.123→0.136, uvicorn 0.38→0.49, pydantic 2.12→2.13, openai 2.31→2.41, ollama 0.6.1→0.6.2, qdrant-client, mem0ai, faster-whisper, ruff, cryptography, pytest 7→9, mypy 1→2
+
+### Packaged app rebuilt
+- `Jarvis.spec`: added infra.checkpointer, infra.jarvis_md, agents.career_agent, agents.automation_engineer, agents.ai_safety_agent, ade.fleet
+- Build succeeded at 2026-06-06 19:43. Installed to /Users/truthseeker/Applications/Jarvis.app
+
+### STAGING_PLAN.md
+- Updated: Commits 13-17 added covering Phase 2 work
+- New commits: Security fixes, Email features, Phase 2 agents, JARVIS system, ADE fleet
+
+### What's next
+- Execute git commits 1-17 per STAGING_PLAN.md
+- Note: workspace/ security artifacts staged before .gitignore update — `git rm --cached -r workspace/` needed before Commit 11
+- Optionally: Python 3.13 migration (3.13 available at /usr/local/bin/python3.13, needs PyInstaller/PyQt6 vetting first)
+
+---
+
+## Session 7 — Codex (Context Token Optimization Lane) — 2026-06-13
+
+**Status: Focused code slice complete; Claude can review/extend.**
+
+### Codex completed
+- `context_budget.py`: added a small context governor:
+  - `estimate_tokens()`
+  - `target_tokens_for()`
+  - `compile_context_blocks()`
+  - Candidate context blocks are ranked by priority and selected under one target instead of blindly appended.
+- `model_router.py`: vault, graph, semantic memory, semantic hint, and mem0 context now flow through the context governor before being appended to `system_extra`.
+- `brains/brain_ollama.py`: local model fit checks now happen after full prompt assembly, so the estimate includes system prompt, memory, skills, and retrieved context. Normal `ask_local_stream()` also sets `num_ctx=64000` for GLM via `GLM_CTX` / `OLLAMA_GLM_CONTEXT`, matching the tool-calling lane.
+- `tests/test_context_governor.py`: added focused tests for priority dropping, router context compilation, and GLM `num_ctx` on normal chat.
+
+### Verification
+```bash
+./venv/bin/python -m pytest tests/test_context_governor.py -q
+./venv/bin/python -m pytest tests/test_smart_stream_context_hang.py tests/test_cloud_token_budget.py -q
+./venv/bin/python -m py_compile context_budget.py model_router.py brains/brain_ollama.py
+```
+
+Result: `14 passed`, `py_compile` clean.
+
+### Claude-safe next work
+- Add dashboard visibility for context budget planned/used/dropped blocks.
+- Add an Ollama runtime setup helper for:
+  - `OLLAMA_CONTEXT_LENGTH=64000`
+  - `OLLAMA_FLASH_ATTENTION=1`
+  - `OLLAMA_KV_CACHE_TYPE=q8_0`
+  - `OLLAMA_NUM_PARALLEL=1`
+  - `OLLAMA_MAX_LOADED_MODELS=1`
+- Add a real benchmark comparing before/after prompt tokens and latency for:
+  - normal chat
+  - agent task
+  - code task
+  - long vault/codebase query
+- Verify mem0 end-to-end with the current venv. Package import name `mem0` is present at `2.0.2`; `mem0ai` is the package/distribution name, not the runtime import.
+
+---
+
+## Session 8 — Codex (Manager Pipeline Canary) — 2026-06-13
+
+**Status: Focused pipeline canary complete; uncommitted in working tree for Claude/Codex review.**
+
+### Codex completed
+- `tests/test_eval_delta_unit.py`: fixed collection-time `sys.modules` contamination. The test now only temporarily installs the `capability_evals` stub needed to import `eval_delta`; heavier stubs (`brains`, `brains.brain_ollama`, `config`, `provider_priority`) are installed only inside each test and restored afterward.
+- `tests/test_pipeline_canary.py`: added a repeatable manager pipeline canary around the real `/manager/run-stream` endpoint.
+  - Patches manager decomposition to eight specialist tasks.
+  - Patches `agent_dispatch.dispatch` for deterministic local-only output.
+  - Patches `api._run_eval` for deterministic pass verdicts.
+  - Patches `task_runtime._start_task_thread`, persistence, approval, and worktree creation to avoid background model calls, persistent task-board writes, or scratch branch creation.
+  - Asserts eight agents are planned, started, evaluated, completed, visible in `task_runtime`, and reported as healthy by `api._pipeline_health_check()`.
+
+### Verification
+```bash
+./venv/bin/python -m pytest tests/test_pipeline_canary.py -q
+# 1 passed
+
+./venv/bin/python -m pytest tests/test_pipeline_canary.py \
+  tests/test_agent_collaboration.py::TestAgentWorkerDispatch \
+  tests/test_agent_dispatch_integration.py -q
+# 12 passed
+
+./venv/bin/python -m pytest tests/test_pipeline_canary.py tests/test_eval_delta_unit.py \
+  tests/test_context_governor.py tests/test_ollama_context_setup.py tests/test_orchestrate.py \
+  tests/test_preflect.py tests/test_ade.py tests/test_pipeline_audit.py \
+  tests/test_agent_collaboration.py tests/test_agent_dispatch_integration.py \
+  tests/test_jarvis_regression_suite.py::ApiSurfaceTests::test_agent_ops_dashboard_serves_current_runtime_javascript -q
+# 185 passed, 2 warnings, 24 subtests passed
+```
+
+### Notes for Claude
+- This canary is intentionally synthetic. It proves the manager SSE lifecycle, task registration, eval hook, and health check compose without spending local/cloud tokens.
+- The next real-runtime step is a manual dashboard run with one or two safe tasks while watching logs, then a packaged-app check if dashboard/runtime files are committed.
+- Keep `agent/eval-delta-tests` payload as targeted-import only; do not reintroduce module-level `brains`/`config` stubs during collection.

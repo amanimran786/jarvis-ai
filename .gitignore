@@ -8,6 +8,7 @@ token.json
 .jarvis_crash.log
 .jarvis_build_stamp
 .jarvis_runtime.json
+.worktrees/
 
 # Persistent runtime data
 memory.json

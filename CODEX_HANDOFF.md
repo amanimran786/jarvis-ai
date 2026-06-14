@@ -414,3 +414,75 @@ tests/test_researcher_agent.py  15 tests for researcher agent
 tests/test_event_bus.py         ~55 tests for event bus (incl. approvals)
 tests/test_ade.py               ~36 tests for full ADE stack
 ```
+
+## Codex OAuth Recovery Update - 2026-06-07 00:00 PDT
+
+Scope kept intentionally narrow to avoid Claude's active `api.py` / `router.py` lane.
+
+Applied:
+- `google_services.py` now has a real CLI entrypoint:
+  - `python google_services.py --reauth` clears the saved Google token, runs `InstalledAppFlow.run_local_server(port=0)`, and rewrites `~/Library/Application Support/Jarvis/token.json`
+  - `python google_services.py --status` probes whether current Google auth is usable
+- Added `clear_google_token()` and `reauthorize_google()` helpers so token reset is explicit and reusable.
+- Added isolated tests in `tests/test_google_oauth_reauth.py` instead of touching Claude-owned regression files.
+
+Observed live issue on this machine before the fix:
+- Existing token refresh failed with `RefreshError: ('invalid_grant: Bad Request', ...)`
+- Router/user guidance already told people to run `python google_services.py --reauth`, but that command previously did nothing because `google_services.py` had no `__main__` handler.
+
+Deliberately not changed to avoid merge friction:
+- `router.py` still mentions `jarvis-ai/auth`; that reconnect URL does not exist yet.
+- `api.py` still only exposes `/auth/verify`; no browser reconnect endpoint was added in this Codex slice.
+
+Verification:
+```bash
+./venv/bin/python -m pytest tests/test_google_oauth_reauth.py -q
+./venv/bin/python google_services.py --help
+git diff --check -- google_services.py tests/test_google_oauth_reauth.py CODEX_HANDOFF.md
+```
+
+## Codex Context Optimization Update - 2026-06-13
+
+Applied:
+- `context_budget.py` now has a real context governor (`estimate_tokens`, `target_tokens_for`, `compile_context_blocks`) instead of policy text only.
+- `model_router.py` now compiles vault, graph, semantic memory, semantic hint, and mem0 blocks under one budget before appending them to `system_extra`.
+- `brains/brain_ollama.py` now checks local prompt fit after the full prompt is assembled, not just against raw user input.
+- Normal GLM local chat now sends `num_ctx=64000` by default via `GLM_CTX` / `OLLAMA_GLM_CONTEXT`, matching the local tool-calling lane.
+- `tests/test_context_governor.py` covers budget priority dropping, router compilation, and GLM context options without hitting real Ollama.
+
+Verification:
+```bash
+./venv/bin/python -m pytest tests/test_context_governor.py -q
+./venv/bin/python -m pytest tests/test_smart_stream_context_hang.py tests/test_cloud_token_budget.py -q
+./venv/bin/python -m py_compile context_budget.py model_router.py brains/brain_ollama.py
+```
+
+Result: `14 passed`, compile clean.
+
+Recommended Claude next slice:
+- Dashboard metric for context selected/dropped blocks.
+- Ollama runtime setup helper for long-context local mode.
+- Benchmark prompt tokens + latency before/after for chat/task/code/vault queries.
+- Verify mem0 end-to-end: `fastembed` is installed and runtime import `mem0` is present at `2.0.2`; `mem0ai` is not the module name.
+
+## Codex Manager Pipeline Canary Update - 2026-06-13
+
+Applied:
+- Added `tests/test_pipeline_canary.py` to exercise the real `/manager/run-stream` manager SSE path with eight specialist agents.
+- The canary is local-only and side-effect free: decomposition, dispatch, eval, persistence, task background threads, approval, and worktree creation are mocked or disabled for the test.
+- It verifies: plan event, eight start events, eight eval events, eight done events, complete event, dashboard-visible `task_runtime` records, succeeded status, debrief presence, and healthy `api._pipeline_health_check()`.
+- Fixed `tests/test_eval_delta_unit.py` so branch-imported eval tests no longer poison other suites by installing fake `brains`/`config` modules during collection.
+
+Verification:
+```bash
+./venv/bin/python -m pytest tests/test_pipeline_canary.py -q
+./venv/bin/python -m pytest tests/test_pipeline_canary.py tests/test_agent_collaboration.py::TestAgentWorkerDispatch tests/test_agent_dispatch_integration.py -q
+./venv/bin/python -m pytest tests/test_pipeline_canary.py tests/test_eval_delta_unit.py tests/test_context_governor.py tests/test_ollama_context_setup.py tests/test_orchestrate.py tests/test_preflect.py tests/test_ade.py tests/test_pipeline_audit.py tests/test_agent_collaboration.py tests/test_agent_dispatch_integration.py tests/test_jarvis_regression_suite.py::ApiSurfaceTests::test_agent_ops_dashboard_serves_current_runtime_javascript -q
+```
+
+Result: `185 passed`, `2 warnings`, `24 subtests passed`.
+
+Recommended next slice:
+- Run one live dashboard manager task with safe, read-only scope and watch the SSE stream/logs.
+- If live canary is clean, wire a dashboard "Run Canary" button or documented command for periodic manager-loop checks.
+- Only after the dirty tree is staged by logical groups, run the packaged app verification path.
