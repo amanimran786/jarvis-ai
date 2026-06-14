@@ -193,6 +193,24 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
         "by_provider": {},
         "by_model": {},
         "recent": rows[-include_recent:] if include_recent else [],
+        "context_budget": {
+            "call_count": 0,
+            "selected_block_count": 0,
+            "dropped_block_count": 0,
+            "context_used_tokens": 0,
+            "context_budget_tokens": 0,
+            "target_tokens": 0,
+            "recent": [],
+        },
+        "conversation_budget": {
+            "call_count": 0,
+            "dropped_message_count": 0,
+            "dropped_message_tokens": 0,
+            "original_prompt_tokens": 0,
+            "final_prompt_tokens": 0,
+            "over_budget_count": 0,
+            "recent": [],
+        },
     }
 
     provider_buckets: dict[str, dict] = {}
@@ -216,6 +234,45 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
             summary["estimated_cost_usd"] += float(cost)
         if row.get("estimated"):
             summary["estimated_entry_count"] += 1
+
+        context_meta = (row.get("metadata") or {}).get("context_budget")
+        if isinstance(context_meta, dict):
+            cb = summary["context_budget"]
+            cb["call_count"] += 1
+            cb["selected_block_count"] += len(context_meta.get("selected") or [])
+            cb["dropped_block_count"] += len(context_meta.get("dropped") or [])
+            cb["context_used_tokens"] += int(context_meta.get("context_used_tokens") or 0)
+            cb["context_budget_tokens"] += int(context_meta.get("context_budget_tokens") or 0)
+            cb["target_tokens"] += int(context_meta.get("target_tokens") or 0)
+            cb["recent"].append({
+                "timestamp": row.get("timestamp"),
+                "model": row.get("model"),
+                "selected": context_meta.get("selected") or [],
+                "dropped": context_meta.get("dropped") or [],
+                "context_used_tokens": context_meta.get("context_used_tokens", 0),
+                "context_budget_tokens": context_meta.get("context_budget_tokens", 0),
+                "target_tokens": context_meta.get("target_tokens", 0),
+            })
+
+        conversation_meta = (row.get("metadata") or {}).get("conversation_budget")
+        if isinstance(conversation_meta, dict):
+            conv = summary["conversation_budget"]
+            conv["call_count"] += 1
+            conv["dropped_message_count"] += int(conversation_meta.get("dropped_message_count") or 0)
+            conv["dropped_message_tokens"] += int(conversation_meta.get("dropped_message_tokens") or 0)
+            conv["original_prompt_tokens"] += int(conversation_meta.get("original_prompt_tokens") or 0)
+            conv["final_prompt_tokens"] += int(conversation_meta.get("final_prompt_tokens") or 0)
+            if conversation_meta.get("over_budget"):
+                conv["over_budget_count"] += 1
+            conv["recent"].append({
+                "timestamp": row.get("timestamp"),
+                "model": row.get("model"),
+                "dropped_message_count": conversation_meta.get("dropped_message_count", 0),
+                "dropped_message_tokens": conversation_meta.get("dropped_message_tokens", 0),
+                "original_prompt_tokens": conversation_meta.get("original_prompt_tokens", 0),
+                "final_prompt_tokens": conversation_meta.get("final_prompt_tokens", 0),
+                "over_budget": bool(conversation_meta.get("over_budget")),
+            })
 
         provider = row.get("provider", "unknown")
         model = row.get("model", "unknown")
@@ -261,6 +318,24 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
         key: {**value, "estimated_cost_usd": round(value["estimated_cost_usd"], 8)}
         for key, value in model_buckets.items()
     }
+    cb = summary["context_budget"]
+    cb["recent"] = cb["recent"][-10:]
+    if cb["call_count"]:
+        cb["average_used_tokens"] = round(cb["context_used_tokens"] / cb["call_count"], 2)
+        cb["average_budget_tokens"] = round(cb["context_budget_tokens"] / cb["call_count"], 2)
+        cb["average_target_tokens"] = round(cb["target_tokens"] / cb["call_count"], 2)
+    else:
+        cb["average_used_tokens"] = 0
+        cb["average_budget_tokens"] = 0
+        cb["average_target_tokens"] = 0
+    conv = summary["conversation_budget"]
+    conv["recent"] = conv["recent"][-10:]
+    if conv["call_count"]:
+        conv["average_original_prompt_tokens"] = round(conv["original_prompt_tokens"] / conv["call_count"], 2)
+        conv["average_final_prompt_tokens"] = round(conv["final_prompt_tokens"] / conv["call_count"], 2)
+    else:
+        conv["average_original_prompt_tokens"] = 0
+        conv["average_final_prompt_tokens"] = 0
     return summary
 
 

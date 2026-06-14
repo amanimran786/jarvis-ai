@@ -35,6 +35,100 @@ PROFILES: dict[str, dict[str, Any]] = {
 }
 
 
+def estimate_tokens(text: str) -> int:
+    """Cheap local token estimate used before provider calls expose real usage."""
+    cleaned = (text or "").strip()
+    return max(1, len(cleaned) // 4) if cleaned else 0
+
+
+def target_tokens_for(tool: str | None = None, *, default: int | None = None) -> int:
+    """Return the prompt target for the request lane.
+
+    This is intentionally conservative. The model may support a larger context,
+    but keeping a smaller active working set preserves latency and KV-cache reuse.
+    """
+    import os
+
+    raw = os.getenv("JARVIS_CONTEXT_TARGET_TOKENS")
+    if raw:
+        try:
+            return max(2048, int(raw))
+        except ValueError:
+            pass
+    lane = (tool or "chat").strip().lower()
+    if default:
+        return default
+    if lane in {"code", "terminal", "shell"}:
+        return 32_000
+    if lane in {"research", "browser", "vault"}:
+        return 24_000
+    if lane in {"task", "agent"}:
+        return 16_000
+    return 12_000
+
+
+def _trim_chars(text: str, max_chars: int | None) -> str:
+    text = (text or "").strip()
+    if not max_chars or len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 16)].rstrip() + "\n[truncated]"
+
+
+def compile_context_blocks(
+    blocks: list[dict[str, Any]],
+    *,
+    base_text: str = "",
+    user_input: str = "",
+    target_tokens: int = 12_000,
+    reserve_response_tokens: int = 1_024,
+) -> dict[str, Any]:
+    """Select context blocks under one prompt budget.
+
+    Callers pass candidate blocks as dictionaries:
+    {"label": str, "content": str, "priority": int, "max_chars": int | None}
+
+    Higher-priority blocks win when the prompt is tight. The function returns
+    selected text plus a report suitable for dashboard/debug surfaces.
+    """
+    base_tokens = estimate_tokens(base_text) + estimate_tokens(user_input)
+    budget = max(0, int(target_tokens) - int(reserve_response_tokens) - base_tokens)
+    ordered = sorted(
+        enumerate(blocks or []),
+        key=lambda item: (-int(item[1].get("priority", 0)), item[0]),
+    )
+    selected: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    used = 0
+    for original_index, block in ordered:
+        label = str(block.get("label") or f"block_{original_index}")
+        content = _trim_chars(str(block.get("content") or ""), block.get("max_chars"))
+        if not content:
+            continue
+        tokens = estimate_tokens(content)
+        entry = {
+            "label": label,
+            "tokens": tokens,
+            "priority": int(block.get("priority", 0)),
+        }
+        if tokens <= max(0, budget - used):
+            selected.append({**entry, "content": content, "index": original_index})
+            used += tokens
+        else:
+            dropped.append(entry)
+
+    selected.sort(key=lambda item: item["index"])
+    return {
+        "text": "\n\n".join(item["content"] for item in selected),
+        "target_tokens": int(target_tokens),
+        "base_tokens": base_tokens,
+        "reserve_response_tokens": int(reserve_response_tokens),
+        "context_budget_tokens": budget,
+        "context_used_tokens": used,
+        "selected": [{k: v for k, v in item.items() if k not in {"content", "index"}} for item in selected],
+        "dropped": dropped,
+    }
+
+
 def policy_status(hours: int = 24) -> dict[str, Any]:
     usage = usage_tracker.summarize(hours=hours, include_recent=5)
     local_tokens = sum(

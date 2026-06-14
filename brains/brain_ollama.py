@@ -11,6 +11,7 @@ import threading
 import time
 from typing import Any
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
+import context_budget
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
@@ -234,6 +235,76 @@ def _fits_local(prompt: str, model: str) -> str:
     return model
 
 
+def _messages_text(messages: list[dict]) -> str:
+    return "\n\n".join(str(m.get("content") or "") for m in messages or [])
+
+
+def _cap_track_context_messages(
+    messages: list[dict],
+    *,
+    target_tokens: int | None = None,
+    reserve_response_tokens: int = 1024,
+) -> tuple[list[dict], dict[str, Any]]:
+    """Drop oldest active conversation messages before sending to Ollama.
+
+    The in-memory conversation state is untouched. We only reduce the prompt
+    payload for this provider call, preserving the system message and current
+    user request so Jarvis stays accurate under a local context budget.
+    """
+    target = int(target_tokens or context_budget.target_tokens_for("chat"))
+    prompt_budget = max(1, target - int(reserve_response_tokens))
+    original_tokens = context_budget.estimate_tokens(_messages_text(messages))
+    report: dict[str, Any] = {
+        "target_tokens": target,
+        "reserve_response_tokens": int(reserve_response_tokens),
+        "prompt_budget_tokens": prompt_budget,
+        "original_prompt_tokens": original_tokens,
+        "final_prompt_tokens": original_tokens,
+        "dropped_message_count": 0,
+        "dropped_message_tokens": 0,
+        "dropped_messages": [],
+        "over_budget": original_tokens > prompt_budget,
+    }
+    if original_tokens <= prompt_budget or len(messages or []) <= 2:
+        return messages, report
+
+    capped = list(messages)
+    dropped_messages: list[dict[str, Any]] = []
+    dropped_tokens = 0
+    while len(capped) > 2 and context_budget.estimate_tokens(_messages_text(capped)) > prompt_budget:
+        dropped = capped.pop(1)
+        content = str(dropped.get("content") or "")
+        tokens = context_budget.estimate_tokens(content)
+        dropped_tokens += tokens
+        dropped_messages.append({
+            "role": str(dropped.get("role") or "unknown"),
+            "tokens": tokens,
+        })
+
+    final_tokens = context_budget.estimate_tokens(_messages_text(capped))
+    report.update({
+        "final_prompt_tokens": final_tokens,
+        "dropped_message_count": len(dropped_messages),
+        "dropped_message_tokens": dropped_tokens,
+        "dropped_messages": dropped_messages,
+        "over_budget": final_tokens > prompt_budget,
+    })
+    return capped, report
+
+
+def _ollama_options_for_model(model: str) -> dict[str, int]:
+    """Model-specific runtime options that keep local context explicit."""
+    lower = (model or "").lower()
+    options: dict[str, int] = {}
+    if "glm" in lower:
+        options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "64000")))
+    if "deepseek" in lower:
+        # Cap DeepSeek R1 to limit reasoning token explosion on Mac.
+        options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
+        options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
+    return options
+
+
 def _is_available(model: str) -> bool:
     """Check if a model is pulled and available."""
     try:
@@ -367,12 +438,9 @@ def ask_local_stream(
     system_extra: str = "",
     track_context: bool = False,
     raise_on_error: bool = False,
+    context_budget_report: dict[str, Any] | None = None,
 ):
     """Stream a response from a local Ollama model."""
-    # Escalate to a larger-context local model when the prompt won't fit.
-    model = _fits_local(user_input, model)
-    model = get_best_available(model)
-
     # Inject chain-of-thought boost for non-trivial inputs (skip for short commands)
     word_count = len(user_input.split())
     if word_count > 6 and not system_extra:
@@ -386,22 +454,23 @@ def ask_local_stream(
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
         messages = [{"role": "system", "content": system}] + messages
+        messages, conversation_budget_report = _cap_track_context_messages(messages)
     else:
         system = system_base
         if system_extra:
             system += "\n\n" + system_extra
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user_input}]
+        conversation_budget_report = None
+
+    # Escalate to a larger-context local model only after the full prompt is
+    # assembled. User input alone hides the real cost of system + memory blocks.
+    model = get_best_available(_fits_local(_messages_text(messages), model))
 
     full_reply = ""
     prompt_eval_count = None
     eval_count = None
     try:
-        # Cap context for DeepSeek R1 to limit reasoning token explosion on Mac.
-        # 8192 is enough for all Jarvis use cases and keeps response time manageable.
-        options = {}
-        if "deepseek" in model.lower():
-            options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
-            options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
+        options = _ollama_options_for_model(model)
 
         stream = _client().chat(
             model=model,
@@ -464,7 +533,11 @@ def ask_local_stream(
         messages=messages,
         response_text=cleaned_reply,
         estimated=(prompt_eval_count is None and eval_count is None),
-        metadata={"track_context": track_context},
+        metadata={
+            "track_context": track_context,
+            **({"context_budget": context_budget_report} if context_budget_report else {}),
+            **({"conversation_budget": conversation_budget_report} if conversation_budget_report else {}),
+        },
     )
 
     if track_context:
@@ -641,7 +714,6 @@ def ask_local_with_tools(
         yield from ask_local_stream(user_input, model=model, system_extra=system_extra)
         return
 
-    model = get_best_available(model)
     tool_schemas = [_AGENT_TOOL_SCHEMAS[t] for t in tool_names]
 
     system = SYSTEM_PROMPT + mem.get_context()
@@ -653,8 +725,8 @@ def ask_local_with_tools(
         {"role": "user", "content": user_input},
     ]
 
-    # ctx options: use the 64k window we configured for glm models
-    _opts = {"num_ctx": 64000} if "glm" in model.lower() else {}
+    model = get_best_available(_fits_local(_messages_text(messages), model))
+    _opts = _ollama_options_for_model(model)
 
     last_msg = None
     for _ in range(max_iterations):
