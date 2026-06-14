@@ -17,7 +17,15 @@ _mock_config.AGENT_ROSTER = {
     "researcher":       {"tools": ["web_search", "file_read"],     "model": "glm-4.7-flash"},
     "qa_tester":        {"tools": ["code", "shell"],               "model": "glm-4.7-flash"},
 }
+_orig_config = sys.modules.get("config")
 sys.modules["config"] = _mock_config
+
+
+def teardown_module(module):  # noqa: ANN001
+    if _orig_config is None:
+        sys.modules.pop("config", None)
+    else:
+        sys.modules["config"] = _orig_config
 
 # FastAPI stubs — HTTPException must be a real exception subclass
 import fastapi as _fastapi  # already installed; just use the real one

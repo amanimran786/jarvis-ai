@@ -31,9 +31,25 @@ for _mod in [
     if _mod not in sys.modules:
         sys.modules[_mod] = _make_stub(_mod)
 
-# Give config.AGENT_ROSTER a real dict so imports don't crash
+# Give config.AGENT_ROSTER a real dict so imports don't crash.
+# Save the originals so teardown_module can restore them — without this,
+# config.AGENT_ROSTER stays empty for the rest of the test session and breaks
+# security_reviewer tests that depend on a non-empty roster.
+_config_mod = sys.modules.get("config")
+_orig_agent_roster = getattr(_config_mod, "AGENT_ROSTER", None)
+_orig_local_default = getattr(_config_mod, "LOCAL_DEFAULT", None)
 sys.modules["config"].AGENT_ROSTER = {}
 sys.modules["config"].LOCAL_DEFAULT = "ollama"
+
+
+def teardown_module(module):  # noqa: ANN001
+    _c = sys.modules.get("config")
+    if _c is None:
+        return
+    if _orig_agent_roster is not None:
+        _c.AGENT_ROSTER = _orig_agent_roster
+    if _orig_local_default is not None:
+        _c.LOCAL_DEFAULT = _orig_local_default
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
