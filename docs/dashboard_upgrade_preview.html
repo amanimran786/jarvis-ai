@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Manager Console Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0d10;
+      --panel: #11161c;
+      --panel-2: #151b22;
+      --line: #26303a;
+      --text: #e7edf3;
+      --muted: #8c9aa8;
+      --blue: #62b7ff;
+      --green: #43d18d;
+      --yellow: #ffd166;
+      --red: #ff6b6b;
+      --violet: #b99cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    header {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: #0e1217;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+    h1 { font-size: 18px; margin: 0; font-weight: 650; }
+    .statusbar { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 9px;
+      background: #121820;
+      white-space: nowrap;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .dot.warn { background: var(--yellow); }
+    .dot.red { background: var(--red); }
+    main {
+      display: grid;
+      grid-template-columns: 240px minmax(540px, 1fr) 340px;
+      gap: 12px;
+      padding: 12px;
+    }
+    section, aside {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .section-head {
+      min-height: 42px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-2);
+    }
+    .section-head h2 { font-size: 13px; margin: 0; color: #c8d3dd; text-transform: uppercase; font-weight: 700; }
+    .body { padding: 12px; }
+    .nav button {
+      width: 100%;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: #b9c5d0;
+      padding: 8px 10px;
+      margin-bottom: 4px;
+      text-align: left;
+      font: inherit;
+      cursor: pointer;
+    }
+    .nav button.active, .nav button:hover { background: #1a232d; color: var(--text); }
+    .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: #0d1218;
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 86px;
+    }
+    .metric .value { font-size: 25px; font-weight: 750; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+    .metric .label { color: var(--muted); font-size: 12px; line-height: 1.35; }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .lane {
+      border: 1px solid var(--line);
+      background: #0d1218;
+      border-radius: 8px;
+      min-height: 320px;
+      padding: 8px;
+    }
+    .lane h3 {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+    }
+    .ticket {
+      border: 1px solid #2d3946;
+      background: #141b23;
+      border-radius: 6px;
+      padding: 9px;
+      margin-bottom: 8px;
+    }
+    .ticket strong { display: block; font-size: 13px; margin-bottom: 5px; line-height: 1.35; }
+    .ticket p { margin: 0 0 8px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .meta { display: flex; flex-wrap: wrap; gap: 5px; }
+    .tag {
+      font-size: 11px;
+      padding: 3px 6px;
+      border-radius: 5px;
+      color: #d9e4ee;
+      background: #202a35;
+      border: 1px solid #2f3b47;
+    }
+    .tag.green { color: var(--green); border-color: #245d42; background: #102119; }
+    .tag.yellow { color: var(--yellow); border-color: #6b5622; background: #241f10; }
+    .tag.red { color: var(--red); border-color: #6b3030; background: #241313; }
+    .tag.blue { color: var(--blue); border-color: #254e73; background: #101c27; }
+    .agent {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 1px solid #202832;
+      min-height: 48px;
+    }
+    .agent:last-child { border-bottom: 0; }
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #1b2631;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .agent b { display: block; font-size: 13px; }
+    .agent span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .review-item {
+      border-bottom: 1px solid #202832;
+      padding: 11px 0;
+    }
+    .review-item:first-child { padding-top: 0; }
+    .review-item:last-child { border-bottom: 0; }
+    .review-title { font-size: 13px; font-weight: 650; margin-bottom: 5px; }
+    .review-copy { color: var(--muted); font-size: 12px; line-height: 1.45; margin-bottom: 8px; }
+    .actions { display: flex; gap: 7px; }
+    .actions button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #18212b;
+      color: var(--text);
+      padding: 6px 9px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .actions button.primary { border-color: #286394; color: var(--blue); }
+    .actions button.danger { border-color: #703434; color: var(--red); }
+    .timeline {
+      margin-top: 12px;
+      border: 1px solid var(--line);
+      background: #0d1218;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .event {
+      display: grid;
+      grid-template-columns: 72px 1fr;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #202832;
+      font-size: 12px;
+    }
+    .event:last-child { border-bottom: 0; }
+    .time { color: var(--muted); font-variant-numeric: tabular-nums; }
+    @media (max-width: 1180px) {
+      main { grid-template-columns: 210px 1fr; }
+      .right { grid-column: 1 / -1; }
+    }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      .grid, .board { grid-template-columns: 1fr 1fr; }
+      header { height: auto; align-items: flex-start; gap: 10px; padding: 12px; flex-direction: column; }
+    }
+    @media (max-width: 560px) {
+      .grid, .board { grid-template-columns: 1fr; }
+      .statusbar { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Jarvis Manager Console</h1>
+    <div class="statusbar">
+      <span class="pill"><span class="dot"></span> Local runtime online</span>
+      <span class="pill"><span class="dot warn"></span> 3 approvals waiting</span>
+      <span class="pill">glm-4.7-flash · 64k</span>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="section-head"><h2>Control</h2></div>
+      <div class="body nav">
+        <button class="active">Ops Overview <span class="count">live</span></button>
+        <button>Upgrade Loop <span class="count">12</span></button>
+        <button>Agent Team <span class="count">9</span></button>
+        <button>Review Gates <span class="count">3</span></button>
+        <button>Pipeline Audit <span class="count">clean</span></button>
+        <button>Training & Evals <span class="count">nightly</span></button>
+        <button>Security Ledger <span class="count">hash</span></button>
+      </div>
+    </aside>
+
+    <section>
+      <div class="section-head">
+        <h2>Operating Picture</h2>
+        <span class="pill">Last refresh 12s ago</span>
+      </div>
+      <div class="body">
+        <div class="grid">
+          <div class="metric"><div class="value">CLEAN</div><div class="label">Pipeline audit verdict, with 5 historical warnings acknowledged</div></div>
+          <div class="metric"><div class="value">12</div><div class="label">Upgrade tickets discovered from watchlist and research briefs</div></div>
+          <div class="metric"><div class="value">4</div><div class="label">Sandbox smoke suites passing before promotion</div></div>
+          <div class="metric"><div class="value">91%</div><div class="label">Local-first routing over the latest task window</div></div>
+        </div>
+
+        <div class="board">
+          <div class="lane">
+            <h3>Signals <span>4</span></h3>
+            <div class="ticket">
+              <strong>Ollama docs changed</strong>
+              <p>Watchlist digest changed. Needs researcher validation before any work order.</p>
+              <div class="meta"><span class="tag blue">local runtime</span><span class="tag">source delta</span></div>
+            </div>
+            <div class="ticket">
+              <strong>Apple Foundation Models update</strong>
+              <p>Potential guided-generation change. Check macOS compatibility and local-only path.</p>
+              <div class="meta"><span class="tag blue">on-device</span></div>
+            </div>
+          </div>
+          <div class="lane">
+            <h3>Ranked <span>3</span></h3>
+            <div class="ticket">
+              <strong>FastEmbed memory recall benchmark</strong>
+              <p>Low-risk, measurable latency and recall improvement.</p>
+              <div class="meta"><span class="tag green">score 42</span><span class="tag green">auto backlog</span></div>
+            </div>
+            <div class="ticket">
+              <strong>GRPO routing eval harness</strong>
+              <p>Quality lever, needs training lane and rollback plan.</p>
+              <div class="meta"><span class="tag yellow">review</span><span class="tag">training</span></div>
+            </div>
+          </div>
+          <div class="lane">
+            <h3>Sandbox <span>2</span></h3>
+            <div class="ticket">
+              <strong>Upgrade-loop ticket plumbing</strong>
+              <p>Tests passed: upgrade loop, work order, runtime sandbox.</p>
+              <div class="meta"><span class="tag green">47 passed</span><span class="tag">no dispatch</span></div>
+            </div>
+            <div class="ticket">
+              <strong>Security gate latency probe</strong>
+              <p>Measure p50/p95 for local verifier before cloud fallback decisions.</p>
+              <div class="meta"><span class="tag yellow">measurement</span></div>
+            </div>
+          </div>
+          <div class="lane">
+            <h3>Ready For Human <span>3</span></h3>
+            <div class="ticket">
+              <strong>Install continuous upgrade watcher</strong>
+              <p>LaunchAgent runs every 6 hours and creates preview tickets only.</p>
+              <div class="meta"><span class="tag green">safe</span><span class="tag">install optional</span></div>
+            </div>
+            <div class="ticket">
+              <strong>Allow intrusive scan flags</strong>
+              <p>High-risk security tooling must remain gated by human review.</p>
+              <div class="meta"><span class="tag red">HITL</span><span class="tag">security</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div class="event"><span class="time">17:18:04</span><span>qa_tester: sandbox smoke passed for upgrade-loop ticket plumbing</span></div>
+          <div class="event"><span class="time">17:12:31</span><span>memory_librarian: indexed Claude/Codex handoff into project memory</span></div>
+          <div class="event"><span class="time">17:07:55</span><span>security_reviewer: high-risk tool flags require action-time approval</span></div>
+          <div class="event"><span class="time">17:01:12</span><span>researcher: watchlist digest changed for Ollama integration docs</span></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="section-head"><h2>Agent Team</h2><span class="pill">9 roles</span></div>
+      <div class="body">
+        <div class="agent"><div class="avatar">BE</div><div><b>backend_engineer</b><span>API, runtime, integrations</span></div><span class="tag green">ready</span></div>
+        <div class="agent"><div class="avatar">FE</div><div><b>frontend_designer</b><span>dashboard, flows, polish</span></div><span class="tag blue">active</span></div>
+        <div class="agent"><div class="avatar">SR</div><div><b>security_reviewer</b><span>secrets, tools, approvals</span></div><span class="tag yellow">review</span></div>
+        <div class="agent"><div class="avatar">QA</div><div><b>qa_tester</b><span>smoke and regression gates</span></div><span class="tag green">ready</span></div>
+        <div class="agent"><div class="avatar">ML</div><div><b>memory_librarian</b><span>Obsidian, mem0, recall</span></div><span class="tag green">ready</span></div>
+      </div>
+
+      <div class="section-head"><h2>Review Gates</h2><span class="pill">Action required</span></div>
+      <div class="body">
+        <div class="review-item">
+          <div class="review-title">Promote FastEmbed ticket to implementation</div>
+          <div class="review-copy">Low risk, but still needs your approval before any package install or code edit.</div>
+          <div class="actions"><button class="primary">Approve</button><button>Defer</button></div>
+        </div>
+        <div class="review-item">
+          <div class="review-title">Enable cloud research escalation</div>
+          <div class="review-copy">Would use paid subscriptions only by explicit approval. Keep local default.</div>
+          <div class="actions"><button class="primary">Approve once</button><button class="danger">Block</button></div>
+        </div>
+        <div class="review-item">
+          <div class="review-title">Run intrusive security tooling</div>
+          <div class="review-copy">High-risk flags stay gated with action-time confirmation and audit trail.</div>
+          <div class="actions"><button>Review ROE</button><button class="danger">Do not run</button></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>
