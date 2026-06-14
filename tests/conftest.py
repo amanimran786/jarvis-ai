@@ -24,6 +24,7 @@ os.environ.setdefault(
 )
 
 _EARLY_IMPORTS = [
+    "tools",               # must be first: prevents test_backend_engineer from seeing _real_tools=None
     "brains.brain_apple_foundation",
     "brains.brain_ollama",
 ]
@@ -34,3 +35,4 @@ for _mod in _EARLY_IMPORTS:
             __import__(_mod)
         except Exception:
             pass
+
