@@ -169,26 +169,54 @@ def read_triage(path: Path | None = None) -> dict[str, dict]:
 
 def acknowledge_findings(findings: list[dict], *, reason: str, actor: str = "operator",
                          path: Path | None = None) -> list[dict]:
-    """Append triage acknowledgements. Does not edit verdict or audit ledgers."""
+    """Append triage acknowledgements, hash-chained for tamper-evidence.
+
+    Each new ack chains onto the prior record's `this_hash` (GENESIS if the file
+    is empty or holds only legacy un-chained records), so editing a past
+    acknowledgement — who/why/when a warning was silenced — is detectable via
+    verify_triage_integrity(). Does not edit verdict or audit ledgers. Only
+    WARNING findings are acknowledgeable; criticals are never suppressible."""
     path = path or triage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    entries = _hc.read_chain(path)
     records: list[dict] = []
-    with open(path, "a", encoding="utf-8") as f:
-        for finding in findings:
-            if finding.get("severity") != WARNING:
-                continue
-            rec = {
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "fingerprint": finding_fingerprint(finding),
-                "code": finding.get("code", ""),
-                "task_id": finding.get("task_id", ""),
-                "agent_id": finding.get("agent_id", ""),
-                "reason": reason,
-                "actor": actor,
-            }
-            f.write(json.dumps(rec, sort_keys=True) + "\n")
-            records.append(rec)
+    for finding in findings:
+        if finding.get("severity") != WARNING:
+            continue
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "fingerprint": finding_fingerprint(finding),
+            "code": finding.get("code", ""),
+            "task_id": finding.get("task_id", ""),
+            "agent_id": finding.get("agent_id", ""),
+            "reason": reason,
+            "actor": actor,
+        }
+        stored = _hc.append_record(path, rec, entries)  # adds prev_hash/this_hash
+        entries.append(stored)
+        records.append(stored)
     return records
+
+
+def verify_triage_integrity(path: Path | None = None) -> list[Finding]:
+    """Verify the hash-chained suffix of the triage ledger. Records written
+    before this hardening have no `this_hash` and are treated as an unprotected
+    legacy baseline (skipped, not failed); every chained record after them must
+    verify. A broken chain means an acknowledgement was edited after the fact —
+    a silent-suppression attempt — surfaced as CRITICAL so it can't itself be
+    triaged away."""
+    path = path or triage_path()
+    entries = _hc.read_chain(path)
+    chained = [e for e in entries if isinstance(e, dict) and _hc.HASH_FIELD in e]
+    if not chained:
+        return []  # all legacy or empty — nothing chained to verify yet
+    ok, reason, idx = _hc.verify_chain(chained)
+    if ok:
+        return []
+    return [Finding(
+        "TRIAGE_LEDGER_TAMPERED", CRITICAL, f"triage:{idx}", "-",
+        f"acknowledgement chain broken ({reason}) — a triage record was edited after the fact",
+    )]
 
 
 def _apply_triage(findings: list[Finding]) -> tuple[list[Finding], list[dict]]:
@@ -492,6 +520,10 @@ def run_once(append: bool = True) -> dict:
                 "VERDICT_LOG_TRUNCATED", CRITICAL, "verdict-log", "-",
                 f"verdict log shrank from {prev_n} to {len(lines)} lines — records deleted",
             ))
+
+    # The triage ledger can suppress warnings, so its own integrity is audited:
+    # a tampered acknowledgement chain is CRITICAL (and thus itself un-triageable).
+    findings += verify_triage_integrity()
 
     findings, acknowledged = _apply_triage(findings)
 

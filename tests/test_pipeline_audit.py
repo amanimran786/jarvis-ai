@@ -258,5 +258,53 @@ class ReconciliationTests(unittest.TestCase):
         self.assertNotIn("UNVERIFIED_COMPLETION", self._codes(report))
 
 
+class TriageIntegrityTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        d = Path(self.tmp.name)
+        self.tpath = d / "triage.jsonl"
+        os.environ["JARVIS_PIPELINE_AUDIT_TRIAGE_PATH"] = str(self.tpath)
+
+    def tearDown(self):
+        os.environ.pop("JARVIS_PIPELINE_AUDIT_TRIAGE_PATH", None)
+        self.tmp.cleanup()
+
+    def _warn(self, task_id="w1"):
+        return {"code": "RETRY_EXHAUSTION_FAIL", "severity": pa.WARNING,
+                "task_id": task_id, "agent_id": "qa-tester", "detail": "d"}
+
+    def test_acks_are_hash_chained(self):
+        recs = pa.acknowledge_findings([self._warn("a"), self._warn("b")],
+                                       reason="known baseline")
+        self.assertEqual(len(recs), 2)
+        self.assertEqual(recs[0]["prev_hash"], pa._hc.GENESIS)
+        self.assertEqual(recs[1]["prev_hash"], recs[0]["this_hash"])
+        self.assertEqual(pa.verify_triage_integrity(self.tpath), [])
+
+    def test_edited_ack_detected(self):
+        pa.acknowledge_findings([self._warn("a"), self._warn("b")], reason="x")
+        entries = pa._hc.read_chain(self.tpath)
+        entries[0]["reason"] = "forged — pretend a different operator approved"
+        self.tpath.write_text("\n".join(pa._hc.canonical(e) for e in entries) + "\n")
+        findings = pa.verify_triage_integrity(self.tpath)
+        self.assertTrue(any(f.code == "TRIAGE_LEDGER_TAMPERED" for f in findings))
+        self.assertEqual(findings[0].severity, pa.CRITICAL)
+
+    def test_legacy_plain_records_tolerated(self):
+        # Pre-hardening records have no this_hash — must not false-positive, and
+        # a new chained ack appended after them still verifies.
+        self.tpath.write_text(json.dumps({"fingerprint": "old", "code": "X",
+                                          "severity": "warning", "reason": "legacy"}) + "\n")
+        self.assertEqual(pa.verify_triage_integrity(self.tpath), [])
+        pa.acknowledge_findings([self._warn("new")], reason="post-hardening")
+        self.assertEqual(pa.verify_triage_integrity(self.tpath), [])
+
+    def test_critical_cannot_be_acknowledged(self):
+        crit = {"code": "SCORE_PASS_INCOHERENT", "severity": pa.CRITICAL,
+                "task_id": "c", "agent_id": "backend-engineer", "detail": "d"}
+        recs = pa.acknowledge_findings([crit], reason="attempt to silence")
+        self.assertEqual(recs, [])
+
+
 if __name__ == "__main__":
     unittest.main()
