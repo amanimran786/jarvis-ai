@@ -23,6 +23,7 @@ from brains.brain_claude import ask_claude
 from config import HAIKU
 from task_planner import TaskStep as Step, plan_task
 from execution_engine import execute_step
+import preflect
 
 
 # ── Step definition ───────────────────────────────────────────────────────────
@@ -61,6 +62,11 @@ def run_task(
     steps = plan_task(task)
     _prog(f"Plan ready — {len(steps)} steps",
           " → ".join(s.description for s in steps))
+
+    if preflect.is_enabled():
+        pf = preflect.review_plan(task, steps, task_id=run_id)
+        if pf.fired:
+            _prog("Plan pre-checked", f"{pf.verdict}: {pf.summary}")
 
     step_results: dict[int, str] = {}
 
