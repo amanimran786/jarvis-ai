@@ -3555,6 +3555,63 @@ class ApiSurfaceTests(unittest.TestCase):
         self.assertIn("/agents", html)
         self.assertIn("/tasks", html)
         self.assertIn("switchTab('agents')", html)
+        # Stream parser: f-string must render a real escaped newline in JS,
+        # not a literal backslash-n pair (regression from the f-string escaping).
+        self.assertIn(r"buf.split('\n')", html)
+        # Pipeline board + task drawer + command palette surfaces
+        self.assertIn('role="tablist"', html)
+        self.assertIn('id="pane-console"', html)
+        self.assertIn('id="pane-upgrades"', html)
+        self.assertIn("/dashboard/state", html)
+        self.assertIn("loadManagerConsole", html)
+        self.assertIn("loadUpgradeLoop", html)
+        self.assertIn('id="pane-pipeline"', html)
+        self.assertIn("renderPipeline", html)
+        self.assertIn("openTaskDrawer", html)
+        self.assertIn('id="cmd-palette"', html)
+        self.assertIn('aria-live="polite"', html)
+        # Token / rate-limit panel: renders /usage and the cloud-rate guard metric
+        self.assertIn('id="pane-tokens"', html)
+        self.assertIn("loadTokens", html)
+        self.assertIn("/usage?hours=1", html)
+        self.assertIn("JARVIS_CLOUD_TOKENS_PER_HOUR", html)
+        self.assertIn("Context Governor", html)
+        self.assertIn("ctx-dropped", html)
+        self.assertIn("ctx-turns", html)
+
+    def test_dashboard_state_aggregates_manager_console_sources(self):
+        fake_tasks = [
+            {"id": "t1", "status": "waiting_approval", "assigned_agent_id": "security_reviewer"},
+            {"id": "t2", "status": "succeeded", "assigned_agent_id": "backend_engineer"},
+            {"id": "t3", "status": "failed", "assigned_agent_id": "qa_tester"},
+        ]
+        with patch("api.task_runtime.list_tasks", return_value=fake_tasks), \
+             patch("api._safe_pipeline_audit_summary", return_value={
+                 "ok": True,
+                 "verdict": "CLEAN",
+                 "severity_counts": {"critical": 0, "warning": 0, "info": 1},
+                 "acknowledged_count": 5,
+             }), \
+             patch("api._safe_upgrade_loop_state", return_value={
+                 "ok": True,
+                 "summary": {"ticket_count": 2, "cycle_count": 1},
+                 "tickets": [{"title": "FastEmbed", "requires_review": False}],
+                 "watchlist": [],
+             }), \
+             patch("api.local_training.status", return_value={"ok": True}), \
+             patch("api.local_model_eval.status", return_value={"ok": True}), \
+             patch("infra.security_audit.summarize", return_value={"total": 3, "denials": 1, "by_severity": {"critical": 0}}):
+            response = self.client.get("/dashboard/state")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["tasks"]["awaiting_approval"], 1)
+        self.assertEqual(payload["tasks"]["completed"], 1)
+        self.assertEqual(payload["tasks"]["failed"], 1)
+        self.assertEqual(payload["pipeline_audit"]["verdict"], "CLEAN")
+        self.assertEqual(payload["upgrade_loop"]["summary"]["ticket_count"], 2)
+        self.assertEqual(payload["security"]["denials"], 1)
 
     def test_bridge_url_uses_hash_token_not_query_token(self):
         with patch.dict(os.environ, {"JARVIS_API_TOKEN": "bridge-token"}, clear=False), \
