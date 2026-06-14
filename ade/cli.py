@@ -48,6 +48,16 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "-", name).strip("-")[:40]
 
 
+_SYNC_SCRATCH_PATHS = ("PLAN.md",)
+
+
+def _git_add_sync_changes(worktree_path: Path) -> None:
+    """Stage ADE lane changes without sweeping scratch planning artifacts."""
+    cmd = ["git", "add", "-A", "--", "."]
+    cmd.extend(f":!{path}" for path in _SYNC_SCRATCH_PATHS)
+    subprocess.run(cmd, cwd=str(worktree_path), check=False)
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 def cmd_start(task_name: str, prompt: str) -> None:
@@ -190,7 +200,7 @@ def cmd_sync(task_name: str) -> None:
 
     # 1. Commit changes in the worktree
     print(f"[ade] Staging and committing worktree changes on {branch}…")
-    subprocess.run(["git", "add", "-A"], cwd=str(worktree_path), check=False)
+    _git_add_sync_changes(worktree_path)
     commit_result = subprocess.run(
         ["git", "commit", "-m", f"ade: {slug} — autonomous agent changes"],
         cwd=str(worktree_path),

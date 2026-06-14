@@ -253,6 +253,86 @@ class TestClaudePromptCommand:
         assert cmd == ["claude", "--dangerously-skip-permissions", "-p", "plan"]
 
 
+class TestPhasePlanAutoApprove:
+    """Unattended orchestration: the plan gate must NOT block on input() when
+    ADE_AUTO_APPROVE_PLAN is set, otherwise every fleet worker hangs forever."""
+
+    def test_human_gate_blocks_on_input_by_default(self, tmp_path, repo, monkeypatch):
+        from ade.loop import phase_plan
+        monkeypatch.delenv("ADE_AUTO_APPROVE_PLAN", raising=False)
+        (tmp_path / "PLAN.md").write_text("# plan")
+        with patch("ade.loop._run_interactive", return_value=0), \
+             patch("ade.loop.notify.send"), \
+             patch("builtins.input", return_value="") as mock_input:
+            approved = phase_plan("task", "do x", tmp_path, repo)
+        assert approved is True
+        mock_input.assert_called_once()  # human gate engaged
+
+    def test_auto_approve_skips_input_when_env_set(self, tmp_path, repo, monkeypatch):
+        from ade.loop import phase_plan
+        monkeypatch.setenv("ADE_AUTO_APPROVE_PLAN", "1")
+        (tmp_path / "PLAN.md").write_text("# plan")
+        with patch("ade.loop._run_interactive", return_value=0), \
+             patch("ade.loop.notify.send"), \
+             patch("builtins.input", side_effect=AssertionError("input() must not be called")) as mock_input:
+            approved = phase_plan("task", "do x", tmp_path, repo)
+        assert approved is True
+        mock_input.assert_not_called()  # unattended: no human gate
+
+
+class TestPostToolHookScoping:
+    """Finding B: the lint/format hook must touch only files the agent changed,
+    never the whole worktree — otherwise `ade sync` merges a repo-wide reformat."""
+
+    def test_hook_targets_only_changed_files(self, tmp_path):
+        from ade import loop
+        f1, f2 = tmp_path / "a.py", tmp_path / "b.py"
+        f1.write_text("x=1\n")
+        f2.write_text("y=2\n")
+        with patch("ade.loop._changed_py_files", return_value=[f1, f2]), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            loop.run_post_tool_hook(tmp_path)
+        assert mock_run.call_args_list, "hook ran no commands"
+        targets_seen: set[str] = set()
+        for c in mock_run.call_args_list:
+            cmd = c.args[0]
+            assert str(tmp_path) not in cmd  # never targets the whole worktree root
+            targets_seen.update(p for p in cmd if p in (str(f1), str(f2)))
+        assert targets_seen == {str(f1), str(f2)}
+
+    def test_hook_skips_entirely_when_no_changed_files(self, tmp_path):
+        from ade import loop
+        with patch("ade.loop._changed_py_files", return_value=[]), \
+             patch("subprocess.run") as mock_run:
+            passed, out = loop.run_post_tool_hook(tmp_path)
+        assert passed is True
+        mock_run.assert_not_called()
+
+
+class TestPhaseVerifyScoping:
+    """Finding A: an orchestrator must be able to scope or skip the test phase
+    per lane, instead of always running the full repo suite."""
+
+    def test_uses_ade_test_cmd_override(self, tmp_path, repo, monkeypatch):
+        from ade.loop import phase_verify
+        monkeypatch.setenv("ADE_TEST_CMD", "pytest tests/test_foo.py -q")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="1 passed", stderr="")
+            passed, errors = phase_verify("task", tmp_path, repo)
+        assert passed is True
+        assert mock_run.call_args.args[0] == ["pytest", "tests/test_foo.py", "-q"]
+
+    def test_skip_verify_env_returns_true_without_running(self, tmp_path, repo, monkeypatch):
+        from ade.loop import phase_verify
+        monkeypatch.setenv("ADE_SKIP_VERIFY", "1")
+        with patch("subprocess.run") as mock_run:
+            passed, errors = phase_verify("task", tmp_path, repo)
+        assert passed is True
+        assert errors == ""
+        mock_run.assert_not_called()
+
+
 # ── ade.cli ───────────────────────────────────────────────────────────────────
 
 class TestCli:
@@ -324,6 +404,38 @@ class TestCli:
         mock_notify.assert_called_once()
         assert "conflict" in mock_notify.call_args[0][0].lower() or \
                "conflict" in mock_notify.call_args[0][1].lower()
+
+    def test_sync_does_not_commit_plan_scratch(self, repo):
+        import subprocess
+
+        from ade import state as st
+        from ade.cli import cmd_sync
+
+        def git(cwd, *args):
+            return subprocess.run(
+                ["git", *args],
+                cwd=str(cwd),
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        git(repo, "config", "user.email", "t@example.com")
+        git(repo, "config", "user.name", "Test")
+
+        worktree = repo / ".worktrees" / "task-x"
+        git(repo, "worktree", "add", "-b", "ade/task-x", str(worktree), "HEAD")
+
+        (worktree / "feature.py").write_text("VALUE = 1\n")
+        (worktree / "PLAN.md").write_text("# scratch\n")
+        st.upsert(repo, "task-x", branch="ade/task-x", worktree_path=str(worktree))
+
+        with patch("ade.cli._repo_root", return_value=repo):
+            cmd_sync("task-x")
+
+        tree = git(repo, "ls-tree", "-r", "--name-only", "HEAD").stdout.splitlines()
+        assert "feature.py" in tree
+        assert "PLAN.md" not in tree
 
 
 # ── ade approvals command ─────────────────────────────────────────────────────
