@@ -1,21 +1,53 @@
 """Hermetic unit tests for cost_policy decision logic.
 
 The two module-level dependencies (`evals`, `usage_tracker`) are replaced with
-MagicMocks in sys.modules *before* importing cost_policy, so importing and
-exercising the policy never makes real calls.
+MagicMocks *after collection* (in setup_module) so that tests from other files
+that run before these tests are not contaminated by a polluted sys.modules.
+cost_policy is force-reimported in setup_module after the mocks are in place so
+its internal references resolve to the mock stand-ins.
 """
 
+import importlib
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-# Inject mocks before importing cost_policy so its module-level
-# `import evals` / `import usage_tracker` resolve to hermetic stand-ins.
-sys.modules["evals"] = MagicMock()
-sys.modules["usage_tracker"] = MagicMock()
+# These will be set by setup_module so tests can reference them.
+cost_policy = None  # type: ignore[assignment]
 
-import cost_policy  # noqa: E402
+_orig_evals = None
+_orig_usage_tracker = None
+_orig_cost_policy = None
+
+
+def setup_module(module):
+    global cost_policy, _orig_evals, _orig_usage_tracker, _orig_cost_policy
+    _orig_evals = sys.modules.get("evals")
+    _orig_usage_tracker = sys.modules.get("usage_tracker")
+    _orig_cost_policy = sys.modules.get("cost_policy")
+
+    # Install mocks AFTER collection so earlier-alphabetical test files are not affected.
+    sys.modules["evals"] = MagicMock()
+    sys.modules["usage_tracker"] = MagicMock()
+
+    # Force reimport so cost_policy.usage_tracker / cost_policy.evals point to the mocks.
+    sys.modules.pop("cost_policy", None)
+    cost_policy = importlib.import_module("cost_policy")
+    module.cost_policy = cost_policy
+
+
+def teardown_module(module):
+    # Restore sys.modules so later test files see the real modules.
+    for key, orig in [
+        ("evals", _orig_evals),
+        ("usage_tracker", _orig_usage_tracker),
+        ("cost_policy", _orig_cost_policy),
+    ]:
+        if orig is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = orig
 
 
 @pytest.fixture(autouse=True)
