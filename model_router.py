@@ -62,6 +62,7 @@ import vault
 import graph_context as _gctx
 import semantic_memory as _smem
 import memory as _mem
+import context_budget as _context_budget
 import provider_router
 import telemetry
 import jarvis_core_brain as _core_brain
@@ -1008,18 +1009,22 @@ def smart_stream(
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
-    if vault_extra:
-        system_extra = system_extra + ("\n\n" if system_extra else "") + vault_extra
-    if graph_extra:
-        system_extra = system_extra + ("\n\n" if system_extra else "") + graph_extra
     semantic_hint = _semantic_memory_hint(smem_hits)
-    if semantic_hint:
-        system_extra = system_extra + ("\n\n" if system_extra else "") + semantic_hint
-    if smem_ctx:
-        system_extra = system_extra + ("\n\n" if system_extra else "") + smem_ctx
-    # mem0 cross-session episodic memory goes last — most dynamic, lowest trust rank
-    if mem0_extra:
-        system_extra = system_extra + ("\n\n" if system_extra else "") + mem0_extra
+    compiled_context = _context_budget.compile_context_blocks(
+        [
+            {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
+            {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
+            {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
+            {"label": "semantic_memory", "content": smem_ctx, "priority": 65, "max_chars": 1200},
+            # mem0 cross-session episodic memory goes last — most dynamic, lowest trust rank.
+            {"label": "mem0", "content": mem0_extra, "priority": 55, "max_chars": 600},
+        ],
+        base_text=system_extra,
+        user_input=user_input,
+        target_tokens=_context_budget.target_tokens_for(tool),
+    )
+    if compiled_context["text"]:
+        system_extra = system_extra + ("\n\n" if system_extra else "") + compiled_context["text"]
 
     def _resilient_stream(primary_factory, fallback_factories):
         def _stream():
@@ -1115,6 +1120,7 @@ def smart_stream(
                 system_extra=system_extra,
                 track_context=True,
                 raise_on_error=True,
+                context_budget_report=compiled_context,
             )
         if candidate.provider == "apple_foundation":
             from brains.brain_apple_foundation import ask_apple_foundation_stream
