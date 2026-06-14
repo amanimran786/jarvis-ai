@@ -86,17 +86,54 @@ def _claude_prompt_cmd(prompt: str) -> list[str]:
 
 # ── Post-tool hook ────────────────────────────────────────────────────────────
 
+def _changed_py_files(worktree: Path) -> list[Path]:
+    """Return .py files the agent modified or added in the worktree (vs HEAD).
+
+    Scoped via `git status --porcelain` so the post-tool hook touches only the
+    agent's actual diff — never the whole worktree, which would mass-reformat
+    the entire repo and bury the real change when `ade sync` merges to main.
+    """
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=str(worktree), capture_output=True, text=True, timeout=30, shell=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+    if r.returncode != 0:
+        return []
+    files: list[Path] = []
+    for line in r.stdout.splitlines():
+        path = line[3:].strip()  # porcelain: 'XY <path>'
+        if not path:
+            continue
+        if " -> " in path:  # rename: 'old -> new'
+            path = path.split(" -> ", 1)[1]
+        path = path.strip('"')
+        if path.endswith(".py"):
+            p = worktree / path
+            if p.exists():
+                files.append(p)
+    return files
+
+
 def run_post_tool_hook(worktree: Path) -> tuple[bool, str]:
     """
-    Run ruff check --fix + ruff format + mypy after any file modification.
+    Run ruff check --fix + ruff format + mypy on the files the agent changed.
     Returns (passed, combined output). Non-fatal: only reports, does not abort.
+    Scoped to changed files only (see _changed_py_files) — never the whole tree.
     """
+    changed = _changed_py_files(worktree)
+    if not changed:
+        return True, ""
+
+    targets = [str(p) for p in changed]
     output_parts = []
 
     for cmd in [
-        [sys.executable, "-m", "ruff", "check", "--fix", str(worktree)],
-        [sys.executable, "-m", "ruff", "format", str(worktree)],
-        [sys.executable, "-m", "mypy", str(worktree), "--ignore-missing-imports", "--no-error-summary"],
+        [sys.executable, "-m", "ruff", "check", "--fix", *targets],
+        [sys.executable, "-m", "ruff", "format", *targets],
+        [sys.executable, "-m", "mypy", *targets, "--ignore-missing-imports", "--no-error-summary"],
     ]:
         try:
             result = subprocess.run(
@@ -156,6 +193,14 @@ def phase_plan(task_name: str, prompt: str, worktree: Path, repo_root: Path) -> 
         "Review PLAN.md, then press Enter in the session to approve.",
     )
 
+    # Unattended orchestration: when an orchestrator spawns this loop in a
+    # detached tmux pane there is no human to press Enter. ADE_AUTO_APPROVE_PLAN
+    # auto-approves the plan and proceeds straight to execution. Default stays
+    # human-gated so an interactively-watched session still pauses for review.
+    if os.getenv("ADE_AUTO_APPROVE_PLAN", "").lower() in {"1", "true", "yes"}:
+        print("[ADE] ADE_AUTO_APPROVE_PLAN set — auto-approving plan, starting execution.")
+        return True
+
     print("[ADE] Press Enter to approve and start execution, or Ctrl-C to abort: ", end="", flush=True)
     try:
         input()
@@ -204,7 +249,19 @@ def phase_verify(task_name: str, worktree: Path, repo_root: Path) -> tuple[bool,
     print(f"  ADE  [{task_name}]  PHASE 3 — VERIFYING")
     print(f"{'='*60}\n")
 
-    test_cmd = detect_test_cmd(worktree)
+    # Orchestrator scoping: skip verification entirely for no-code lanes, or
+    # override the auto-detected suite with a lane-scoped command. Without this
+    # every lane runs the full repo suite (slow + trips unrelated flakes).
+    if os.getenv("ADE_SKIP_VERIFY", "").lower() in {"1", "true", "yes"}:
+        print("[ADE] ADE_SKIP_VERIFY set — skipping verification.")
+        return True, ""
+
+    override = os.getenv("ADE_TEST_CMD", "").strip()
+    if override:
+        import shlex
+        test_cmd: list[str] | None = shlex.split(override)
+    else:
+        test_cmd = detect_test_cmd(worktree)
     if test_cmd is None:
         print("[ADE] No test suite detected — skipping verification.")
         return True, ""
