@@ -102,11 +102,10 @@ def _fake_dispatch(agent: str, task: str, context: str = "") -> Iterable[str]:
     )
 
 
-def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monkeypatch):
+def _patch_runtime_for_canary(monkeypatch, *, approval_required: bool = False):
     import api
     import task_runtime
     import task_persistence
-    from core.manager import manager
 
     persisted: dict[str, object] = {"tasks": [], "events": {}}
     monkeypatch.setattr(api, "_API_TOKEN", "")
@@ -116,11 +115,14 @@ def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monk
     monkeypatch.setattr(task_persistence, "reset_for_tests", lambda: None)
     monkeypatch.setattr(task_persistence, "upsert_task", lambda task: None)
     monkeypatch.setattr(task_persistence, "append_event", lambda event, index: None)
-    monkeypatch.setattr(
-        task_runtime,
-        "_task_requires_approval",
-        lambda *args, **kwargs: (False, "", {"score": 0.98, "source": "canary"}),
-    )
+
+    def _approval_gate(*args, **kwargs):
+        confidence = {"score": 0.42 if approval_required else 0.98, "source": "canary"}
+        if approval_required:
+            return True, "confidence below safe autonomy threshold", confidence
+        return False, "", confidence
+
+    monkeypatch.setattr(task_runtime, "_task_requires_approval", _approval_gate)
     monkeypatch.setattr(task_runtime, "_start_task_thread", lambda task_id: None)
     monkeypatch.setattr(
         task_runtime.worktree_manager,
@@ -132,8 +134,15 @@ def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monk
             "reason": "disabled_in_canary",
         },
     )
-
     task_runtime.reset_for_tests()
+    return api, task_runtime
+
+
+def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monkeypatch):
+    from core.manager import manager
+
+    api, task_runtime = _patch_runtime_for_canary(monkeypatch)
+
     client = TestClient(api.app)
     with (
         patch.object(manager, "decompose", return_value=_agent_tasks()),
@@ -193,4 +202,47 @@ def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monk
     health = api._pipeline_health_check()
     assert health["ok"] is True
     assert health["by_status"].get("succeeded") == 8
+    task_runtime.reset_for_tests()
+
+
+def test_manager_stream_leaves_low_confidence_tasks_waiting_for_approval(monkeypatch):
+    from core.manager import AgentTask, manager
+
+    api, task_runtime = _patch_runtime_for_canary(monkeypatch, approval_required=True)
+    client = TestClient(api.app)
+    gated_task = AgentTask(
+        title="Approval-gated backend audit",
+        description="Inspect the local manager API route contract and report one finding.",
+        agent="backend_engineer",
+        priority=5,
+    )
+
+    with (
+        patch.object(manager, "decompose", return_value=[gated_task]),
+        patch("agent_dispatch.dispatch") as dispatch_mock,
+        patch("api._run_eval") as eval_mock,
+    ):
+        with client.stream(
+            "POST",
+            "/manager/run-stream",
+            json={"goal": "Canary gated manager task", "cloud_plan": False},
+        ) as response:
+            assert response.status_code == 200
+            events = _parse_sse_events("".join(response.iter_text()))
+
+    assert [event.get("type") for event in events] == ["plan", "blocked", "complete"]
+    blocked = events[1]
+    assert blocked["reason"] == "approval_required"
+    assert blocked["approval_reason"] == "confidence below safe autonomy threshold"
+    assert blocked["agent"] == "backend_engineer"
+    dispatch_mock.assert_not_called()
+    eval_mock.assert_not_called()
+
+    tasks = task_runtime.list_tasks(limit=5)
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task["status"] == "waiting_approval"
+    assert task["approval_required"] is True
+    assert task["result"] == ""
+    assert task["assigned_agent_id"] == "backend-engineer"
     task_runtime.reset_for_tests()

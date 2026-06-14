@@ -1756,6 +1756,18 @@ async def manager_run_stream(req: ManagerRunStreamRequest, request: Request):
                 assigned_agent_id=t.agent,
             )
             task_id = registered.get("id", str(uuid.uuid4()))
+            if registered.get("approval_required") or registered.get("status") == "waiting_approval":
+                yield _sse({
+                    "type": "blocked",
+                    "task_id": task_id,
+                    "agent": t.agent,
+                    "title": t.title,
+                    "reason": "approval_required",
+                    "approval_reason": registered.get("approval_reason", ""),
+                    "confidence": registered.get("confidence", {}),
+                })
+                continue
+
             # Mark running immediately so Active tab shows it
             task_runtime._set_task_status(task_id, "running")
             yield _sse({"type": "start", "task_id": task_id,
