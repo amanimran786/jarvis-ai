@@ -247,6 +247,14 @@ def _run_project(project_id: str) -> None:
         # in_flight: seq -> {ptask_id, submitted_id, title, deadline}
         in_flight: dict[int, dict] = {}
 
+        def _cancel_in_flight() -> None:
+            """Request cancellation of all currently in-flight task_runtime tasks."""
+            for info in in_flight.values():
+                try:
+                    task_runtime.cancel_task(info["submitted_id"])
+                except Exception:
+                    pass
+
         last_heartbeat = time.monotonic()
 
         while True:
@@ -261,6 +269,7 @@ def _run_project(project_id: str) -> None:
                     "SELECT status FROM projects WHERE id=?", (project_id,)
                 ).fetchone()
             if proj and proj["status"] == "cancelled":
+                _cancel_in_flight()
                 _emit(project_id, "project_cancelled", reason="cancel_requested")
                 return
 
@@ -276,6 +285,38 @@ def _run_project(project_id: str) -> None:
                 ptask_id = r["id"]
                 title = r["title"]
                 prompt = r["prompt"]
+
+                # Inject completed dep results into synthesis/aggregation tasks.
+                # Only injects for explicit deps (stored as non-empty JSON list).
+                _raw_deps = tasks_by_seq[seq]["depends_on"]
+                try:
+                    _explicit_dep_seqs = json.loads(_raw_deps) if _raw_deps else []
+                except Exception:
+                    _explicit_dep_seqs = []
+                if _explicit_dep_seqs:
+                    _dep_blocks: list[str] = []
+                    with _connect() as _dconn:
+                        for _dep_seq in sorted(_explicit_dep_seqs):
+                            _dep_row = tasks_by_seq.get(_dep_seq)
+                            if _dep_row is None:
+                                continue
+                            _res_row = _dconn.execute(
+                                "SELECT result FROM project_tasks WHERE id=?",
+                                (_dep_row["id"],),
+                            ).fetchone()
+                            _res_text = (_res_row["result"] or "") if _res_row else ""
+                            if _res_text:
+                                _dep_title = _dep_row["title"] or f"Task {_dep_seq}"
+                                _dep_blocks.append(
+                                    f"=== {_dep_title} ===\n{_res_text[:2000]}"
+                                )
+                    if _dep_blocks:
+                        prompt = (
+                            prompt
+                            + "\n\n== Results from prerequisite tasks ==\n"
+                            + "\n\n".join(_dep_blocks)
+                        )
+
                 _emit(project_id, "task_started", task_seq=seq, title=title)
                 _set_ptask_status(ptask_id, "running")
                 try:
@@ -354,8 +395,9 @@ def _run_project(project_id: str) -> None:
                         failed_this_round.append(seq)
                     del in_flight[seq]
 
-            # Fail-fast: any failure terminates the project.
+            # Fail-fast: any failure terminates the project; cancel remaining in-flight work.
             if failed_this_round:
+                _cancel_in_flight()
                 _set_project_status(project_id, "failed")
                 return
 
@@ -382,11 +424,13 @@ _TEMPLATES: dict[str, dict] = {
         "agent": "security-reviewer",
         "description": "Automated security review of {target}",
         "tasks": [
-            "Search {target} for subprocess calls with shell=True and flag each one",
-            "Search {target} for eval(), exec(), and pickle.load() usage",
-            "Search {target} for hardcoded secrets: API_KEY, TOKEN, PASSWORD patterns",
-            "Check all user-controlled input paths in {target} for path traversal risk",
-            "Summarize all findings with severity ratings and recommended fixes",
+            # Scans 0-3 are independent — fan out in parallel.
+            {"title": "subprocess scan", "prompt": "Search {target} for subprocess calls with shell=True. For each match report: file, line number, the command string, and whether it processes user-controlled data. Output a bullet list.", "depends_on": []},
+            {"title": "eval/exec scan", "prompt": "Search {target} for eval(), exec(), pickle.load(), and yaml.load() usage. For each match report: file, line number, what data flows into it. Output a bullet list.", "depends_on": []},
+            {"title": "secrets scan", "prompt": "Search {target} for hardcoded secrets: patterns matching API_KEY, TOKEN, PASSWORD, SECRET not wrapped in os.getenv(). Report file, line, and the variable name. Output a bullet list.", "depends_on": []},
+            {"title": "path traversal scan", "prompt": "Check all user-controlled input paths in {target} for path traversal risk. Look for file opens, path joins, or directory listings that use untrusted input without Path.resolve() + prefix validation. Output a bullet list.", "depends_on": []},
+            # Summary task depends on all four scans.
+            {"title": "summarize findings", "prompt": "Read the project task results for the four parallel security scans just completed on {target}. Consolidate into a final report: (1) Critical findings (2) Medium findings (3) Informational. Add a recommended fix for each Critical item.", "depends_on": [0, 1, 2, 3]},
         ],
     },
     "test-coverage": {
@@ -405,11 +449,14 @@ _TEMPLATES: dict[str, dict] = {
         "agent": "backend-engineer",
         "description": "Review and harden API endpoints in {target}",
         "tasks": [
-            "List all API endpoints in {target} with their HTTP methods and auth requirements",
-            "Identify endpoints missing authentication or rate limiting",
-            "Check all request body parsing for missing validation",
-            "Review error responses — ensure no stack traces leak to callers",
-            "Write a summary report with prioritized recommendations",
+            # Task 0 first: enumerate endpoints so checks 1-3 have a concrete list.
+            {"title": "enumerate endpoints", "prompt": "List all API endpoints in {target} with their HTTP methods, route paths, and auth requirements (authenticated vs. public). Output as a markdown table.", "depends_on": []},
+            # Checks 1-3 fan out in parallel after the endpoint list is ready.
+            {"title": "auth/rate-limit check", "prompt": "Using the endpoint list from the previous task on {target}: identify every endpoint missing authentication or rate limiting. Note the risk level for each.", "depends_on": [0]},
+            {"title": "input validation check", "prompt": "Using the endpoint list from the previous task on {target}: check all request body parsing for missing schema validation. Flag endpoints that accept arbitrary JSON or missing required fields.", "depends_on": [0]},
+            {"title": "error response check", "prompt": "Using the endpoint list from the previous task on {target}: review error responses. Identify any that leak stack traces, internal paths, or exception messages to the caller.", "depends_on": [0]},
+            # Summary depends on all three checks.
+            {"title": "summarize recommendations", "prompt": "Synthesize the auth/rate-limit, input-validation, and error-response findings for {target} into a single prioritized recommendation report. Group by severity: Critical / Medium / Low.", "depends_on": [1, 2, 3]},
         ],
     },
     "refactor": {
@@ -455,9 +502,14 @@ def create_from_template(
     def _sub(s: str) -> str:
         return s.replace("{target}", target or "the codebase")
 
+    def _sub_task(t: str | dict) -> str | dict:
+        if isinstance(t, str):
+            return _sub(t)
+        return {k: (_sub(v) if isinstance(v, str) else v) for k, v in t.items()}
+
     title = title_override or _sub(tpl["title"])
     agent = agent_override or tpl["agent"]
-    tasks = [_sub(t) for t in tpl["tasks"]]
+    tasks = [_sub_task(t) for t in tpl["tasks"]]
     return create_project(
         title=title,
         description=_sub(tpl["description"]),
@@ -679,7 +731,54 @@ def cancel_project(project_id: str) -> bool:
     return True
 
 
-def get_project(project_id: str) -> dict | None:
+def retry_project(project_id: str) -> dict:
+    """Re-queue all failed/timed-out tasks in a failed project and re-dispatch.
+
+    Resets the project status to 'pending' and flips any 'failed' project_tasks
+    back to 'pending' so the wave scheduler will re-run them.  Tasks that
+    already succeeded are left intact and their seqs remain in the 'completed'
+    set when the executor resumes.
+
+    Returns the updated project dict.
+    Raises ValueError if the project is not found or not in a failed/cancelled state.
+    """
+    _ensure_schema()
+    with _connect() as conn:
+        row = conn.execute("SELECT status FROM projects WHERE id=?", (project_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Project not found: {project_id}")
+    if row["status"] not in ("failed", "cancelled"):
+        raise ValueError(
+            f"retry is only valid for failed or cancelled projects (current status: {row['status']})"
+        )
+    if project_id in _EXECUTORS:
+        raise ValueError("Project executor is still running — cannot retry while in flight")
+
+    with _connect() as conn:
+        # Reset failed tasks to pending; leave 'done' tasks untouched.
+        conn.execute(
+            "UPDATE project_tasks SET status='pending', task_id='', result='', updated_at=? "
+            "WHERE project_id=? AND status='failed'",
+            (_now(), project_id),
+        )
+        # Reset project to pending so dispatch_project will accept it.
+        conn.execute(
+            "UPDATE projects SET status='pending', updated_at=? WHERE id=?",
+            (_now(), project_id),
+        )
+    _emit(project_id, "project_retry")
+    dispatch_project(project_id)
+    proj = get_project(project_id)
+    assert proj is not None
+    return proj
+
+
+def get_project(project_id: str, include_events: int = 0) -> dict | None:
+    """Return project dict with tasks and optional recent events.
+
+    Args:
+        include_events: If > 0, include the last N events in the result.
+    """
     _ensure_schema()
     with _connect() as conn:
         proj_row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
@@ -693,6 +792,13 @@ def get_project(project_id: str) -> dict | None:
             "SELECT COUNT(*) FROM project_events WHERE project_id=?",
             (project_id,),
         ).fetchone()[0]
+        recent_events: list[dict] = []
+        if include_events > 0:
+            ev_rows = conn.execute(
+                "SELECT * FROM project_events WHERE project_id=? ORDER BY id DESC LIMIT ?",
+                (project_id, include_events),
+            ).fetchall()
+            recent_events = list(reversed([dict(r) for r in ev_rows]))
 
     tasks = [dict(r) for r in task_rows]
     proj = dict(proj_row)
@@ -702,6 +808,7 @@ def get_project(project_id: str) -> dict | None:
         proj["meta"] = {}
     proj["tasks"] = tasks
     proj["event_count"] = event_count
+    proj["events"] = recent_events
     proj["running"] = project_id in _EXECUTORS
     return proj
 
@@ -880,8 +987,22 @@ def _cli_cancel(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cli_retry(args: argparse.Namespace) -> None:
+    try:
+        proj = retry_project(args.project_id)
+        failed_count = sum(1 for t in proj["tasks"] if t["status"] == "failed")
+        done_count = sum(1 for t in proj["tasks"] if t["status"] == "done")
+        print(f"[retry] {args.project_id} — re-queued {failed_count} failed tasks "
+              f"({done_count} already done, kept)")
+        if getattr(args, "monitor", False):
+            _cli_monitor(args)
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+
+
 def _cli_show(args: argparse.Namespace) -> None:
-    proj = get_project(args.project_id)
+    proj = get_project(args.project_id, include_events=50)
     if proj is None:
         print(f"[error] Project not found: {args.project_id}")
         sys.exit(1)
@@ -914,14 +1035,20 @@ def _cli_monitor(args: argparse.Namespace) -> None:
                 elif et == "task_done":
                     excerpt = payload.get("result_excerpt", "")[:120]
                     print(f"  {ts} {seq} ✓  {payload.get('title', '')}  →  {excerpt}")
-                elif et in ("task_failed", "task_timeout"):
-                    print(f"  {ts} {seq} ✗  {et}  {payload.get('error', '')}")
+                elif et == "task_failed":
+                    print(f"  {ts} {seq} ✗  task_failed  {payload.get('error', '')}")
+                elif et == "task_timeout":
+                    print(f"  {ts} {seq} ⏱  task_timeout  after {payload.get('timeout_s', '?')}s")
                 elif et == "project_done":
                     print(f"  {ts} ★  PROJECT DONE")
                 elif et == "project_error":
                     print(f"  {ts} ✗  PROJECT ERROR: {payload.get('error', '')}")
+                elif et == "project_cancelled":
+                    print(f"  {ts} ⊘  PROJECT CANCELLED")
+                elif et == "project_retry":
+                    print(f"  {ts} ↺  PROJECT RETRY — re-queuing failed tasks")
                 elif et == "heartbeat":
-                    print(f"  {ts} ♡  heartbeat {seq}")
+                    pass  # suppress heartbeats from monitor output
                 elif et == "status_change":
                     print(f"  {ts} →  status={payload.get('status', '')}")
                 else:
@@ -1036,6 +1163,10 @@ def main(argv: list[str] | None = None) -> None:
     ca = sub.add_parser("cancel", help="Cancel a running project")
     ca.add_argument("project_id")
 
+    re_p = sub.add_parser("retry", help="Re-queue failed tasks in a failed/cancelled project and re-dispatch")
+    re_p.add_argument("project_id")
+    re_p.add_argument("--monitor", action="store_true", help="Tail events until project completes")
+
     m = sub.add_parser("monitor", help="Live tail of project events")
     m.add_argument("project_id")
 
@@ -1078,6 +1209,7 @@ def main(argv: list[str] | None = None) -> None:
         "show": _cli_show,
         "dispatch": _cli_dispatch,
         "cancel": _cli_cancel,
+        "retry": _cli_retry,
         "monitor": _cli_monitor,
         "agents": _cli_agents,
         "templates": _cli_templates,

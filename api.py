@@ -7502,6 +7502,17 @@ def pm_cancel_project(project_id: str, request: Request):
         return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
 
 
+@app.post("/pm/projects/{project_id}/retry")
+def pm_retry_project(project_id: str, request: Request):
+    """Re-queue failed tasks in a failed/cancelled project and re-dispatch."""
+    import project_manager as _pm
+    try:
+        proj = _pm.retry_project(project_id)
+        return {"ok": True, "project": proj}
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+
 @app.get("/pm/projects/{project_id}/events")
 async def pm_project_events_stream(project_id: str, since_id: int = 0, request: Request = None):
     """SSE stream of project events. Poll every 2 s; sends [DONE] when project reaches terminal state."""
