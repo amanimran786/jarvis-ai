@@ -438,10 +438,13 @@ _TEMPLATES: dict[str, dict] = {
         "agent": "qa-tester",
         "description": "Add missing test coverage for {target}",
         "tasks": [
-            "Read {target} and list all public functions/methods with no corresponding tests",
-            "Write pytest unit tests for the top 3 most-used untested functions in {target}",
-            "Write edge-case tests: empty input, None values, type errors for {target}",
-            "Run the new tests and confirm they all pass",
+            # Discovery first.
+            {"title": "find untested", "prompt": "Read {target} and list all public functions/methods with no corresponding tests. Output as a table: function name, file, reason it's untested.", "depends_on": []},
+            # Unit and edge-case tests both depend on the discovery but can write in parallel.
+            {"title": "unit tests", "prompt": "Using the untested function list for {target}: write pytest unit tests for the top 3 most-used untested functions.", "depends_on": [0]},
+            {"title": "edge-case tests", "prompt": "Using the untested function list for {target}: write edge-case pytest tests — empty input, None values, type errors — for the same top 3 functions.", "depends_on": [0]},
+            # Run step gets all written tests as context.
+            {"title": "run and verify", "prompt": "Run all the new tests for {target} and report pass/fail. Include exact pytest output.", "depends_on": [1, 2]},
         ],
     },
     "api-review": {
@@ -464,10 +467,12 @@ _TEMPLATES: dict[str, dict] = {
         "agent": "backend-engineer",
         "description": "Clean up and refactor {target}",
         "tasks": [
-            "Read {target} and identify dead code, unused imports, and duplicated logic",
-            "List all functions longer than 40 lines that could be split",
-            "Identify missing type annotations on public functions",
-            "Propose specific refactors with before/after for the top 3 issues",
+            # Analysis steps run sequentially (each may build on prior context).
+            {"title": "dead code scan", "prompt": "Read {target} and identify dead code, unused imports, and duplicated logic. Output as a bullet list.", "depends_on": []},
+            {"title": "long function scan", "prompt": "List all functions in {target} longer than 40 lines that could be split. Include function name, line count, and a one-line rationale.", "depends_on": []},
+            {"title": "type annotation scan", "prompt": "Identify all public functions in {target} missing type annotations. List function name and signature.", "depends_on": []},
+            # Proposal depends on all three analysis results.
+            {"title": "propose refactors", "prompt": "Using the analysis results for {target}: propose specific refactors with before/after snippets for the top 3 issues. Rank by impact.", "depends_on": [0, 1, 2]},
         ],
     },
     "research": {
@@ -475,9 +480,10 @@ _TEMPLATES: dict[str, dict] = {
         "agent": "researcher",
         "description": "Research and summarize {target}",
         "tasks": [
-            "Research the topic: {target}. Collect key facts, approaches, and tradeoffs.",
-            "Compare the top 3 approaches for {target} with pros/cons",
-            "Recommend the best approach for the Jarvis codebase and explain why",
+            {"title": "collect facts", "prompt": "Research the topic: {target}. Collect key facts, approaches, and tradeoffs. Output a structured summary.", "depends_on": []},
+            {"title": "compare approaches", "prompt": "Compare the top 3 approaches for {target} with pros/cons for each.", "depends_on": []},
+            # Recommendation depends on both research tasks.
+            {"title": "recommend approach", "prompt": "Using the research and comparison results for {target}: recommend the best approach for the Jarvis codebase and explain why. Be specific.", "depends_on": [0, 1]},
         ],
     },
 }
@@ -876,6 +882,7 @@ def collect_status() -> list[dict]:
             "running": p["running"],
             "tasks_total": total,
             "tasks_done": done,
+            "tasks_running": count_map.get("running", 0),
             "tasks_failed": count_map.get("failed", 0),
             "created_at": p["created_at"][:19],
             "updated_at": p["updated_at"][:19],
@@ -892,7 +899,9 @@ def render_status(rows: list[dict]) -> str:
     for r in rows:
         live = "●" if r["running"] else "○"
         prog = f"{r['tasks_done']}/{r['tasks_total']}" if r["tasks_total"] else "0/0"
-        if r["tasks_failed"]:
+        if r.get("tasks_running"):
+            prog += f" ({r['tasks_running']}▶)"
+        if r.get("tasks_failed"):
             prog += f" ({r['tasks_failed']}✗)"
         lines.append(
             f"{r['id']:<18} {r['title']:<42} {r['agent']:<22} {r['status']:<11} {live:<5} {prog:<12} {r['updated_at']}"
