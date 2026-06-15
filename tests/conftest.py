@@ -23,6 +23,16 @@ os.environ.setdefault(
     os.path.join(_tempfile.mkdtemp(prefix="jarvis_test_audit_"), "security_audit.jsonl"),
 )
 
+# Pin the task DB to a throwaway file for the whole session. task_persistence.db_path()
+# checks JARVIS_TASK_DB_PATH first, so this short-circuits the runtime_state fallback:
+# tests that stub runtime_state with a MagicMock can no longer leak a stray
+# "<MagicMock name='mock.writable_data_path()' ...>" sqlite file into the repo root,
+# and no test writes the real task DB. Per-test patch.dict overrides still win.
+os.environ.setdefault(
+    "JARVIS_TASK_DB_PATH",
+    os.path.join(_tempfile.mkdtemp(prefix="jarvis_test_taskdb_"), "jarvis_tasks.sqlite3"),
+)
+
 _EARLY_IMPORTS = [
     "tools",               # must be first: prevents test_backend_engineer from seeing _real_tools=None
     "brains.brain_apple_foundation",

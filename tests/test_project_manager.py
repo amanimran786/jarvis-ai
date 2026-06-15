@@ -5,14 +5,8 @@ model inference or threads run.
 """
 from __future__ import annotations
 
-import importlib
-import json
-import os
 import sys
 import time
-import threading
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -315,6 +309,169 @@ class TestAutonomousExecution:
 
         assert started1 is True
         assert started2 is False
+
+
+# ── Parallel / dependency-aware execution ────────────────────────────────────
+
+class TestParallelExecution:
+    """Tests for the wave-scheduler added in Build 1.
+
+    Two flavours of mock_rt are used:
+      - _fast_rt: every task succeeds immediately (synchronous return).
+      - _tracking_rt: records which task IDs were submitted concurrently.
+    """
+
+    def _fast_rt(self, final_status: str = "succeeded") -> MagicMock:
+        counter = {"n": 0}
+        mock_rt = MagicMock()
+
+        def _submit(prompt, **kwargs):
+            counter["n"] += 1
+            return {"id": f"t_{counter['n']}"}
+
+        def _get(task_id):
+            return {"id": task_id, "status": final_status, "result": "ok"}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = _get
+        return mock_rt
+
+    def _wait(self, pm, project_id: str, timeout: float = 5.0) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = pm.get_project(project_id)["status"]
+            if status in ("done", "failed", "cancelled"):
+                return status
+            time.sleep(0.05)
+        return pm.get_project(project_id)["status"]
+
+    def test_two_independent_tasks_both_complete(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = self._fast_rt()
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "parallel test",
+                tasks=[
+                    {"prompt": "alpha", "depends_on": []},
+                    {"prompt": "beta", "depends_on": []},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            status = self._wait(pm, proj["id"])
+
+        assert status == "done"
+        assert mock_rt.submit_task.call_count == 2
+
+    def test_explicit_depends_on_enforces_ordering(self, _isolated_db):
+        pm = _isolated_db
+        call_order: list[str] = []
+        mock_rt = MagicMock()
+
+        def _submit(prompt, **kwargs):
+            call_order.append(prompt)
+            return {"id": f"t_{len(call_order)}"}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = lambda tid: {"id": tid, "status": "succeeded", "result": ""}
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "dep chain",
+                tasks=[
+                    {"prompt": "step0", "depends_on": []},
+                    {"prompt": "step1", "depends_on": [0]},
+                    {"prompt": "step2", "depends_on": [1]},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        assert call_order == ["step0", "step1", "step2"]
+
+    def test_fail_fast_on_parallel_failure(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = MagicMock()
+        counter = {"n": 0}
+
+        def _submit(prompt, **kwargs):
+            counter["n"] += 1
+            return {"id": f"t_{counter['n']}"}
+
+        def _get(task_id):
+            # First task fails, second succeeds — project must fail regardless.
+            if task_id == "t_1":
+                return {"id": task_id, "status": "failed", "result": ""}
+            return {"id": task_id, "status": "succeeded", "result": "ok"}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = _get
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "fail-fast parallel",
+                tasks=[
+                    {"prompt": "will-fail", "depends_on": []},
+                    {"prompt": "ok-task", "depends_on": []},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            status = self._wait(pm, proj["id"])
+
+        assert status == "failed"
+
+    def test_implicit_sequential_default_unchanged(self, _isolated_db):
+        # Plain string tasks (no depends_on key) must still run in seq order.
+        pm = _isolated_db
+        call_order: list[str] = []
+        mock_rt = MagicMock()
+
+        def _submit(prompt, **kwargs):
+            call_order.append(prompt)
+            return {"id": f"t_{len(call_order)}"}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = lambda tid: {"id": tid, "status": "succeeded", "result": ""}
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project("implicit seq", tasks=["A", "B", "C"])
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        assert call_order == ["A", "B", "C"]
+
+    def test_deadlock_fails_project_with_error_event(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = self._fast_rt()
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "deadlock",
+                tasks=[
+                    # Task 0 depends on seq 99 which doesn't exist.
+                    {"prompt": "impossible", "depends_on": [99]},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            status = self._wait(pm, proj["id"])
+
+        assert status == "failed"
+        events = pm.tail_events(proj["id"])
+        error_events = [e for e in events if e["event_type"] == "project_error"]
+        assert error_events, "project_error event should be emitted for unsatisfiable deps"
+
+    def test_depends_on_stored_and_retrievable(self, _isolated_db):
+        pm = _isolated_db
+        proj = pm.create_project(
+            "dep storage",
+            tasks=[
+                {"prompt": "first", "depends_on": []},
+                {"prompt": "second", "depends_on": [0]},
+            ],
+        )
+        tasks = proj["tasks"]
+        assert tasks[0]["depends_on"] == "[]"
+        assert tasks[1]["depends_on"] == "[0]"
 
 
 # ── _looks_like_code_task heuristic ─────────────────────────────────────────

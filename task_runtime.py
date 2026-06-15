@@ -6,7 +6,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,12 @@ _TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled"}
 _WAITING_APPROVAL_STATUS = "waiting_approval"
 _DEFAULT_CONFIDENCE_THRESHOLD = float(os.getenv("JARVIS_AGENT_AUTO_CONFIDENCE_THRESHOLD", "0.74"))
 
+# Lease TTL: tasks stuck in assigned/running/streaming for longer than this are
+# force-failed by the watchdog. Default is 2× the project_manager task timeout.
+_TASK_LEASE_SECONDS = float(os.getenv("JARVIS_TASK_LEASE_SECONDS", "1200"))
+_WATCHDOG_INTERVAL = float(os.getenv("JARVIS_TASK_WATCHDOG_INTERVAL", "30"))
+_WATCHDOG_STARTED = False
+
 _DEBRIEF_CONTRACT = (
     "\n\nJarvis managed-agent debrief contract:\n"
     "- Act as the assigned specialist, while Jarvis remains the manager.\n"
@@ -93,6 +99,10 @@ _BOOTSTRAPPED = False
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _now_plus(seconds: float) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
 def _copy(value: Any) -> Any:
@@ -401,7 +411,7 @@ def _drain_task_threads(timeout: float = 0.4) -> None:
 
 
 def bootstrap(force_reset: bool = False) -> None:
-    global _BOOTSTRAPPED
+    global _BOOTSTRAPPED, _WATCHDOG_STARTED
     if force_reset:
         _drain_task_threads()
     with _LOCK:
@@ -410,6 +420,7 @@ def bootstrap(force_reset: bool = False) -> None:
             _TASKS.clear()
             _TASK_EVENTS.clear()
             _BOOTSTRAPPED = False
+            _WATCHDOG_STARTED = False
             task_persistence.reset_for_tests()
         if _BOOTSTRAPPED:
             return
@@ -437,6 +448,14 @@ def bootstrap(force_reset: bool = False) -> None:
             agent_id = task.get("assigned_agent_id", "")
             if agent_id:
                 _touch_agent(agent_id, status="idle", current_task_id="", last_error="daemon_restart")
+
+        if not _WATCHDOG_STARTED:
+            wt = threading.Thread(
+                target=_watchdog_loop, daemon=True, name="JarvisTaskWatchdog"
+            )
+            wt.start()
+            _WATCHDOG_STARTED = True
+
         _BOOTSTRAPPED = True
 
 
@@ -1679,6 +1698,11 @@ def _run_task(task_id: str) -> None:
         task = _TASKS.get(task_id)
         if not task:
             return
+        # Atomic check-and-claim: if the task has already been claimed or is in
+        # a terminal state, bail without touching anything. Prevents double-execution
+        # if _start_task_thread is inadvertently called twice for the same task.
+        if task.get("status") != "queued":
+            return
         agent_id = task["assigned_agent_id"]
         _set_task_status(task_id, "assigned", assigned_at=_now())
         _touch_agent(agent_id, status="busy", current_task_id=task_id, last_error="")
@@ -1902,6 +1926,45 @@ def _run_task(task_id: str) -> None:
             _TASK_THREADS.pop(task_id, None)
 
 
+_ACTIVE_STATUSES_FOR_LEASE = {"assigned", "running", "streaming"}
+
+
+def _expire_stale_leases() -> None:
+    """Force-fail tasks that have been in an active state past their lease expiry."""
+    now_ts = datetime.now(timezone.utc).timestamp()
+    with _LOCK:
+        for task_id, task in list(_TASKS.items()):
+            if task.get("status") not in _ACTIVE_STATUSES_FOR_LEASE:
+                continue
+            lease_str = task.get("lease_expires_at", "")
+            if not lease_str:
+                continue
+            try:
+                lease_ts = datetime.fromisoformat(lease_str).timestamp()
+            except (ValueError, TypeError, OSError):
+                continue
+            if now_ts < lease_ts:
+                continue
+            log.warning(
+                "task_runtime: task %s lease expired (status=%s) — force-failing",
+                task_id, task.get("status"),
+            )
+            agent_id = task.get("assigned_agent_id", "")
+            _set_task_status(task_id, "failed", error="task_lease_expired", finished_at=_now())
+            if agent_id:
+                _touch_agent(agent_id, status="idle", current_task_id="", last_error="task_lease_expired")
+
+
+def _watchdog_loop() -> None:
+    """Daemon thread: periodically expire stale task leases."""
+    while True:
+        time.sleep(_WATCHDOG_INTERVAL)
+        try:
+            _expire_stale_leases()
+        except Exception:
+            log.exception("task_runtime: watchdog iteration failed")
+
+
 def submit_task(
     prompt: str,
     *,
@@ -1973,6 +2036,7 @@ def submit_task(
         "denied_at": "",
         "terse_mode": normalized_terse_mode,
         "workspace": _copy(workspace),
+        "lease_expires_at": _now_plus(_TASK_LEASE_SECONDS),
         "meta": _copy(meta or {}),
     }
     with _LOCK:
