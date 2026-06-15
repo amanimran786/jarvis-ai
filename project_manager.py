@@ -290,6 +290,203 @@ def _run_project(project_id: str) -> None:
             _EXECUTORS.pop(project_id, None)
 
 
+# ── Project templates ─────────────────────────────────────────────────────────
+
+_TEMPLATES: dict[str, dict] = {
+    "security-audit": {
+        "title": "Security audit: {target}",
+        "agent": "security-reviewer",
+        "description": "Automated security review of {target}",
+        "tasks": [
+            "Search {target} for subprocess calls with shell=True and flag each one",
+            "Search {target} for eval(), exec(), and pickle.load() usage",
+            "Search {target} for hardcoded secrets: API_KEY, TOKEN, PASSWORD patterns",
+            "Check all user-controlled input paths in {target} for path traversal risk",
+            "Summarize all findings with severity ratings and recommended fixes",
+        ],
+    },
+    "test-coverage": {
+        "title": "Test coverage: {target}",
+        "agent": "qa-tester",
+        "description": "Add missing test coverage for {target}",
+        "tasks": [
+            "Read {target} and list all public functions/methods with no corresponding tests",
+            "Write pytest unit tests for the top 3 most-used untested functions in {target}",
+            "Write edge-case tests: empty input, None values, type errors for {target}",
+            "Run the new tests and confirm they all pass",
+        ],
+    },
+    "api-review": {
+        "title": "API review: {target}",
+        "agent": "backend-engineer",
+        "description": "Review and harden API endpoints in {target}",
+        "tasks": [
+            "List all API endpoints in {target} with their HTTP methods and auth requirements",
+            "Identify endpoints missing authentication or rate limiting",
+            "Check all request body parsing for missing validation",
+            "Review error responses — ensure no stack traces leak to callers",
+            "Write a summary report with prioritized recommendations",
+        ],
+    },
+    "refactor": {
+        "title": "Refactor: {target}",
+        "agent": "backend-engineer",
+        "description": "Clean up and refactor {target}",
+        "tasks": [
+            "Read {target} and identify dead code, unused imports, and duplicated logic",
+            "List all functions longer than 40 lines that could be split",
+            "Identify missing type annotations on public functions",
+            "Propose specific refactors with before/after for the top 3 issues",
+        ],
+    },
+    "research": {
+        "title": "Research: {target}",
+        "agent": "researcher",
+        "description": "Research and summarize {target}",
+        "tasks": [
+            "Research the topic: {target}. Collect key facts, approaches, and tradeoffs.",
+            "Compare the top 3 approaches for {target} with pros/cons",
+            "Recommend the best approach for the Jarvis codebase and explain why",
+        ],
+    },
+}
+
+
+def list_templates() -> list[str]:
+    return sorted(_TEMPLATES.keys())
+
+
+def create_from_template(
+    template_name: str,
+    target: str = "",
+    *,
+    title_override: str = "",
+    agent_override: str = "",
+) -> dict:
+    """Create a project from a named template, substituting {target} in all strings."""
+    if template_name not in _TEMPLATES:
+        raise ValueError(f"Unknown template {template_name!r}. Available: {list_templates()}")
+    tpl = _TEMPLATES[template_name]
+
+    def _sub(s: str) -> str:
+        return s.replace("{target}", target or "the codebase")
+
+    title = title_override or _sub(tpl["title"])
+    agent = agent_override or tpl["agent"]
+    tasks = [_sub(t) for t in tpl["tasks"]]
+    return create_project(
+        title=title,
+        description=_sub(tpl["description"]),
+        agent_id=agent,
+        tasks=tasks,
+    )
+
+
+# ── Routines (scheduled recurring projects) ───────────────────────────────────
+
+def _ensure_routines_schema() -> None:
+    _ensure_schema()
+    with _connect() as conn:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS project_routines (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                template    TEXT NOT NULL DEFAULT '',
+                target      TEXT NOT NULL DEFAULT '',
+                agent_id    TEXT NOT NULL DEFAULT '',
+                tasks_json  TEXT NOT NULL DEFAULT '[]',
+                schedule    TEXT NOT NULL,
+                enabled     INTEGER NOT NULL DEFAULT 1,
+                last_fired_at TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL
+            );
+        """)
+
+
+def create_routine(
+    name: str,
+    schedule: str,
+    *,
+    template: str = "",
+    target: str = "",
+    agent_id: str = "",
+    tasks: list[str] | None = None,
+) -> dict:
+    """Create a named recurring project routine.
+
+    schedule: cron expression, e.g. '0 9 * * 1' (Mon 9am) or shorthand
+              'daily', 'weekly', 'hourly'.
+    Either supply template+target or explicit tasks.
+    """
+    _ensure_routines_schema()
+    if not template and not tasks:
+        raise ValueError("Provide --template or --tasks")
+    routine_id = f"rt_{uuid.uuid4().hex[:10]}"
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO project_routines (id, name, template, target, agent_id, tasks_json, schedule, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (routine_id, name, template, target, agent_id, json.dumps(tasks or []), schedule, now),
+        )
+    return get_routine(routine_id)  # type: ignore[return-value]
+
+
+def get_routine(routine_id: str) -> dict | None:
+    _ensure_routines_schema()
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM project_routines WHERE id=?", (routine_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    try:
+        d["tasks"] = json.loads(d.pop("tasks_json", "[]") or "[]")
+    except Exception:
+        d["tasks"] = []
+    return d
+
+
+def list_routines() -> list[dict]:
+    _ensure_routines_schema()
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM project_routines ORDER BY created_at DESC").fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["tasks"] = json.loads(d.pop("tasks_json", "[]") or "[]")
+        except Exception:
+            d["tasks"] = []
+        result.append(d)
+    return result
+
+
+def fire_routine(routine_id: str) -> dict:
+    """Execute a routine now: create and dispatch a project from it."""
+    routine = get_routine(routine_id)
+    if routine is None:
+        raise ValueError(f"Routine not found: {routine_id}")
+    if routine.get("template"):
+        proj = create_from_template(
+            routine["template"],
+            target=routine.get("target", ""),
+            agent_override=routine.get("agent_id", ""),
+        )
+    else:
+        proj = create_project(
+            title=f"{routine['name']} — {_now()[:10]}",
+            agent_id=routine.get("agent_id", "backend-engineer"),
+            tasks=routine["tasks"],
+        )
+    dispatch_project(proj["id"])
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE project_routines SET last_fired_at=? WHERE id=?",
+            (_now(), routine_id),
+        )
+    return proj
+
+
 def _looks_like_code_task(prompt: str) -> bool:
     lower = prompt.lower()
     code_words = ("implement", "write", "create", "add", "fix", "refactor",
@@ -645,6 +842,68 @@ def _cli_status(args: argparse.Namespace) -> None:
     _cli_list(args)
 
 
+def _cli_from_template(args: argparse.Namespace) -> None:
+    try:
+        proj = create_from_template(
+            args.template,
+            target=args.target or "",
+            title_override=args.title or "",
+            agent_override=args.agent or "",
+        )
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+    print(f"[created] {proj['id']}  title={proj['title']!r}  agent={proj['agent_id']}  tasks={len(proj['tasks'])}")
+    if args.dispatch:
+        dispatch_project(proj["id"])
+        print(f"[dispatched] {proj['id']}")
+
+
+def _cli_templates(_args: argparse.Namespace) -> None:
+    print("Available templates:")
+    for name, tpl in sorted(_TEMPLATES.items()):
+        print(f"  {name:<20} agent={tpl['agent']}  tasks={len(tpl['tasks'])}")
+        print(f"    {tpl['description'].replace('{target}', '<target>')}")
+
+
+def _cli_routine_create(args: argparse.Namespace) -> None:
+    try:
+        r = create_routine(
+            name=args.name,
+            schedule=args.schedule,
+            template=args.template or "",
+            target=args.target or "",
+            agent_id=args.agent or "",
+            tasks=list(args.tasks or []),
+        )
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+    print(f"[routine created] {r['id']}  name={r['name']!r}  schedule={r['schedule']!r}")
+
+
+def _cli_routine_list(_args: argparse.Namespace) -> None:
+    routines = list_routines()
+    if not routines:
+        print("[routines] No routines. Create one:\n  python3 project_manager.py routine create 'Daily scan' --schedule daily --template security-audit --target api.py")
+        return
+    print(f"{'ID':<14} {'NAME':<30} {'TEMPLATE':<18} {'SCHEDULE':<14} {'EN':<3} LAST FIRED")
+    print("─" * 95)
+    for r in routines:
+        en = "✓" if r["enabled"] else "✗"
+        fired = (r.get("last_fired_at") or "never")[:19]
+        print(f"  {r['id']:<12} {r['name']:<30} {r.get('template','custom'):<18} {r['schedule']:<14} {en:<3} {fired}")
+
+
+def _cli_routine_fire(args: argparse.Namespace) -> None:
+    try:
+        proj = fire_routine(args.routine_id)
+        print(f"[fired] {args.routine_id} → project {proj['id']}  dispatched")
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="project_manager", description="Assign tasks/projects to agents and monitor them.")
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
@@ -675,6 +934,32 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("project_id")
 
     sub.add_parser("agents", help="List available agent IDs")
+    sub.add_parser("templates", help="List available project templates")
+
+    ft = sub.add_parser("from-template", help="Create a project from a template")
+    ft.add_argument("template", choices=list(_TEMPLATES.keys()))
+    ft.add_argument("--target", default="", help="Target file, module, or topic to substitute into prompts")
+    ft.add_argument("--title", default="", help="Override project title")
+    ft.add_argument("--agent", default="", help="Override agent ID")
+    ft.add_argument("--dispatch", action="store_true", help="Dispatch immediately after creation")
+
+    # Routines subcommand group.
+    rt = sub.add_parser("routine", help="Manage recurring scheduled projects")
+    rt_sub = rt.add_subparsers(dest="routine_command")
+
+    rtc = rt_sub.add_parser("create", help="Create a routine")
+    rtc.add_argument("name")
+    rtc.add_argument("--schedule", required=True,
+                     help="Cron expression or 'daily'/'weekly'/'hourly'")
+    rtc.add_argument("--template", default="", help="Template name (e.g. security-audit)")
+    rtc.add_argument("--target", default="", help="Target for template substitution")
+    rtc.add_argument("--agent", default="", help="Override agent ID")
+    rtc.add_argument("--tasks", nargs="+", metavar="PROMPT")
+
+    rt_sub.add_parser("list", help="List all routines")
+
+    rtf = rt_sub.add_parser("fire", help="Fire a routine immediately")
+    rtf.add_argument("routine_id")
 
     args = p.parse_args(argv)
 
@@ -689,7 +974,23 @@ def main(argv: list[str] | None = None) -> None:
         "cancel": _cli_cancel,
         "monitor": _cli_monitor,
         "agents": _cli_agents,
+        "templates": _cli_templates,
+        "from-template": _cli_from_template,
     }
+
+    # Routine subcommands.
+    if args.command == "routine":
+        rt_dispatch = {
+            "create": _cli_routine_create,
+            "list": _cli_routine_list,
+            "fire": _cli_routine_fire,
+        }
+        fn = rt_dispatch.get(getattr(args, "routine_command", None) or "")
+        if fn is None:
+            rt.print_help()
+            sys.exit(1)
+        fn(args)
+        return
     fn = dispatch_table.get(args.command)
     if fn is None:
         p.print_help()
