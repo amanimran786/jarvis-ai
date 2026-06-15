@@ -474,6 +474,234 @@ class TestParallelExecution:
         assert tasks[1]["depends_on"] == "[0]"
 
 
+# ── get_project include_events ────────────────────────────────────────────────
+
+class TestGetProjectIncludeEvents:
+    def test_default_returns_empty_events_list(self, _isolated_db):
+        pm = _isolated_db
+        proj = _make_proj(pm)
+        fetched = pm.get_project(proj["id"])
+        assert fetched["events"] == []
+
+    def test_include_events_returns_recent_events(self, _isolated_db):
+        pm = _isolated_db
+        proj = _make_proj(pm)
+        pm._emit(proj["id"], "custom_a")
+        pm._emit(proj["id"], "custom_b")
+        fetched = pm.get_project(proj["id"], include_events=10)
+        types = [e["event_type"] for e in fetched["events"]]
+        assert "custom_a" in types
+        assert "custom_b" in types
+
+    def test_include_events_limit_is_respected(self, _isolated_db):
+        pm = _isolated_db
+        proj = _make_proj(pm)
+        for i in range(20):
+            pm._emit(proj["id"], f"event_{i}")
+        fetched = pm.get_project(proj["id"], include_events=5)
+        assert len(fetched["events"]) == 5
+
+    def test_include_events_returns_most_recent(self, _isolated_db):
+        pm = _isolated_db
+        proj = _make_proj(pm)
+        for i in range(10):
+            pm._emit(proj["id"], f"evt_{i}")
+        fetched = pm.get_project(proj["id"], include_events=3)
+        types = [e["event_type"] for e in fetched["events"]]
+        assert types == ["evt_7", "evt_8", "evt_9"]
+
+
+# ── retry_project ─────────────────────────────────────────────────────────────
+
+class TestRetryProject:
+    def _fast_rt(self, final_status: str = "succeeded") -> MagicMock:
+        counter = {"n": 0}
+        mock_rt = MagicMock()
+
+        def _submit(prompt, **kwargs):
+            counter["n"] += 1
+            return {"id": f"t_{counter['n']}"}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = lambda tid: {"id": tid, "status": final_status, "result": "ok"}
+        return mock_rt
+
+    def _wait(self, pm, project_id: str, timeout: float = 5.0) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = pm.get_project(project_id)["status"]
+            if status in ("done", "failed", "cancelled"):
+                return status
+            time.sleep(0.05)
+        return pm.get_project(project_id)["status"]
+
+    def test_retry_raises_for_non_failed_project(self, _isolated_db):
+        pm = _isolated_db
+        proj = _make_proj(pm)
+        with pytest.raises(ValueError, match="failed or cancelled"):
+            pm.retry_project(proj["id"])
+
+    def test_retry_raises_for_unknown_project(self, _isolated_db):
+        pm = _isolated_db
+        with pytest.raises(ValueError, match="not found"):
+            pm.retry_project("nonexistent")
+
+    def test_retry_resets_failed_tasks_to_pending(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = self._fast_rt(final_status="failed")
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project("retry test", tasks=["Task A", "Task B"])
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        # Project should be failed now; reset with a succeeding runtime.
+        mock_rt2 = self._fast_rt(final_status="succeeded")
+        with patch.dict(sys.modules, {"task_runtime": mock_rt2}):
+            pm.retry_project(proj["id"])
+            status = self._wait(pm, proj["id"])
+
+        assert status == "done"
+
+    def test_retry_preserves_done_tasks(self, _isolated_db):
+        """Tasks that succeeded in wave 1 must not be re-run after retry."""
+        pm = _isolated_db
+        submit_calls: list[str] = []
+        mock_rt = MagicMock()
+        call_n = {"n": 0}
+
+        def _submit(prompt, **kwargs):
+            call_n["n"] += 1
+            submit_calls.append(prompt)
+            return {"id": f"t_{call_n['n']}"}
+
+        # First run: task 0 succeeds, task 1 fails.
+        def _get_first(tid):
+            if tid == "t_1":
+                return {"id": tid, "status": "succeeded", "result": "ok"}
+            return {"id": tid, "status": "failed", "result": ""}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = _get_first
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project("preserve done", tasks=["alpha", "beta"])
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        assert pm.get_project(proj["id"])["status"] == "failed"
+        submit_calls.clear()
+
+        # Second run after retry: only the failed task should be re-submitted.
+        mock_rt.get_task.side_effect = lambda tid: {"id": tid, "status": "succeeded", "result": "ok"}
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            pm.retry_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        # Only "beta" (task 1) should have been submitted again, not "alpha".
+        assert submit_calls == ["beta"]
+
+    def test_retry_emits_project_retry_event(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = self._fast_rt(final_status="failed")
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project("event test", tasks=["only"])
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        mock_rt2 = self._fast_rt(final_status="succeeded")
+        with patch.dict(sys.modules, {"task_runtime": mock_rt2}):
+            pm.retry_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        events = pm.tail_events(proj["id"])
+        assert any(e["event_type"] == "project_retry" for e in events)
+
+
+# ── template parallel fan-out ─────────────────────────────────────────────────
+
+class TestTemplateDependencies:
+    def test_security_audit_template_has_parallel_scans(self, _isolated_db):
+        pm = _isolated_db
+        proj = pm.create_from_template("security-audit", target="api.py")
+        tasks = proj["tasks"]
+        # First 4 tasks must be independent (depends_on = "[]")
+        for t in tasks[:4]:
+            assert t["depends_on"] == "[]", f"task {t['seq']} should be independent"
+        # Last task depends on [0,1,2,3]
+        last = tasks[4]
+        import json
+        deps = json.loads(last["depends_on"])
+        assert sorted(deps) == [0, 1, 2, 3]
+
+    def test_api_review_template_checks_fan_out_after_enumerate(self, _isolated_db):
+        pm = _isolated_db
+        proj = pm.create_from_template("api-review", target="api.py")
+        tasks = proj["tasks"]
+        import json
+        # Task 0 (enumerate) must be independent.
+        assert tasks[0]["depends_on"] == "[]"
+        # Tasks 1-3 all depend only on task 0.
+        for t in tasks[1:4]:
+            deps = json.loads(t["depends_on"])
+            assert deps == [0], f"task {t['seq']} should depend only on task 0"
+        # Task 4 (summarize) depends on 1,2,3.
+        deps_last = json.loads(tasks[4]["depends_on"])
+        assert sorted(deps_last) == [1, 2, 3]
+
+    def test_target_substituted_in_task_prompts(self, _isolated_db):
+        pm = _isolated_db
+        proj = pm.create_from_template("security-audit", target="mymodule.py")
+        for t in proj["tasks"]:
+            assert "mymodule.py" in t["prompt"], f"task {t['seq']} missing target substitution"
+
+
+# ── cancel cancels in-flight tasks ──────────────────────────────────────────
+
+class TestCancelInFlight:
+    def test_cancel_calls_cancel_task_for_in_flight_work(self, _isolated_db):
+        """When a project is cancelled, in-flight task_runtime tasks should be cancelled."""
+        pm = _isolated_db
+        cancel_calls: list[str] = []
+        mock_rt = MagicMock()
+        call_n = {"n": 0}
+
+        def _submit(prompt, **kwargs):
+            call_n["n"] += 1
+            return {"id": f"t_{call_n['n']}"}
+
+        # Task never completes — always returns running so it stays in-flight.
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = lambda tid: {"id": tid, "status": "running", "result": ""}
+        mock_rt.cancel_task.side_effect = lambda tid: cancel_calls.append(tid)
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project("cancel test", tasks=[
+                {"prompt": "long task", "depends_on": []},
+            ])
+            pm.dispatch_project(proj["id"])
+            # Give the executor a moment to submit the task and get it in-flight.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                fetched = pm.get_project(proj["id"])
+                if any(t["status"] == "running" for t in fetched["tasks"]):
+                    break
+                time.sleep(0.05)
+            # Now cancel the project.
+            pm.cancel_project(proj["id"])
+            # Wait for the executor to emit project_cancelled (fired AFTER _cancel_in_flight).
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                events = pm.tail_events(proj["id"])
+                if any(e["event_type"] == "project_cancelled" for e in events):
+                    break
+                time.sleep(0.05)
+
+        assert cancel_calls, "cancel_task should have been called for in-flight tasks"
+
+
 # ── _looks_like_code_task heuristic ─────────────────────────────────────────
 
 class TestCodeTaskHeuristic:
@@ -488,3 +716,135 @@ class TestCodeTaskHeuristic:
         assert not pm._looks_like_code_task("what time is it")
         assert not pm._looks_like_code_task("summarize the meeting notes")
         assert not pm._looks_like_code_task("who is the CEO of Apple")
+
+
+# ── Result injection into downstream prompts ─────────────────────────────────
+
+class TestResultInjection:
+    """Verify that completed dep results are appended to downstream task prompts."""
+
+    def _make_rt(self, results_by_call: list[str]) -> MagicMock:
+        """Return a mock task_runtime that returns successive results.
+
+        ``results_by_call[i]`` is the result for the i-th submitted task.
+        """
+        counter = {"n": 0}
+        stored: dict[str, str] = {}
+        mock_rt = MagicMock()
+
+        def _submit(prompt, **kwargs):
+            idx = counter["n"]
+            tid = f"t_{idx}"
+            result = results_by_call[idx] if idx < len(results_by_call) else "ok"
+            stored[tid] = {"prompt": prompt, "result": result}
+            counter["n"] += 1
+            return {"id": tid}
+
+        def _get(task_id):
+            entry = stored.get(task_id)
+            if entry is None:
+                return None
+            return {"id": task_id, "status": "succeeded", "result": entry["result"]}
+
+        mock_rt.submit_task.side_effect = _submit
+        mock_rt.get_task.side_effect = _get
+        mock_rt._stored = stored
+        return mock_rt
+
+    def _wait(self, pm, project_id: str, timeout: float = 5.0) -> str:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = pm.get_project(project_id)["status"]
+            if status in ("done", "failed", "cancelled"):
+                return status
+            time.sleep(0.05)
+        return pm.get_project(project_id)["status"]
+
+    def test_dep_result_injected_into_synthesis_prompt(self, _isolated_db):
+        pm = _isolated_db
+        mock_rt = self._make_rt(["finding: SQL injection in login.py", "synthesis done"])
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "inject test",
+                tasks=[
+                    {"title": "scan", "prompt": "scan the code", "depends_on": []},
+                    {"title": "synthesize", "prompt": "write a report", "depends_on": [0]},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            status = self._wait(pm, proj["id"])
+
+        assert status == "done"
+        calls = mock_rt.submit_task.call_args_list
+        # Second call is the synthesis task — it must include scan result.
+        synth_prompt = calls[1][0][0]
+        assert "== Results from prerequisite tasks ==" in synth_prompt
+        assert "finding: SQL injection in login.py" in synth_prompt
+        assert "=== scan ===" in synth_prompt
+
+    def test_no_injection_for_fanout_tasks(self, _isolated_db):
+        """Tasks with depends_on=[] (fan-out) should not get injected context."""
+        pm = _isolated_db
+        mock_rt = self._make_rt(["result A", "result B"])
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "fanout test",
+                tasks=[
+                    {"title": "task A", "prompt": "do A", "depends_on": []},
+                    {"title": "task B", "prompt": "do B", "depends_on": []},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        calls = mock_rt.submit_task.call_args_list
+        # Neither prompt should have injection context.
+        for call in calls:
+            assert "== Results from prerequisite tasks ==" not in call[0][0]
+
+    def test_no_injection_when_dep_has_empty_result(self, _isolated_db):
+        """Empty dep results should not produce the injection header."""
+        pm = _isolated_db
+        mock_rt = self._make_rt(["", "synthesis"])
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "empty result test",
+                tasks=[
+                    {"title": "noop", "prompt": "do nothing", "depends_on": []},
+                    {"title": "synth", "prompt": "summarize", "depends_on": [0]},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        calls = mock_rt.submit_task.call_args_list
+        synth_prompt = calls[1][0][0]
+        assert "== Results from prerequisite tasks ==" not in synth_prompt
+
+    def test_multiple_dep_results_all_injected(self, _isolated_db):
+        """All explicit dep results should appear in the downstream prompt."""
+        pm = _isolated_db
+        mock_rt = self._make_rt(["subprocess finding", "eval finding", "summary done"])
+
+        with patch.dict(sys.modules, {"task_runtime": mock_rt}):
+            proj = pm.create_project(
+                "multi-dep inject",
+                tasks=[
+                    {"title": "scan A", "prompt": "scan subprocess", "depends_on": []},
+                    {"title": "scan B", "prompt": "scan eval", "depends_on": []},
+                    {"title": "report", "prompt": "write report", "depends_on": [0, 1]},
+                ],
+            )
+            pm.dispatch_project(proj["id"])
+            self._wait(pm, proj["id"])
+
+        calls = mock_rt.submit_task.call_args_list
+        # The third submit is the report task (tasks 0 and 1 run in parallel).
+        report_prompt = calls[2][0][0]
+        assert "subprocess finding" in report_prompt
+        assert "eval finding" in report_prompt
+        assert "=== scan A ===" in report_prompt
+        assert "=== scan B ===" in report_prompt
