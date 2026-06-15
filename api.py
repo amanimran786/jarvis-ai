@@ -7426,7 +7426,7 @@ class _PMCreateRequest(BaseModel):
     title: str
     description: str = ""
     agent_id: str = "backend-engineer"
-    tasks: list[str] = []
+    tasks: list[str | dict] = []
     dispatch: bool = False
 
 
