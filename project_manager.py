@@ -43,6 +43,11 @@ _POLL_INTERVAL = float(os.getenv("JARVIS_PROJECT_POLL_INTERVAL", "3"))
 # Max time (seconds) to wait for a single task before declaring it timed out.
 _TASK_TIMEOUT = float(os.getenv("JARVIS_PROJECT_TASK_TIMEOUT", "600"))
 
+# Max tasks from a single project running concurrently. task_runtime's own
+# model semaphore still bounds total concurrent model calls across all projects;
+# this just caps how wide one project's dependency wave can fan out.
+_MAX_PARALLEL = max(1, int(os.getenv("JARVIS_PROJECT_MAX_PARALLEL", "6")))
+
 _PROJECT_STATUSES = ("pending", "running", "done", "failed", "cancelled")
 _TERMINAL = {"done", "failed", "cancelled"}
 _TASK_TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -105,6 +110,7 @@ def _ensure_schema() -> None:
                     status     TEXT NOT NULL DEFAULT 'pending',
                     task_id    TEXT NOT NULL DEFAULT '',
                     result     TEXT NOT NULL DEFAULT '',
+                    depends_on TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     UNIQUE(project_id, seq)
@@ -125,6 +131,13 @@ def _ensure_schema() -> None:
                 CREATE INDEX IF NOT EXISTS idx_project_events_project_id
                 ON project_events(project_id, id);
             """)
+            # Idempotent migration: add depends_on for pre-Build1 tables.
+            try:
+                conn.execute(
+                    "ALTER TABLE project_tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT ''"
+                )
+            except Exception:
+                pass  # Column already exists.
         _SCHEMA_INITIALIZED = True
 
 
@@ -175,7 +188,22 @@ _EXECUTORS: dict[str, threading.Thread] = {}
 
 
 def _run_project(project_id: str) -> None:
-    """Daemon thread: work through all pending project tasks sequentially."""
+    """Daemon thread: execute project tasks respecting declared dependencies.
+
+    Dependency model
+    ----------------
+    Each task's ``depends_on`` column encodes its blocking dependencies as a
+    JSON list of seq integers (e.g. ``[0, 2]``).  An empty string means the
+    implicit sequential default: depends on seq-1 only (preserving the original
+    ordered behaviour for all existing projects and templates).  Passing
+    ``depends_on=[]`` marks a task as unconditionally independent so it fans out
+    immediately alongside other ready tasks.
+
+    Up to ``_MAX_PARALLEL`` tasks from the same project run concurrently; the
+    task_runtime model semaphore still caps total cross-project model calls.
+    Fail-fast: any task failure (or timeout) immediately marks the project
+    failed and returns.
+    """
     import task_runtime
 
     try:
@@ -193,21 +221,41 @@ def _run_project(project_id: str) -> None:
             ).fetchone()
 
         agent_id = agent_row["agent_id"] if agent_row else ""
+        tasks_by_seq: dict[int, sqlite3.Row] = {r["seq"]: r for r in rows}
+
+        def _deps(seq: int) -> set[int]:
+            try:
+                raw = tasks_by_seq[seq]["depends_on"]
+            except (IndexError, KeyError):
+                raw = ""
+            if not raw:
+                return {seq - 1} if seq > 0 else set()
+            try:
+                return set(json.loads(raw))
+            except Exception:
+                return {seq - 1} if seq > 0 else set()
+
+        # completed: seqs that have reached a terminal state (done or pre-existing failed).
+        # submitted: seqs already dispatched or skipped — never re-submitted.
+        completed: set[int] = set()
+        submitted: set[int] = set()
+        for r in rows:
+            if r["status"] in ("done", "failed"):
+                completed.add(r["seq"])
+                submitted.add(r["seq"])
+
+        # in_flight: seq -> {ptask_id, submitted_id, title, deadline}
+        in_flight: dict[int, dict] = {}
 
         last_heartbeat = time.monotonic()
 
-        for row in rows:
-            ptask_id = row["id"]
-            seq = row["seq"]
-            title = row["title"]
-            prompt = row["prompt"]
-            current_status = row["status"]
+        while True:
+            now = time.monotonic()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                _emit(project_id, "heartbeat")
+                last_heartbeat = now
 
-            # Skip already-completed tasks (supports resume after crash).
-            if current_status in ("done", "failed"):
-                continue
-
-            # Check for cancellation.
+            # Cancellation check.
             with _connect() as conn:
                 proj = conn.execute(
                     "SELECT status FROM projects WHERE id=?", (project_id,)
@@ -216,64 +264,94 @@ def _run_project(project_id: str) -> None:
                 _emit(project_id, "project_cancelled", reason="cancel_requested")
                 return
 
-            _emit(project_id, "task_started", task_seq=seq, title=title)
-            _set_ptask_status(ptask_id, "running")
+            # Find tasks whose deps are all satisfied and that haven't been submitted yet.
+            ready = [
+                seq for seq in sorted(tasks_by_seq)
+                if seq not in submitted and _deps(seq).issubset(completed)
+            ]
 
-            try:
-                task_result = task_runtime.submit_task(
-                    prompt,
-                    kind="code" if _looks_like_code_task(prompt) else "chat",
-                    source="project_manager",
-                    assigned_agent_id=agent_id,
-                    meta={"project_id": project_id, "project_task_seq": seq},
-                )
-                submitted_task_id = task_result["id"]
-            except Exception as exc:
-                log.exception("project %s task %d submit failed", project_id, seq)
-                _set_ptask_status(ptask_id, "failed")
-                _emit(project_id, "task_failed", task_seq=seq, error=str(exc))
-                _set_project_status(project_id, "failed")
-                return
+            # Submit up to available parallelism slots.
+            for seq in ready[: max(0, _MAX_PARALLEL - len(in_flight))]:
+                r = tasks_by_seq[seq]
+                ptask_id = r["id"]
+                title = r["title"]
+                prompt = r["prompt"]
+                _emit(project_id, "task_started", task_seq=seq, title=title)
+                _set_ptask_status(ptask_id, "running")
+                try:
+                    task_result = task_runtime.submit_task(
+                        prompt,
+                        kind="code" if _looks_like_code_task(prompt) else "chat",
+                        source="project_manager",
+                        assigned_agent_id=agent_id,
+                        meta={"project_id": project_id, "project_task_seq": seq},
+                    )
+                    submitted_id = task_result["id"]
+                except Exception as exc:
+                    log.exception("project %s task %d submit failed", project_id, seq)
+                    _set_ptask_status(ptask_id, "failed")
+                    _emit(project_id, "task_failed", task_seq=seq, error=str(exc))
+                    _set_project_status(project_id, "failed")
+                    return
+                submitted.add(seq)
+                in_flight[seq] = {
+                    "ptask_id": ptask_id,
+                    "submitted_id": submitted_id,
+                    "title": title,
+                    "deadline": time.monotonic() + _TASK_TIMEOUT,
+                }
 
-            # Poll until terminal.
-            deadline = time.monotonic() + _TASK_TIMEOUT
-            result_text = ""
-            task_final_status = "failed"
+            # Termination: nothing in flight after submitting all ready tasks.
+            if not in_flight:
+                unrunnable = set(tasks_by_seq) - submitted
+                if unrunnable:
+                    # Dependency graph has tasks that can never become ready.
+                    _emit(project_id, "project_error",
+                          error=f"Tasks with unsatisfiable deps: {sorted(unrunnable)}")
+                    _set_project_status(project_id, "failed")
+                    return
+                break
 
-            while time.monotonic() < deadline:
-                # Heartbeat if due.
-                now = time.monotonic()
-                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                    _emit(project_id, "heartbeat", task_seq=seq)
-                    last_heartbeat = now
+            # Poll all in-flight tasks.
+            time.sleep(_POLL_INTERVAL)
 
-                task_snapshot = task_runtime.get_task(submitted_task_id)
-                if task_snapshot is None:
-                    time.sleep(_POLL_INTERVAL)
+            failed_this_round: list[int] = []
+
+            for seq, info in list(in_flight.items()):
+                task_snapshot = task_runtime.get_task(info["submitted_id"])
+                timed_out = time.monotonic() > info["deadline"]
+
+                if task_snapshot is None and not timed_out:
+                    continue  # Not ready yet.
+
+                if timed_out and (
+                    task_snapshot is None
+                    or task_snapshot.get("status") not in _TASK_TERMINAL
+                ):
+                    _set_ptask_status(info["ptask_id"], "failed", info["submitted_id"])
+                    _emit(project_id, "task_timeout", task_seq=seq, timeout_s=_TASK_TIMEOUT)
+                    failed_this_round.append(seq)
+                    del in_flight[seq]
                     continue
 
-                t_status = task_snapshot.get("status", "")
+                t_status = task_snapshot.get("status", "") if task_snapshot else ""
                 if t_status in _TASK_TERMINAL:
                     result_text = task_snapshot.get("result", "") or ""
-                    task_final_status = "done" if t_status == "succeeded" else "failed"
-                    break
+                    if t_status == "succeeded":
+                        _set_ptask_status(info["ptask_id"], "done", info["submitted_id"], result_text)
+                        _emit(project_id, "task_done", task_seq=seq, title=info["title"],
+                              result_excerpt=result_text[:400])
+                        completed.add(seq)
+                    else:
+                        _set_ptask_status(info["ptask_id"], "failed", info["submitted_id"], result_text)
+                        _emit(project_id, "task_failed", task_seq=seq, title=info["title"])
+                        failed_this_round.append(seq)
+                    del in_flight[seq]
 
-                time.sleep(_POLL_INTERVAL)
-            else:
-                # Timeout.
-                _set_ptask_status(ptask_id, "failed", submitted_task_id)
-                _emit(project_id, "task_timeout", task_seq=seq, timeout_s=_TASK_TIMEOUT)
+            # Fail-fast: any failure terminates the project.
+            if failed_this_round:
                 _set_project_status(project_id, "failed")
                 return
-
-            _set_ptask_status(ptask_id, task_final_status, submitted_task_id, result_text)
-            if task_final_status == "failed":
-                _emit(project_id, "task_failed", task_seq=seq, title=title)
-                _set_project_status(project_id, "failed")
-                return
-            else:
-                _emit(project_id, "task_done", task_seq=seq, title=title,
-                      result_excerpt=result_text[:400])
 
         _set_project_status(project_id, "done")
         _emit(project_id, "project_done")
@@ -519,11 +597,14 @@ def create_project(
     normalized_tasks: list[dict] = []
     for i, t in enumerate(tasks or []):
         if isinstance(t, str):
-            normalized_tasks.append({"title": f"Task {i + 1}", "prompt": t})
+            normalized_tasks.append({"title": f"Task {i + 1}", "prompt": t, "depends_on": ""})
         else:
+            raw_deps = t.get("depends_on")
             normalized_tasks.append({
                 "title": t.get("title", f"Task {i + 1}"),
                 "prompt": t.get("prompt", str(t)),
+                # "" = implicit sequential (seq-1); explicit list serialised as JSON.
+                "depends_on": json.dumps([int(d) for d in raw_deps]) if raw_deps is not None else "",
             })
 
     with _connect() as conn:
@@ -535,9 +616,11 @@ def create_project(
         for seq, task in enumerate(normalized_tasks):
             ptask_id = f"pt_{uuid.uuid4().hex[:10]}"
             conn.execute(
-                "INSERT INTO project_tasks (id, project_id, seq, title, prompt, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-                (ptask_id, project_id, seq, task["title"], task["prompt"], now, now),
+                "INSERT INTO project_tasks "
+                "(id, project_id, seq, title, prompt, depends_on, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+                (ptask_id, project_id, seq, task["title"], task["prompt"],
+                 task["depends_on"], now, now),
             )
 
     _emit(project_id, "project_created", title=title, agent_id=agent_id, task_count=len(normalized_tasks))
@@ -708,10 +791,21 @@ def render_status(rows: list[dict]) -> str:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _cli_create(args: argparse.Namespace) -> None:
-    tasks = list(args.tasks or [])
-    if not tasks:
-        print("[error] Provide at least one --tasks entry.")
-        sys.exit(1)
+    # --tasks-json takes precedence; it's a JSON array of task dicts that may
+    # include 'depends_on' for parallel fan-out.  Falls back to plain --tasks.
+    if getattr(args, "tasks_json", None):
+        try:
+            tasks = json.loads(args.tasks_json)
+            if not isinstance(tasks, list) or not tasks:
+                raise ValueError("must be a non-empty JSON array")
+        except Exception as exc:
+            print(f"[error] --tasks-json: {exc}")
+            sys.exit(1)
+    else:
+        tasks = list(args.tasks or [])
+        if not tasks:
+            print("[error] Provide --tasks or --tasks-json.")
+            sys.exit(1)
     proj = create_project(
         title=args.title,
         description=args.description or "",
@@ -913,8 +1007,11 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--description", default="")
     c.add_argument("--agent", default="backend-engineer",
                    help="Agent ID from task_runtime (e.g. backend-engineer, security-reviewer)")
-    c.add_argument("--tasks", nargs="+", metavar="PROMPT",
+    c.add_argument("--tasks", nargs="*", metavar="PROMPT",
                    help="One or more task prompts (in order)")
+    c.add_argument("--tasks-json", default="", metavar="JSON",
+                   help='JSON array of task dicts with optional depends_on for parallel fan-out, '
+                        'e.g. \'[{"prompt":"...","depends_on":[]},{"prompt":"...","depends_on":[]}]\'')
     c.add_argument("--dispatch", action="store_true", help="Start execution immediately after creation")
 
     sub.add_parser("list", help="List all projects (status table)")
