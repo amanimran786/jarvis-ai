@@ -7471,13 +7471,32 @@ def pm_list_projects(status: str = "", limit: int = 50, request: Request = None)
 
 
 @app.get("/pm/projects/{project_id}")
-def pm_get_project(project_id: str, request: Request):
-    """Return a project with its tasks and event count."""
+def pm_get_project(project_id: str, include_events: int = 0, request: Request = None):
+    """Return a project with its tasks. Pass include_events=N to include last N events."""
+    import project_manager as _pm
+    proj = _pm.get_project(project_id, include_events=include_events)
+    if proj is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+    return {"ok": True, "project": proj}
+
+
+@app.get("/pm/projects/{project_id}/results")
+def pm_project_results(project_id: str, request: Request = None):
+    """Return each task's title, status, and full result text."""
     import project_manager as _pm
     proj = _pm.get_project(project_id)
     if proj is None:
         return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
-    return {"ok": True, "project": proj}
+    tasks = [
+        {
+            "seq": t.get("seq"),
+            "title": t.get("title"),
+            "status": t.get("status"),
+            "result": t.get("result") or "",
+        }
+        for t in proj.get("tasks", [])
+    ]
+    return {"ok": True, "project_id": project_id, "project_status": proj["status"], "tasks": tasks}
 
 
 @app.post("/pm/projects/{project_id}/dispatch")

@@ -926,9 +926,12 @@ def _cli_create(args: argparse.Namespace) -> None:
         tasks=tasks,
     )
     print(f"[created] {proj['id']}  title={proj['title']!r}  agent={proj['agent_id']}  tasks={len(proj['tasks'])}")
-    if args.dispatch:
+    if args.dispatch or getattr(args, "monitor", False):
         dispatch_project(proj["id"])
         print(f"[dispatched] project {proj['id']} is now running.")
+    if getattr(args, "monitor", False):
+        args.project_id = proj["id"]
+        _cli_monitor(args)
 
 
 def _cli_list(args: argparse.Namespace) -> None:
@@ -1009,6 +1012,32 @@ def _cli_show(args: argparse.Namespace) -> None:
     print(json.dumps(proj, indent=2, default=str))
 
 
+def _cli_results(args: argparse.Namespace) -> None:
+    """Print each task's result in human-readable form."""
+    proj = get_project(args.project_id)
+    if proj is None:
+        print(f"[error] Project not found: {args.project_id}")
+        sys.exit(1)
+    print(f"Project: {proj['id']}  {proj['title']!r}  status={proj['status']}")
+    print("─" * 80)
+    for t in proj.get("tasks", []):
+        seq = t.get("seq", "?")
+        title = t.get("title") or f"Task {seq}"
+        status = t.get("status", "?")
+        result = t.get("result") or ""
+        status_icon = {"done": "✓", "failed": "✗", "running": "▶", "pending": "○"}.get(status, "?")
+        print(f"\n[{seq}] {status_icon} {title}  ({status})")
+        if result:
+            # Print full result or truncated if --short flag set.
+            limit = getattr(args, "chars", 0) or 0
+            if limit and len(result) > limit:
+                print(result[:limit] + f"\n  … ({len(result) - limit} chars truncated)")
+            else:
+                print(result)
+        else:
+            print("  (no result)")
+
+
 def _cli_monitor(args: argparse.Namespace) -> None:
     """Live tail of project events. Polls every 2s. Ctrl-C to stop."""
     project_id = args.project_id
@@ -1083,9 +1112,12 @@ def _cli_from_template(args: argparse.Namespace) -> None:
         print(f"[error] {exc}")
         sys.exit(1)
     print(f"[created] {proj['id']}  title={proj['title']!r}  agent={proj['agent_id']}  tasks={len(proj['tasks'])}")
-    if args.dispatch:
+    if args.dispatch or getattr(args, "monitor", False):
         dispatch_project(proj["id"])
         print(f"[dispatched] {proj['id']}")
+    if getattr(args, "monitor", False):
+        args.project_id = proj["id"]
+        _cli_monitor(args)
 
 
 def _cli_templates(_args: argparse.Namespace) -> None:
@@ -1148,12 +1180,18 @@ def main(argv: list[str] | None = None) -> None:
                    help='JSON array of task dicts with optional depends_on for parallel fan-out, '
                         'e.g. \'[{"prompt":"...","depends_on":[]},{"prompt":"...","depends_on":[]}]\'')
     c.add_argument("--dispatch", action="store_true", help="Start execution immediately after creation")
+    c.add_argument("--monitor", action="store_true", help="Tail events until project completes (implies --dispatch)")
 
     sub.add_parser("list", help="List all projects (status table)")
     sub.add_parser("status", help="Alias for list")
 
     sh = sub.add_parser("show", help="Show project detail (JSON)")
     sh.add_argument("project_id")
+
+    rs = sub.add_parser("results", help="Show task results in human-readable format")
+    rs.add_argument("project_id")
+    rs.add_argument("--chars", type=int, default=0, metavar="N",
+                    help="Truncate each result to N chars (default: show full)")
 
     d = sub.add_parser("dispatch", help="Start autonomous execution of a project (or all pending)")
     d.add_argument("project_id", nargs="?", default=None)
@@ -1179,6 +1217,7 @@ def main(argv: list[str] | None = None) -> None:
     ft.add_argument("--title", default="", help="Override project title")
     ft.add_argument("--agent", default="", help="Override agent ID")
     ft.add_argument("--dispatch", action="store_true", help="Dispatch immediately after creation")
+    ft.add_argument("--monitor", action="store_true", help="Tail events until project completes (implies --dispatch)")
 
     # Routines subcommand group.
     rt = sub.add_parser("routine", help="Manage recurring scheduled projects")
@@ -1214,6 +1253,7 @@ def main(argv: list[str] | None = None) -> None:
         "agents": _cli_agents,
         "templates": _cli_templates,
         "from-template": _cli_from_template,
+        "results": _cli_results,
     }
 
     # Routine subcommands.
