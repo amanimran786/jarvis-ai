@@ -657,6 +657,44 @@ class TestTemplateDependencies:
         for t in proj["tasks"]:
             assert "mymodule.py" in t["prompt"], f"task {t['seq']} missing target substitution"
 
+    def test_refactor_template_analysis_parallel_synthesis_sequential(self, _isolated_db):
+        import json
+        pm = _isolated_db
+        proj = pm.create_from_template("refactor", target="router.py")
+        tasks = proj["tasks"]
+        # Tasks 0-2 are independent analysis steps.
+        for t in tasks[:3]:
+            assert t["depends_on"] == "[]", f"task {t['seq']} should be independent"
+        # Task 3 (propose) depends on all three analysis tasks.
+        deps = json.loads(tasks[3]["depends_on"])
+        assert sorted(deps) == [0, 1, 2]
+
+    def test_research_template_parallel_research_then_recommendation(self, _isolated_db):
+        import json
+        pm = _isolated_db
+        proj = pm.create_from_template("research", target="local STT approaches")
+        tasks = proj["tasks"]
+        # Tasks 0 and 1 are independent research steps.
+        assert tasks[0]["depends_on"] == "[]"
+        assert tasks[1]["depends_on"] == "[]"
+        # Task 2 (recommend) depends on both.
+        deps = json.loads(tasks[2]["depends_on"])
+        assert sorted(deps) == [0, 1]
+
+    def test_test_coverage_template_discovery_then_parallel_writing(self, _isolated_db):
+        import json
+        pm = _isolated_db
+        proj = pm.create_from_template("test-coverage", target="router.py")
+        tasks = proj["tasks"]
+        # Task 0 (discovery) is independent.
+        assert tasks[0]["depends_on"] == "[]"
+        # Tasks 1 and 2 (unit + edge-case tests) depend on task 0.
+        assert json.loads(tasks[1]["depends_on"]) == [0]
+        assert json.loads(tasks[2]["depends_on"]) == [0]
+        # Task 3 (run and verify) depends on tasks 1 and 2.
+        deps = json.loads(tasks[3]["depends_on"])
+        assert sorted(deps) == [1, 2]
+
 
 # ── cancel cancels in-flight tasks ──────────────────────────────────────────
 
