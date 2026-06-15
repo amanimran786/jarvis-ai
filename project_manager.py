@@ -657,10 +657,12 @@ def create_project(
         if isinstance(t, str):
             normalized_tasks.append({"title": f"Task {i + 1}", "prompt": t, "depends_on": ""})
         else:
+            if not t.get("prompt"):
+                raise ValueError(f"Task {i} is missing required 'prompt' key: {t!r}")
             raw_deps = t.get("depends_on")
             normalized_tasks.append({
                 "title": t.get("title", f"Task {i + 1}"),
-                "prompt": t.get("prompt", str(t)),
+                "prompt": t["prompt"],
                 # "" = implicit sequential (seq-1); explicit list serialised as JSON.
                 "depends_on": json.dumps([int(d) for d in raw_deps]) if raw_deps is not None else "",
             })
@@ -809,7 +811,7 @@ def get_project(project_id: str, include_events: int = 0) -> dict | None:
     proj["tasks"] = tasks
     proj["event_count"] = event_count
     proj["events"] = recent_events
-    proj["running"] = project_id in _EXECUTORS
+    proj["running"] = proj.get("status") == "running"
     return proj
 
 
@@ -833,7 +835,7 @@ def list_projects(status: str = "", limit: int = 50) -> list[dict]:
             d["meta"] = json.loads(d.pop("meta_json", "{}") or "{}")
         except Exception:
             d["meta"] = {}
-        d["running"] = d["id"] in _EXECUTORS
+        d["running"] = d.get("status") == "running"
         results.append(d)
     return results
 
@@ -919,12 +921,16 @@ def _cli_create(args: argparse.Namespace) -> None:
         if not tasks:
             print("[error] Provide --tasks or --tasks-json.")
             sys.exit(1)
-    proj = create_project(
-        title=args.title,
-        description=args.description or "",
-        agent_id=args.agent,
-        tasks=tasks,
-    )
+    try:
+        proj = create_project(
+            title=args.title,
+            description=args.description or "",
+            agent_id=args.agent,
+            tasks=tasks,
+        )
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
     print(f"[created] {proj['id']}  title={proj['title']!r}  agent={proj['agent_id']}  tasks={len(proj['tasks'])}")
     if args.dispatch or getattr(args, "monitor", False):
         dispatch_project(proj["id"])
