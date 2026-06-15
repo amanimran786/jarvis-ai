@@ -532,6 +532,21 @@ def _cli_list(args: argparse.Namespace) -> None:
 
 
 def _cli_dispatch(args: argparse.Namespace) -> None:
+    if getattr(args, "all_pending", False):
+        rows = list_projects(status="pending")
+        if not rows:
+            print("[dispatch] No pending projects.")
+            return
+        for p in rows:
+            try:
+                started = dispatch_project(p["id"])
+                print(f"[{'dispatched' if started else 'no-op'}] {p['id']}  {p['title']!r}")
+            except ValueError as exc:
+                print(f"[error] {p['id']}: {exc}")
+        return
+    if not args.project_id:
+        print("[error] Provide a project_id or --all-pending.")
+        sys.exit(1)
     try:
         started = dispatch_project(args.project_id)
         if started:
@@ -541,6 +556,20 @@ def _cli_dispatch(args: argparse.Namespace) -> None:
     except ValueError as exc:
         print(f"[error] {exc}")
         sys.exit(1)
+
+
+def _cli_agents(_args: argparse.Namespace) -> None:
+    """Print available agent IDs from task_runtime."""
+    try:
+        import task_runtime
+        task_runtime.bootstrap()
+        agents = task_runtime.list_agents()
+        print(f"{'ID':<30} {'KIND':<12} STATUS")
+        print("─" * 60)
+        for a in agents:
+            print(f"  {a['id']:<28} {a.get('kind','?'):<12} {a.get('status','?')}")
+    except Exception as exc:
+        print(f"[error] Could not load agents: {exc}")
 
 
 def _cli_cancel(args: argparse.Namespace) -> None:
@@ -635,14 +664,17 @@ def main(argv: list[str] | None = None) -> None:
     sh = sub.add_parser("show", help="Show project detail (JSON)")
     sh.add_argument("project_id")
 
-    d = sub.add_parser("dispatch", help="Start autonomous execution of a project")
-    d.add_argument("project_id")
+    d = sub.add_parser("dispatch", help="Start autonomous execution of a project (or all pending)")
+    d.add_argument("project_id", nargs="?", default=None)
+    d.add_argument("--all-pending", action="store_true", help="Dispatch all projects in pending state")
 
     ca = sub.add_parser("cancel", help="Cancel a running project")
     ca.add_argument("project_id")
 
     m = sub.add_parser("monitor", help="Live tail of project events")
     m.add_argument("project_id")
+
+    sub.add_parser("agents", help="List available agent IDs")
 
     args = p.parse_args(argv)
 
@@ -656,6 +688,7 @@ def main(argv: list[str] | None = None) -> None:
         "dispatch": _cli_dispatch,
         "cancel": _cli_cancel,
         "monitor": _cli_monitor,
+        "agents": _cli_agents,
     }
     fn = dispatch_table.get(args.command)
     if fn is None:
