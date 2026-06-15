@@ -1,0 +1,668 @@
+"""project_manager.py — Assign tasks/projects to agents and monitor them.
+
+A project is a named goal with an ordered list of tasks, pinned to a specific
+agent. Once dispatched, the project executor thread works through each task
+sequentially, records results, emits structured events, and updates the
+project's status — no human intervention needed.
+
+Monitoring surfaces:
+  CLI:  python3 project_manager.py [create|list|dispatch|cancel|monitor|status]
+  API:  GET /projects, POST /projects, GET /projects/{id}/events (SSE)
+
+Execution model:
+  - Each project gets one daemon thread.
+  - Tasks run via task_runtime.submit_task(), polled until terminal.
+  - All activity written to project_events table (append-only, not rewritten).
+  - Heartbeat event every HEARTBEAT_INTERVAL seconds while running.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import os
+import sqlite3
+import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+from typing import Any
+
+log = logging.getLogger("jarvis.project_manager")
+
+_REPO_ROOT = Path(__file__).resolve().parent
+_LOCK = threading.RLock()
+
+# How often a running project emits a heartbeat event.
+HEARTBEAT_INTERVAL = int(os.getenv("JARVIS_PROJECT_HEARTBEAT", "30"))
+
+# How often the executor polls task_runtime for task completion.
+_POLL_INTERVAL = float(os.getenv("JARVIS_PROJECT_POLL_INTERVAL", "3"))
+
+# Max time (seconds) to wait for a single task before declaring it timed out.
+_TASK_TIMEOUT = float(os.getenv("JARVIS_PROJECT_TASK_TIMEOUT", "600"))
+
+_PROJECT_STATUSES = ("pending", "running", "done", "failed", "cancelled")
+_TERMINAL = {"done", "failed", "cancelled"}
+_TASK_TERMINAL = {"succeeded", "failed", "cancelled"}
+
+
+# ── DB setup ──────────────────────────────────────────────────────────────────
+
+def _db_path() -> Path:
+    override = os.getenv("JARVIS_PROJECT_DB_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    # Reuse the task-persistence DB so foreign-key joins are possible.
+    from task_persistence import db_path as _task_db_path
+    return _task_db_path()
+
+
+def _connect() -> sqlite3.Connection:
+    path = _db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+_SCHEMA_INITIALIZED = False
+
+
+def _ensure_schema() -> None:
+    global _SCHEMA_INITIALIZED
+    if _SCHEMA_INITIALIZED:
+        return
+    with _LOCK:
+        if _SCHEMA_INITIALIZED:
+            return
+        with _connect() as conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id          TEXT PRIMARY KEY,
+                    title       TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    agent_id    TEXT NOT NULL DEFAULT '',
+                    status      TEXT NOT NULL DEFAULT 'pending',
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL,
+                    meta_json   TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_projects_status
+                ON projects(status);
+
+                CREATE TABLE IF NOT EXISTS project_tasks (
+                    id         TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    seq        INTEGER NOT NULL,
+                    title      TEXT NOT NULL,
+                    prompt     TEXT NOT NULL,
+                    status     TEXT NOT NULL DEFAULT 'pending',
+                    task_id    TEXT NOT NULL DEFAULT '',
+                    result     TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(project_id, seq)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id
+                ON project_tasks(project_id, seq);
+
+                CREATE TABLE IF NOT EXISTS project_events (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT NOT NULL REFERENCES projects(id),
+                    task_seq   INTEGER,
+                    ts         TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_project_events_project_id
+                ON project_events(project_id, id);
+            """)
+        _SCHEMA_INITIALIZED = True
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
+
+def _now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _dumps(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _emit(project_id: str, event_type: str, task_seq: int | None = None, **payload: Any) -> None:
+    try:
+        with _connect() as conn:
+            conn.execute(
+                "INSERT INTO project_events (project_id, task_seq, ts, event_type, payload_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (project_id, task_seq, _now(), event_type, _dumps(payload)),
+            )
+    except Exception:
+        log.exception("project_manager: failed to emit event %s for %s", event_type, project_id)
+
+
+def _set_project_status(project_id: str, status: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE projects SET status=?, updated_at=? WHERE id=?",
+            (status, _now(), project_id),
+        )
+    _emit(project_id, "status_change", status=status)
+
+
+def _set_ptask_status(ptask_id: str, status: str, task_id: str = "", result: str = "") -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE project_tasks SET status=?, task_id=?, result=?, updated_at=? WHERE id=?",
+            (status, task_id, result[:8000], _now(), ptask_id),
+        )
+
+
+# ── Project executor thread ───────────────────────────────────────────────────
+
+# Registry of running executor threads, keyed by project_id.
+_EXECUTORS: dict[str, threading.Thread] = {}
+
+
+def _run_project(project_id: str) -> None:
+    """Daemon thread: work through all pending project tasks sequentially."""
+    import task_runtime
+
+    try:
+        _set_project_status(project_id, "running")
+        _emit(project_id, "project_started")
+
+        with _connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM project_tasks WHERE project_id=? ORDER BY seq",
+                (project_id,),
+            ).fetchall()
+            agent_row = conn.execute(
+                "SELECT agent_id FROM projects WHERE id=?",
+                (project_id,),
+            ).fetchone()
+
+        agent_id = agent_row["agent_id"] if agent_row else ""
+
+        last_heartbeat = time.monotonic()
+
+        for row in rows:
+            ptask_id = row["id"]
+            seq = row["seq"]
+            title = row["title"]
+            prompt = row["prompt"]
+            current_status = row["status"]
+
+            # Skip already-completed tasks (supports resume after crash).
+            if current_status in ("done", "failed"):
+                continue
+
+            # Check for cancellation.
+            with _connect() as conn:
+                proj = conn.execute(
+                    "SELECT status FROM projects WHERE id=?", (project_id,)
+                ).fetchone()
+            if proj and proj["status"] == "cancelled":
+                _emit(project_id, "project_cancelled", reason="cancel_requested")
+                return
+
+            _emit(project_id, "task_started", task_seq=seq, title=title)
+            _set_ptask_status(ptask_id, "running")
+
+            try:
+                task_result = task_runtime.submit_task(
+                    prompt,
+                    kind="code" if _looks_like_code_task(prompt) else "chat",
+                    source="project_manager",
+                    assigned_agent_id=agent_id,
+                    meta={"project_id": project_id, "project_task_seq": seq},
+                )
+                submitted_task_id = task_result["id"]
+            except Exception as exc:
+                log.exception("project %s task %d submit failed", project_id, seq)
+                _set_ptask_status(ptask_id, "failed")
+                _emit(project_id, "task_failed", task_seq=seq, error=str(exc))
+                _set_project_status(project_id, "failed")
+                return
+
+            # Poll until terminal.
+            deadline = time.monotonic() + _TASK_TIMEOUT
+            result_text = ""
+            task_final_status = "failed"
+
+            while time.monotonic() < deadline:
+                # Heartbeat if due.
+                now = time.monotonic()
+                if now - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    _emit(project_id, "heartbeat", task_seq=seq)
+                    last_heartbeat = now
+
+                task_snapshot = task_runtime.get_task(submitted_task_id)
+                if task_snapshot is None:
+                    time.sleep(_POLL_INTERVAL)
+                    continue
+
+                t_status = task_snapshot.get("status", "")
+                if t_status in _TASK_TERMINAL:
+                    result_text = task_snapshot.get("result", "") or ""
+                    task_final_status = "done" if t_status == "succeeded" else "failed"
+                    break
+
+                time.sleep(_POLL_INTERVAL)
+            else:
+                # Timeout.
+                _set_ptask_status(ptask_id, "failed", submitted_task_id)
+                _emit(project_id, "task_timeout", task_seq=seq, timeout_s=_TASK_TIMEOUT)
+                _set_project_status(project_id, "failed")
+                return
+
+            _set_ptask_status(ptask_id, task_final_status, submitted_task_id, result_text)
+            if task_final_status == "failed":
+                _emit(project_id, "task_failed", task_seq=seq, title=title)
+                _set_project_status(project_id, "failed")
+                return
+            else:
+                _emit(project_id, "task_done", task_seq=seq, title=title,
+                      result_excerpt=result_text[:400])
+
+        _set_project_status(project_id, "done")
+        _emit(project_id, "project_done")
+
+    except Exception:
+        log.exception("project_manager: unhandled error in executor for %s", project_id)
+        try:
+            _set_project_status(project_id, "failed")
+            _emit(project_id, "project_error", error="unhandled exception in executor")
+        except Exception:
+            pass
+    finally:
+        with _LOCK:
+            _EXECUTORS.pop(project_id, None)
+
+
+def _looks_like_code_task(prompt: str) -> bool:
+    lower = prompt.lower()
+    code_words = ("implement", "write", "create", "add", "fix", "refactor",
+                  "function", "class", "endpoint", "api", "test", "module")
+    return any(w in lower for w in code_words)
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def create_project(
+    title: str,
+    description: str = "",
+    agent_id: str = "backend-engineer",
+    tasks: list[str | dict] | None = None,
+    *,
+    meta: dict | None = None,
+) -> dict:
+    """Create a project and its task list. Does not start execution.
+
+    `tasks` is a list of either plain prompt strings or dicts with keys:
+      title (optional), prompt (required).
+
+    Returns the full project dict.
+    """
+    _ensure_schema()
+    project_id = f"proj_{uuid.uuid4().hex[:12]}"
+    now = _now()
+    meta_json = _dumps(meta or {})
+
+    normalized_tasks: list[dict] = []
+    for i, t in enumerate(tasks or []):
+        if isinstance(t, str):
+            normalized_tasks.append({"title": f"Task {i + 1}", "prompt": t})
+        else:
+            normalized_tasks.append({
+                "title": t.get("title", f"Task {i + 1}"),
+                "prompt": t.get("prompt", str(t)),
+            })
+
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO projects (id, title, description, agent_id, status, created_at, updated_at, meta_json) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (project_id, title, description, agent_id, now, now, meta_json),
+        )
+        for seq, task in enumerate(normalized_tasks):
+            ptask_id = f"pt_{uuid.uuid4().hex[:10]}"
+            conn.execute(
+                "INSERT INTO project_tasks (id, project_id, seq, title, prompt, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+                (ptask_id, project_id, seq, task["title"], task["prompt"], now, now),
+            )
+
+    _emit(project_id, "project_created", title=title, agent_id=agent_id, task_count=len(normalized_tasks))
+    return get_project(project_id)  # type: ignore[return-value]
+
+
+def dispatch_project(project_id: str) -> bool:
+    """Start autonomous execution of a project. Idempotent — no-ops if already running/done."""
+    _ensure_schema()
+    with _LOCK:
+        if project_id in _EXECUTORS:
+            return False  # Already running.
+
+    with _connect() as conn:
+        row = conn.execute("SELECT status FROM projects WHERE id=?", (project_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Project not found: {project_id}")
+    if row["status"] in _TERMINAL:
+        raise ValueError(f"Project is already {row['status']}")
+
+    with _LOCK:
+        if project_id in _EXECUTORS:
+            return False
+        thread = threading.Thread(
+            target=_run_project,
+            args=(project_id,),
+            daemon=True,
+            name=f"ProjExec-{project_id}",
+        )
+        _EXECUTORS[project_id] = thread
+    thread.start()
+    return True
+
+
+def cancel_project(project_id: str) -> bool:
+    """Request cancellation. The executor thread checks this between tasks."""
+    _ensure_schema()
+    with _connect() as conn:
+        row = conn.execute("SELECT status FROM projects WHERE id=?", (project_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Project not found: {project_id}")
+    if row["status"] in _TERMINAL:
+        return False
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE projects SET status='cancelled', updated_at=? WHERE id=?",
+            (_now(), project_id),
+        )
+    _emit(project_id, "cancel_requested")
+    return True
+
+
+def get_project(project_id: str) -> dict | None:
+    _ensure_schema()
+    with _connect() as conn:
+        proj_row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if proj_row is None:
+            return None
+        task_rows = conn.execute(
+            "SELECT * FROM project_tasks WHERE project_id=? ORDER BY seq",
+            (project_id,),
+        ).fetchall()
+        event_count = conn.execute(
+            "SELECT COUNT(*) FROM project_events WHERE project_id=?",
+            (project_id,),
+        ).fetchone()[0]
+
+    tasks = [dict(r) for r in task_rows]
+    proj = dict(proj_row)
+    try:
+        proj["meta"] = json.loads(proj.pop("meta_json", "{}") or "{}")
+    except Exception:
+        proj["meta"] = {}
+    proj["tasks"] = tasks
+    proj["event_count"] = event_count
+    proj["running"] = project_id in _EXECUTORS
+    return proj
+
+
+def list_projects(status: str = "", limit: int = 50) -> list[dict]:
+    _ensure_schema()
+    with _connect() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM projects WHERE status=? ORDER BY created_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM projects ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["meta"] = json.loads(d.pop("meta_json", "{}") or "{}")
+        except Exception:
+            d["meta"] = {}
+        d["running"] = d["id"] in _EXECUTORS
+        results.append(d)
+    return results
+
+
+def tail_events(
+    project_id: str,
+    since_id: int = 0,
+    limit: int = 100,
+) -> list[dict]:
+    """Return events for a project with id > since_id (for SSE polling)."""
+    _ensure_schema()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM project_events WHERE project_id=? AND id>? ORDER BY id LIMIT ?",
+            (project_id, since_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def collect_status() -> list[dict]:
+    """Return a monitoring table row per project (for CLI and /dashboard/state)."""
+    projects = list_projects(limit=100)
+    rows = []
+    for p in projects:
+        with _connect() as conn:
+            counts = conn.execute(
+                "SELECT status, COUNT(*) as n FROM project_tasks WHERE project_id=? GROUP BY status",
+                (p["id"],),
+            ).fetchall()
+        count_map: dict[str, int] = {r["status"]: r["n"] for r in counts}
+        total = sum(count_map.values())
+        done = count_map.get("done", 0)
+        rows.append({
+            "id": p["id"],
+            "title": p["title"][:40],
+            "agent": p["agent_id"],
+            "status": p["status"],
+            "running": p["running"],
+            "tasks_total": total,
+            "tasks_done": done,
+            "tasks_failed": count_map.get("failed", 0),
+            "created_at": p["created_at"][:19],
+            "updated_at": p["updated_at"][:19],
+        })
+    return rows
+
+
+def render_status(rows: list[dict]) -> str:
+    if not rows:
+        return "[projects] No projects yet. Create one:\n  python3 project_manager.py create 'Title' --agent backend-engineer --tasks 'step 1' 'step 2'"
+    header = f"{'ID':<18} {'TITLE':<42} {'AGENT':<22} {'STATUS':<11} {'LIVE':<5} {'PROGRESS':<12} {'UPDATED'}"
+    sep = "-" * 130
+    lines = [header, sep]
+    for r in rows:
+        live = "●" if r["running"] else "○"
+        prog = f"{r['tasks_done']}/{r['tasks_total']}" if r["tasks_total"] else "0/0"
+        if r["tasks_failed"]:
+            prog += f" ({r['tasks_failed']}✗)"
+        lines.append(
+            f"{r['id']:<18} {r['title']:<42} {r['agent']:<22} {r['status']:<11} {live:<5} {prog:<12} {r['updated_at']}"
+        )
+    active = [r for r in rows if r["status"] not in ("done", "cancelled")]
+    if active:
+        lines += ["", f"Active: {len(active)}   →  python3 project_manager.py monitor <id>"]
+    return "\n".join(lines)
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def _cli_create(args: argparse.Namespace) -> None:
+    tasks = list(args.tasks or [])
+    if not tasks:
+        print("[error] Provide at least one --tasks entry.")
+        sys.exit(1)
+    proj = create_project(
+        title=args.title,
+        description=args.description or "",
+        agent_id=args.agent,
+        tasks=tasks,
+    )
+    print(f"[created] {proj['id']}  title={proj['title']!r}  agent={proj['agent_id']}  tasks={len(proj['tasks'])}")
+    if args.dispatch:
+        dispatch_project(proj["id"])
+        print(f"[dispatched] project {proj['id']} is now running.")
+
+
+def _cli_list(args: argparse.Namespace) -> None:
+    print(render_status(collect_status()))
+
+
+def _cli_dispatch(args: argparse.Namespace) -> None:
+    try:
+        started = dispatch_project(args.project_id)
+        if started:
+            print(f"[dispatched] {args.project_id} — executor thread started.")
+        else:
+            print(f"[no-op] {args.project_id} is already running or in a terminal state.")
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+
+
+def _cli_cancel(args: argparse.Namespace) -> None:
+    try:
+        ok = cancel_project(args.project_id)
+        print(f"[{'cancelled' if ok else 'no-op'}] {args.project_id}")
+    except ValueError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
+
+
+def _cli_show(args: argparse.Namespace) -> None:
+    proj = get_project(args.project_id)
+    if proj is None:
+        print(f"[error] Project not found: {args.project_id}")
+        sys.exit(1)
+    print(json.dumps(proj, indent=2, default=str))
+
+
+def _cli_monitor(args: argparse.Namespace) -> None:
+    """Live tail of project events. Polls every 2s. Ctrl-C to stop."""
+    project_id = args.project_id
+    proj = get_project(project_id)
+    if proj is None:
+        print(f"[error] Project not found: {project_id}")
+        sys.exit(1)
+
+    print(f"[monitor] {project_id}  {proj['title']!r}  agent={proj['agent_id']}  status={proj['status']}")
+    print("─" * 80)
+
+    since_id = 0
+    try:
+        while True:
+            events = tail_events(project_id, since_id=since_id)
+            for ev in events:
+                payload = json.loads(ev.get("payload_json") or "{}")
+                ts = (ev.get("ts") or "")[:19]
+                seq = f"[task {ev['task_seq']}]" if ev.get("task_seq") is not None else ""
+                et = ev["event_type"]
+                # Render nicely by event type.
+                if et == "task_started":
+                    print(f"  {ts} {seq} ▶  {payload.get('title', '')}")
+                elif et == "task_done":
+                    excerpt = payload.get("result_excerpt", "")[:120]
+                    print(f"  {ts} {seq} ✓  {payload.get('title', '')}  →  {excerpt}")
+                elif et in ("task_failed", "task_timeout"):
+                    print(f"  {ts} {seq} ✗  {et}  {payload.get('error', '')}")
+                elif et == "project_done":
+                    print(f"  {ts} ★  PROJECT DONE")
+                elif et == "project_error":
+                    print(f"  {ts} ✗  PROJECT ERROR: {payload.get('error', '')}")
+                elif et == "heartbeat":
+                    print(f"  {ts} ♡  heartbeat {seq}")
+                elif et == "status_change":
+                    print(f"  {ts} →  status={payload.get('status', '')}")
+                else:
+                    print(f"  {ts} {et}  {json.dumps(payload)[:100]}")
+                since_id = max(since_id, ev["id"])
+
+            # Stop tailing if terminal.
+            proj_now = get_project(project_id)
+            if proj_now and proj_now["status"] in _TERMINAL and not events:
+                print(f"\n[monitor] Project is {proj_now['status']}. Exiting.")
+                break
+
+            time.sleep(2)
+    except KeyboardInterrupt:
+        print("\n[monitor] Detached.")
+
+
+def _cli_status(args: argparse.Namespace) -> None:
+    """Alias for list."""
+    _cli_list(args)
+
+
+def main(argv: list[str] | None = None) -> None:
+    p = argparse.ArgumentParser(prog="project_manager", description="Assign tasks/projects to agents and monitor them.")
+    sub = p.add_subparsers(dest="command", metavar="COMMAND")
+
+    c = sub.add_parser("create", help="Create a project")
+    c.add_argument("title")
+    c.add_argument("--description", default="")
+    c.add_argument("--agent", default="backend-engineer",
+                   help="Agent ID from task_runtime (e.g. backend-engineer, security-reviewer)")
+    c.add_argument("--tasks", nargs="+", metavar="PROMPT",
+                   help="One or more task prompts (in order)")
+    c.add_argument("--dispatch", action="store_true", help="Start execution immediately after creation")
+
+    sub.add_parser("list", help="List all projects (status table)")
+    sub.add_parser("status", help="Alias for list")
+
+    sh = sub.add_parser("show", help="Show project detail (JSON)")
+    sh.add_argument("project_id")
+
+    d = sub.add_parser("dispatch", help="Start autonomous execution of a project")
+    d.add_argument("project_id")
+
+    ca = sub.add_parser("cancel", help="Cancel a running project")
+    ca.add_argument("project_id")
+
+    m = sub.add_parser("monitor", help="Live tail of project events")
+    m.add_argument("project_id")
+
+    args = p.parse_args(argv)
+
+    _ensure_schema()
+
+    dispatch_table = {
+        "create": _cli_create,
+        "list": _cli_list,
+        "status": _cli_status,
+        "show": _cli_show,
+        "dispatch": _cli_dispatch,
+        "cancel": _cli_cancel,
+        "monitor": _cli_monitor,
+    }
+    fn = dispatch_table.get(args.command)
+    if fn is None:
+        p.print_help()
+        sys.exit(1)
+    fn(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -2804,6 +2804,7 @@ def dashboard_state(request: Request):
         "training": training_status,
         "evals": eval_status,
         "security": security,
+        "projects": _safe_projects_status(),
     }
 
 
@@ -7415,6 +7416,120 @@ def get_api_token() -> str:
 
 
 hw.register_api_routes(app)
+
+
+# ── Project Manager (pm) routes ───────────────────────────────────────────────
+# Persistent, agent-assigned, sequentially-executed projects. Lives under /pm/
+# to avoid collision with the wave-based /projects/ orchestrator above.
+
+class _PMCreateRequest(BaseModel):
+    title: str
+    description: str = ""
+    agent_id: str = "backend-engineer"
+    tasks: list[str] = []
+    dispatch: bool = False
+
+
+def _safe_projects_status() -> dict:
+    try:
+        import project_manager as _pm
+        rows = _pm.collect_status()
+        return {"ok": True, "projects": rows}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "projects": []}
+
+
+@app.post("/pm/projects")
+async def pm_create_project(req: _PMCreateRequest, request: Request):
+    """Create a project and optionally dispatch it to the assigned agent."""
+    from infra.rbac import registry
+    registry.caller_from_request(request)
+    if not req.title.strip():
+        return JSONResponse(status_code=400, content={"ok": False, "error": "title required"})
+    if not req.tasks:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "tasks required"})
+    import project_manager as _pm
+    proj = _pm.create_project(
+        title=req.title,
+        description=req.description,
+        agent_id=req.agent_id,
+        tasks=req.tasks,
+    )
+    if req.dispatch:
+        try:
+            _pm.dispatch_project(proj["id"])
+        except Exception as exc:
+            proj["dispatch_error"] = str(exc)
+    return {"ok": True, "project": proj}
+
+
+@app.get("/pm/projects")
+def pm_list_projects(status: str = "", limit: int = 50, request: Request = None):
+    """List all projects with status summary."""
+    import project_manager as _pm
+    return {"ok": True, "projects": _pm.list_projects(status=status, limit=limit)}
+
+
+@app.get("/pm/projects/{project_id}")
+def pm_get_project(project_id: str, request: Request):
+    """Return a project with its tasks and event count."""
+    import project_manager as _pm
+    proj = _pm.get_project(project_id)
+    if proj is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+    return {"ok": True, "project": proj}
+
+
+@app.post("/pm/projects/{project_id}/dispatch")
+def pm_dispatch_project(project_id: str, request: Request):
+    """Start autonomous execution of a project."""
+    import project_manager as _pm
+    try:
+        started = _pm.dispatch_project(project_id)
+        return {"ok": True, "started": started}
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+
+@app.post("/pm/projects/{project_id}/cancel")
+def pm_cancel_project(project_id: str, request: Request):
+    """Cancel a running project."""
+    import project_manager as _pm
+    try:
+        ok = _pm.cancel_project(project_id)
+        return {"ok": True, "cancelled": ok}
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+
+
+@app.get("/pm/projects/{project_id}/events")
+async def pm_project_events_stream(project_id: str, since_id: int = 0, request: Request = None):
+    """SSE stream of project events. Poll every 2 s; sends [DONE] when project reaches terminal state."""
+    import asyncio as _asyncio
+    import project_manager as _pm
+
+    # Validate project exists.
+    if _pm.get_project(project_id) is None:
+        return JSONResponse(status_code=404, content={"ok": False, "error": "not found"})
+
+    _terminal = {"done", "failed", "cancelled"}
+
+    async def _gen():
+        current_since = since_id
+        while True:
+            if request and await request.is_disconnected():
+                break
+            events = _pm.tail_events(project_id, since_id=current_since)
+            for ev in events:
+                yield f"data: {json.dumps(dict(ev))}\n\n"
+                current_since = max(current_since, ev["id"])
+            proj = _pm.get_project(project_id)
+            if proj and proj.get("status") in _terminal and not events:
+                yield f"data: {json.dumps({'event_type': 'stream_done', 'status': proj['status']})}\n\n"
+                break
+            await _asyncio.sleep(2)
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
