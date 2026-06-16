@@ -30,6 +30,8 @@ TOOLS = {
     "message": "Send iMessage/SMS via Messages app.",
     "osint_username": "Local username footprint scan using Maigret.",
     "osint_domain_typos": "Local typo-squatting scan for a domain using DNSTwist.",
+    "osint_subdomains": "Passive subdomain enumeration via subfinder.",
+    "osint_whois": "WHOIS lookup for domain registration and ownership information.",
 }
 
 
@@ -210,6 +212,32 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         required=("domain",),
         side_effects=False,
         timeout_seconds=120,
+        verifier="json_object",
+    ),
+    "osint_subdomains": ToolSpec(
+        name="osint_subdomains",
+        description="Passive subdomain enumeration via subfinder.",
+        args_schema={
+            "domain": {"type": "string"},
+            "timeout_seconds": {"type": "int", "default": 60},
+            "max_results": {"type": "int", "default": 100},
+            "passive_only": {"type": "bool", "default": True},
+        },
+        required=("domain",),
+        side_effects=False,
+        timeout_seconds=120,
+        verifier="json_object",
+    ),
+    "osint_whois": ToolSpec(
+        name="osint_whois",
+        description="WHOIS lookup for domain registration and ownership information.",
+        args_schema={
+            "domain": {"type": "string"},
+            "timeout_seconds": {"type": "int", "default": 15},
+        },
+        required=("domain",),
+        side_effects=False,
+        timeout_seconds=30,
         verifier="json_object",
     ),
 }

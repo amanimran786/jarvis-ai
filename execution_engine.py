@@ -208,6 +208,24 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         )
         return True, json.dumps(result)
 
+    if tool == "osint_subdomains":
+        import osint_tools
+        result = osint_tools.subdomain_enum(
+            params.get("domain", ""),
+            timeout_seconds=int(params.get("timeout_seconds", 60)),
+            max_results=int(params.get("max_results", 100)),
+            passive_only=bool(params.get("passive_only", True)),
+        )
+        return True, json.dumps(result)
+
+    if tool == "osint_whois":
+        import osint_tools
+        result = osint_tools.whois_lookup(
+            params.get("domain", ""),
+            timeout_seconds=int(params.get("timeout_seconds", 15)),
+        )
+        return True, json.dumps(result)
+
     prompt = params.get("prompt", params.get("content", step.description))
     if step_results:
         last = step_results.get(max(step_results.keys()))
