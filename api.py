@@ -13,6 +13,11 @@ Endpoints:
   GET  /osint/status  — local OSINT tool availability
   POST /osint/username — username footprint scan via Maigret
   POST /osint/domain-typos — domain typo-squatting scan via DNSTwist
+  POST /osint/subdomains — passive subdomain enumeration via subfinder
+  POST /osint/whois — WHOIS domain registration lookup
+  POST /osint/worldview — aggregated OSINT scan (domain or username)
+  GET  /osint/cache — list cached scan results
+  DELETE /osint/cache — clear scan cache
   POST /memory/add    — add a fact
   POST /memory/forget — forget by keyword
   GET  /mode          — current model routing mode
@@ -40,7 +45,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 
 log = logging.getLogger("api")
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from router import route_stream, record_turn as _record_turn
 import memory as mem
@@ -610,16 +615,35 @@ class CoderRunVerifyPlanRequest(BaseModel):
 
 class OsintUsernameRequest(BaseModel):
     username: str
-    timeout_seconds: int = 45
-    top_sites: int = 200
-    max_results: int = 25
+    timeout_seconds: int = Field(45, ge=5, le=120)
+    top_sites: int = Field(200, ge=20, le=500)
+    max_results: int = Field(25, ge=1, le=100)
 
 
 class OsintDomainTyposRequest(BaseModel):
     domain: str
-    timeout_seconds: int = 60
-    max_results: int = 25
+    timeout_seconds: int = Field(60, ge=5, le=120)
+    max_results: int = Field(25, ge=1, le=100)
     registered_only: bool = True
+
+
+class OsintSubdomainRequest(BaseModel):
+    domain: str
+    timeout_seconds: int = Field(60, ge=5, le=300)
+    max_results: int = Field(100, ge=1, le=1000)
+    passive_only: bool = True
+
+
+class OsintWhoisRequest(BaseModel):
+    domain: str
+    timeout_seconds: int = Field(15, ge=5, le=60)
+
+
+class OsintWorldviewRequest(BaseModel):
+    target: str
+    timeout_seconds: int = Field(90, ge=10, le=300)
+    max_results_per_tool: int = Field(25, ge=1, le=100)
+    include_typos: bool = False
 
 
 class RemoteVolumeRequest(BaseModel):
@@ -7123,13 +7147,263 @@ def post_self_review(req: SelfReviewRequest):
     return {"ok": result.get("ok", False), "message": message, "result": result}
 
 
+@app.get("/osint")
+async def osint_dashboard():
+    from fastapi.responses import HTMLResponse
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSINT Worldview — Jarvis</title>
+<style>
+:root{--bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--accent:#6c8cff;--text:#e0e2ec;--sub:#8b8fa8;--danger:#ff6b6b;--warn:#ffa94d;--ok:#5cb85c;--card:#1e2132}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;min-height:100vh;padding:24px}
+h1{font-size:1.4rem;font-weight:600;letter-spacing:.02em;color:#fff}
+.subtitle{color:var(--sub);font-size:.85rem;margin-top:4px}
+header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px}
+.status-bar{display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}
+.status-pill{font-size:.72rem;padding:3px 8px;border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.status-pill.ok{border-color:var(--ok);color:var(--ok)}
+.status-pill.missing{border-color:var(--danger);color:var(--danger)}
+.search-row{display:flex;gap:10px;margin-bottom:28px}
+#query{flex:1;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-size:1rem;outline:none;transition:border .15s}
+#query:focus{border-color:var(--accent)}
+button#run{background:var(--accent);color:#fff;border:none;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:.95rem;font-weight:500;white-space:nowrap}
+button#run:disabled{opacity:.5;cursor:default}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.panel-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title{font-size:.85rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--sub)}
+.badge{font-size:.75rem;background:var(--surface);border:1px solid var(--border);padding:2px 8px;border-radius:8px}
+.panel-body{padding:14px;max-height:400px;overflow-y:auto}
+.placeholder{color:var(--sub);font-size:.85rem;text-align:center;padding:24px 0}
+.loading{text-align:center;padding:24px;color:var(--sub)}
+.dot-spin::after{content:"⠋";animation:spin .8s linear infinite}
+@keyframes spin{0%{content:"⠋"}12%{content:"⠙"}25%{content:"⠹"}37%{content:"⠸"}50%{content:"⠼"}62%{content:"⠴"}75%{content:"⠦"}87%{content:"⠧"}100%{content:"⠇"}}
+.profile-row,.domain-row,.sub-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.85rem}
+.profile-row:last-child,.domain-row:last-child,.sub-row:last-child{border-bottom:none}
+.site-name{font-weight:500;min-width:90px}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.risk{font-size:.7rem;padding:2px 6px;border-radius:6px;background:var(--surface)}
+.risk-3{color:var(--danger)}.risk-2{color:var(--warn)}.risk-1{color:var(--ok)}
+.whois-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.83rem}
+.whois-key{color:var(--sub);white-space:nowrap}
+.whois-val{word-break:break-word}
+.error-msg{color:var(--danger);font-size:.85rem;padding:12px;background:#1a0f0f;border-radius:6px;border:1px solid #400}
+.target-type{font-size:.75rem;color:var(--sub);margin-bottom:8px}
+.export-btn{font-size:.75rem;background:none;border:1px solid var(--border);color:var(--sub);padding:3px 10px;border-radius:6px;cursor:pointer}
+.export-btn:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>OSINT Worldview</h1>
+    <div class="subtitle">Username &amp; domain intelligence aggregator</div>
+    <div class="status-bar" id="toolStatus">Loading tools…</div>
+  </div>
+  <button class="export-btn" onclick="exportJSON()">Export JSON</button>
+</header>
+<div class="search-row">
+  <input id="query" placeholder="Enter username or domain (e.g. johndoe or example.com)" autocomplete="off" spellcheck="false">
+  <button id="run" onclick="runScan()">Scan</button>
+</div>
+<div id="targetType" class="target-type"></div>
+<div class="panels">
+  <div class="panel" id="panelProfiles">
+    <div class="panel-header"><span class="panel-title">Username Profiles</span><span class="badge" id="badgeProfiles">—</span></div>
+    <div class="panel-body" id="bodyProfiles"><div class="placeholder">Submit a username scan to see results</div></div>
+  </div>
+  <div class="panel" id="panelTypos">
+    <div class="panel-header"><span class="panel-title">Typo-squatting Domains</span><span class="badge" id="badgeTypos">—</span></div>
+    <div class="panel-body" id="bodyTypos"><div class="placeholder">Submit a domain scan to see results</div></div>
+  </div>
+  <div class="panel" id="panelSubs">
+    <div class="panel-header"><span class="panel-title">Subdomains</span><span class="badge" id="badgeSubs">—</span></div>
+    <div class="panel-body" id="bodySubs"><div class="placeholder">Submit a domain scan to see results</div></div>
+  </div>
+  <div class="panel" id="panelWhois">
+    <div class="panel-header"><span class="panel-title">WHOIS</span><span class="badge" id="badgeWhois">—</span></div>
+    <div class="panel-body" id="bodyWhois"><div class="placeholder">Submit a domain scan to see results</div></div>
+  </div>
+</div>
+<script>
+const API = 'http://127.0.0.1:8765';
+let lastResult = null;
+
+async function loadStatus() {
+  try {
+    const r = await fetch(API + '/osint/status');
+    const d = await r.json();
+    const bar = document.getElementById('toolStatus');
+    bar.innerHTML = Object.entries(d.status || {}).map(([k,v]) =>
+      `<span class="status-pill ${v.available?'ok':'missing'}">${k} ${v.available?'✓':'✗'}</span>`
+    ).join('');
+  } catch(e) { document.getElementById('toolStatus').textContent = 'Cannot reach Jarvis API'; }
+}
+
+async function runScan() {
+  const q = document.getElementById('query').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('run');
+  btn.disabled = true;
+  setLoading();
+  try {
+    const res = await fetch(API + '/osint/worldview', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target:q, timeout_seconds:90, max_results_per_tool:50})
+    });
+    const d = await res.json();
+    lastResult = d;
+    renderResults(d);
+  } catch(e) {
+    showError(String(e));
+  } finally { btn.disabled = false; }
+}
+
+function setLoading() {
+  ['Profiles','Typos','Subs','Whois'].forEach(p => {
+    document.getElementById('body'+p).innerHTML = '<div class="loading"><span class="dot-spin"></span> Scanning…</div>';
+    document.getElementById('badge'+p).textContent = '…';
+  });
+  document.getElementById('targetType').textContent = '';
+}
+
+function renderResults(d) {
+  const tt = d.target_type === 'domain' ? '🌐 Domain target' : '👤 Username target';
+  document.getElementById('targetType').textContent = tt + ' — tools run: ' + (d.tools_run||[]).join(', ') + ' — elapsed: ' + d.elapsed_seconds + 's';
+
+  const intel = d.intelligence || {};
+
+  // Profiles
+  const pr = intel.profiles;
+  if (pr && pr.ok) {
+    const profiles = pr.profiles || [];
+    document.getElementById('badgeProfiles').textContent = profiles.length;
+    document.getElementById('bodyProfiles').innerHTML = profiles.length
+      ? profiles.map(p => `<div class="profile-row"><span class="site-name">${esc(p.site)}</span><a href="${esc(p.url)}" target="_blank">↗</a></div>`).join('')
+      : '<div class="placeholder">No profiles found</div>';
+  } else {
+    document.getElementById('badgeProfiles').textContent = d.target_type === 'domain' ? 'n/a' : 'err';
+    document.getElementById('bodyProfiles').innerHTML = d.target_type === 'domain'
+      ? '<div class="placeholder">Not applicable for domain targets</div>'
+      : '<div class="placeholder">No results</div>';
+  }
+
+  // Typos
+  const ty = intel.typos;
+  if (ty && ty.ok) {
+    const cands = ty.candidates || [];
+    document.getElementById('badgeTypos').textContent = cands.length;
+    document.getElementById('bodyTypos').innerHTML = cands.length
+      ? cands.map(c => `<div class="domain-row"><span class="site-name">${esc(c.domain)}</span><span class="risk risk-${Math.min(3,c.risk_score)}">${['','low','med','high'][Math.min(3,c.risk_score)]}</span><span style="color:var(--sub);font-size:.75rem">${esc(c.fuzzer)}</span></div>`).join('')
+      : '<div class="placeholder">No typo-squatting candidates found</div>';
+  } else {
+    document.getElementById('badgeTypos').textContent = d.target_type !== 'domain' ? 'n/a' : 'err';
+    document.getElementById('bodyTypos').innerHTML = d.target_type !== 'domain'
+      ? '<div class="placeholder">Not applicable for username targets</div>'
+      : '<div class="placeholder">No results</div>';
+  }
+
+  // Subdomains
+  const sub = intel.subdomains;
+  if (sub && sub.ok) {
+    const subs = sub.subdomains || [];
+    document.getElementById('badgeSubs').textContent = sub.count ?? subs.length;
+    document.getElementById('bodySubs').innerHTML = subs.length
+      ? subs.map(s => `<div class="sub-row"><span>${esc(s.host)}</span>${s.ip?`<span style="color:var(--sub);font-size:.75rem">${esc(s.ip)}</span>`:''}</div>`).join('')
+      : '<div class="placeholder">No subdomains found</div>';
+  } else {
+    document.getElementById('badgeSubs').textContent = d.target_type !== 'domain' ? 'n/a' : 'err';
+    document.getElementById('bodySubs').innerHTML = d.target_type !== 'domain'
+      ? '<div class="placeholder">Not applicable for username targets</div>'
+      : '<div class="placeholder">subfinder not available or no results</div>';
+  }
+
+  // WHOIS
+  const wh = intel.whois;
+  if (wh && wh.ok) {
+    document.getElementById('badgeWhois').textContent = '✓';
+    const rows = [
+      ['Registrar', wh.registrar],['Created', wh.created],['Expires', wh.expires],
+      ['Registrant', wh.registrant_org],['Status', (wh.status||[]).join(', ')],
+      ['Name Servers', (wh.name_servers||[]).join(', ')],
+    ].filter(([,v]) => v);
+    document.getElementById('bodyWhois').innerHTML = rows.length
+      ? `<div class="whois-grid">${rows.map(([k,v])=>`<span class="whois-key">${esc(k)}</span><span class="whois-val">${esc(String(v))}</span>`).join('')}</div>`
+      : '<div class="placeholder">No structured WHOIS data extracted</div>';
+  } else {
+    document.getElementById('badgeWhois').textContent = d.target_type !== 'domain' ? 'n/a' : 'err';
+    document.getElementById('bodyWhois').innerHTML = d.target_type !== 'domain'
+      ? '<div class="placeholder">Not applicable for username targets</div>'
+      : '<div class="placeholder">whois not available or no results</div>';
+  }
+}
+
+function showError(msg) {
+  ['Profiles','Typos','Subs','Whois'].forEach(p => {
+    document.getElementById('body'+p).innerHTML = `<div class="error-msg">Error: ${esc(msg)}</div>`;
+    document.getElementById('badge'+p).textContent = '!';
+  });
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function exportJSON() {
+  if (!lastResult) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(lastResult, null, 2)], {type:'application/json'}));
+  a.download = 'osint-worldview-' + (lastResult.target||'result') + '.json';
+  a.click();
+}
+
+document.getElementById('query').addEventListener('keydown', e => { if (e.key==='Enter') runScan(); });
+
+loadStatus();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+class _OsintRateLimiter:
+    """Sliding-window per-caller rate limit for heavy OSINT scans."""
+
+    def __init__(self, max_calls: int = 5, window_seconds: int = 60) -> None:
+        self._max = max_calls
+        self._window = window_seconds
+        self._history: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, caller: str) -> None:
+        now = time.time()
+        with self._lock:
+            ts = self._history.get(caller, [])
+            cutoff = now - self._window
+            ts = [t for t in ts if t > cutoff]
+            if len(ts) >= self._max:
+                retry_after = int(self._window - (now - ts[0]))
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Rate limit: {self._max} OSINT scans per {self._window}s. "
+                           f"Retry after {retry_after}s.",
+                )
+            ts.append(now)
+            self._history[caller] = ts
+
+
+_osint_rl = _OsintRateLimiter(max_calls=5, window_seconds=60)
+
+
 @app.get("/osint/status")
 def osint_status():
     return {"ok": True, "status": osint_tools.status()}
 
 
 @app.post("/osint/username")
-def osint_username(req: OsintUsernameRequest):
+def osint_username(request: Request, req: OsintUsernameRequest):
+    caller = request.client.host if request.client else "unknown"
+    _osint_rl.check(caller)
     result = osint_tools.username_lookup(
         req.username,
         timeout_seconds=req.timeout_seconds,
@@ -7140,7 +7414,9 @@ def osint_username(req: OsintUsernameRequest):
 
 
 @app.post("/osint/domain-typos")
-def osint_domain_typos(req: OsintDomainTyposRequest):
+def osint_domain_typos(request: Request, req: OsintDomainTyposRequest):
+    caller = request.client.host if request.client else "unknown"
+    _osint_rl.check(caller)
     result = osint_tools.domain_typo_scan(
         req.domain,
         timeout_seconds=req.timeout_seconds,
@@ -7148,6 +7424,95 @@ def osint_domain_typos(req: OsintDomainTyposRequest):
         registered_only=req.registered_only,
     )
     return result
+
+
+@app.post("/osint/subdomains")
+def osint_subdomains(req: OsintSubdomainRequest):
+    return osint_tools.subdomain_enum(
+        domain=req.domain,
+        timeout_seconds=req.timeout_seconds,
+        max_results=req.max_results,
+        passive_only=req.passive_only,
+    )
+
+
+@app.post("/osint/whois")
+def osint_whois(req: OsintWhoisRequest):
+    return osint_tools.whois_lookup(
+        domain=req.domain,
+        timeout_seconds=req.timeout_seconds,
+    )
+
+
+@app.post("/osint/worldview")
+def osint_worldview(req: OsintWorldviewRequest):
+    import concurrent.futures
+    import time as _time
+    target = req.target.strip()
+    timeout = req.timeout_seconds
+    max_r = req.max_results_per_tool
+    start = _time.time()
+
+    intelligence: dict = {}
+    tools_run: list[str] = []
+    tools_failed: list[str] = []
+
+    is_domain = "." in target and _normalize_domain_for_worldview(target)
+
+    def _run(fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    if is_domain:
+        sub_timeout = min(timeout, 30)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {}
+            if req.include_typos:
+                futures["typos"] = pool.submit(_run, osint_tools.domain_typo_scan, target, timeout, max_r, True)
+            futures["subdomains"] = pool.submit(_run, osint_tools.subdomain_enum, target, sub_timeout, max_r, True)
+            futures["whois"] = pool.submit(_run, osint_tools.whois_lookup, target, min(timeout, 15))
+
+            for name, fut in futures.items():
+                res = fut.result()
+                if res.get("ok"):
+                    intelligence[name] = res
+                    tools_run.append(name)
+                else:
+                    tools_failed.append(name)
+    else:
+        res = _run(osint_tools.username_lookup, target, timeout, 200, max_r)
+        if res.get("ok"):
+            intelligence["profiles"] = res
+            tools_run.append("username_lookup")
+        else:
+            tools_failed.append("username_lookup")
+
+    return {
+        "ok": True,
+        "target": target,
+        "target_type": "domain" if is_domain else "username",
+        "intelligence": intelligence,
+        "tools_run": tools_run,
+        "tools_failed": tools_failed,
+        "elapsed_seconds": round(_time.time() - start, 2),
+    }
+
+
+def _normalize_domain_for_worldview(value: str) -> str:
+    import osint_tools as _ot
+    return _ot._normalize_domain(value)
+
+
+@app.get("/osint/cache")
+def osint_cache_list():
+    return osint_tools.list_cache()
+
+
+@app.delete("/osint/cache")
+def osint_cache_clear(tool: str = "", target: str = ""):
+    return osint_tools.clear_cache(tool=tool or None, target=target or None)
 
 
 @app.get("/memory")

@@ -105,12 +105,14 @@ Two waves shipped this month. The second wave turned the agent team into a real 
 5. **Routines and Approval-Gated Lessons** — Cron-style routines run agents on a schedule (`/routines` CRUD, RBAC-protected). Agents can propose lessons learned, but nothing persists until a human approves it in the dashboard.
 6. **Context Minimalism** — Multi-task waves chain through a compact result index; downstream agents pull full upstream results only when they ask for them.
 
+7. **Local OSINT Intelligence Engine** — Four local tools (Maigret username scan, DNSTwist typosquatting, subfinder passive subdomain enumeration, system WHOIS) wired into Jarvis as first-class tools. All results cached in SQLite with per-tool TTL. Heavy scans rate-limited (5/60s per caller). A single `/osint/worldview` endpoint aggregates whois + subdomains in parallel (typos opt-in via `include_typos`). Full TypeScript service layer in WorldView (`enumSubdomains`, `whoisLookup`, `worldviewScan`) and Vercel edge proxy. 42 unit tests. WorldView `JarvisOsintPanel` renders scan results inline.
+
 Earlier in June:
 
-7. **14-Agent Specialized Team** — A named roster of purpose-built agents runs inside the task runtime. Each agent has a defined role: `backend_engineer`, `researcher`, `security_reviewer`, `automation_engineer`, `devops_release`, `frontend_designer`, `ux_researcher`, `qa_tester`, `ai_evaluator`, `ai_safety_agent`, `pipeline_monitor`, `output_quality_checker`, `career_agent`, `memory_librarian`. Dispatch any task to any agent via `POST /tasks`.
-8. **Three.js 3D Office World** — The `/dashboard` now renders a live Roblox-style 3D office in WebGL. Each agent appears as an R6 avatar character with named animations: idle breathing, walk cycle, typing at desk, gym lifting, done jump, failed droop, speaking gesture, waiting head-sway. The office is zoned by function (engineering, design, security, gym, meeting room) with isometric camera. Click an agent to inspect its state.
-9. **Single Unified Dashboard** — Two dashboards (`/` mobile HUD and `/dashboard` ops panel) are now one. The root `/` redirects to `/dashboard`, eliminating a 2038-line duplicate UI surface.
-10. **Fast-Path Contamination Fix** — Agent tasks were being silently intercepted by keyword fast-paths in `router.py` (task list, calendar routes) before ever reaching the LLM, producing garbage output in ~26ms. Fixed by dispatching agent tasks directly through `smart_stream` in `model_router.py` with an agent-specific system context.
+8. **14-Agent Specialized Team** — A named roster of purpose-built agents runs inside the task runtime. Each agent has a defined role: `backend_engineer`, `researcher`, `security_reviewer`, `automation_engineer`, `devops_release`, `frontend_designer`, `ux_researcher`, `qa_tester`, `ai_evaluator`, `ai_safety_agent`, `pipeline_monitor`, `output_quality_checker`, `career_agent`, `memory_librarian`. Dispatch any task to any agent via `POST /tasks`.
+9. **Three.js 3D Office World** — The `/dashboard` now renders a live Roblox-style 3D office in WebGL. Each agent appears as an R6 avatar character with named animations: idle breathing, walk cycle, typing at desk, gym lifting, done jump, failed droop, speaking gesture, waiting head-sway. The office is zoned by function (engineering, design, security, gym, meeting room) with isometric camera. Click an agent to inspect its state.
+10. **Single Unified Dashboard** — Two dashboards (`/` mobile HUD and `/dashboard` ops panel) are now one. The root `/` redirects to `/dashboard`, eliminating a 2038-line duplicate UI surface.
+11. **Fast-Path Contamination Fix** — Agent tasks were being silently intercepted by keyword fast-paths in `router.py` (task list, calendar routes) before ever reaching the LLM, producing garbage output in ~26ms. Fixed by dispatching agent tasks directly through `smart_stream` in `model_router.py` with an agent-specific system context.
 
 ## What's New (April 2026)
 
@@ -134,6 +136,7 @@ flowchart LR
     Router --> Agents["Parallel Agents\nCalendar / Tasks / Code"]
     Router --> Skills["Skills"]
     Router --> Tools["Tools + Connectors"]
+    Router --> OSINT["OSINT Engine\nWorldview · Username · Subdomains · WHOIS"]
     Router --> Models["Local Models\nsmart_stream direct"]
     Router --> Tasks["Managed Task Runtime\n14 Specialist Agents"]
     Tasks --> AgentTeam["backend · researcher · security\nautomation · devops · frontend\nux · qa · ai_eval · ai_safety\npipeline · quality · career · memory"]
@@ -355,6 +358,8 @@ Jarvis as of June 2026:
 
 **Agent runtime** — 14 specialist agents with a sandboxed multi-turn tool loop, isolated git worktrees for code tasks, transcript-grounded verification, and scheduled routines.
 
+**OSINT** — Local intelligence engine: username footprint (Maigret), typosquatting (DNSTwist), passive subdomain enumeration (subfinder), WHOIS. Aggregated worldview scan completes in ~10–30s. Rate-limited, SQLite-cached, integrated into WorldView frontend via Vercel edge proxy.
+
 **Voice** — Kokoro TTS with macOS `say` fallback. Faster-whisper STT (upgrade path: large-v3-turbo).
 
 **Memory** — 4-tier parallel: vault (Obsidian brain) + graph context + semantic TF-IDF/embed + mem0 episodic.
@@ -385,6 +390,7 @@ Jarvis as of June 2026:
 | Verification | Score agent output against the runtime tool transcript, detect fabricated execution, auto-retry |
 | Routines | Schedule agents on cron-style routines; approval-gated lessons for self-improvement |
 | 3D Office World | Live WebGL dashboard with R6 avatar agents, zone floors, animated states, click-to-inspect |
+| OSINT | Local intelligence engine: username footprint (Maigret), typosquatting (DNSTwist), subdomains (subfinder), WHOIS — rate-limited, SQLite-cached, aggregated via `/osint/worldview` |
 | Extensions | Expose discoverable skills, connectors, and plugins through API and CLI |
 
 ## Current Local Stack
@@ -565,9 +571,14 @@ Extensions:
 
 OSINT local endpoints:
 
-- `GET /osint/status`
-- `POST /osint/username`
-- `POST /osint/domain-typos`
+- `GET /osint/status` — tool availability (maigret, dnstwist, subfinder, whois)
+- `POST /osint/username` — username footprint scan via Maigret
+- `POST /osint/domain-typos` — typosquatting detection via DNSTwist
+- `POST /osint/subdomains` — passive subdomain enumeration via subfinder
+- `POST /osint/whois` — WHOIS registration lookup
+- `POST /osint/worldview` — aggregated domain/username scan (whois + subdomains in parallel; typos opt-in)
+- `GET /osint/cache` — inspect cached scan results
+- `DELETE /osint/cache` — clear cache by tool name
 
 Managed runtime:
 
@@ -668,8 +679,14 @@ Cloud/heavy candidates are intentionally not part of the default pull list: `dee
 ### 4. (Optional) Install local OSINT tools
 
 ```bash
+# Python tools (username scan + typosquatting)
 pip install maigret dnstwist
+
+# Subdomain enumeration (passive, no API key required)
+brew install subfinder
 ```
+
+All four tools (maigret, dnstwist, subfinder, whois) are discovered at runtime via `shutil.which` — Jarvis reports availability at `GET /osint/status`.
 
 ### 5. Run Jarvis
 
