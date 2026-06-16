@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 
-_CACHE_TTL: dict[str, int] = {"maigret": 3600, "dnstwist": 1800}
+_CACHE_TTL: dict[str, int] = {"maigret": 3600, "dnstwist": 1800, "subfinder": 1800, "whois": 3600}
 
 
 class _ScanCache:
@@ -111,14 +111,15 @@ def _normalize_domain(value: str) -> str:
 
 
 def _run_command(argv: list[str], timeout_seconds: int) -> tuple[int, str, str]:
-    proc = subprocess.run(
-        argv,
-        capture_output=True,
-        text=True,
-        timeout=max(5, min(300, int(timeout_seconds))),
-        check=False,
-    )
-    return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    safe_timeout = max(5, min(300, int(timeout_seconds)))
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=safe_timeout)
+        return proc.returncode, (stdout or "").strip(), (stderr or "").strip()
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        raise
 
 
 def _try_parse_json(text: str) -> dict | list | None:
@@ -447,6 +448,17 @@ def subdomain_enum(
             "message": "Domain must be a valid hostname, e.g. example.com.",
         }
 
+    cached = _cache.get("subfinder", normalized)
+    if cached:
+        return {
+            "ok": True,
+            "provider": "subfinder",
+            "domain": normalized,
+            "subdomains": cached["subdomains"],
+            "count": cached["count"],
+            "cache_hit": True,
+        }
+
     cmd = shutil.which("subfinder")
     if not cmd:
         return {
@@ -486,11 +498,13 @@ def subdomain_enum(
             if line.strip():
                 subdomains.append({"host": line.strip(), "source": "", "ip": ""})
 
+    clipped = subdomains[: max(1, min(1000, int(max_results)))]
+    _cache.put("subfinder", normalized, {"subdomains": clipped, "count": len(subdomains)})
     return {
         "ok": True,
         "provider": "subfinder",
         "domain": normalized,
-        "subdomains": subdomains[: max(1, min(1000, int(max_results)))],
+        "subdomains": clipped,
         "count": len(subdomains),
         "command": " ".join(argv),
     }
@@ -504,6 +518,10 @@ def whois_lookup(domain: str, timeout_seconds: int = 15) -> dict:
             "error": "invalid_domain",
             "message": "Domain must be a valid hostname, e.g. example.com.",
         }
+
+    cached = _cache.get("whois", normalized)
+    if cached:
+        return {**cached, "cache_hit": True}
 
     cmd = shutil.which("whois")
     if not cmd:
@@ -534,7 +552,7 @@ def whois_lookup(domain: str, timeout_seconds: int = 15) -> dict:
     def _extract_all(pattern: str) -> list[str]:
         return [m.strip() for m in re.findall(pattern, stdout, re.IGNORECASE)]
 
-    return {
+    result = {
         "ok": True,
         "provider": "whois",
         "domain": normalized,
@@ -546,6 +564,8 @@ def whois_lookup(domain: str, timeout_seconds: int = 15) -> dict:
         "registrant_org": _extract(r"Registrant Organization:\s*(.+)"),
         "raw_truncated": stdout[:800],
     }
+    _cache.put("whois", normalized, result)
+    return result
 
 
 def clear_cache(tool: str | None = None, target: str | None = None) -> dict:
