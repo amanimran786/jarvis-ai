@@ -7427,7 +7427,9 @@ def osint_domain_typos(request: Request, req: OsintDomainTyposRequest):
 
 
 @app.post("/osint/subdomains")
-def osint_subdomains(req: OsintSubdomainRequest):
+def osint_subdomains(request: Request, req: OsintSubdomainRequest):
+    caller = request.client.host if request.client else "unknown"
+    _osint_rl.check(caller)
     return osint_tools.subdomain_enum(
         domain=req.domain,
         timeout_seconds=req.timeout_seconds,
@@ -7437,7 +7439,9 @@ def osint_subdomains(req: OsintSubdomainRequest):
 
 
 @app.post("/osint/whois")
-def osint_whois(req: OsintWhoisRequest):
+def osint_whois(request: Request, req: OsintWhoisRequest):
+    caller = request.client.host if request.client else "unknown"
+    _osint_rl.check(caller)
     return osint_tools.whois_lookup(
         domain=req.domain,
         timeout_seconds=req.timeout_seconds,

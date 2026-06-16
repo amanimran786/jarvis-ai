@@ -123,6 +123,16 @@ class OsintDomainTypoScanTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class OsintSubdomainEnumTests(unittest.TestCase):
+    def setUp(self):
+        self._get_patcher = patch.object(osint_tools._cache, "get", return_value=None)
+        self._put_patcher = patch.object(osint_tools._cache, "put")
+        self._get_patcher.start()
+        self._put_patcher.start()
+
+    def tearDown(self):
+        self._get_patcher.stop()
+        self._put_patcher.stop()
+
     def test_rejects_invalid_domain(self):
         result = osint_tools.subdomain_enum("not a domain")
         self.assertFalse(result["ok"])
@@ -203,6 +213,18 @@ class OsintSubdomainEnumTests(unittest.TestCase):
         self.assertEqual(result["count"], 20)
         self.assertEqual(len(result["subdomains"]), 5)
 
+    def test_returns_cache_hit(self):
+        with tempfile.TemporaryDirectory() as td:
+            cache = _make_isolated_cache(Path(td))
+            subdomains = [{"host": "api.example.com", "source": "certspotter", "ip": ""}]
+            cache.put("subfinder", "example.com", {"subdomains": subdomains, "count": 1})
+            with patch.object(osint_tools, "_cache", cache):
+                result = osint_tools.subdomain_enum("example.com")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["cache_hit"])
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["subdomains"][0]["host"], "api.example.com")
+
 
 # ---------------------------------------------------------------------------
 # WHOIS lookup
@@ -222,6 +244,16 @@ Registrant Organization: Google LLC
 
 
 class OsintWhoisLookupTests(unittest.TestCase):
+    def setUp(self):
+        self._get_patcher = patch.object(osint_tools._cache, "get", return_value=None)
+        self._put_patcher = patch.object(osint_tools._cache, "put")
+        self._get_patcher.start()
+        self._put_patcher.start()
+
+    def tearDown(self):
+        self._get_patcher.stop()
+        self._put_patcher.stop()
+
     def test_rejects_invalid_domain(self):
         result = osint_tools.whois_lookup("not a domain!")
         self.assertFalse(result["ok"])
@@ -287,6 +319,22 @@ class OsintWhoisLookupTests(unittest.TestCase):
             osint_tools.whois_lookup("www.google.com")
         argv = mock_run.call_args[0][0]
         self.assertEqual(argv[-1], "google.com")
+
+    def test_returns_cache_hit(self):
+        cached = {
+            "ok": True, "provider": "whois", "domain": "google.com",
+            "registrar": "MarkMonitor Inc.", "created": "1997-09-15T04:00:00Z",
+            "expires": "2028-09-14T04:00:00Z", "name_servers": ["NS1.GOOGLE.COM"],
+            "status": [], "registrant_org": "Google LLC", "raw_truncated": "...",
+        }
+        with tempfile.TemporaryDirectory() as td:
+            cache = _make_isolated_cache(Path(td))
+            cache.put("whois", "google.com", cached)
+            with patch.object(osint_tools, "_cache", cache):
+                result = osint_tools.whois_lookup("google.com")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["cache_hit"])
+        self.assertEqual(result["registrar"], "MarkMonitor Inc.")
 
 
 # ---------------------------------------------------------------------------
