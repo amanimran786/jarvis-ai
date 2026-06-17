@@ -10,6 +10,33 @@ values and not to MagicMock objects.
 import os
 import sys
 
+# ── CI stubs — pre-stub macOS-only and hardware packages before any import ────
+# GitHub Actions always sets CI=true. These are all mocked in individual tests;
+# stubbing them here prevents collection-time ImportError on Linux runners.
+if os.getenv("CI"):
+    from unittest.mock import MagicMock as _MM
+
+    _CI_STUBS = [
+        # macOS Objective-C bridge
+        "objc", "PyObjCTools", "PyObjCTools.AppHelper",
+        "AppKit", "Foundation", "Quartz",
+        "Cocoa", "CoreFoundation", "CoreServices",
+        # macOS-only GUI
+        "PyQt6", "PyQt6.QtWidgets", "PyQt6.QtCore", "PyQt6.QtGui",
+        "PyQt6.QtMultimedia", "PyQt6.QtSvg",
+        # Audio hardware (PortAudio-backed)
+        "sounddevice", "pyaudio",
+        # Local ML models (large, not installed in CI)
+        "kokoro_onnx", "kokoro", "faster_whisper",
+        # Optional vision
+        "cv2",
+        # Optional TTS engine
+        "pyttsx3",
+    ]
+    for _s in _CI_STUBS:
+        if _s not in sys.modules:
+            sys.modules[_s] = _MM()
+
 # Unit tests must never make real verifier LLM calls. Background task threads
 # run _auto_verify after _complete_task; without this, tests with a mocked
 # smart_stream still leak real GPT_MINI calls (and pollute the verdict log).

@@ -469,7 +469,7 @@ def handle_capture(user_input: str) -> str | None:
             return None
         result = update_projects(update)
         if result.get("ok"):
-            return f"Project update logged to vault."
+            return "Project update logged to vault."
         return f"Couldn't log project update: {result.get('error', 'unknown error')}"
 
     # ── append to explicit wikilink note ─────────────────────────────────────

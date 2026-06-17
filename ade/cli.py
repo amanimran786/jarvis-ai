@@ -128,7 +128,7 @@ def cmd_start(task_name: str, prompt: str) -> None:
 
     print(f"[ade] Session '{session_name}' started.")
     print(f"[ade] Attach:  ade watch {task_name}")
-    print(f"[ade] Status:  ade list")
+    print("[ade] Status:  ade list")
 
 
 def _cpu_for_pid(pid: int | None) -> str:
@@ -210,7 +210,7 @@ def cmd_sync(task_name: str) -> None:
     if commit_result.returncode not in (0, 1):  # 1 = nothing to commit
         print(f"[ade] Commit: {commit_result.stdout.strip() or commit_result.stderr.strip()}")
     else:
-        print(f"[ade] Committed.")
+        print("[ade] Committed.")
 
     # 2. Fetch latest main
     print("[ade] Fetching origin…")
@@ -240,7 +240,7 @@ def cmd_sync(task_name: str) -> None:
         print(f"[ade] Merged {branch} → {current_branch}.")
         st.set_status(repo_root, slug, st.DONE)
     else:
-        print(f"[ade] Merge conflict — resolve manually then run 'git merge --continue'.")
+        print("[ade] Merge conflict — resolve manually then run 'git merge --continue'.")
         print(merge_result.stdout[-1000:])
         print(merge_result.stderr[-500:])
         notify.send(

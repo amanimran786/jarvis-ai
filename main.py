@@ -262,7 +262,7 @@ def _run_headless():
             return True
         if lower.startswith("forget "):
             keyword = user_input[7:].strip()
-            speak(f"Forgotten." if mem.forget(keyword) else f"Nothing saved about {keyword}.")
+            speak("Forgotten." if mem.forget(keyword) else f"Nothing saved about {keyword}.")
             return True
         if any(p in lower for p in ("give me a briefing", "catch me up", "what did i miss")):
             run_briefing(mem.list_facts())

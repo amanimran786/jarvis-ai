@@ -329,7 +329,7 @@ def audit_records(records: list[dict]) -> list[Finding]:
                 and aid in verifiable):
             findings.append(Finding(
                 "SILENT_PASS_NO_EVIDENCE", WARNING, tid, aid,
-                f"verifiable agent passed with zero tool calls and no inherited evidence",
+                "verifiable agent passed with zero tool calls and no inherited evidence",
             ))
 
         # I4 — claimed-evidence without captured transcript (enrichment only):

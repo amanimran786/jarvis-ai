@@ -2040,7 +2040,7 @@ class MessageBubble(QFrame):
             layout.setAlignment(Qt.AlignmentFlag.AlignRight)
             self.setStyleSheet("background: transparent;")
         else:
-            msg.setStyleSheet(f"""
+            msg.setStyleSheet("""
                 color: #D8F6FF;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0, 212, 255, 0.08), stop:1 rgba(0, 212, 255, 0.02));
                 border: 1px solid rgba(0, 212, 255, 0.25);

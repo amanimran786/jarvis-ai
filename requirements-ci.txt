@@ -1,0 +1,28 @@
+# CI requirements — cross-platform subset of requirements.txt.
+# Excludes: pyobjc (macOS only), PyQt6 (mocked), pyaudio/sounddevice (mocked),
+#           kokoro-onnx/faster-whisper (mocked), opencv-python (mocked).
+openai
+google-genai
+anthropic
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+elevenlabs
+pyserial
+SpeechRecognition
+ddgs
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+ollama
+pypdf
+rich
+prompt_toolkit
+cryptography
+mem0ai>=2.0,<3
+qdrant-client>=1.17,<2
+redis[hiredis]>=5,<7
+pytest
+pytest-asyncio
+ruff

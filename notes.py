@@ -24,7 +24,7 @@ def add_note(content: str) -> str:
     notes = _load()
     notes.append({"id": len(notes) + 1, "date": str(datetime.now().strftime("%Y-%m-%d %H:%M")), "content": content})
     _save(notes)
-    return f"Note saved."
+    return "Note saved."
 
 
 def get_notes(n: int = 5) -> str:
