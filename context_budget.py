@@ -41,23 +41,19 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(cleaned) // 4) if cleaned else 0
 
 
-def target_tokens_for(tool: str | None = None, *, default: int | None = None) -> int:
-    """Return the prompt target for the request lane.
-
-    This is intentionally conservative. The model may support a larger context,
-    but keeping a smaller active working set preserves latency and KV-cache reuse.
-    """
+def _env_int(name: str, minimum: int = 2048) -> int | None:
     import os
 
-    raw = os.getenv("JARVIS_CONTEXT_TARGET_TOKENS")
-    if raw:
-        try:
-            return max(2048, int(raw))
-        except ValueError:
-            pass
-    lane = (tool or "chat").strip().lower()
-    if default:
-        return default
+    raw = os.getenv(name)
+    if not raw:
+        return None
+    try:
+        return max(minimum, int(raw))
+    except ValueError:
+        return None
+
+
+def _base_target_for_lane(lane: str) -> int:
     if lane in {"code", "terminal", "shell"}:
         return 32_000
     if lane in {"research", "browser", "vault"}:
@@ -65,6 +61,44 @@ def target_tokens_for(tool: str | None = None, *, default: int | None = None) ->
     if lane in {"task", "agent"}:
         return 16_000
     return 12_000
+
+
+def target_tokens_for(
+    tool: str | None = None,
+    *,
+    default: int | None = None,
+    model: str | None = None,
+    local: bool | None = None,
+) -> int:
+    """Return the prompt target for the request lane.
+
+    This is intentionally conservative. The model may support a larger context,
+    but keeping a smaller active working set preserves latency and KV-cache reuse.
+    """
+    global_override = _env_int("JARVIS_CONTEXT_TARGET_TOKENS")
+    if global_override:
+        return global_override
+    lane = (tool or "chat").strip().lower()
+    if default:
+        return default
+    base = _base_target_for_lane(lane)
+
+    # Long-context local models should actually get to use their window.
+    # Keep cloud prompts conservative unless the operator explicitly overrides
+    # JARVIS_CONTEXT_TARGET_TOKENS above.
+    if local is False or not model:
+        return base
+    local_override = _env_int("JARVIS_LOCAL_CONTEXT_TARGET_TOKENS")
+    if local_override:
+        return max(base, local_override)
+    lower = model.lower()
+    if "glm" in lower:
+        return max(base, _env_int("JARVIS_GLM_CONTEXT_TARGET_TOKENS") or 48_000)
+    if "qwen3-coder" in lower or "qwen3.6" in lower:
+        return max(base, _env_int("JARVIS_QWEN_LONG_CONTEXT_TARGET_TOKENS") or 64_000)
+    if "qwen3" in lower:
+        return max(base, 24_000)
+    return base
 
 
 def _trim_chars(text: str, max_chars: int | None) -> str:

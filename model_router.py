@@ -67,6 +67,7 @@ import provider_router
 import telemetry
 import jarvis_core_brain as _core_brain
 import mem0_layer as _m0
+import repeat_context as _repeat_context
 
 _forced_model = ""
 _forced_provider = ""
@@ -950,10 +951,28 @@ def smart_stream(
                 system_extra = coding_grounding + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
+
+    local_available = _has_local()
+    local_model = _best_local(user_input) if local_available else ""
+    forced = forced_model_status()
+    context_model = ""
+    context_is_local = False
+    if forced.get("active") and forced.get("provider") == "ollama":
+        context_model = forced.get("model") or ""
+        context_is_local = True
+    elif mode != "cloud" and local_available:
+        context_model = local_model
+        context_is_local = True
+
     # ── Parallel context assembly ──────────────────────────────────────────────
     # vault, graph, and semantic memory are all read-only and independent.
     # Running them concurrently cuts wall time from sum → max of the three.
     from concurrent.futures import ThreadPoolExecutor
+
+    def _get_repeat():
+        if runtime_voice_query:
+            return ""
+        return _repeat_context.context_for_prompt(user_input, max_chars=1400)
 
     def _get_vault():
         if runtime_voice_query:
@@ -976,7 +995,7 @@ def smart_stream(
         hits = _m0.search(user_input, top_k=5)
         return _m0.format_for_prompt(hits, max_chars=600)
 
-    vault_extra = graph_extra = smem_ctx = mem0_extra = ""
+    repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = ""
     smem_hits: list[dict] = []
     if not skip_dynamic_context:
         # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins
@@ -984,12 +1003,17 @@ def smart_stream(
         # socket timeout would block this request forever despite the result()
         # timeouts below (live incident 2026-06-10: agent task stuck in
         # "streaming" for 50+ min behind a hung embedding request).
-        _pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="ctx")
+        _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="ctx")
         try:
+            _fr = _pool.submit(_get_repeat)
             _fv = _pool.submit(_get_vault)
             _fg = _pool.submit(_get_graph)
             _fs = _pool.submit(_get_smem)
             _fm = _pool.submit(_get_mem0)
+            try:
+                repeat_extra = _fr.result(timeout=2.0) or ""
+            except Exception:
+                pass
             try:
                 vault_extra = _fv.result(timeout=2.0) or ""
             except Exception:
@@ -1012,6 +1036,7 @@ def smart_stream(
     semantic_hint = _semantic_memory_hint(smem_hits)
     compiled_context = _context_budget.compile_context_blocks(
         [
+            {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
             {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
             {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
             {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
@@ -1021,7 +1046,11 @@ def smart_stream(
         ],
         base_text=system_extra,
         user_input=user_input,
-        target_tokens=_context_budget.target_tokens_for(tool),
+        target_tokens=_context_budget.target_tokens_for(
+            tool,
+            model=context_model,
+            local=context_is_local,
+        ),
     )
     if compiled_context["text"]:
         system_extra = system_extra + ("\n\n" if system_extra else "") + compiled_context["text"]
@@ -1049,10 +1078,6 @@ def smart_stream(
 
         return _stream()
 
-    local_available = _has_local()
-    local_model = _best_local(user_input) if local_available else ""
-
-    forced = forced_model_status()
     if forced.get("active"):
         candidate = provider_router.RouteCandidate(
             provider=forced["provider"],

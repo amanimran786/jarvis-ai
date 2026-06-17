@@ -4793,7 +4793,11 @@ class GraphContextTests(unittest.TestCase):
         previous = model_router.get_mode()
         try:
             model_router.set_mode("auto")
-            with patch("model_router.ask_stream", side_effect=broken_stream), \
+            # Force no local models so LOCAL_STRICT_FIRST doesn't redirect the plan
+            # to a local candidate — this test verifies the cloud fallback chain only.
+            with patch("model_router._has_local", return_value=False), \
+                 patch("model_router._best_local", return_value=""), \
+                 patch("model_router.ask_stream", side_effect=broken_stream), \
                  patch("model_router.ask_gemini_stream", return_value=iter(["Fallback answer from Gemini."])):
                 stream, label = model_router.smart_stream(
                     "Compare optimistic locking and pessimistic locking and tell me when each one is the better choice.",

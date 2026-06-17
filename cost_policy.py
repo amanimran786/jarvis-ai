@@ -15,6 +15,7 @@ from collections import Counter
 
 import evals
 import usage_tracker
+from config import LOCAL_STRICT_FIRST
 
 
 DAILY_CLOUD_SOFT_BUDGET_USD = 0.50
@@ -112,6 +113,12 @@ def route_decision(user_input: str, base_tier: str, tool: str | None = "chat", l
     hard_reasoning = any(marker in lower for marker in HARD_REASONING_MARKERS)
 
     if base_tier in {"opus", "sonnet"}:
+        if local_available and LOCAL_STRICT_FIRST and not high_stakes:
+            return {
+                "tier": base_tier,
+                "provider": "local",
+                "reason": "Strict local-first is active, so high-complexity work should try the long-context local model before cloud.",
+            }
         return {"tier": base_tier, "provider": "cloud", "reason": "This request is in the high-complexity tier and should stay on cloud."}
 
     if not local_available:
