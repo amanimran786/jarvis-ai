@@ -47,7 +47,7 @@ from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 log = logging.getLogger("api")
 from pydantic import BaseModel, Field
 
-from router import route_stream, record_turn as _record_turn
+from router import route_stream as _route_stream_raw, record_turn as _record_turn
 import memory as mem
 import model_router
 import hardware as hw
@@ -80,6 +80,22 @@ import task_persistence
 import semantic_memory
 import graph_context as gctx
 import osint_tools
+import skill_monitor as _skill_monitor
+
+
+def route_stream(user_input: str) -> tuple:
+    """Thin wrapper that records every route_stream call to skill_monitor."""
+    _t0 = time.monotonic()
+    try:
+        result = _route_stream_raw(user_input)
+        skill = result[1] if isinstance(result, tuple) and len(result) > 1 else "chat"
+        _skill_monitor.record_call(skill, success=True, latency_ms=(time.monotonic() - _t0) * 1000)
+        return result
+    except Exception as exc:
+        _skill_monitor.record_call("route_error", success=False,
+                                   latency_ms=(time.monotonic() - _t0) * 1000,
+                                   error=str(exc)[:200])
+        raise
 
 
 def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
@@ -7640,6 +7656,31 @@ def get_health():
         "degraded": _jh.degraded(),
         "summary": _jh.health_summary(force=False),
     }
+
+
+@app.get("/monitor")
+def get_monitor(force: bool = False):
+    """Unified monitoring report: health + skill usage + integration inventory + agent roster."""
+    return _skill_monitor.get_report(force=force)
+
+
+@app.get("/monitor/stats")
+def get_monitor_stats():
+    """Per-skill invocation counters, success/failure rates, and latency."""
+    return _skill_monitor.get_stats()
+
+
+@app.get("/monitor/integrations")
+def get_monitor_integrations(force: bool = False):
+    """Availability check for all 3rd-party integrations and local tools."""
+    return _skill_monitor.integration_status(force=force)
+
+
+@app.get("/monitor/log")
+def get_monitor_log(n: int = 50):
+    """Recent invocation log (last n entries)."""
+    n = max(1, min(200, n))
+    return {"entries": _skill_monitor.get_recent_log(n)}
 
 
 @app.post("/execute")
