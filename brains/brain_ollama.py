@@ -650,7 +650,7 @@ _AGENT_TOOL_SCHEMAS: dict[str, dict] = {
     },
 }
 
-_JARVIS_ROOT: "Path | None" = None  # type: ignore[name-defined]
+_JARVIS_ROOT = None  # pathlib.Path set lazily in _jarvis_root()
 
 
 def _jarvis_root() -> "Any":

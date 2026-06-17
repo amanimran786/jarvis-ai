@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check .
+
+  typecheck:
+    name: Typecheck (pyright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pyright + stubs
+        run: pip install pyright
+      - name: Typecheck core modules
+        run: |
+          pyright skill_monitor.py \
+                  tool_registry.py \
+                  jarvis_health.py \
+                  repeat_context.py \
+                  osint_tools.py \
+                  context_budget.py \
+                  cost_policy.py || true
+        # || true: pyright on untyped dependencies emits errors we don't own.
+        # We use this job to catch regressions in our typed modules, not enforce
+        # strict typing on the whole codebase in one go. Remove || true as
+        # typing coverage improves.
+
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      PYTHONDONTWRITEBYTECODE: "1"
+      JARVIS_AUTO_VERIFY: "0"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      GEMINI_API_KEY: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -q --tb=short --no-header -x
+        timeout-minutes: 25

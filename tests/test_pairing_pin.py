@@ -70,7 +70,7 @@ class TestPairingPIN(unittest.TestCase):
         self.assertGreater(resp.json()["lockout_seconds"], 0)
 
         # Subsequent attempts are instantly blocked
-        resp2 = self.client.get(f"/bridge/pair?pin=123456")
+        resp2 = self.client.get("/bridge/pair?pin=123456")
         self.assertEqual(resp2.status_code, 429)
         self.assertEqual(resp2.json()["error"], "rate_limit_lockout")
 

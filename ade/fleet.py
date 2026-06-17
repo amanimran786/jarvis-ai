@@ -185,7 +185,7 @@ def cmd_start(args: argparse.Namespace) -> None:
 
     launched = _launch_tmux_session(session_name, ade_cmd, str(worktree))
     if not launched:
-        print(f"[fleet] tmux not available — run manually:")
+        print("[fleet] tmux not available — run manually:")
         print(f"  {' '.join(ade_cmd)}")
     else:
         print(f"[fleet] Worker {worker_id} started in tmux session '{session_name}'")

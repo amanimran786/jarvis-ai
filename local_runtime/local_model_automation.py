@@ -231,5 +231,5 @@ def result_text(result: dict) -> str:
     if result.get("promotion", {}).get("ok"):
         text += f" I promoted {result['promotion']['preferred_model']} as the preferred local model."
     elif result.get("cleanup", {}).get("ok"):
-        text += f" The failed candidate was removed after evaluation."
+        text += " The failed candidate was removed after evaluation."
     return text

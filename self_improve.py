@@ -402,7 +402,7 @@ def review_text(review: dict) -> str:
     else:
         parts.append("I do not yet have enough repeated evidence to justify editing code automatically.")
     if review.get("recent_crashes"):
-        parts.append(f"I also have recent crash evidence in the local crash log, which means runtime stability is part of the review context.")
+        parts.append("I also have recent crash evidence in the local crash log, which means runtime stability is part of the review context.")
     return " ".join(parts)
 
 

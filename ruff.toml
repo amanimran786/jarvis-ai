@@ -1,0 +1,31 @@
+# Ruff configuration for Jarvis AI.
+# Focused on correctness and security, not style enforcement.
+# Extend to stricter rules as coverage improves.
+
+line-length = 120
+
+exclude = [
+    ".git",
+    "venv",
+    "build",
+    "dist",
+    "__pycache__",
+    "*.egg-info",
+]
+
+[lint]
+# E9xx  — syntax errors (always critical)
+# F821  — undefined names
+# F811  — redefined-while-unused (real collision, not intentional shadow)
+# F541  — f-string without placeholders (copy-paste bug)
+# W191  — tabs instead of spaces
+select = ["E9", "F821", "F811", "F541", "W191"]
+
+# Ignore rules that are too noisy or common patterns in this codebase:
+# F401: unused-import — many conditional/re-export imports are intentional
+# F841: unused-variable — common in exception handlers and exploratory code
+ignore = ["F401", "F841"]
+
+[lint.per-file-ignores]
+# Test files may shadow real modules intentionally
+"tests/*" = ["F811"]
