@@ -9,6 +9,16 @@ from brains import brain_ollama
 
 
 class ContextBudgetCompilerTests(unittest.TestCase):
+    def test_target_tokens_uses_long_context_local_glm_without_cloud_expansion(self):
+        self.assertEqual(
+            context_budget.target_tokens_for("chat", model="glm-4.7-flash", local=True),
+            48_000,
+        )
+        self.assertEqual(
+            context_budget.target_tokens_for("chat", model="gpt-4o", local=False),
+            12_000,
+        )
+
     def test_compile_context_blocks_drops_low_priority_when_budget_is_tight(self):
         result = context_budget.compile_context_blocks(
             [
@@ -47,6 +57,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
              patch.object(model_router._smem, "format_for_prompt", return_value="SEMANTIC_CONTEXT"), \
              patch.object(model_router._m0, "search", return_value=[]), \
              patch.object(model_router._m0, "format_for_prompt", return_value="MEM0_CONTEXT"), \
+             patch.object(model_router._repeat_context, "context_for_prompt", return_value="REPEAT_CONTEXT"), \
              patch.object(model_router.vault, "build_context", return_value="VAULT_CONTEXT"), \
              patch.object(model_router._gctx, "context_for_query", return_value="GRAPH_CONTEXT"), \
              patch.object(model_router._context_budget, "compile_context_blocks", side_effect=fake_compile), \
@@ -59,14 +70,50 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
             stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
             self.assertEqual("".join(stream), "ok")
 
-        self.assertEqual([b["label"] for b in captured["blocks"]], [
-            "vault", "graph", "semantic_hint", "semantic_memory", "mem0",
-        ])
+        self.assertEqual(
+            [b["label"] for b in captured["blocks"]],
+            ["repeat_context", "vault", "graph", "semantic_hint", "semantic_memory", "mem0"],
+        )
         self.assertIn("SELECTED_CONTEXT", ask_local.call_args.kwargs["system_extra"])
         self.assertEqual(
             ask_local.call_args.kwargs["context_budget_report"]["text"],
             "SELECTED_CONTEXT",
         )
+
+    def test_dynamic_context_uses_selected_local_model_budget(self):
+        captured = {}
+
+        def fake_compile(blocks, **kwargs):
+            captured["kwargs"] = kwargs
+            return {
+                "text": "",
+                "target_tokens": kwargs["target_tokens"],
+                "base_tokens": 1,
+                "reserve_response_tokens": 1024,
+                "context_budget_tokens": 100,
+                "context_used_tokens": 0,
+                "selected": [],
+                "dropped": [],
+            }
+
+        with patch.object(model_router._smem, "retrieve", return_value=[]), \
+             patch.object(model_router._smem, "format_for_prompt", return_value=""), \
+             patch.object(model_router._m0, "search", return_value=[]), \
+             patch.object(model_router._m0, "format_for_prompt", return_value=""), \
+             patch.object(model_router._repeat_context, "context_for_prompt", return_value=""), \
+             patch.object(model_router.vault, "build_context", return_value=""), \
+             patch.object(model_router._gctx, "context_for_query", return_value=""), \
+             patch.object(model_router._context_budget, "compile_context_blocks", side_effect=fake_compile), \
+             patch.object(model_router, "_current_mode", "open-source"), \
+             patch.object(model_router, "_is_mobile_web_active", return_value=False), \
+             patch.object(model_router, "forced_model_status", return_value={"active": False}), \
+             patch.object(model_router, "_has_local", return_value=True), \
+             patch.object(model_router, "_best_local", return_value="glm-4.7-flash"), \
+             patch.object(model_router, "ask_local_stream", return_value=iter(["ok"])):
+            stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
+            self.assertEqual("".join(stream), "ok")
+
+        self.assertEqual(captured["kwargs"]["target_tokens"], 48_000)
 
 
 class OllamaPromptFitTests(unittest.TestCase):
@@ -133,7 +180,7 @@ class OllamaPromptFitTests(unittest.TestCase):
         with patch.object(brain_ollama, "_client", return_value=FakeClient()), \
              patch.object(brain_ollama, "get_best_available", side_effect=lambda model: model), \
              patch.object(brain_ollama, "_fits_local", side_effect=lambda prompt, model: model), \
-             patch.object(brain_ollama.context_budget, "target_tokens_for", return_value=1100), \
+             patch.object(brain_ollama.context_budget, "target_tokens_for", return_value=1100) as target_for, \
              patch.object(brain_ollama.mem, "get_context", return_value=""), \
              patch.object(brain_ollama.ctx, "begin_turn", return_value=None), \
              patch.object(brain_ollama.ctx, "end_turn", return_value=None), \
@@ -149,6 +196,7 @@ class OllamaPromptFitTests(unittest.TestCase):
         sent_text = brain_ollama._messages_text(captured["chat_kwargs"]["messages"])
         self.assertNotIn("OLD_CONTEXT_MARKER", sent_text)
         self.assertIn("CURRENT_REQUEST_MARKER", sent_text)
+        target_for.assert_called_once_with("chat", model="glm-4.7-flash", local=True)
         conversation_budget = recorded["kwargs"]["metadata"]["conversation_budget"]
         self.assertGreaterEqual(conversation_budget["dropped_message_count"], 1)
         self.assertGreater(conversation_budget["dropped_message_tokens"], 0)

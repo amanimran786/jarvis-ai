@@ -751,11 +751,14 @@ def _task_requires_approval(prompt: str, *, kind: str = "", source: str = "", ag
         confidence = _estimate_task_confidence(prompt, kind=kind, source=source, agent_id=agent_id, meta=meta)
         return True, str(meta.get("approval_reason") or "explicit request"), confidence
     confidence = _estimate_task_confidence(prompt, kind=kind, source=source, agent_id=agent_id, meta=meta)
-    # Internally-generated orchestrator tasks (source="project") with an explicit
-    # confidence score bypass the content-marker scan — the prompt contains prior
-    # agent outputs which may include destructive-sounding words (install, remove)
-    # that are analysis findings, not commands being issued.
-    skip_content_scan = (source == "project" and meta.get("confidence_score") is not None)
+    # Internally-generated orchestrator tasks (source="project" or "retry" of a
+    # project task) with an explicit confidence score bypass the content-marker
+    # scan — the prompt contains prior agent outputs which may include
+    # destructive-sounding words (install, remove) that are analysis findings,
+    # not commands being issued.
+    skip_content_scan = (
+        source in ("project", "retry") and meta.get("confidence_score") is not None
+    )
     if not skip_content_scan:
         reason = _approval_reason_for_task(prompt, kind=kind, source=source)
         if reason:

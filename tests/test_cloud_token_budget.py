@@ -2,7 +2,8 @@
 
 When set to a positive integer and the last hour's cloud token usage meets it,
 auto-mode routing degrades to local instead of bursting into provider rate
-limits. Unset (the default) must change NOTHING — freeze requirement.
+limits. Strict local-first may already keep non-high-stakes work local before
+the cloud budget guard is needed.
 """
 
 import sys
@@ -56,7 +57,7 @@ class BudgetHelperTests(unittest.TestCase):
 
 
 class BudgetRoutingTests(unittest.TestCase):
-    def _plan_for(self, env: dict):
+    def _plan_for(self, env: dict, prompt: str = AGENT_PROMPT):
         captured = {}
         real_build_plan = provider_router.build_plan
 
@@ -73,20 +74,33 @@ class BudgetRoutingTests(unittest.TestCase):
              patch.object(model_router, "_best_local", return_value="jarvis-local"), \
              patch.object(model_router.provider_router, "build_plan", spy_build_plan):
             # Lazy stream — never iterated, no model call happens.
-            model_router.smart_stream(AGENT_PROMPT, tool="chat")
+            model_router.smart_stream(prompt, tool="chat")
         return captured
 
-    def test_exhausted_budget_degrades_cloud_route_to_local(self):
-        kwargs = self._plan_for({"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"})
+    def test_strict_local_first_keeps_non_high_stakes_agent_work_local(self):
+        kwargs = self._plan_for({})
+        self.assertEqual(kwargs["tier"], "sonnet")
+        self.assertFalse(kwargs["explicit_cloud"])
+        plan = provider_router.build_plan(**kwargs)
+        self.assertTrue(plan.candidates[0].local)
+
+    def test_exhausted_budget_degrades_explicit_cloud_route_to_local(self):
+        kwargs = self._plan_for(
+            {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"},
+            prompt="I have a production security vulnerability. Give me a comprehensive incident plan.",
+        )
         self.assertEqual(kwargs["tier"], "local")
         self.assertFalse(kwargs["explicit_cloud"])
         plan = provider_router.build_plan(**kwargs)
         self.assertTrue(plan.candidates[0].local)
 
-    def test_flag_unset_keeps_cloud_route_unchanged(self):
+    def test_flag_unset_keeps_high_stakes_cloud_route_unchanged(self):
         import os
         os.environ.pop("JARVIS_CLOUD_TOKENS_PER_HOUR", None)
-        kwargs = self._plan_for({})
+        kwargs = self._plan_for(
+            {},
+            prompt="I have a production security vulnerability. Give me a comprehensive incident plan.",
+        )
         self.assertEqual(kwargs["tier"], "sonnet")
         self.assertTrue(kwargs["explicit_cloud"])
 

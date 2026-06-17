@@ -113,10 +113,21 @@ def test_route_decision_local_available_simple_chat_stays_local():
     assert result["tier"] == "mini"
 
 
-def test_route_decision_high_tier_stays_cloud():
+def test_route_decision_high_tier_respects_strict_local_first():
     # Act
     result = cost_policy.route_decision(
         "simple question", base_tier="opus", local_available=True
+    )
+
+    # Assert
+    assert result["provider"] == "local"
+    assert result["tier"] == "opus"
+
+
+def test_route_decision_high_tier_uses_cloud_when_local_unavailable():
+    # Act
+    result = cost_policy.route_decision(
+        "simple question", base_tier="opus", local_available=False
     )
 
     # Assert
