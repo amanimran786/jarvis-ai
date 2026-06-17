@@ -441,11 +441,24 @@ def ask_local_stream(
     context_budget_report: dict[str, Any] | None = None,
 ):
     """Stream a response from a local Ollama model."""
-    # Inject chain-of-thought boost for non-trivial inputs (skip for short commands)
+    # Inject chain-of-thought boost only for task/question inputs, not casual conversation.
+    # Casual statements lack a question mark and don't contain task/technical keywords — injecting
+    # the reasoning prompt on those makes small models respond with "please clarify the question."
     word_count = len(user_input.split())
-    if word_count > 6 and not system_extra:
+    _is_question = "?" in user_input
+    _task_keywords = (
+        "how", "why", "what", "when", "where", "which", "who",
+        "can you", "could you", "please", "help", "write", "create",
+        "fix", "debug", "run", "open", "send", "search", "find",
+        "check", "show", "list", "explain", "compare", "analyze",
+        "code", "script", "file", "test", "build", "deploy",
+    )
+    _lower_input = user_input.lower()
+    _is_task = any(kw in _lower_input for kw in _task_keywords)
+    _needs_boost = word_count > 6 and (_is_question or _is_task)
+    if _needs_boost and not system_extra:
         system_extra = _REASONING_BOOST
-    elif word_count > 6 and _REASONING_BOOST not in system_extra:
+    elif _needs_boost and _REASONING_BOOST not in system_extra:
         system_extra = _REASONING_BOOST + "\n\n" + system_extra
 
     pruned_prompt = _prune_prompt(user_input, SYSTEM_PROMPT, system_extra)
@@ -454,7 +467,10 @@ def ask_local_stream(
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
         messages = [{"role": "system", "content": system}] + messages
-        messages, conversation_budget_report = _cap_track_context_messages(messages)
+        messages, conversation_budget_report = _cap_track_context_messages(
+            messages,
+            target_tokens=context_budget.target_tokens_for("chat", model=model, local=True),
+        )
     else:
         system = system_base
         if system_extra:

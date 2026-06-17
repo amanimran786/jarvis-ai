@@ -3748,8 +3748,14 @@ def route_stream(user_input: str) -> tuple:
     if any(p in lower for p in ("take a screenshot", "screenshot", "capture screen")):
         return _s(tools.take_screenshot()), "System"
 
-    # Battery status
-    if any(p in lower for p in ("battery", "battery level", "battery status", "how's my battery", "charge level")):
+    # Battery status — require explicit system battery context, not "social battery" etc.
+    _battery_exact = re.search(
+        r"\b(battery\s*(level|status|percent|percentage|life)|"
+        r"how(?:'s| is)(?: my)? battery|charge\s*level|charging status|"
+        r"^battery$)\b",
+        lower,
+    )
+    if _battery_exact:
         return _s(tools.get_battery()), "System"
 
     # Math fast-path: "what's 20% of 150", "calculate 1234 * 56", "12 + 34"
