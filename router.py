@@ -11,6 +11,7 @@ The orchestrator replaces the old regex wall. New tools need only an entry
 in orchestrator.TOOLS — no regex patterns to write.
 """
 
+import logging
 import re
 import os
 import sys
@@ -838,8 +839,8 @@ def _self_review_text(area: str | None = None) -> str:
         format_fn = getattr(si, "review_text", None)
         if callable(review_fn) and callable(format_fn):
             return format_fn(review_fn(area=area))
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("[Router] self_review failed, using fallback: %s", exc)
     return _fallback_self_review_text(area=area)
 
 
@@ -2126,23 +2127,27 @@ def _dispatch_single_intent(query: str) -> str | None:
     if hint == "weather":
         try:
             return tools.get_weather(_extract_weather_location(query))
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Weather fetch failed: %s", exc)
             return "Weather is unavailable right now."
     if hint == "calendar":
         try:
             return gs.get_todays_events()
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Calendar fetch failed: %s", exc)
             return "Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."
     if hint == "email" and _is_email_digest_query(query):
         try:
             import jarvis_agents as _ja
             return _ja.email_digest()
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Email digest failed: %s", exc)
             return "Email is unavailable. You may need to re-authorize Google access."
     if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Email read failed: %s", exc)
             return "Email is unavailable. You may need to re-authorize Google access."
     return None
 
@@ -2172,7 +2177,8 @@ def _current_activity_reply(lower: str) -> str:
     """Return a truthful status answer for current-activity questions."""
     try:
         snap = meeting_listener.status_snapshot()
-    except Exception:
+    except Exception as exc:
+        logging.warning("[Router] meeting_listener.status_snapshot failed: %s", exc)
         snap = {}
 
     running = bool(snap.get("running"))
@@ -2382,8 +2388,8 @@ def _start_local_beta_background(*, suite: str = "all", build_training_pack: boo
     label = "engineering beta" if suite == "engineering" else "local beta"
     try:
         local_beta._ensure_dirs()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning("[Router] local_beta._ensure_dirs failed: %s", exc)
 
     def _run():
         try:
