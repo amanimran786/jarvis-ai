@@ -31,6 +31,9 @@ import memory as mem
 
 # ── Base agent ────────────────────────────────────────────────────────────────
 
+_RUN_TIMEOUT = 25  # seconds per agent run() call before abandoning
+
+
 class Agent(ABC):
     name: str = "Agent"
     interval: int = 300          # seconds between runs
@@ -48,13 +51,28 @@ class Agent(ABC):
         if not self.enabled or not self.due():
             return
         self._last_run = time.time()
-        try:
-            result = self.run()
-            if result:
-                title, body, speak = result
-                on_alert(title, body, speak)
-        except Exception:
-            logging.exception("[Agent:%s] tick failed", self.name)
+        result_box: list = [None]
+        exc_box: list = [None]
+
+        def _run():
+            try:
+                result_box[0] = self.run()
+            except Exception as exc:
+                exc_box[0] = exc
+
+        thread = threading.Thread(target=_run, daemon=True, name=f"agent-{self.name}-tick")
+        thread.start()
+        thread.join(timeout=_RUN_TIMEOUT)
+        if thread.is_alive():
+            logging.warning("[Agent:%s] run() timed out after %ds — skipping", self.name, _RUN_TIMEOUT)
+            return
+        if exc_box[0] is not None:
+            logging.exception("[Agent:%s] tick failed: %s", self.name, exc_box[0])
+            return
+        result = result_box[0]
+        if result:
+            title, body, speak = result
+            on_alert(title, body, speak)
 
     @abstractmethod
     def run(self) -> tuple[str, str, bool] | None:
