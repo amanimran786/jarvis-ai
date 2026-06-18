@@ -4665,6 +4665,49 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             return _s(build_briefing(mem.list_facts())), "Memory"
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
+    # ── Artifact — Claude Code shareable interactive page ─────────────────────
+    if tool == "artifact":
+        import datetime
+        import pathlib
+        from provider_priority import ask_with_priority
+
+        _ARTIFACT_SYSTEM = (
+            "You are generating a Claude Code Artifact — a self-contained, shareable HTML page. "
+            "Rules: single file, no external dependencies except trusted CDNs (Mermaid.js for diagrams, "
+            "Chart.js for charts, Prism.js for syntax highlighting, Tailwind CDN for styling). "
+            "Clean, professional design. Works offline after first load. Mobile-friendly. "
+            "The output must be complete, valid HTML from <!DOCTYPE html> to </html> with all CSS inline or in <style>. "
+            "Produce production-quality output a team can open and share immediately."
+        )
+
+        def _artifact_stream():
+            yield "Building your artifact now, sir."
+            prompt = (
+                f"Create a Claude Code Artifact HTML page for this request:\n\n{user_input}\n\n"
+                "Generate a complete, working single-file HTML page. Choose the right format: "
+                "Mermaid diagram for architecture/flows, Chart.js for data dashboards, "
+                "structured HTML with code blocks for walkthroughs and PR reviews, "
+                "or a clean report layout for team summaries. "
+                "Include a clear title, navigation if multi-section, and any interactive elements that add value."
+            )
+            try:
+                html = ask_with_priority(prompt, tier="sonnet", system=_ARTIFACT_SYSTEM)
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_name = re.sub(r"[^a-z0-9]+", "_", user_input[:30].lower()).strip("_")
+                path = pathlib.Path.home() / "Desktop" / f"jarvis_artifact_{safe_name}_{ts}.html"
+                path.write_text(html, encoding="utf-8")
+                notes.add_note(f"# Artifact: {user_input[:80]}\n\nSaved to Desktop: {path.name}")
+                yield (
+                    f" Done. Artifact saved to your Desktop as {path.name}. "
+                    "Open it in your browser to preview, then share the file with your team. "
+                    "I can also package any future diagram, dashboard, or walkthrough as a Claude Code Artifact — just ask."
+                )
+            except Exception as exc:
+                logging.warning("[Router] Artifact generation failed: %s", exc)
+                yield " Artifact generation hit an error. Try again or ask me to build the content as plain text first."
+
+        return _artifact_stream(), "Artifact"
+
     # ── Self-improve ──────────────────────────────────────────────────────────
     if tool == "self_improve":
         action = params.get("action", "improve")

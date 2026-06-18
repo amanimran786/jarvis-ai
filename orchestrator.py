@@ -251,6 +251,13 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Restart
     if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes|hit your restart|do a restart)\b", lower):
         return ToolDecision("self_improve", 0.99, "restart")
+    # Artifact — explicit requests to create shareable/interactive pages
+    if re.search(
+        r"\b(create|make|build|generate|turn (this|it) into|package (this|it) as)\b.{0,40}"
+        r"\b(artifact|diagram|dashboard|visualization|walkthrough|shareable page|interactive page|team report)\b",
+        lower,
+    ) or re.search(r"\bartifact\b", lower):
+        return ToolDecision("artifact", 0.97, "create")
     # Messaging — require "to <name>" or an explicit send/message verb at the START
     # to avoid false positives on phrases like "plain text in a database"
     if re.search(r"\b(text|message|send a text|send a message|imessage)\b.*(to\s+\w+|\w+\s+imran)", lower):
