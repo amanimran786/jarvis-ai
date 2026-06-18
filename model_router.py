@@ -18,6 +18,7 @@ Mode commands:
   "what mode are you in"        → status
 """
 
+import logging
 import re
 import time as _time
 import threading as _threading
@@ -1012,24 +1013,24 @@ def smart_stream(
             _fm = _pool.submit(_get_mem0)
             try:
                 repeat_extra = _fr.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] repeat_context retrieval failed: %s", _exc)
             try:
                 vault_extra = _fv.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] vault retrieval failed: %s", _exc)
             try:
                 graph_extra = _fg.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] graph_context retrieval failed: %s", _exc)
             try:
                 smem_hits, smem_ctx = _fs.result(timeout=4.0)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] semantic_memory retrieval failed: %s", _exc)
             try:
                 mem0_extra = _fm.result(timeout=4.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] mem0 retrieval failed: %s", _exc)
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
@@ -1063,16 +1064,16 @@ def smart_stream(
                 return
             except Exception as exc:
                 last_error = exc
-                print(f"[ModelRouter] Primary model stream failed: {exc}")
+                logging.warning("[ModelRouter] Primary model stream failed: %s", exc)
 
             for name, factory in fallback_factories:
                 try:
-                    print(f"[ModelRouter] Falling back to {name}.")
+                    logging.info("[ModelRouter] Falling back to %s.", name)
                     yield from factory()
                     return
                 except Exception as exc:
                     last_error = exc
-                    print(f"[ModelRouter] Fallback {name} failed: {exc}")
+                    logging.warning("[ModelRouter] Fallback %s failed: %s", name, exc)
 
             yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
@@ -1208,7 +1209,7 @@ def smart_stream(
                 return
             except Exception as exc:
                 last_error = exc
-                print(f"[ModelRouter] Candidate {candidate.label} failed: {exc}")
+                logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
     return _execute_plan_stream(), primary_label

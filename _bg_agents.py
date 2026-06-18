@@ -18,6 +18,7 @@ Usage:
   agents.stop()
 """
 
+import logging
 import threading
 import time
 import os
@@ -52,8 +53,8 @@ class Agent(ABC):
             if result:
                 title, body, speak = result
                 on_alert(title, body, speak)
-        except Exception as e:
-            print(f"[Agent:{self.name}] Error: {e}")
+        except Exception:
+            logging.exception("[Agent:%s] tick failed", self.name)
 
     @abstractmethod
     def run(self) -> tuple[str, str, bool] | None:
@@ -355,7 +356,7 @@ def start(on_alert=None):
     _running = True
 
     def _loop():
-        print(f"[Agents] Running {len(_AGENTS)} proactive agents.")
+        logging.info("[Agents] Running %d proactive agents.", len(_AGENTS))
         while _running:
             for agent in _AGENTS:
                 if not _running:
