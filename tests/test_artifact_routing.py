@@ -86,9 +86,9 @@ class ArtifactHandlerTests(unittest.TestCase):
             text = "".join(stream)
             return text, label, mock_write
 
-    def test_label_is_artifact(self):
+    def test_label_is_local_artifact(self):
         _, label, _ = self._run_artifact("create an artifact for the auth flow")
-        self.assertEqual(label, "Artifact")
+        self.assertEqual(label, "Local Artifact")
 
     def test_response_mentions_desktop(self):
         text, _, _ = self._run_artifact("make a diagram of the system")
@@ -106,7 +106,7 @@ class ArtifactHandlerTests(unittest.TestCase):
             import router
             stream, label = router.route_stream("create an artifact")
             text = "".join(stream)
-        self.assertEqual(label, "Artifact")
+        self.assertEqual(label, "Local Artifact")
         self.assertIn("error", text.lower())
 
 
