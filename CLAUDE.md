@@ -120,3 +120,11 @@ When working in this codebase, prefer:
 - absolute timestamps when discussing builds or installed apps
 
 If something is still uncertain, say exactly what is known and what is not.
+
+# Compact instructions
+
+When compacting this conversation, keep: code changes and their file paths, test/CI
+failures and their root causes, architectural decisions, and the current next step.
+Drop: raw CI/test log dumps, full-file reads, exploratory dead ends, and verbose tool
+output. Prefer pushing verbose investigation (log reading, multi-file search, test runs)
+into subagents so only a short summary returns to the main thread.
