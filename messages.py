@@ -150,6 +150,11 @@ def _run_applescript(script: str) -> tuple[str, str]:
     except subprocess.TimeoutExpired:
         _last_applescript_error = "macOS Contacts or Messages took too long to respond."
         return "", _last_applescript_error
+    except (FileNotFoundError, OSError) as exc:
+        # osascript is macOS-only; on non-macOS (e.g. Linux CI) it is absent.
+        # Degrade gracefully instead of raising FileNotFoundError.
+        _last_applescript_error = f"AppleScript unavailable on this platform: {exc}"
+        return "", _last_applescript_error
     stderr = result.stderr.strip()
     if stderr:
         _last_applescript_error = stderr
