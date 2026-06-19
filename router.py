@@ -1033,7 +1033,7 @@ def _resolve_email_recipient(recipient: str) -> tuple[str, str]:
             if found_email:
                 return found_email.group(0), ""
         except Exception:
-            pass
+            logging.debug("[Router] email-from-memory lookup failed; using contact lookup", exc_info=True)
     # Email-specific lookup — avoids returning phone numbers for contacts that have both
     email_found = msg.lookup_contact_email(recipient)
     if email_found:
@@ -2405,7 +2405,7 @@ def _start_local_beta_background(*, suite: str = "all", build_training_pack: boo
                     source="local_beta_background",
                 )
             except Exception:
-                pass
+                logging.debug("[Router] teacher-capture of local beta failure could not be recorded", exc_info=True)
 
     threading.Thread(target=_run, daemon=False, name=f"jarvis-{label.replace(' ', '-')}-runner").start()
     training_note = " and training pack" if build_training_pack else ""
@@ -2466,7 +2466,7 @@ def _suggest_reply_from_context(contact: str, incoming: str) -> str | None:
                 )
                 result_holder.append(r.strip())
             except Exception:
-                pass
+                logging.debug("[Router] local reply-draft suggestion failed", exc_info=True)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -4665,14 +4665,14 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             return _s(build_briefing(mem.list_facts())), "Memory"
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
-    # ── Artifact — Claude Code shareable interactive page ─────────────────────
+    # ── Local Artifact — self-contained interactive HTML page (local-first) ───
     if tool == "artifact":
         import datetime
         import pathlib
         from provider_priority import ask_with_priority
 
         _ARTIFACT_SYSTEM = (
-            "You are generating a Claude Code Artifact — a self-contained, shareable HTML page. "
+            "You are generating a Local Artifact — a self-contained, shareable HTML page generated on-device. "
             "Rules: single file, no external dependencies except trusted CDNs (Mermaid.js for diagrams, "
             "Chart.js for charts, Prism.js for syntax highlighting, Tailwind CDN for styling). "
             "Clean, professional design. Works offline after first load. Mobile-friendly. "
@@ -4683,7 +4683,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         def _artifact_stream():
             yield "Building your artifact now, sir."
             prompt = (
-                f"Create a Claude Code Artifact HTML page for this request:\n\n{user_input}\n\n"
+                f"Create a self-contained HTML page for this request:\n\n{user_input}\n\n"
                 "Generate a complete, working single-file HTML page. Choose the right format: "
                 "Mermaid diagram for architecture/flows, Chart.js for data dashboards, "
                 "structured HTML with code blocks for walkthroughs and PR reviews, "
@@ -4691,7 +4691,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 "Include a clear title, navigation if multi-section, and any interactive elements that add value."
             )
             try:
-                html = ask_with_priority(prompt, tier="sonnet", system=_ARTIFACT_SYSTEM)
+                html = ask_with_priority(prompt, tier="strong", system=_ARTIFACT_SYSTEM)
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 safe_name = re.sub(r"[^a-z0-9]+", "_", user_input[:30].lower()).strip("_")
                 path = pathlib.Path.home() / "Desktop" / f"jarvis_artifact_{safe_name}_{ts}.html"
@@ -4700,13 +4700,13 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 yield (
                     f" Done. Artifact saved to your Desktop as {path.name}. "
                     "Open it in your browser to preview, then share the file with your team. "
-                    "I can also package any future diagram, dashboard, or walkthrough as a Claude Code Artifact — just ask."
+                    "I can also package any future diagram, dashboard, or walkthrough as a Local Artifact — just ask."
                 )
             except Exception as exc:
                 logging.warning("[Router] Artifact generation failed: %s", exc)
                 yield " Artifact generation hit an error. Try again or ask me to build the content as plain text first."
 
-        return _artifact_stream(), "Artifact"
+        return _artifact_stream(), "Local Artifact"
 
     # ── Self-improve ──────────────────────────────────────────────────────────
     if tool == "self_improve":
@@ -4809,7 +4809,7 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
         import jarvis_extractor as _jex
         _jex.extract_async(user_input, assistant_reply)
     except Exception:
-        pass
+        logging.debug("[Router] background fact extraction (jarvis_extractor) failed to start", exc_info=True)
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────

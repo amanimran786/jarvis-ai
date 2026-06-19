@@ -67,7 +67,7 @@ class Agent(ABC):
             logging.warning("[Agent:%s] run() timed out after %ds — skipping", self.name, _RUN_TIMEOUT)
             return
         if exc_box[0] is not None:
-            logging.exception("[Agent:%s] tick failed: %s", self.name, exc_box[0])
+            logging.error("[Agent:%s] tick failed: %s", self.name, exc_box[0], exc_info=exc_box[0])
             return
         result = result_box[0]
         if result:
