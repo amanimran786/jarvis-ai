@@ -101,6 +101,30 @@ class AuditorTests(unittest.TestCase):
         report = pa.run_once(append=False)
         self.assertIn("SILENT_PASS_NO_EVIDENCE", self._codes(report))
 
+    def test_zero_call_fail_does_not_claim_zero_calls_caused_failure(self):
+        self._write(_verdict(
+            task_id="z", agent_id="security-reviewer", tool_calls=0,
+            score=0.0, **{"pass": False},
+        ))
+
+        report = pa.run_once(append=False)
+
+        finding = next(f for f in report["findings"] if f["code"] == "ZERO_CALL_FAIL")
+        self.assertIn("failure cause is not established", finding["detail"])
+        self.assertNotIn("correctly failed", finding["detail"])
+
+    def test_zero_call_fail_reports_deterministic_fabrication_evidence(self):
+        self._write(_verdict(
+            task_id="z-fab", agent_id="backend-engineer", tool_calls=0,
+            score=0.0, **{"pass": False}, fabrication_flag="I ran pytest",
+        ))
+
+        report = pa.run_once(append=False)
+
+        finding = next(f for f in report["findings"] if f["code"] == "ZERO_CALL_FAIL")
+        self.assertIn("deterministic fabrication detection", finding["detail"])
+        self.assertIn("I ran pytest", finding["detail"])
+
     def test_retry_exhaustion_warns(self):
         self._write(_verdict(
             task_id="r", tool_calls=1, score=0.3, **{"pass": False}, retry_count=2,

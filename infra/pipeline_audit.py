@@ -349,12 +349,23 @@ def audit_records(records: list[dict]) -> list[Finding]:
                 f"failed at retry_count={retry} (budget {MAX_RETRIES}) — could not ground its answer",
             ))
 
-        # I6 — the fabrication defense working as designed (informational, so
-        # operators can see the system actively caught a fake, not just silence).
+        # I6 — zero-call failure observation. A fabrication flag establishes
+        # that the deterministic defense fired, but zero calls alone do not
+        # establish why the verifier failed the response.
         if int(tool_calls) == 0 and not bool(passed) and not inherited:
+            if fab_flag:
+                detail = (
+                    f"failed after deterministic fabrication detection "
+                    f"({fab_flag!r}); zero tool calls (score={score})"
+                )
+            else:
+                detail = (
+                    f"failed with zero tool calls (score={score}); "
+                    "failure cause is not established by audit evidence"
+                )
             findings.append(Finding(
                 "ZERO_CALL_FAIL", INFO, tid, aid,
-                f"correctly failed: zero tool calls (score={score})",
+                detail,
             ))
 
         # I7 — monotonic timestamps: out-of-order ts implies reordering/tamper.
