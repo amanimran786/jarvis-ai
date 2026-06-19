@@ -1125,7 +1125,8 @@ def application_states_text() -> str:
     if summary:
         return summary
     return (
-        "Keep application statuses normalized as Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, and Skip."
+        "Keep application statuses normalized as Evaluated, Applied, Responded, Interview, Offer, Rejected, Discarded, and Skip. "
+        "Dates should stay separate from the status itself, and no status change should be invented without clear evidence or your explicit instruction."
     )
 
 
