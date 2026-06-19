@@ -4722,7 +4722,7 @@ async def agent_dashboard(request: Request):
   #eval-filter-agent,#eval-filter-verdict{{background:#0a0a0f;border:1px solid #2a2a4a;border-radius:6px;color:#d0d0e0;padding:5px 8px;font-size:.8em}}
   /* ---- Manager Console + Upgrade Loop ---- */
   .console-grid{{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:14px;align-items:start}}
-  .console-rail{{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:14px}}
+  .console-rail{{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:10px;margin-bottom:14px}}
   .console-tile{{background:#0d0d18;border:1px solid #1a1a3a;border-radius:8px;padding:12px;min-height:92px}}
   .console-tile .kpi{{font-size:1.8em;font-weight:750;color:#7ec8e3;font-variant-numeric:tabular-nums;line-height:1.1}}
   .console-tile .kpi.ok{{color:#28c76f}} .console-tile .kpi.warn{{color:#ffd700}} .console-tile .kpi.bad{{color:#ea5455}}
@@ -4743,7 +4743,8 @@ async def agent_dashboard(request: Request):
   .upgrade-ticket p{{font-size:.76em;color:#9999b4;line-height:1.42;margin:0 0 8px}}
   .source-row{{display:grid;grid-template-columns:minmax(140px,1fr) auto;gap:8px;align-items:center;border-bottom:1px solid #17172a;padding:8px 0;font-size:.8em}}
   .source-row:last-child{{border-bottom:0}}
-  @media(max-width:1200px){{.console-grid{{grid-template-columns:1fr}}.console-rail{{grid-template-columns:repeat(2,1fr)}}.upgrade-board{{grid-template-columns:repeat(2,1fr)}}}}
+  @media(max-width:1400px){{.console-rail{{grid-template-columns:repeat(3,1fr)}}}}
+  @media(max-width:1200px){{.console-grid{{grid-template-columns:1fr}}.console-rail{{grid-template-columns:repeat(3,1fr)}}.upgrade-board{{grid-template-columns:repeat(2,1fr)}}}}
   @media(max-width:700px){{.manager-layout{{grid-template-columns:1fr}}.console-rail,.upgrade-board{{grid-template-columns:1fr}}}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
@@ -4795,7 +4796,8 @@ async def agent_dashboard(request: Request):
 <div class="pane active" id="pane-console" role="tabpanel" aria-labelledby="tab-console">
   <div class="console-rail">
     <div class="console-tile"><div class="kpi" id="mc-audit">—</div><div class="label">Pipeline truthfulness verdict</div></div>
-    <div class="console-tile"><div class="kpi" id="mc-active">—</div><div class="label">Active or approval-gated tasks</div></div>
+    <div class="console-tile"><div class="kpi" id="mc-active">—</div><div class="label">Active + approval-gated tasks</div></div>
+    <div class="console-tile"><div class="kpi" id="mc-taskrate">—</div><div class="label">Task success rate (completed/total)</div></div>
     <div class="console-tile"><div class="kpi" id="mc-upgrades">—</div><div class="label">Upgrade tickets in local backlog</div></div>
     <div class="console-tile"><div class="kpi" id="mc-security">—</div><div class="label">Security denials / critical events</div></div>
   </div>
@@ -5522,15 +5524,23 @@ async def agent_dashboard(request: Request):
       const verdict = audit.verdict || 'UNKNOWN';
       const vCls = verdict === 'CLEAN' ? 'ok' : verdict === 'WARN' ? 'warn' : 'bad';
       const active = state.tasks?.active ?? 0;
+      const awaitingApproval = state.tasks?.awaiting_approval ?? 0;
+      const totalInFlight = active + awaitingApproval;
+      const totalTasks = state.tasks?.total ?? 0;
+      const completedTasks = state.tasks?.completed ?? 0;
+      const failedTasks = state.tasks?.failed ?? 0;
+      const successRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
+      const rateCls = successRate === null ? '' : successRate >= 70 ? 'ok' : successRate >= 50 ? 'warn' : 'bad';
       const upgrades = state.upgrade_loop?.summary?.ticket_count ?? (state.upgrade_loop?.tickets || []).length;
       const denials = state.security?.denials ?? 0;
       const critical = state.security?.by_severity?.critical ?? 0;
       _setKpi('mc-audit', verdict, vCls);
-      _setKpi('mc-active', active, active ? 'warn' : 'ok');
+      _setKpi('mc-active', totalInFlight, totalInFlight ? 'warn' : 'ok');
+      _setKpi('mc-taskrate', successRate !== null ? `${{successRate}}%` : '—', rateCls);
       _setKpi('mc-upgrades', upgrades, upgrades ? 'warn' : '');
       _setKpi('mc-security', `${{denials}}/${{critical}}`, critical ? 'bad' : denials ? 'warn' : 'ok');
       document.getElementById('mc-nav-upgrades').textContent = upgrades;
-      document.getElementById('mc-nav-pipeline').textContent = active;
+      document.getElementById('mc-nav-pipeline').textContent = totalInFlight;
       document.getElementById('mc-nav-security').textContent = critical ? 'critical' : 'ok';
       document.getElementById('mc-nav-agents').textContent = state.agents?.total ?? 0;
       document.getElementById('mc-nav-evals').textContent = state.evals?.ok === false ? 'check' : 'ok';
@@ -5538,10 +5548,16 @@ async def agent_dashboard(request: Request):
 
       const acknowledged = audit.acknowledged_count ?? 0;
       const warnCount = audit.severity_counts?.warning ?? 0;
+      const agentList = state.agents?.agents || [];
+      const agentSummary = agentList.length
+        ? agentList.map(a => `${{escHtml(a.agent_id)}} at ${{Math.round((a.success_rate ?? 0)*100)}}%`).join(', ')
+        : 'none tracked';
       document.getElementById('mc-narrative').innerHTML =
         `<strong style="color:#e0e0ef">Current read:</strong> pipeline audit is <span style="color:${{verdict==='CLEAN'?'#28c76f':verdict==='WARN'?'#ffd700':'#ea5455'}}">${{escHtml(verdict)}}</span>, ` +
-        `${{acknowledged}} historical warning(s) are triaged, ${{warnCount}} warning(s) are active, and the upgrade loop has ${{upgrades}} local ticket(s). ` +
-        `Jarvis can rank and prepare work orders, but execution, package installs, cloud escalation, risky security tooling, merge, push, and deploy still require human approval.`;
+        `${{acknowledged}} historical warning(s) triaged, ${{warnCount}} active. ` +
+        `Task outcome: <strong style="color:${{rateCls==='ok'?'#28c76f':rateCls==='warn'?'#ffd700':'#ea5455'}}">${{completedTasks}} succeeded, ${{failedTasks}} failed</strong> of ${{totalTasks}} total. ` +
+        `Agent success rates — ${{agentSummary}}. ` +
+        `Execution, package installs, cloud escalation, merge, push, and deploy still require human approval.`;
 
       const decisions = [
         ['Upgrade scout', upgrades ? `${{upgrades}} ticket(s) need review or promotion.` : 'No upgrade tickets waiting.'],
