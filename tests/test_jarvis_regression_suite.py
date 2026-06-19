@@ -49,6 +49,23 @@ import wiki_builder
 from tests.jarvis_golden_cases import ENGINEERING_GOLDEN_CASES
 
 
+
+# --- Personal-corpus gate (CI hermeticity) --------------------------------
+# Some interview/career/brain regression tests assert on Aman's personal
+# corpus (career packs under kb/career/, brain variant notes under vault/),
+# which is gitignored and therefore absent in CI. Skip them when the corpus
+# isn't present so CI stays green without committing personal data publicly.
+_PERSONAL_KB_PRESENT = (
+    (interview_profile.PACKS_DIR / "youtube_pem_2026.md").exists()
+    and interview_profile.BRAIN_ROOT.exists()
+)
+_SKIP_NO_KB = unittest.skipUnless(
+    _PERSONAL_KB_PRESENT,
+    "personal career KB + brain vault are gitignored and absent (e.g. CI)",
+)
+# --------------------------------------------------------------------------
+
+
 class PromptModifierTests(unittest.TestCase):
     def test_eli5_modifier_strips_prefix_and_adds_system_extra(self):
         result = prompt_modifiers.parse("ELI5: explain tcp congestion control")
@@ -1307,10 +1324,12 @@ class InterviewProfileTests(unittest.TestCase):
         self.assertIn("Cybersecurity", text)
         self.assertTrue(any(term in text.lower() for term in ("risk", "detection", "incident", "automation")))
 
+    @_SKIP_NO_KB
     def test_imported_role_pack_is_discoverable(self):
         text = interview_profile.supported_role_families_text()
         self.assertIn("youtube_pem_2026", text)
 
+    @_SKIP_NO_KB
     def test_file_backed_youtube_role_pack_mentions_policy_enforcement_manager(self):
         text = interview_profile.target_role_pack_text("Give me my YouTube PEM 2026 role pack.")
         self.assertIn("Policy Enforcement Manager, Age Appropriateness", text)
@@ -1346,6 +1365,7 @@ class InterviewProfileTests(unittest.TestCase):
         self.assertTrue(any(term in text.lower() for term in ("on-call", "reversed", "post-mortem", "escalation")))
         self.assertIn("story-bank angle", text.lower())
 
+    @_SKIP_NO_KB
     def test_interview_prep_text_uses_playbook_rules_and_role_pack(self):
         text = interview_profile.interview_prep_text("Help me prep for the YouTube Policy Enforcement Manager interview.")
         self.assertIn("company-specific intelligence", text.lower())
@@ -2661,6 +2681,7 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Evaluated", text)
         self.assertIn("Skip", text)
 
+    @_SKIP_NO_KB
     def test_file_backed_youtube_pack_fast_path(self):
         stream, label = router.route_stream("Give me my YouTube PEM 2026 role pack.")
         text = "".join(stream)
@@ -4555,6 +4576,7 @@ class CameraTechnicalGuidanceTests(unittest.TestCase):
 
 
 class LongFormTechnicalGroundingTests(unittest.TestCase):
+    @_SKIP_NO_KB
     def test_research_voice_summary_injects_engineering_grounding_for_technical_query(self):
         result = {
             "query": "How would you design a resilient job queue?",
@@ -4574,6 +4596,7 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
         self.assertIn("Engineering companion guidance", injected)
         self.assertIn("Systems Design Tradeoff Heuristics", injected)
 
+    @_SKIP_NO_KB
     def test_operative_summary_injects_engineering_grounding_for_technical_task(self):
         fake_steps = [
             SimpleNamespace(number=1, description="Inspect logs", ok=True, result="Found queue contention."),
@@ -4619,11 +4642,13 @@ class InterviewProfileBrainRegressionTests(unittest.TestCase):
         path = interview_profile._brain_variant_path("Why am I a fit for Meta trust and safety calibration work?")
         self.assertEqual(path, interview_profile.META_VARIANT)
 
+    @_SKIP_NO_KB
     def test_target_role_pack_uses_openai_brain_variant(self):
         text = interview_profile.target_role_pack_text("How should I position myself for OpenAI trust and safety operations?")
         self.assertIn("OpenAI-style roles", text)
         self.assertIn("high-sensitivity abuse and integrity cases", text)
 
+    @_SKIP_NO_KB
     def test_candidate_profile_hint_includes_career_rules_and_variant_guidance(self):
         text = interview_profile._candidate_profile_hint("Tell me about yourself for OpenAI trust and safety operations.")
         self.assertIn("career-answering rules", text)
@@ -4634,6 +4659,7 @@ class InterviewProfileBrainRegressionTests(unittest.TestCase):
         text = interview_profile.tell_me_about_yourself_text("Tell me about yourself for a trust and safety role.")
         self.assertIn("7+ years", text)
 
+    @_SKIP_NO_KB
     def test_candidate_profile_hint_includes_llnl_technical_guidance_for_engineering_queries(self):
         text = interview_profile._candidate_profile_hint("Tell me about yourself for a backend software engineering role.")
         self.assertIn("Technical credibility note guidance", text)
