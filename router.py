@@ -4672,11 +4672,12 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         from provider_priority import ask_with_priority
 
         _ARTIFACT_SYSTEM = (
-            "You are generating a Local Artifact — a self-contained, shareable HTML page generated on-device. "
-            "Rules: single file, no external dependencies except trusted CDNs (Mermaid.js for diagrams, "
-            "Chart.js for charts, Prism.js for syntax highlighting, Tailwind CDN for styling). "
-            "Clean, professional design. Works offline after first load. Mobile-friendly. "
-            "The output must be complete, valid HTML from <!DOCTYPE html> to </html> with all CSS inline or in <style>. "
+            "You are generating a Local Artifact — a single-file, shareable HTML page generated on-device. "
+            "Rules: one .html file with all CSS inline or in <style>. You may pull a few trusted CDNs when they "
+            "add real value (Mermaid.js for diagrams, Chart.js for charts, Prism.js for syntax highlighting, "
+            "Tailwind CDN for styling); these need a network connection to render, so keep the core content "
+            "legible without them. Clean, professional, mobile-friendly design. "
+            "The output must be complete, valid HTML from <!DOCTYPE html> to </html>. "
             "Produce production-quality output a team can open and share immediately."
         )
 
@@ -4691,7 +4692,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 "Include a clear title, navigation if multi-section, and any interactive elements that add value."
             )
             try:
-                html = ask_with_priority(prompt, tier="strong", system=_ARTIFACT_SYSTEM)
+                html = ask_with_priority(prompt, tier="strong", system_extra=_ARTIFACT_SYSTEM)
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 safe_name = re.sub(r"[^a-z0-9]+", "_", user_input[:30].lower()).strip("_")
                 path = pathlib.Path.home() / "Desktop" / f"jarvis_artifact_{safe_name}_{ts}.html"
