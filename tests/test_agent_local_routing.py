@@ -24,7 +24,8 @@ AGENT_PROMPT = (
 
 
 class PreferLocalRoutingTests(unittest.TestCase):
-    def _plan_for(self, prompt: str, prefer_local: bool, local_available: bool = True):
+    def _plan_for(self, prompt: str, prefer_local: bool, local_available: bool = True,
+                  local_only: bool = False):
         captured = {}
         real_build_plan = provider_router.build_plan
 
@@ -39,7 +40,9 @@ class PreferLocalRoutingTests(unittest.TestCase):
              patch.object(model_router, "_best_local", return_value="jarvis-local"), \
              patch.object(model_router.provider_router, "build_plan", spy_build_plan):
             # Stream is a lazy generator — never iterated, so no model is called.
-            model_router.smart_stream(prompt, tool="chat", prefer_local=prefer_local)
+            model_router.smart_stream(
+                prompt, tool="chat", prefer_local=prefer_local, local_only=local_only,
+            )
         return captured
 
     def test_prefer_local_routes_agent_prompt_to_local_tier(self):
@@ -63,6 +66,22 @@ class PreferLocalRoutingTests(unittest.TestCase):
         kwargs = self._plan_for(AGENT_PROMPT, prefer_local=True, local_available=False)
         self.assertEqual(kwargs["tier"], "sonnet")
         self.assertFalse(kwargs["local_available"])
+
+    def test_local_only_plan_contains_no_cloud_candidates(self):
+        kwargs = self._plan_for(
+            AGENT_PROMPT, prefer_local=True, local_available=True, local_only=True,
+        )
+        plan = provider_router.build_plan(**kwargs)
+        self.assertEqual(kwargs["mode"], "open-source")
+        self.assertTrue(plan.candidates)
+        self.assertTrue(all(candidate.local for candidate in plan.candidates))
+
+    def test_local_only_with_ollama_down_has_no_candidates(self):
+        kwargs = self._plan_for(
+            AGENT_PROMPT, prefer_local=True, local_available=False, local_only=True,
+        )
+        plan = provider_router.build_plan(**kwargs)
+        self.assertEqual(plan.candidates, ())
 
 
 if __name__ == "__main__":

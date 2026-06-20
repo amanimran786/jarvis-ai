@@ -27,20 +27,21 @@ _LOCK = threading.RLock()
 # Per-agent execution locks — agents with different IDs run concurrently; same agent serializes.
 _AGENT_LOCKS: dict[str, threading.Lock] = {}
 _AGENT_LOCKS_MUTEX = threading.Lock()
-# Global concurrency cap — prevents overwhelming a single Ollama instance with too many parallel
-# model calls. Cloud providers (OpenAI/Gemini) are not affected by this limit in practice.
+# Global local-inference cap. Agent coordination can remain parallel, but a
+# single large Ollama model plus long KV caches should not receive many
+# simultaneous generations by default on memory-constrained hardware.
 def _parse_max_concurrent(raw: str | None) -> int:
     # Clamp to [1, 32]: 0 would wedge the semaphore forever (silent DoS) and
     # garbage must not crash module import.
     try:
         return max(1, min(int(raw), 32))
     except (TypeError, ValueError):
-        log.warning("invalid JARVIS_MAX_CONCURRENT_TASKS=%r — using 6", raw)
-        return 6
+        log.warning("invalid JARVIS_MAX_CONCURRENT_TASKS=%r — using 1", raw)
+        return 1
 
 
 _MODEL_SEMAPHORE = threading.Semaphore(
-    _parse_max_concurrent(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "6"))
+    _parse_max_concurrent(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "1"))
 )
 
 
@@ -857,6 +858,39 @@ def _fail_task(task_id: str, error: str) -> None:
     _persist_task(task_id)
 
 
+def _finalize_after_verification(
+    task_id: str,
+    *,
+    passed: bool,
+    error: str = "",
+    response: str = "",
+    model: str = "",
+    usage: dict[str, Any] | None = None,
+    interaction_id: str = "",
+    source: str = "",
+) -> bool:
+    """Atomically let cancellation win over any verification transition."""
+    with _LOCK:
+        task = _TASKS.get(task_id)
+        if not task:
+            return False
+        if task.get("cancel_requested"):
+            _set_task_status(task_id, "cancelled", finished_at=_now())
+            return False
+        if passed:
+            _complete_task(
+                task_id,
+                response=response,
+                model=model,
+                usage=usage or {},
+                interaction_id=interaction_id,
+                source=source,
+            )
+        else:
+            _fail_task(task_id, error)
+        return True
+
+
 # ── Agent tool context injection ──────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).parent.resolve()
@@ -918,16 +952,16 @@ def _detect_fabricated_execution(response: str, tool_calls: int) -> str:
 
 def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
                  tool_calls: int = -1, tool_transcript: str = "",
-                 inherited_transcript: str = "") -> dict:
+                 inherited_transcript: str = "",
+                 runtime_context_evidence: str = "") -> dict:
     """
     Score a completed task output using a lightweight LLM call.
     Returns {"pass": bool, "score": float, "reason": str}.
-    Fails open (pass=True) on any error so verification never blocks valid tasks.
+    Fails closed when the local verifier is unavailable or returns invalid JSON.
     """
     import json as _json
     try:
-        from brains.brain import ask_stream
-        from config import GPT_MINI
+        from brains.brain_ollama import ask_local_structured
         tool_fact = ""
         if tool_calls == 0 and inherited_transcript:
             # Retry attempts inherit the prior attempt's runtime-captured
@@ -938,6 +972,14 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
                 "tool outputs from the previous attempt (shown below). Claims consistent "
                 "with those outputs are grounded and must NOT be treated as fabricated. "
                 "Only claims going beyond them are unsupported.\n"
+            )
+        elif tool_calls == 0 and runtime_context_evidence:
+            tool_fact = (
+                "\nRUNTIME FACT (ground truth, not from the agent): the runtime "
+                "prefetched read-only evidence before this attempt (shown below), "
+                "but the agent executed ZERO tool calls. Claims directly supported "
+                "by the prefetched evidence are grounded. The evidence does NOT prove "
+                "that commands or tests were run; any such execution claim is fabricated.\n"
             )
         elif tool_calls == 0:
             tool_fact = (
@@ -961,10 +1003,15 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
                 "\nRUNTIME-CAPTURED TOOL OUTPUTS (ground truth):\n"
                 f"{tool_transcript[-3000:]}\n"
             )
-        elif inherited_transcript and tool_calls == 0:
+        elif (inherited_transcript or runtime_context_evidence) and tool_calls == 0:
+            evidence = inherited_transcript or runtime_context_evidence
+            evidence_source = (
+                "from the previous attempt" if inherited_transcript
+                else "prefetched read-only context"
+            )
             transcript_block = (
-                "\nRUNTIME-CAPTURED TOOL OUTPUTS (from the previous attempt, ground truth):\n"
-                f"{inherited_transcript[-3000:]}\n"
+                f"\nRUNTIME-CAPTURED EVIDENCE ({evidence_source}, ground truth):\n"
+                f"{evidence[-3000:]}\n"
             )
         verify_prompt = (
             f"You are an output quality evaluator. Score this agent response.\n\n"
@@ -987,11 +1034,29 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
             '{"score": 0.0, "reason": "one sentence"}\n'
             "Score = average of the three criteria."
         )
-        raw = "".join(ask_stream(verify_prompt, model=GPT_MINI, track_context=False,
-                                 bypass_local=True, bare_system=True))
+        schema = {
+            "type": "object",
+            "properties": {
+                "score": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "reason": {"type": "string"},
+            },
+            "required": ["score", "reason"],
+            "additionalProperties": False,
+        }
+        raw = ask_local_structured(
+            verify_prompt,
+            schema,
+            system="You are a strict output-quality evaluator. Return only the requested JSON.",
+            raise_on_error=False,
+        )
         m = re.search(r'\{.*\}', raw, re.DOTALL)
         if not m:
-            return {"pass": True, "score": 1.0, "reason": "parse error — failing open"}
+            return {
+                "pass": False,
+                "score": 0.0,
+                "reason": "local verifier unavailable or returned invalid JSON",
+                "verifier_available": False,
+            }
         verdict = _json.loads(m.group(0))
         score = float(verdict.get("score", 1.0))
         # Pass is computed from the score, never taken from the model — mini
@@ -1000,10 +1065,16 @@ def _auto_verify(task_id: str, agent_id: str, prompt: str, result: str,
             "pass": score >= 0.65,
             "score": score,
             "reason": str(verdict.get("reason", "")),
+            "verifier_available": True,
         }
     except Exception as exc:
         log.warning("auto_verify error for %s: %s", task_id, exc)
-        return {"pass": True, "score": 1.0, "reason": f"verify error: {exc}"}
+        return {
+            "pass": False,
+            "score": 0.0,
+            "reason": f"local verifier unavailable: {exc}",
+            "verifier_available": False,
+        }
 
 
 _VERDICTS_PATH = Path.home() / ".jarvis" / "verifier_verdicts.jsonl"
@@ -1013,6 +1084,7 @@ def _record_verdict(task_id: str, agent_id: str, verdict: dict,
                     tool_calls: int, retry_count: int,
                     result: str = "", tool_transcript: str = "",
                     inherited_transcript: str = "",
+                    runtime_context_evidence: str = "",
                     fabricated_claim: str = "") -> None:
     """Append the verifier verdict to a JSONL log so calibration is measurable
     (pass rate per agent, score distribution, retry effectiveness). Provenance
@@ -1028,14 +1100,21 @@ def _record_verdict(task_id: str, agent_id: str, verdict: dict,
             "score": verdict.get("score"),
             "pass": verdict.get("pass"),
             "reason": verdict.get("reason", ""),
+            "verifier_available": verdict.get("verifier_available", True),
             "tool_calls": tool_calls,
             "retry_count": retry_count,
             "fabrication_flag": fabricated_claim,
             "had_inherited_evidence": bool(inherited_transcript and tool_calls == 0),
+            "had_runtime_context_evidence": bool(runtime_context_evidence and tool_calls == 0),
             "result_sha256": _hashlib.sha256(result.encode("utf-8")).hexdigest() if result else "",
             "result_len": len(result or ""),
             "transcript_sha256": _hashlib.sha256(tool_transcript.encode("utf-8")).hexdigest() if tool_transcript else "",
             "transcript_len": len(tool_transcript or ""),
+            "runtime_context_sha256": (
+                _hashlib.sha256(runtime_context_evidence.encode("utf-8")).hexdigest()
+                if runtime_context_evidence else ""
+            ),
+            "runtime_context_len": len(runtime_context_evidence or ""),
         }
         with open(_VERDICTS_PATH, "a", encoding="utf-8") as f:
             f.write(_json.dumps(entry) + "\n")
@@ -1067,7 +1146,10 @@ def _propose_skill_update(agent_id: str, prompt: str, result: str, reason: str) 
             "next time it sees a similar task. Be concrete and actionable. "
             "No markdown headers, no preamble — just the rule text."
         )
-        stream, _ = smart_stream(lesson_prompt, tool="chat", prefer_local=True, skip_dynamic_context=True)
+        stream, _ = smart_stream(
+            lesson_prompt, tool="chat", prefer_local=True, local_only=True,
+            skip_dynamic_context=True,
+        )
         rule = "".join(chunk for chunk in stream).strip()
         if not rule:
             return
@@ -1374,7 +1456,7 @@ _TASK_RESULT_MAX = 8000
 
 
 def _tool_task_result(task_id: str) -> str:
-    """Return the stored result of a completed task. On-demand context retrieval."""
+    """Return only a successfully verified task result for downstream use."""
     tid = task_id.strip()
     if not re.match(r'^task_[a-f0-9]{6,32}$', tid):
         return "[task_result denied: invalid task id format]"
@@ -1386,6 +1468,8 @@ def _tool_task_result(task_id: str) -> str:
         result = (t.get("result") or "").strip()
     if status not in _TERMINAL_TASK_STATUSES:
         return f"[task_result: task {tid} is still '{status}' — no result yet]"
+    if status != "succeeded":
+        return f"[task_result denied: task {tid} finished as '{status}']"
     if not result:
         return f"[task_result: task {tid} finished with empty result]"
     if len(result) > _TASK_RESULT_MAX:
@@ -1408,6 +1492,7 @@ def _run_tool_loop(
     work_root: "Path | None" = None,
     allow_write: bool = False,
     prefer_local: bool = True,
+    has_inherited_execution_evidence: bool = False,
 ) -> tuple[str, str, int, int, str]:
     """
     Multi-turn tool-call loop.
@@ -1430,6 +1515,11 @@ def _run_tool_loop(
 
     def _transcript() -> str:
         return "\n\n".join(tools for _, tools in conversation)
+
+    def _cancel_requested() -> bool:
+        with _LOCK:
+            task = _TASKS.get(task_id)
+            return bool(task and task.get("cancel_requested"))
 
     def _history_blocks() -> list[str]:
         """Compact prior steps so the continuation prompt does not grow
@@ -1456,10 +1546,58 @@ def _run_tool_loop(
             blocks[0] = f"[{elided} earlier step(s) elided]\n\n" + blocks[0]
         return blocks
 
+    # Local compliance repair: execution-capable tasks occasionally receive a
+    # prose-only first response even though the system prompt requires a tool
+    # tag. Give the local model one explicit corrective turn before verification.
+    # This is deliberately narrow and bounded; reasoning-only tasks never enter
+    # it, and a second prose-only response simply falls through to the verifier.
+    repaired_for_execution = False
+    if (_requires_live_tool_execution(original_prompt)
+            and not has_inherited_execution_evidence
+            and not _extract_bash_calls(response)
+            and not _extract_task_result_calls(response)
+            and not (allow_write and _extract_write_calls(response))):
+        repair_prompt = (
+            f"{original_prompt}\n\n---\n"
+            "Your previous response did not invoke a runtime tool, but this task "
+            "explicitly requires live execution evidence. Respond now with the "
+            "single read-only command needed inside <bash>...</bash>. Do not claim "
+            "a result before the runtime returns it."
+        )
+        repair_stream, model = smart_stream(
+            repair_prompt,
+            tool="chat",
+            extra_system=agent_ctx,
+            prefer_local=True,
+            local_only=True,
+            skip_dynamic_context=True,
+        )
+        repair_chunks: list[str] = []
+        for chunk in repair_stream:
+            if _cancel_requested():
+                return response, model, index, tool_calls_made, _transcript()
+            repair_chunks.append(chunk)
+            index += 1
+            _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+        repaired = "".join(repair_chunks).strip()
+        if repaired:
+            response = repaired
+            repaired_for_execution = True
+
     for _iter in range(4):  # up to 4 continuation rounds after the initial call
+        if _cancel_requested():
+            return response, model, index, tool_calls_made, _transcript()
         bash_calls = _extract_bash_calls(response)
         result_calls = _extract_task_result_calls(response)
         write_calls = _extract_write_calls(response) if (allow_write and work_root) else []
+        if repaired_for_execution:
+            # The corrective turn is authorized for exactly one read-only bash
+            # command. Ignore write/task-result tags and extra commands emitted
+            # despite the prompt; later continuation rounds use the normal loop.
+            bash_calls = bash_calls[:1]
+            result_calls = []
+            write_calls = []
+            repaired_for_execution = False
         if not bash_calls and not result_calls and not write_calls:
             break
 
@@ -1509,7 +1647,7 @@ def _run_tool_loop(
         # Stream continuation response
         stream, model = smart_stream(
             continuation_prompt, tool="chat", extra_system=agent_ctx,
-            prefer_local=prefer_local, skip_dynamic_context=True,
+            prefer_local=prefer_local, local_only=True, skip_dynamic_context=True,
         )
         cont_chunks: list[str] = []
         for chunk in stream:
@@ -1547,7 +1685,7 @@ def _run_tool_loop(
                 return response, model, index, tool_calls_made, _transcript()
         stream, model = smart_stream(
             wrapup_prompt, tool="chat", extra_system=agent_ctx,
-            prefer_local=prefer_local, skip_dynamic_context=True,
+            prefer_local=prefer_local, local_only=True, skip_dynamic_context=True,
         )
         final_chunks: list[str] = []
         for chunk in stream:
@@ -1669,14 +1807,16 @@ def _tool_fetch_task_results(prompt: str) -> str:
             continue
         agent = t.get("assigned_agent_id", "?")
         status = t.get("status", "?")
+        if status != "succeeded":
+            continue
         sections.append(f"[{tid}  /  {agent}  /  {status}]\n{result[:800]}")
     if not sections:
         return ""
     return "=== Referenced task results ===\n\n" + "\n\n".join(sections)
 
 
-def _build_agent_tool_context(agent_id: str, prompt: str) -> str:
-    """Assemble live context to inject before the agent runs its task."""
+def _build_agent_tool_context(agent_id: str, prompt: str) -> tuple[str, str]:
+    """Return prompt context plus its runtime-captured evidence provenance."""
     parts: list[str] = []
 
     if agent_id in _MONITOR_AGENTS:
@@ -1693,7 +1833,37 @@ def _build_agent_tool_context(agent_id: str, prompt: str) -> str:
         if files:
             parts.append(files)
 
-    return "\n\n" + "\n\n".join(parts) if parts else ""
+    evidence = "\n\n".join(parts)
+    return (("\n\n" + evidence) if evidence else "", evidence)
+
+
+_LIVE_EXECUTION_REQUEST = re.compile(
+    r"\b(?:run|execute)\s+"
+    r"(?:(?:the|a|an|most\s+relevant|focused|existing)\s+)*"
+    r"`?(?:pytest|tests?|ruff|command|script|build)\b"
+    r"|\bcount\s+(?:the\s+)?(?:python\s+)?files?\b"
+    r"|\b(?:check|show)\s+(?:the\s+)?git\s+(?:status|diff|log)\b"
+    r"|\bverify\b[^.\n]{0,80}\bby\s+running\b",
+    re.IGNORECASE,
+)
+def _requires_live_tool_execution(prompt: str) -> bool:
+    """True only for narrow requests that explicitly require runtime evidence."""
+    text = prompt or ""
+    for request in _LIVE_EXECUTION_REQUEST.finditer(text):
+        prefix = text[max(0, request.start() - 100):request.start()]
+        # Negation applies to the current clause, not an earlier instruction:
+        # "do not run the full suite; run focused tests" must still execute the
+        # explicitly positive second clause.
+        prefix = re.split(r"[;.!?\n]", prefix)[-1]
+        negated = re.search(
+            r"\b(?:do\s+not|don't|never|should\s+not|shouldn't|must\s+not|mustn't"
+            r"|under\s+no\s+circumstances)\b[^.!?\n]{0,80}$",
+            prefix,
+            re.IGNORECASE,
+        )
+        if not negated:
+            return True
+    return False
 
 
 def _run_task(task_id: str) -> None:
@@ -1765,20 +1935,34 @@ def _run_task(task_id: str) -> None:
                     + _bash_tool_hint
                     + _write_tool_hint
                 )
-                tool_ctx = _build_agent_tool_context(agent_id, original_prompt)
+                with _LOCK:
+                    task_meta = dict(_TASKS.get(task_id, {}).get("meta") or {})
+                inherited_transcript = str(task_meta.get("inherited_transcript", ""))
+                tool_ctx, runtime_context_evidence = _build_agent_tool_context(
+                    agent_id, original_prompt
+                )
+                prior_runtime_context = str(
+                    task_meta.get("inherited_runtime_context", "")
+                )
+                if prior_runtime_context and prior_runtime_context not in runtime_context_evidence:
+                    runtime_context_evidence = "\n\n".join(
+                        part for part in (runtime_context_evidence, prior_runtime_context) if part
+                    )
+                    tool_ctx = "\n\n" + runtime_context_evidence
                 if tool_ctx:
                     agent_ctx = agent_ctx + tool_ctx
                 lesson = _load_agent_lesson(agent_id)
                 if lesson:
                     agent_ctx = agent_ctx + lesson
-                # Verified-failure escalation: first attempt runs local-first
-                # (cheap); once the verifier has rejected an attempt, retries
-                # go to the stronger cloud tier instead of repeating the same
-                # local-model failure mode.
-                with _LOCK:
-                    _retry_count = int((_TASKS.get(task_id, {}).get("meta") or {}).get("retry_count", 0))
-                prefer_local_run = _retry_count == 0
-                stream, model = smart_stream(prompt, tool="chat", extra_system=agent_ctx, prefer_local=prefer_local_run)
+                # Agent execution stays local on every attempt. A verifier
+                # rejection must not silently transmit the task to a cloud
+                # provider; any future cloud escalation needs a separate,
+                # explicit approval gate.
+                prefer_local_run = True
+                stream, model = smart_stream(
+                    prompt, tool="chat", extra_system=agent_ctx,
+                    prefer_local=prefer_local_run, local_only=True,
+                )
                 chunks: list[str] = []
                 for index, chunk in enumerate(stream):
                     with _LOCK:
@@ -1805,15 +1989,13 @@ def _run_task(task_id: str) -> None:
                     work_root=work_root,
                     allow_write=work_root is not None,
                     prefer_local=prefer_local_run,
+                    has_inherited_execution_evidence=bool(inherited_transcript),
                 )
                 # Deterministic fabrication check: response claims execution
                 # but zero tool calls actually ran. Runs for ALL agents — no
                 # LLM needed, the runtime knows the ground truth. Skipped when
                 # the task inherited verified outputs from a prior attempt —
                 # the LLM verifier judges those against the evidence instead.
-                with _LOCK:
-                    task_meta = _TASKS.get(task_id, {}).get("meta") or {}
-                inherited_transcript = str(task_meta.get("inherited_transcript", ""))
                 fabricated_claim = (
                     "" if (inherited_transcript and tool_calls_made == 0)
                     else _detect_fabricated_execution(response, tool_calls_made)
@@ -1850,45 +2032,98 @@ def _run_task(task_id: str) -> None:
                 interaction = evals.log_interaction(original_prompt, response, model, source=f"task:{source}", context=context_stats)
                 evals.maybe_log_automatic_failure(interaction)
 
-            with _LOCK:
-                _complete_task(
-                    task_id,
-                    response=response,
-                    model=model,
-                    usage=usage,
-                    interaction_id=interaction["id"],
-                    source=source,
-                )
-            # Verification runs OUTSIDE the lock — LLM calls cannot hold _LOCK
-            if _AUTO_VERIFY and agent_id in _VERIFIABLE_AGENTS:
+            needs_verification = _AUTO_VERIFY and agent_id in _VERIFIABLE_AGENTS
+            if needs_verification:
+                # Keep the task nonterminal until verification finishes so API
+                # pollers cannot observe a transient succeeded result that is
+                # later changed to failed.
+                with _LOCK:
+                    pending = _TASKS[task_id]
+                    pending.update(
+                        result=response,
+                        model=model,
+                        interaction_id=interaction["id"],
+                        usage=_copy(usage),
+                        source=source,
+                        updated_at=_now(),
+                    )
+                    _persist_task(task_id)
+            else:
+                with _LOCK:
+                    _complete_task(
+                        task_id,
+                        response=response,
+                        model=model,
+                        usage=usage,
+                        interaction_id=interaction["id"],
+                        source=source,
+                    )
+
+            # Verification runs OUTSIDE the lock — LLM calls cannot hold _LOCK.
+            if needs_verification:
                 retry_count = int(task_meta.get("retry_count", 0))
-                verdict = _auto_verify(
-                    task_id, agent_id, original_prompt, response,
-                    tool_calls=tool_calls_made,
-                    tool_transcript=tool_transcript,
-                    inherited_transcript=inherited_transcript,
-                )
+                with _MODEL_SEMAPHORE:
+                    verdict = _auto_verify(
+                        task_id, agent_id, original_prompt, response,
+                        tool_calls=tool_calls_made,
+                        tool_transcript=tool_transcript,
+                        inherited_transcript=inherited_transcript,
+                        runtime_context_evidence=runtime_context_evidence,
+                    )
                 _record_verdict(task_id, agent_id, verdict, tool_calls_made, retry_count,
                                 result=response, tool_transcript=tool_transcript,
                                 inherited_transcript=inherited_transcript,
+                                runtime_context_evidence=runtime_context_evidence,
                                 fabricated_claim=fabricated_claim)
                 with _LOCK:
                     if task_id in _TASKS:
                         (_TASKS[task_id].setdefault("meta", {}))["verification"] = verdict
-                if not verdict["pass"] and retry_count < 2:
+                if not verdict.get("verifier_available", True):
+                    if not _finalize_after_verification(
+                        task_id, passed=False, error=verdict["reason"]
+                    ):
+                        return
+                    log.error("task %s failed closed: %s", task_id, verdict["reason"])
+                elif verdict["pass"]:
+                    if not _finalize_after_verification(
+                        task_id,
+                        passed=True,
+                        response=response,
+                        model=model,
+                        usage=usage,
+                        interaction_id=interaction["id"],
+                        source=source,
+                    ):
+                        return
+                elif not verdict["pass"] and retry_count < 2:
                     log.info(
                         "task %s failed verification (score=%.2f): %s — retrying (%d/2)",
                         task_id, verdict["score"], verdict["reason"], retry_count + 1,
                     )
+                    if not _finalize_after_verification(
+                        task_id,
+                        passed=False,
+                        error=f"verification failed: {verdict['reason']}",
+                    ):
+                        return
                     # Carry real evidence forward — without it, retries parrot
                     # the prior answer with zero tool calls and fail fabrication
                     # checks every time.
-                    evidence = (tool_transcript or inherited_transcript)[-2500:]
-                    evidence_block = (
-                        "\nVerified tool outputs from the previous attempt "
-                        "(runtime-captured — you may cite these as evidence):\n"
-                        f"{evidence}\n" if evidence else ""
-                    )
+                    execution_evidence = (tool_transcript or inherited_transcript)[-2500:]
+                    context_evidence = runtime_context_evidence[-2500:]
+                    evidence_block = ""
+                    if execution_evidence:
+                        evidence_block += (
+                            "\nVerified tool outputs from the previous attempt "
+                            "(runtime-captured — you may cite these as execution evidence):\n"
+                            f"{execution_evidence}\n"
+                        )
+                    if context_evidence:
+                        evidence_block += (
+                            "\nPrefetched read-only context from the previous attempt "
+                            "(grounding evidence only; it does NOT prove commands ran):\n"
+                            f"{context_evidence}\n"
+                        )
                     retry_prompt = (
                         f"{original_prompt}\n\n"
                         f"---\nPrevious attempt failed quality check: {verdict['reason']}\n"
@@ -1904,14 +2139,25 @@ def _run_task(task_id: str) -> None:
                         assigned_agent_id=agent_id,
                         meta={"retry_count": retry_count + 1, "confidence_score": 0.9,
                               "original_task_id": task_id,
-                              "inherited_transcript": evidence},
+                              "inherited_transcript": execution_evidence,
+                              "inherited_runtime_context": context_evidence},
+                        _trusted_runtime_meta=True,
                     )
                 elif not verdict["pass"] and retry_count >= 2:
                     log.warning(
                         "task %s failed verification after max retries: %s",
                         task_id, verdict["reason"],
                     )
-                    _propose_skill_update(agent_id, original_prompt, response, verdict["reason"])
+                    if not _finalize_after_verification(
+                        task_id,
+                        passed=False,
+                        error=f"verification failed: {verdict['reason']}",
+                    ):
+                        return
+                    with _MODEL_SEMAPHORE:
+                        _propose_skill_update(
+                            agent_id, original_prompt, response, verdict["reason"]
+                        )
     except Exception as exc:
         with _LOCK:
             _fail_task(task_id, str(exc))
@@ -1977,8 +2223,20 @@ def submit_task(
     terse_mode: str = "",
     isolated_workspace: bool | None = None,
     meta: dict[str, Any] | None = None,
+    _trusted_runtime_meta: bool = False,
 ) -> dict[str, Any]:
     bootstrap()
+    clean_meta = dict(meta or {})
+    if not _trusted_runtime_meta:
+        for reserved in (
+            "confidence_score",
+            "confidence_threshold",
+            "inherited_transcript",
+            "inherited_runtime_context",
+            "original_task_id",
+            "retry_count",
+        ):
+            clean_meta.pop(reserved, None)
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     chosen_agent_id = _choose_agent(kind, assigned_agent_id)
     created_at = _now()
@@ -1989,7 +2247,7 @@ def submit_task(
         kind=normalized_kind,
         source=source,
         agent_id=chosen_agent_id,
-        meta=meta,
+        meta=clean_meta,
     )
     workspace = worktree_manager.prepare_isolated_workspace(
         task_id,
@@ -2040,7 +2298,7 @@ def submit_task(
         "terse_mode": normalized_terse_mode,
         "workspace": _copy(workspace),
         "lease_expires_at": _now_plus(_TASK_LEASE_SECONDS),
-        "meta": _copy(meta or {}),
+        "meta": _copy(clean_meta),
     }
     with _LOCK:
         _TASKS[task_id] = task
