@@ -2344,6 +2344,7 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
                     source="project",
                     assigned_agent_id=item.get("agent_id", ""),
                     meta={"confidence_score": 0.9},
+                    _trusted_runtime_meta=True,
                 )
                 wave_tasks.append((item.get("agent_id", ""), task["id"]))
                 _append_project_event(project_id, "task_dispatched",
@@ -2406,6 +2407,7 @@ def _run_project_waves(project_id: str, tasks_by_group: dict, goal: str) -> None
             source="project",
             assigned_agent_id="researcher",
             meta={"confidence_score": 0.95, "approval_reason": "internal orchestrator synthesis"},
+            _trusted_runtime_meta=True,
         )
         proj["synthesis_task_id"] = synth_task["id"]
         _append_project_event(project_id, "synthesis_start",

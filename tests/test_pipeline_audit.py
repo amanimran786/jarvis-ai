@@ -86,6 +86,28 @@ class AuditorTests(unittest.TestCase):
         report = pa.run_once(append=False)
         self.assertNotIn("FABRICATION_PASS_CONFLICT", self._codes(report))
 
+    def test_runtime_context_evidence_does_not_suppress_fabrication_conflict(self):
+        self._write(_verdict(
+            task_id="runtime-context", agent_id="backend-engineer", tool_calls=0,
+            score=0.9, **{"pass": True}, fabrication_flag="I ran pytest",
+            had_runtime_context_evidence=True,
+        ))
+
+        report = pa.run_once(append=False)
+
+        self.assertIn("FABRICATION_PASS_CONFLICT", self._codes(report))
+        self.assertEqual(pa.exit_code(report), 2)
+
+    def test_runtime_context_evidence_suppresses_silent_pass_warning(self):
+        self._write(_verdict(
+            task_id="runtime-context", agent_id="security-reviewer", tool_calls=0,
+            score=1.0, **{"pass": True}, had_runtime_context_evidence=True,
+        ))
+
+        report = pa.run_once(append=False)
+
+        self.assertNotIn("SILENT_PASS_NO_EVIDENCE", self._codes(report))
+
     def test_score_pass_incoherent_is_critical(self):
         # pass=True but score below threshold => log tamper or threshold drift.
         self._write(_verdict(task_id="x", score=0.2, **{"pass": True}, tool_calls=1))
@@ -93,10 +115,11 @@ class AuditorTests(unittest.TestCase):
         self.assertIn("SCORE_PASS_INCOHERENT", self._codes(report))
         self.assertEqual(report["severity_counts"][pa.CRITICAL], 1)
 
-    def test_silent_pass_no_evidence_warns(self):
+    def test_zero_call_pass_without_runtime_context_evidence_warns(self):
         self._write(_verdict(
             task_id="s", agent_id="security-reviewer", tool_calls=0,
             score=1.0, **{"pass": True},
+            had_runtime_context_evidence=False,
         ))
         report = pa.run_once(append=False)
         self.assertIn("SILENT_PASS_NO_EVIDENCE", self._codes(report))
@@ -131,6 +154,16 @@ class AuditorTests(unittest.TestCase):
         ))
         report = pa.run_once(append=False)
         self.assertIn("RETRY_EXHAUSTION_FAIL", self._codes(report))
+
+    def test_local_verifier_unavailable_is_distinct_warning(self):
+        self._write(_verdict(
+            task_id="verifier-down", agent_id="qa-tester", tool_calls=0,
+            score=0.0, **{"pass": False}, verifier_available=False,
+        ))
+
+        report = pa.run_once(append=False)
+
+        self.assertIn("VERIFIER_UNAVAILABLE", self._codes(report))
 
     def test_acknowledged_warning_no_longer_blocks_clean_current_audit(self):
         self._write(_verdict(

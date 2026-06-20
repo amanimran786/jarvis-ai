@@ -878,6 +878,7 @@ def smart_stream(
     tool: str | None = "chat",
     extra_system: str = "",
     prefer_local: bool = False,
+    local_only: bool = False,
     skip_dynamic_context: bool = False,
 ) -> tuple:
     """
@@ -890,6 +891,10 @@ def smart_stream(
     chat-tuned complexity heuristics. Routes local-first when a local model
     is available; cloud fallback chain stays intact.
 
+    local_only: enforce an Ollama-only route. Forced cloud models, mobile cloud
+    fast paths, and provider fallbacks are ignored. If Ollama is unavailable,
+    return the open-source-unavailable response without transmitting the prompt.
+
     skip_dynamic_context: skip vault/graph/semantic-memory/mem0 retrieval.
     For tool-loop continuations the task context hasn't changed since turn 1,
     so re-retrieval only adds tokens, an embedding call per turn, and prompt-
@@ -899,7 +904,7 @@ def smart_stream(
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
     # a generator function and break all callers that expect a (stream, label) tuple.
     # Instead return a (stream, label) tuple just like every other path does.
-    if _is_mobile_web_active():
+    if _is_mobile_web_active() and not local_only:
         mobile_extra = _mobile_web_system_extra()
         merged_extra = extra_system
         if mobile_extra:
@@ -961,7 +966,7 @@ def smart_stream(
     if forced.get("active") and forced.get("provider") == "ollama":
         context_model = forced.get("model") or ""
         context_is_local = True
-    elif mode != "cloud" and local_available:
+    elif (local_only or mode != "cloud") and local_available:
         context_model = local_model
         context_is_local = True
 
@@ -1079,7 +1084,7 @@ def smart_stream(
 
         return _stream()
 
-    if forced.get("active"):
+    if forced.get("active") and (not local_only or forced.get("provider") == "ollama"):
         candidate = provider_router.RouteCandidate(
             provider=forced["provider"],
             model=forced["model"],
@@ -1094,7 +1099,11 @@ def smart_stream(
         )
         return _execute_forced_stream(plan, user_input, system_extra), candidate.label
 
-    if prefer_local and local_available and local_model and mode != "cloud":
+    if local_only:
+        tier = "local"
+        apple_foundation_available = False
+        explicit_cloud = False
+    elif prefer_local and local_available and local_model and mode != "cloud":
         tier = "local"
         apple_foundation_available = False
         explicit_cloud = False
@@ -1119,7 +1128,7 @@ def smart_stream(
 
     plan = provider_router.build_plan(
 
-        mode=mode,
+        mode="open-source" if local_only else mode,
         tier=tier,
         local_available=local_available,
         local_model=local_model,

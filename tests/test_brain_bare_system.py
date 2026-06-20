@@ -65,20 +65,24 @@ class BareSystemTests(unittest.TestCase):
         self.assertIn("USER MEMORY", messages[0]["content"])
 
 
-class VerifierUsesBareSystemTests(unittest.TestCase):
-    def test_auto_verify_passes_bare_system(self):
+class VerifierUsesLocalStructuredOutputTests(unittest.TestCase):
+    def test_auto_verify_uses_local_schema_without_cloud_fallback(self):
         import task_runtime
         captured = {}
 
-        def fake_ask_stream(prompt, **kw):
+        def fake_ask_local_structured(prompt, schema, **kw):
+            captured["prompt"] = prompt
+            captured["schema"] = schema
             captured.update(kw)
-            return iter(['{"score": 1.0, "reason": "ok"}'])
+            return '{"score": 1.0, "reason": "ok"}'
 
-        with patch("brains.brain.ask_stream", fake_ask_stream):
+        with patch("brains.brain_ollama.ask_local_structured", fake_ask_local_structured), \
+             patch("brains.brain.ask_stream", side_effect=AssertionError("cloud verifier must not run")):
             task_runtime._auto_verify("t1", "qa-tester", "task", "result", tool_calls=1,
                                       tool_transcript="$ ls\nok")
-        self.assertTrue(captured.get("bare_system"))
-        self.assertTrue(captured.get("bypass_local"))
+        self.assertEqual(captured["schema"]["required"], ["score", "reason"])
+        self.assertIn("strict output-quality evaluator", captured["system"])
+        self.assertFalse(captured["raise_on_error"])
 
 
 if __name__ == "__main__":
