@@ -234,6 +234,7 @@ def test_backend_engineer_worker_flow():
             model="glm-4.7-flash",
             system_extra="Test Prompt",
             tools=["read_file", "write_file", "run_tests"],
+            workspace_confined=True,
         )
 
         # Verify HTTP post back to Event Bus results

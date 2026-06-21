@@ -47,6 +47,42 @@ One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`)
 
 ## Active Lanes
 
+### Codex Lane: Native Tool-Loop Context & Telemetry (2026-06-20)
+
+Owner: Codex + delegated context/telemetry/security agents
+
+Scope:
+- `brains/brain_ollama.py`
+- `usage_tracker.py`
+- focused native tool-loop and usage-summary tests
+
+Objective:
+Bound `ask_local_with_tools()` context growth, compact older tool rounds,
+preserve the latest evidence, and record token/tool/truncation metadata for
+every native Ollama agent call. No cloud fallback and no dashboard UI edits.
+
+Coordination boundary for Claude:
+- Claude retains dashboard rendering, `router.py`, `ui.py`, and conversation UX.
+- Codex will expose additive usage-summary fields for Claude to render later.
+- Existing untracked `docs/ai/context_window_strategy.md` and `projects.db`
+  remain untouched.
+
+Status:
+- Complete. Native Ollama tool loops now receive an explicit context window,
+  compact older complete tool rounds, cap tool results/calls/output, preserve
+  valid read-after-write retries, and synthesize safely at iteration/call caps.
+- Local-first boundaries now reject Ollama cloud tags across chat, vision, and
+  embedding discovery; remote Ollama and network agent tools require explicit
+  opt-in. Backend workspace confinement is immutable per invocation.
+- Usage telemetry records one sanitized row per provider call and aggregates
+  governor coverage, tool calls, truncation, dropped context, errors, and cap
+  exhaustion without storing prompts, arguments, or tool results.
+- Independent QA and security re-reviews found no unresolved P0/P1 blockers.
+- Verification:
+  - focused tool/dispatch/backend suite: `63 passed`
+  - context/unit/regression/agent suite: `810 passed, 10 subtests passed`
+  - `py_compile` and `git diff --check`: passed
+
 ### Codex Lane: Local Agent Reliability (2026-06-19)
 
 Owner: Codex + delegated reliability/QA agents
