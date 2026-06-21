@@ -1270,6 +1270,20 @@ def _validate_bash_segment(parts: list[str], root: "Path | None" = None) -> "lis
                     str(Path(m).relative_to(root)) for m in matches[:500]
                 )
                 continue
+            # Tasks run in an isolated worktree (root); prompts often hand the
+            # agent absolute MAIN-repo paths (e.g. /Users/.../jarvis-ai/foo.py).
+            # Remap those onto the worktree so the agent reads its own checkout
+            # instead of being denied. Read-only _PATH_CMDS only (writes never
+            # reach this block); paths outside the repo still fail the guard below.
+            if root != _REPO_ROOT:
+                try:
+                    _ap = Path(arg)
+                    if _ap.is_absolute():
+                        _apr = _ap.resolve()
+                        if not str(_apr).startswith(str(root.resolve())):
+                            arg = str(root / _apr.relative_to(_REPO_ROOT.resolve()))
+                except Exception:
+                    pass  # outside repo / malformed — guard below decides
             try:
                 resolved = (Path(arg) if Path(arg).is_absolute() else root / arg).resolve()
                 if not str(resolved).startswith(str(root)):
