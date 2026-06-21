@@ -211,10 +211,31 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
             "over_budget_count": 0,
             "recent": [],
         },
+        "tool_loop": {
+            "invocation_count": 0,
+            "provider_call_count": 0,
+            "decision_call_count": 0,
+            "synthesis_call_count": 0,
+            "tool_iteration_count": 0,
+            "tool_call_count": 0,
+            "tool_calls_by_name": {},
+            "truncated_call_count": 0,
+            "dropped_tool_round_count": 0,
+            "dropped_message_count": 0,
+            "dropped_estimated_tokens": 0,
+            "governor_eligible_call_count": 0,
+            "governor_applied_call_count": 0,
+            "governor_coverage_ratio": 0.0,
+            "max_iteration_exhaustion_count": 0,
+            "error_call_count": 0,
+            "recent": [],
+        },
     }
 
     provider_buckets: dict[str, dict] = {}
     model_buckets: dict[str, dict] = {}
+    tool_loop_invocations: set[str] = set()
+    tool_loop_iterations: set[tuple[str, int]] = set()
     for row in rows:
         local = bool(row.get("local"))
         prompt_tokens = int(row.get("prompt_tokens") or 0)
@@ -272,6 +293,77 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
                 "original_prompt_tokens": conversation_meta.get("original_prompt_tokens", 0),
                 "final_prompt_tokens": conversation_meta.get("final_prompt_tokens", 0),
                 "over_budget": bool(conversation_meta.get("over_budget")),
+            })
+
+        tool_loop_meta = (row.get("metadata") or {}).get("tool_loop")
+        if isinstance(tool_loop_meta, dict):
+            tool_loop = summary["tool_loop"]
+            invocation_id = tool_loop_meta.get("invocation_id")
+            call_type = tool_loop_meta.get("call_type")
+            iteration = tool_loop_meta.get("iteration")
+            tool_names = [
+                name for name in (tool_loop_meta.get("tool_names") or [])
+                if isinstance(name, str) and name
+            ]
+
+            tool_loop["provider_call_count"] += 1
+            if invocation_id:
+                tool_loop_invocations.add(str(invocation_id))
+            if call_type == "decision":
+                tool_loop["decision_call_count"] += 1
+            elif call_type == "synthesis":
+                tool_loop["synthesis_call_count"] += 1
+            if iteration is not None and tool_names:
+                tool_loop_iterations.add((str(invocation_id or row.get("seq")), int(iteration)))
+
+            tool_loop["tool_call_count"] += len(tool_names)
+            for tool_name in tool_names:
+                tool_loop["tool_calls_by_name"][tool_name] = (
+                    tool_loop["tool_calls_by_name"].get(tool_name, 0) + 1
+                )
+            if tool_loop_meta.get("truncated"):
+                tool_loop["truncated_call_count"] += 1
+            tool_loop["dropped_tool_round_count"] += int(
+                tool_loop_meta.get("dropped_tool_round_count") or 0
+            )
+            tool_loop["dropped_message_count"] += int(
+                tool_loop_meta.get("dropped_message_count") or 0
+            )
+            tool_loop["dropped_estimated_tokens"] += int(
+                tool_loop_meta.get("dropped_estimated_tokens") or 0
+            )
+            if tool_loop_meta.get("governor_eligible"):
+                tool_loop["governor_eligible_call_count"] += 1
+            if tool_loop_meta.get("governor_applied"):
+                tool_loop["governor_applied_call_count"] += 1
+            if tool_loop_meta.get("max_iteration_exhausted"):
+                tool_loop["max_iteration_exhaustion_count"] += 1
+            if tool_loop_meta.get("error"):
+                tool_loop["error_call_count"] += 1
+
+            tool_loop["recent"].append({
+                "timestamp": row.get("timestamp"),
+                "model": row.get("model"),
+                "invocation_id": invocation_id,
+                "call_type": call_type,
+                "iteration": iteration,
+                "tool_names": tool_names,
+                "truncated": bool(tool_loop_meta.get("truncated")),
+                "dropped_tool_round_count": int(
+                    tool_loop_meta.get("dropped_tool_round_count") or 0
+                ),
+                "dropped_message_count": int(
+                    tool_loop_meta.get("dropped_message_count") or 0
+                ),
+                "dropped_estimated_tokens": int(
+                    tool_loop_meta.get("dropped_estimated_tokens") or 0
+                ),
+                "governor_eligible": bool(tool_loop_meta.get("governor_eligible")),
+                "governor_applied": bool(tool_loop_meta.get("governor_applied")),
+                "max_iteration_exhausted": bool(
+                    tool_loop_meta.get("max_iteration_exhausted")
+                ),
+                "error": bool(tool_loop_meta.get("error")),
             })
 
         provider = row.get("provider", "unknown")
@@ -336,6 +428,16 @@ def summarize(hours: int = 24, since_seq: int = 0, include_recent: int = 10) -> 
     else:
         conv["average_original_prompt_tokens"] = 0
         conv["average_final_prompt_tokens"] = 0
+    tool_loop = summary["tool_loop"]
+    tool_loop["invocation_count"] = len(tool_loop_invocations)
+    tool_loop["tool_iteration_count"] = len(tool_loop_iterations)
+    tool_loop["recent"] = tool_loop["recent"][-10:]
+    eligible_calls = tool_loop["governor_eligible_call_count"]
+    if eligible_calls:
+        tool_loop["governor_coverage_ratio"] = round(
+            tool_loop["governor_applied_call_count"] / eligible_calls,
+            4,
+        )
     return summary
 
 

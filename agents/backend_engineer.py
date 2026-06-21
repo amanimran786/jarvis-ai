@@ -74,8 +74,6 @@ def process_task(payload: dict[str, Any]) -> str:
     user_prompt += "Please resolve the task inside the workspace directory using your tools."
 
     # 4. Invoke local LLM with tool routing
-    # Set the confinement environment flag so tool actions route to tools/fs_tools
-    os.environ["JARVIS_WORKSPACE_CONFINED"] = "1"
     output = ""
     try:
         # We explicitly request 'read_file', 'write_file', and 'run_tests' tools
@@ -84,15 +82,12 @@ def process_task(payload: dict[str, Any]) -> str:
             model=model,
             system_extra=system_prompt,
             tools=["read_file", "write_file", "run_tests"],
+            workspace_confined=True,
         )
         output = "".join(list(response_generator))
     except Exception as exc:
         logger.error("LLM tool-calling loop execution failed: %s", exc)
         output = f"Error: LLM execution failed: {exc}"
-    finally:
-        # Clean up the confinement flag
-        os.environ.pop("JARVIS_WORKSPACE_CONFINED", None)
-
     # 5. Output results back to the event bus /results endpoint
     event_bus_url = os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
     if task_id:
