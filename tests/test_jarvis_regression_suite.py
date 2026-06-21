@@ -66,6 +66,19 @@ _SKIP_NO_KB = unittest.skipUnless(
 # --------------------------------------------------------------------------
 
 
+
+# --- Real-UI gate (CI hermeticity) ----------------------------------------
+# The meeting/voice/overlay rendering tests below call real methods on
+# ui.JarvisWindow / ui.OrbShellWindow. In headless CI conftest stubs PyQt6 with
+# MagicMock, so those classes are Mocks without the methods. Skip those tests
+# when real PyQt6 is absent (they run normally on a machine that has PyQt6).
+_REAL_UI = isinstance(getattr(ui, "JarvisWindow", None), type)
+_SKIP_NO_UI = unittest.skipUnless(
+    _REAL_UI, "real PyQt6 ui.JarvisWindow unavailable (stubbed in CI / headless)",
+)
+# --------------------------------------------------------------------------
+
+
 class PromptModifierTests(unittest.TestCase):
     def test_eli5_modifier_strips_prefix_and_adds_system_extra(self):
         result = prompt_modifiers.parse("ELI5: explain tcp congestion control")
@@ -3888,6 +3901,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         def __init__(self):
             self.emit = unittest.mock.Mock()
 
+    @_SKIP_NO_UI
     def test_transcript_callback_forwards_to_live_bridge(self):
         fake = type("FakeJarvis", (), {"_live_updates": type("Bridge", (), {"transcript": self._SignalSink()})()})()
 
@@ -3895,6 +3909,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
 
         fake._live_updates.transcript.emit.assert_called_once_with("Can you explain optimistic locking?")
 
+    @_SKIP_NO_UI
     def test_transcript_rendering_updates_label_and_toolbar_state(self):
         fake = type(
             "FakeJarvis",
@@ -3916,6 +3931,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         self.assertTrue(fake.suggest_panel.visible)
         fake._update_meeting_toolbar_layout.assert_called_once()
 
+    @_SKIP_NO_UI
     def test_compact_suggestion_rendering_shows_panel_and_refreshes_layout(self):
         fake = type(
             "FakeJarvis",
@@ -3943,6 +3959,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         )
         fake._update_meeting_toolbar_layout.assert_called_once()
 
+    @_SKIP_NO_UI
     def test_orb_suggestion_rendering_updates_compact_text(self):
         fake = type(
             "FakeOrb",
@@ -3966,6 +3983,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         self.assertEqual(fake._top_chip.text(), "SMART LISTEN ACTIVE")
         fake._set_tray_visible.assert_called_once_with(True)
 
+    @_SKIP_NO_UI
     def test_scoped_ui_message_ignores_stale_worker_response(self):
         added = []
         fake = SimpleNamespace(
@@ -4553,6 +4571,7 @@ class ModelRouterFallbackTests(unittest.TestCase):
 
 
 class OverlayTechnicalGuidanceTests(unittest.TestCase):
+    @_SKIP_NO_UI
     def test_screen_analysis_prompt_includes_engineering_playbook_guidance(self):
         worker = overlay.ScreenAnalysisWorker()
         with patch("desktop.overlay.camera.screenshot_and_describe", return_value="answer") as scan_mock:
@@ -5203,7 +5222,13 @@ class LocalTrainingTests(unittest.TestCase):
         }
         with patch("local_runtime.local_model_eval.skills.build_system_extra", return_value=("vault context", [])), \
              patch("local_runtime.local_model_eval.ask_with_priority", return_value='{"pass": true, "score": 4.5, "rationale": "grounded"}') as ask_mock:
-            result = local_model_eval._judge_answer(case, "candidate", "A direct answer.", "claude-3-5-haiku-latest")
+            result = local_model_eval._judge_answer(
+                case,
+                "candidate",
+                "A direct answer.",
+                "claude-3-5-haiku-latest",
+                allow_cloud=True,
+            )
 
         self.assertTrue(result["pass"])
         self.assertEqual(result["score"], 4.5)
@@ -5374,6 +5399,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
             _apply_voice_hint_for_status=unittest.mock.Mock(),
         )
 
+    @_SKIP_NO_UI
     def test_non_voice_status_keeps_existing_mic_state(self):
         window = self._fake_window()
 
@@ -5383,6 +5409,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._apply_voice_hint_for_status.assert_called_once_with("AWAITING WAKE WORD")
         self.assertEqual(window._status_label.text(), "PROCESSING")
 
+    @_SKIP_NO_UI
     def test_voice_prefixed_status_updates_mic_state(self):
         window = self._fake_window()
 
@@ -5392,6 +5419,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._apply_voice_hint_for_status.assert_called_once_with("LISTENING")
         self.assertEqual(window._status_label.text(), "LISTENING")
 
+    @_SKIP_NO_UI
     def test_mic_chip_click_uses_voice_state_not_status_label_text(self):
         window = SimpleNamespace(
             _voice_status_raw="LISTENING",
@@ -5405,6 +5433,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._restart_voice_worker_to_standby.assert_called_once_with()
         trigger_mock.assert_not_called()
 
+    @_SKIP_NO_UI
     def test_mic_chip_click_wakes_if_worker_needs_recovery(self):
         window = SimpleNamespace(
             _voice_status_raw="AWAITING WAKE WORD",
@@ -5417,6 +5446,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._ensure_voice_worker_running.assert_called_once_with()
         trigger_mock.assert_called_once_with()
 
+    @_SKIP_NO_UI
     def test_smart_listen_pause_resume_controls_voice_worker(self):
         worker = SimpleNamespace(
             isRunning=unittest.mock.Mock(return_value=True),
@@ -5439,6 +5469,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
 
 
 class LiveAssistRenderingTests(unittest.TestCase):
+    @_SKIP_NO_UI
     def test_meeting_watchdog_respects_manual_full_window_restore(self):
         window = SimpleNamespace(
             _last_live_listener_started_at=0.0,
@@ -5480,6 +5511,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
 
         window._set_meeting_toolbar_mode.assert_not_called()
 
+    @_SKIP_NO_UI
     def test_toolbar_manual_prompt_renders_when_surface_is_visible(self):
         window = SimpleNamespace(
             _meeting_toolbar_mode=False,
@@ -5501,6 +5533,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         )
         self.assertEqual(window.transcript_label.text(), "[gpt-4o-mini] Manual response ready.")
 
+    @_SKIP_NO_UI
     def test_live_snapshot_refresh_updates_visible_labels(self):
         live_snapshot = {
             "running": True,
@@ -5554,6 +5587,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         self.assertEqual(window.listen_btn.text, "■")
         self.assertTrue(getattr(window, "tray_visible", False))
 
+    @_SKIP_NO_UI
     def test_orb_transcript_update_shows_partial_heard_question(self):
         window = SimpleNamespace(
             transcript_label=_StubTextWidget(),
@@ -5585,6 +5619,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         self.assertEqual(window._top_chip.text(), "SMART LISTEN ACTIVE")
         window._set_tray_visible.assert_called_once_with(True)
 
+    @_SKIP_NO_UI
     def test_orb_live_call_status_appends_actionable_hint(self):
         suggestion = "Use retries and idempotency. Verify duplicate jobs stay harmless under load."
         live_snapshot = {
@@ -5656,6 +5691,7 @@ class UnderstandingQualitySmokeTests(unittest.TestCase):
         window._set_tray_visible = lambda visible: setattr(window, "tray_visible", visible)
         return window
 
+    @_SKIP_NO_UI
     def test_fragmented_captions_build_a_coherent_prompt_and_update_visible_assist(self):
         previous_history = list(meeting_listener._transcript_history)
         meeting_listener._transcript_history[:] = ["tell me about yourself"]
