@@ -8,7 +8,7 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {"type": "command", "command": "python3 /Users/truthseeker/jarvis-ai/scripts/hooks/pre_bash_guard.py"}
+          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks/pre_bash_guard.py\""}
         ]
       }
     ],
@@ -16,8 +16,8 @@
       {
         "matcher": "Edit|Write",
         "hooks": [
-          {"type": "command", "command": "python3 /Users/truthseeker/jarvis-ai/scripts/hooks/post_write_security.py"},
-          {"type": "command", "command": "python3 /Users/truthseeker/jarvis-ai/scripts/hooks/post_write_lint.py"}
+          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks/post_write_security.py\""},
+          {"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks/post_write_lint.py\""}
         ]
       }
     ]
