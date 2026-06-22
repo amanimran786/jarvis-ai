@@ -1764,9 +1764,18 @@ def _tool_read_files(prompt: str) -> str:
         if name in seen:
             continue
         seen.add(name)
-        for base in [_REPO_ROOT, _REPO_ROOT / "brains", _REPO_ROOT / "infra",
-                     _REPO_ROOT / "tests", _REPO_ROOT / "tools"]:
-            candidate = (base / name).resolve()
+        # The filename regex strips a leading '/', so an absolute main-repo path
+        # (e.g. /Users/.../jarvis-ai/foo.py) is captured as "Users/.../foo.py" and
+        # base/name would double the repo path. Try the recovered absolute path
+        # first, then the relative bases. Every candidate is validated under
+        # _REPO_ROOT below, so reads never escape the repo.
+        _np = Path(name)
+        _cands = [_np if _np.is_absolute() else Path("/" + name)]
+        _cands += [base / name for base in (
+            _REPO_ROOT, _REPO_ROOT / "brains", _REPO_ROOT / "infra",
+            _REPO_ROOT / "tests", _REPO_ROOT / "tools")]
+        for candidate in _cands:
+            candidate = candidate.resolve()
             if not str(candidate).startswith(str(_REPO_ROOT)):
                 continue
             if candidate.suffix not in _SAFE_READ_EXTENSIONS:
