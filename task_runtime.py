@@ -2482,7 +2482,12 @@ def runtime_snapshot() -> dict[str, Any]:
                 "waiting_approval": sum(1 for task in tasks if task.get("status") == _WAITING_APPROVAL_STATUS),
                 "running": sum(1 for task in tasks if task.get("status") in {"assigned", "running", "streaming"}),
                 "succeeded": sum(1 for task in tasks if task.get("status") == "succeeded"),
-                "failed": sum(1 for task in tasks if task.get("status") == "failed"),
+                # Genuine quality failures only. daemon_restart casualties are
+                # in-flight tasks the daemon force-failed on reboot (see bootstrap),
+                # not work the agent got wrong — counting them as "failed" inflated
+                # the agent failure rate. They are reported separately as "interrupted".
+                "failed": sum(1 for task in tasks if task.get("status") == "failed" and task.get("error") != "daemon_restart"),
+                "interrupted": sum(1 for task in tasks if task.get("status") == "failed" and task.get("error") == "daemon_restart"),
                 "cancelled": sum(1 for task in tasks if task.get("status") == "cancelled"),
             },
             "isolated_workspace_count": sum(
