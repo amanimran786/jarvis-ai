@@ -2818,6 +2818,12 @@ def dashboard_state(request: Request):
     active_statuses = {"queued", "assigned", "waiting_approval", "running", "streaming"}
     completed_statuses = {"succeeded", "completed"}
     failed_statuses = {"failed", "cancelled", "denied"}
+
+    def _is_restart_casualty(t: dict) -> bool:
+        # The daemon mass-fails in-flight tasks on restart (bootstrap) with
+        # error 'daemon_restart'. Those are infrastructure interruptions, not
+        # agent quality failures — report them separately from the failure rate.
+        return t.get("status") == "failed" and (t.get("error") or "") == "daemon_restart"
     try:
         training_status = local_training.status()
     except Exception as exc:
@@ -2838,7 +2844,8 @@ def dashboard_state(request: Request):
             "active": sum(1 for t in tasks if t.get("status") in active_statuses),
             "awaiting_approval": sum(1 for t in tasks if t.get("status") == "waiting_approval"),
             "completed": sum(1 for t in tasks if t.get("status") in completed_statuses),
-            "failed": sum(1 for t in tasks if t.get("status") in failed_statuses),
+            "failed": sum(1 for t in tasks if t.get("status") in failed_statuses and not _is_restart_casualty(t)),
+            "interrupted": sum(1 for t in tasks if _is_restart_casualty(t)),
         },
         "agents": _get_agent_stats_data(),
         "pipeline_audit": _safe_pipeline_audit_summary(),
@@ -5531,8 +5538,12 @@ async def agent_dashboard(request: Request):
       const totalTasks = state.tasks?.total ?? 0;
       const completedTasks = state.tasks?.completed ?? 0;
       const failedTasks = state.tasks?.failed ?? 0;
-      const successRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
+      const interruptedTasks = state.tasks?.interrupted ?? 0;
+      const decided = completedTasks + failedTasks;  // terminal quality outcomes (excl. restart casualties + in-flight)
+      const successRate = decided > 0 ? Math.round((completedTasks / decided) * 100) : null;
       const rateCls = successRate === null ? '' : successRate >= 70 ? 'ok' : successRate >= 50 ? 'warn' : 'bad';
+      const rateStr = successRate !== null ? ` (${{successRate}}% quality pass rate)` : '';
+      const interruptedStr = interruptedTasks ? `; ${{interruptedTasks}} interrupted by restarts (not counted as failures)` : '';
       const upgrades = state.upgrade_loop?.summary?.ticket_count ?? (state.upgrade_loop?.tickets || []).length;
       const denials = state.security?.denials ?? 0;
       const critical = state.security?.by_severity?.critical ?? 0;
@@ -5557,7 +5568,7 @@ async def agent_dashboard(request: Request):
       document.getElementById('mc-narrative').innerHTML =
         `<strong style="color:#e0e0ef">Current read:</strong> pipeline audit is <span style="color:${{verdict==='CLEAN'?'#28c76f':verdict==='WARN'?'#ffd700':'#ea5455'}}">${{escHtml(verdict)}}</span>, ` +
         `${{acknowledged}} historical warning(s) triaged, ${{warnCount}} active. ` +
-        `Task outcome: <strong style="color:${{rateCls==='ok'?'#28c76f':rateCls==='warn'?'#ffd700':'#ea5455'}}">${{completedTasks}} succeeded, ${{failedTasks}} failed</strong> of ${{totalTasks}} total. ` +
+        `Task outcome: <strong style="color:${{rateCls==='ok'?'#28c76f':rateCls==='warn'?'#ffd700':'#ea5455'}}">${{completedTasks}} succeeded, ${{failedTasks}} failed</strong> of ${{decided}} decided${{rateStr}}${{interruptedStr}}. ` +
         `Agent success rates — ${{agentSummary}}. ` +
         `Execution, package installs, cloud escalation, merge, push, and deploy still require human approval.`;
 
