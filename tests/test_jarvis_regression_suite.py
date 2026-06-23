@@ -5919,7 +5919,7 @@ class MeetingPrepFastPathTests(unittest.TestCase):
         """'prep me for my next meeting' should fast-path to Calendar label."""
         fake_event = {
             "title": "Standup",
-            "start": "2026-04-26T09:30:00-07:00",
+            "start": "2026-04-26T09:30:00",  # naive — avoids astimezone() UTC conversion in CI
             "attendees": [],
         }
         with patch("google_services.get_next_event", return_value=fake_event):
