@@ -4146,24 +4146,30 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertEqual(meeting_listener._last_stt_backend, "faster-whisper")
 
     def test_transcribe_falls_back_to_openai_when_local_stt_is_unavailable(self):
+        # meeting_listener.client is None in CI (no OPENAI_API_KEY). Patch the
+        # client itself so patch.object doesn't crash on NoneType.
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.return_value = SimpleNamespace(text="What is a variable?")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "openai", "openai_fallback_allowed": True, "model": "small.en"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", return_value=SimpleNamespace(text="What is a variable?")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "What is a variable?")
         self.assertEqual(meeting_listener._last_stt_backend, "openai")
         self.assertEqual(meeting_listener._last_stt_backend_detail, "whisper-1")
 
     def test_transcribe_skips_openai_when_fallback_is_disabled(self):
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.side_effect = AssertionError("openai fallback should stay disabled")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "unavailable", "openai_fallback_allowed": False, "model": "small.en"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should stay disabled")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "")
         self.assertEqual(meeting_listener._last_stt_backend, "unavailable")
