@@ -1232,7 +1232,7 @@ def _print_doctor() -> None:
     print(f"STT               : {stt.get('active_engine', 'unknown')} | local={'yes' if stt.get('local_available') else 'no'}")
     print(f"TTS               : {'ready' if tts.get('ready') else 'not ready'} | {tts.get('engine', 'unknown')}:{tts.get('voice', 'unknown')}")
     print(f"Semantic memory   : {semantic.get('retrieval_backend', 'unknown')} | indexed={semantic.get('entries_indexed', 0)} | ready={'yes' if semantic.get('index_ready') else 'no'}")
-    print(f"Runtime           : total={task_counts.get('total', 0)} waiting={task_counts.get('waiting_approval', 0)} running={task_counts.get('running', 0)} queued={task_counts.get('queued', 0)} failed={task_counts.get('failed', 0)} cancelled={task_counts.get('cancelled', 0)}")
+    print(f"Runtime           : total={task_counts.get('total', 0)} waiting={task_counts.get('waiting_approval', 0)} running={task_counts.get('running', 0)} queued={task_counts.get('queued', 0)} failed={task_counts.get('failed', 0)} interrupted={task_counts.get('interrupted', 0)} cancelled={task_counts.get('cancelled', 0)}")
     print(f"Persisted API     : {persisted.get('base_url') or 'none'}")
     print(f"Vault             : docs={vault_status.get('doc_count', 0)} pages={vault_status.get('wiki_page_count', 0)} citation_ready={'yes' if vault_status.get('citation_ready') else 'no'}")
     print(f"Memory            : facts={memory_status.get('facts', 0)} projects={memory_status.get('projects', 0)} conversations={memory_status.get('conversation_summaries', 0)} long_term={'yes' if memory_status.get('long_term_profile_ready') else 'no'}")

@@ -398,6 +398,32 @@ class PersistentJarvisRuntimePersistenceTests(unittest.TestCase):
         ]
         self.assertEqual(len(restart_events), 1)
 
+    def test_runtime_snapshot_separates_interrupted_from_genuine_failures(self) -> None:
+        # Arrange: one succeeded task, one genuine quality failure, and one
+        # in-flight task that the daemon will force-fail on reboot.
+        succeeded = _task_record("task_ok_001", status="succeeded")
+        succeeded["finished_at"] = "2026-04-10T00:03:00+00:00"
+        task_persistence.upsert_task(succeeded)
+
+        genuine_failure = _task_record("task_bad_001", status="failed")
+        genuine_failure["error"] = "agent produced wrong answer"
+        genuine_failure["finished_at"] = "2026-04-10T00:03:00+00:00"
+        task_persistence.upsert_task(genuine_failure)
+
+        task_persistence.upsert_task(_task_record("task_running_001", status="running"))
+
+        _clear_runtime_memory_only()
+        task_runtime.bootstrap()
+
+        # Act
+        counts = task_runtime.runtime_snapshot()["task_counts"]
+
+        # Assert: the daemon_restart casualty is reported as interrupted, not
+        # folded into the genuine failure count.
+        self.assertEqual(counts["succeeded"], 1)
+        self.assertEqual(counts["failed"], 1)
+        self.assertEqual(counts["interrupted"], 1)
+
     def test_webhook_task_persistence_snapshot_is_redacted_after_reboot(self) -> None:
         prompt = "sensitive inbound webhook prompt"
         with patch("task_runtime.smart_stream", return_value=(iter(["ok"]), "UnitTestModel")), patch(
