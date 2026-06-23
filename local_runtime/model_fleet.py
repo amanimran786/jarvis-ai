@@ -15,10 +15,10 @@ from config import (
     LOCAL_CODER, LOCAL_CODER_RECOMMENDED, LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED,
     LOCAL_QWEN3_FAST, LOCAL_QWEN3_MID, LOCAL_QWEN3_STRONG, LOCAL_DEVSTRAL, LOCAL_PHI4_MINI,
     LOCAL_GEMMA4_STRONG, LOCAL_GEMMA4_MOE, LOCAL_QWEN3_6, LOCAL_DEEPSEEK_V4_FLASH,
-    LOCAL_LLAMA4_MAVERICK, LOCAL_GLM51_CLOUD,
+    LOCAL_LLAMA4_MAVERICK, LOCAL_GLM51_CLOUD, LOCAL_GLM52_MODEL,
 )
 from brains import brain_ollama
-from local_runtime import local_model_automation, local_model_eval, local_training
+from local_runtime import glm52_readiness, local_model_automation, local_model_eval, local_training
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,7 @@ class ModelCandidate:
     context_window: str
     why: str
     caution: str
+    source_links: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -233,6 +234,24 @@ MODEL_CANDIDATES: tuple[ModelCandidate, ...] = (
         caution="Not 100% local and may involve cloud cost/data transfer; never use as a Jarvis default in open-source/local-first mode.",
     ),
     ModelCandidate(
+        id="glm_5_2_external_local",
+        role="external_local_eval",
+        label="GLM 5.2 (external-local candidate)",
+        ollama_tag=LOCAL_GLM52_MODEL,
+        status="external_hardware_required",
+        priority="low",
+        pull_command="",
+        disk_estimate="BF16 about 1.4TiB; FP8 about 704GiB",
+        context_window="validate on the trusted external-local endpoint",
+        why="Official profile: 744B total parameters with 40B active; evaluation requires external hardware.",
+        caution="No auto-promotion. M4 Pro 48GiB is a no-go, Ollama's official tag is cloud-only, no official local Ollama quant is available, and endpoint evals must pin a digest.",
+        source_links=(
+            "https://huggingface.co/zai-org/GLM-5.2",
+            "https://huggingface.co/zai-org/GLM-5.2-FP8",
+            "https://ollama.com/library/glm-5.2",
+        ),
+    ),
+    ModelCandidate(
         id="glm_5_1_cloud",
         role="cloud_optional_coding",
         label="GLM-5.1 via Ollama Cloud",
@@ -400,6 +419,7 @@ def _candidate_dict(candidate: ModelCandidate, installed: list[str]) -> dict[str
         "context_window": candidate.context_window,
         "why": candidate.why,
         "caution": candidate.caution,
+        "source_links": list(candidate.source_links),
     }
 
 
@@ -423,6 +443,7 @@ def fleet_status() -> dict[str, Any]:
     training_status = local_training.status()
     eval_status = local_model_eval.status()
     automation_status = local_model_automation.status()
+    glm52_status = glm52_readiness.local_readiness(installed_models=installed)
 
     configured_roles = {
         "default": LOCAL_DEFAULT,
@@ -455,6 +476,7 @@ def fleet_status() -> dict[str, Any]:
         "training_status": training_status,
         "eval_status": eval_status,
         "automation_status": automation_status,
+        "glm52_readiness": glm52_status,
         "policy": {
             "download_all_models": "no",
             "why": "Model pulls consume disk, memory, and latency budget. Jarvis should install role-based candidates, then eval before promotion.",

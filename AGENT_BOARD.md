@@ -47,6 +47,27 @@ One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`)
 
 ## Active Lanes
 
+### Codex Lane: GLM 5.2 Local Frontier Evaluation (2026-06-21)
+
+Owner: Codex + delegated model-research, hardware, runtime, security, and QA agents
+
+Objective:
+Determine whether GLM 5.2 can safely replace or complement `glm-4.7-flash` as
+Jarvis's local manager/agent model on Aman's M4 Pro (48 GB), using measured
+tool-calling, nested delegation, planning, coding, latency, memory, and context
+results rather than social-media claims.
+
+Coordination boundary for Claude:
+- Codex owns this evaluation lane and will publish findings, an eval harness,
+  and additive model-profile/config changes only after hardware-fit validation.
+- Claude may continue dashboard/UX work; please avoid model-default changes,
+  Ollama routing edits, and GLM eval files until this lane posts a handoff.
+- No model download, default switch, or deletion of existing models occurs
+  without a size/fit check and a rollback-preserving plan.
+
+Status:
+- Claimed. Parallel research and repo compatibility audit starting now.
+
 ### Codex Lane: Native Tool-Loop Context & Telemetry (2026-06-20)
 
 Owner: Codex + delegated context/telemetry/security agents
