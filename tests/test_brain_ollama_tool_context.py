@@ -346,7 +346,20 @@ def test_remote_ollama_policy_requires_explicit_opt_in(monkeypatch):
     with pytest.raises(RuntimeError):
         brain_ollama._enforce_ollama_host_policy()
 
+    # Both ALLOW_REMOTE_OLLAMA and TRUSTED_OLLAMA_HOSTS are required
     monkeypatch.setenv("JARVIS_ALLOW_REMOTE_OLLAMA", "1")
+    monkeypatch.setenv("JARVIS_TRUSTED_OLLAMA_HOSTS", "ollama.example.com")
+    brain_ollama._enforce_ollama_host_policy()
+
+    monkeypatch.setenv("JARVIS_TRUSTED_OLLAMA_HOSTS", "other.example.com")
+    with pytest.raises(RuntimeError, match="TRUSTED_OLLAMA_HOSTS"):
+        brain_ollama._enforce_ollama_host_policy()
+
+    monkeypatch.setenv("OLLAMA_HOST", "http://ollama.example.com:11434")
+    monkeypatch.setenv("JARVIS_TRUSTED_OLLAMA_HOSTS", "ollama.example.com")
+    with pytest.raises(RuntimeError, match="requires HTTPS"):
+        brain_ollama._enforce_ollama_host_policy()
+    monkeypatch.setenv("JARVIS_ALLOW_INSECURE_REMOTE_OLLAMA", "1")
     brain_ollama._enforce_ollama_host_policy()
 
 
@@ -363,8 +376,40 @@ def test_local_model_listing_excludes_cloud_tags():
         SimpleNamespace(model="llama3.1:8b"),
         SimpleNamespace(model="llava:13b-cloud"),
         SimpleNamespace(model="nomic-embed-text:cloud"),
+        SimpleNamespace(model="cloud/glm-5.2:latest"),
     ]
     client = SimpleNamespace(list=lambda: SimpleNamespace(models=models))
 
     with patch.object(brain_ollama, "_client", return_value=client):
         assert brain_ollama.list_local_models() == ["llama3.1:8b"]
+
+
+def test_exact_model_lookup_never_substitutes_fallback():
+    models = [SimpleNamespace(model="glm-4.7-flash:latest")]
+    client = SimpleNamespace(list=lambda: SimpleNamespace(models=models))
+
+    with patch.object(brain_ollama, "_client", return_value=client):
+        with pytest.raises(RuntimeError, match="Exact local model is unavailable"):
+            brain_ollama._exact_available_model("glm-5.2")
+
+
+def test_strict_eval_call_excludes_memory_and_marks_remote_usage(monkeypatch):
+    client = _FakeClient([[_response("Evaluation answer.")]])
+    records = []
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.example.com")
+    with patch.object(brain_ollama, "_client", return_value=client), \
+         patch.object(brain_ollama, "_exact_available_model", return_value="glm-5.2"), \
+         patch.object(brain_ollama.mem, "get_context", return_value="PRIVATE MEMORY"), \
+         patch.object(brain_ollama.usage_tracker, "record", side_effect=lambda **kw: records.append(kw)):
+        answer = brain_ollama.ask_local(
+            "Evaluate this answer.",
+            model="glm-5.2",
+            strict_model=True,
+            raise_on_error=True,
+            include_memory=False,
+        )
+
+    assert answer == "Evaluation answer."
+    assert "PRIVATE MEMORY" not in str(client.calls[0]["messages"])
+    assert records[0]["local"] is False
+    assert records[0]["metadata"]["endpoint_scope"] == "remote_trusted"
