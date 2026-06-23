@@ -113,3 +113,7 @@ kb/career/universal_base.md
 training/benchmarks.jsonl
 training/overnight_log.jsonl
 training/overnight_state.json
+
+# Runtime SQLite databases
+*.db
+*.sqlite

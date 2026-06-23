@@ -10,9 +10,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from brains.brain_ollama import ask_local
-from config import LOCAL_DEFAULT, LOCAL_REASONING, LOCAL_TUNED, SONNET
+from brains.brain_ollama import ask_local, list_local_models
+from brains import brain_ollama
+from config import LOCAL_DEFAULT, LOCAL_GLM52_MODEL, LOCAL_REASONING, LOCAL_TUNED, SONNET
 import evals
+from local_runtime import glm52_readiness
 from provider_priority import ask_with_priority
 import runtime_state
 import skills
@@ -80,6 +82,45 @@ CURATED_CASES = [
         "expected": "Explain the main mechanisms, then map them to the main mitigation strategies with concrete terminology.",
     },
 ]
+
+
+def _is_cloud_model(model: str) -> bool:
+    value = (model or "").strip().lower()
+    return bool(re.search(r"(?:^|[:/_.-])cloud(?:$|[:/_.-])", value))
+
+
+def _normalize_model_tag(model: str) -> str:
+    value = (model or "").strip()
+    return value[:-7] if value.endswith(":latest") else value
+
+
+def _model_is_installed(model: str, installed: list[str]) -> bool:
+    requested = _normalize_model_tag(model)
+    if not requested:
+        return False
+    return any(_normalize_model_tag(m) == requested for m in installed)
+
+
+def _eval_preflight(
+    candidate: str,
+    baseline: str,
+    teacher: str | None = None,
+) -> dict:
+    requested = tuple(m for m in (candidate, baseline, teacher) if m)
+    if any(_is_cloud_model(m) for m in requested):
+        return {"ok": False, "error": "Local model evaluation rejects cloud-tagged models."}
+    installed = list_local_models()
+    missing = [m for m in requested if not _model_is_installed(m, installed)]
+    if missing:
+        return {
+            "ok": False,
+            "error": (
+                "Local model evaluation requires the exact candidate and baseline "
+                f"to be visible on the configured Ollama endpoint. Missing: {', '.join(missing)}."
+            ),
+            "installed_models": installed,
+        }
+    return {"ok": True, "installed_models": installed}
 
 
 def _ensure_dirs() -> None:
@@ -253,9 +294,34 @@ def run_eval(
     limit: int = 8,
     teacher_model: str = LOCAL_REASONING,
 ) -> dict:
+    if _is_cloud_model(candidate_model):
+        return {"ok": False, "error": "Local model evaluation rejects cloud-tagged models."}
+
     _ensure_dirs()
     cases = benchmark_cases(limit=limit)
     baseline = baseline_model or promoted_model() or LOCAL_DEFAULT
+
+    preflight = _eval_preflight(candidate_model, baseline, teacher_model)
+    if not preflight["ok"]:
+        return preflight
+
+    # GLM 5.2 requires exact digest match to prevent evaluating a wrong build.
+    if glm52_readiness.LOCAL_GLM52_DIGEST and _normalize_model_tag(candidate_model) == _normalize_model_tag(LOCAL_GLM52_MODEL):
+        try:
+            client = brain_ollama._client()
+            for m in client.list().models:
+                if _normalize_model_tag(m.model) == _normalize_model_tag(candidate_model):
+                    if m.digest != glm52_readiness.LOCAL_GLM52_DIGEST:
+                        return {
+                            "ok": False,
+                            "error": (
+                                f"GLM 5.2 digest does not match pinned digest. "
+                                f"Expected {glm52_readiness.LOCAL_GLM52_DIGEST}, got {m.digest}."
+                            ),
+                        }
+                    break
+        except Exception:
+            pass  # fail open on infra errors
 
     candidate_results = []
     baseline_results = []
@@ -326,6 +392,12 @@ def promote_candidate(
     min_pass_rate: float = PROMOTION_MIN_PASS_RATE,
     min_score_delta: float = PROMOTION_MIN_SCORE_DELTA,
 ) -> dict:
+    if candidate_model and _normalize_model_tag(candidate_model) == _normalize_model_tag(LOCAL_GLM52_MODEL):
+        return {
+            "ok": False,
+            "error": "Generic promotion is disabled for GLM 5.2. Use the dedicated evaluation workflow.",
+        }
+
     result = _load_eval_result(eval_path)
     if not result:
         return {"ok": False, "error": "No local model eval result found to promote from."}
