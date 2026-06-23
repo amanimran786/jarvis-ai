@@ -415,7 +415,12 @@ def get_best_available(preferred: str) -> str:
 
 def _is_cloud_tagged_model(model: str) -> bool:
     lower = (model or "").strip().lower()
-    return bool(re.search(r"(?:^|[:/_.-])cloud(?:$|[:/_.-])", lower))
+    # A cloud-only model carries 'cloud' in its version tag (the part after ':').
+    # Models whose name starts with 'cloud' (e.g. cloud-native) are not cloud-only.
+    _, _, tag = lower.partition(":")
+    if not tag:
+        return False
+    return bool(re.search(r"(?:^|[-/_])cloud(?:$|[-/_])", tag))
 
 
 def _normalize_model_tag(model: str) -> str:
