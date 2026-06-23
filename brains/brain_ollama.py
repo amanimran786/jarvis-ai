@@ -415,9 +415,12 @@ def get_best_available(preferred: str) -> str:
 
 def _is_cloud_tagged_model(model: str) -> bool:
     lower = (model or "").strip().lower()
-    # A cloud-only model carries 'cloud' in its version tag (the part after ':').
-    # Models whose name starts with 'cloud' (e.g. cloud-native) are not cloud-only.
-    _, _, tag = lower.partition(":")
+    name, _, tag = lower.partition(":")
+    # 'cloud/' as a slash-delimited namespace prefix marks a remote-only model.
+    # Hyphen-joined names like 'cloud-native' are local models and must not match.
+    if re.match(r"cloud/", name):
+        return True
+    # Version tag (after ':') containing 'cloud' as a word marks remote-only.
     if not tag:
         return False
     return bool(re.search(r"(?:^|[-/_])cloud(?:$|[-/_])", tag))
