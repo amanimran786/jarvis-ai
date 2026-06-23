@@ -42,6 +42,11 @@ if os.getenv("CI"):
 # smart_stream still leak real GPT_MINI calls (and pollute the verdict log).
 os.environ.setdefault("JARVIS_AUTO_VERIFY", "0")
 
+# Unit tests mock smart_stream, not _run_native_task_loop. Disabling the native
+# loop here routes all task execution through the smart_stream mock path so
+# existing tests continue to work without modification.
+os.environ.setdefault("JARVIS_NATIVE_TOOL_LOOP", "0")
+
 # Keep test-generated security audit entries out of the real operator ledger
 # (~/.jarvis/security_audit.jsonl) — approve/deny/verdict paths emit on call.
 import tempfile as _tempfile  # noqa: E402
