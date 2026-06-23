@@ -24,6 +24,8 @@ if os.getenv("CI"):
         # macOS-only GUI
         "PyQt6", "PyQt6.QtWidgets", "PyQt6.QtCore", "PyQt6.QtGui",
         "PyQt6.QtMultimedia", "PyQt6.QtSvg",
+        # macOS Vision framework (used by local_ocr)
+        "Vision", "CoreML",
         # Audio hardware (PortAudio-backed)
         "sounddevice", "pyaudio",
         # Local ML models (large, not installed in CI)
