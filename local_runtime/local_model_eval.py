@@ -177,16 +177,40 @@ def _teacher_tier(model: str) -> str:
     return "cheap"
 
 
-def _ask_judge(prompt: str, *, teacher_model: str, system_extra: str = "") -> str:
-    return ask_with_priority(prompt, tier=_teacher_tier(teacher_model), system_extra=system_extra)
+def _ask_judge(
+    prompt: str,
+    *,
+    teacher_model: str,
+    system_extra: str = "",
+    allow_cloud: bool = False,
+) -> str:
+    if allow_cloud:
+        return ask_with_priority(prompt, tier=_teacher_tier(teacher_model), system_extra=system_extra)
+    return ask_local(
+        prompt,
+        model=teacher_model,
+        system_extra=system_extra,
+        track_context=False,
+        raise_on_error=True,
+        strict_model=True,
+        include_memory=False,
+    )
 
 
-def _judge_answer(case: dict, model_name: str, answer: str, teacher_model: str) -> dict:
+def _judge_answer(
+    case: dict,
+    model_name: str,
+    answer: str,
+    teacher_model: str,
+    *,
+    allow_cloud: bool = False,
+) -> dict:
     system_extra, _ = skills.build_system_extra(case["prompt"], tool="chat")
     raw = _ask_judge(
         _judge_prompt(case, model_name, answer),
         teacher_model=teacher_model,
         system_extra=system_extra,
+        allow_cloud=allow_cloud,
     ).strip()
     if raw.startswith("```"):
         raw = "\n".join(raw.splitlines()[1:-1]).strip()
