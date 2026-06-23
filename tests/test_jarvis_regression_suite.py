@@ -4135,12 +4135,16 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertEqual(line, "Can you explain optimistic locking?")
 
     def test_transcribe_prefers_local_stt_when_available(self):
+        # meeting_listener.client is None in CI (no OPENAI_API_KEY). Patch the
+        # client object itself so patch.object doesn't crash on NoneType.
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.side_effect = AssertionError("openai fallback should not run")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": True, "engine": "faster-whisper", "text": "What is a variable?", "error": ""}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should not run")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "What is a variable?")
         self.assertEqual(meeting_listener._last_stt_backend, "faster-whisper")
