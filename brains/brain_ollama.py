@@ -67,6 +67,11 @@ def _client():
     return _CLIENT_SINGLETON
 
 
+def get_client():
+    """Return the Ollama client singleton. Public accessor for task_runtime."""
+    return _client()
+
+
 def _ollama_host_is_local(raw: str) -> bool:
     """Accept loopback/unix Ollama endpoints; remote hosts require explicit opt-in."""
     value = (raw or "").strip()
@@ -80,6 +85,23 @@ def _ollama_host_is_local(raw: str) -> bool:
     }
 
 
+def _ollama_endpoint_scope() -> str:
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    if not host:
+        return "on_device"
+    parsed = urlparse(host if "://" in host else f"http://{host}")
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "host.docker.internal":
+        return "host_local"
+    if _ollama_host_is_local(host):
+        return "on_device"
+    return "remote_trusted"
+
+
+def _ollama_usage_is_local() -> bool:
+    return _ollama_endpoint_scope() != "remote_trusted"
+
+
 def _enforce_ollama_host_policy() -> None:
     host = os.getenv("OLLAMA_HOST", "").strip()
     if not host or _ollama_host_is_local(host):
@@ -89,6 +111,25 @@ def _enforce_ollama_host_policy() -> None:
         raise RuntimeError(
             "Remote OLLAMA_HOST is disabled; set JARVIS_ALLOW_REMOTE_OLLAMA=1 "
             "only for an explicitly trusted endpoint."
+        )
+    parsed = urlparse(host if "://" in host else f"http://{host}")
+    hostname = (parsed.hostname or "").lower()
+    trusted = {
+        item.strip().lower()
+        for item in os.getenv("JARVIS_TRUSTED_OLLAMA_HOSTS", "").split(",")
+        if item.strip()
+    }
+    if hostname not in trusted:
+        raise RuntimeError(
+            "Remote OLLAMA_HOST is not in JARVIS_TRUSTED_OLLAMA_HOSTS."
+        )
+    insecure_allowed = os.getenv(
+        "JARVIS_ALLOW_INSECURE_REMOTE_OLLAMA", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if parsed.scheme != "https" and not insecure_allowed:
+        raise RuntimeError(
+            "Remote Ollama requires HTTPS unless "
+            "JARVIS_ALLOW_INSECURE_REMOTE_OLLAMA=1 is explicitly set."
         )
 
 
@@ -225,6 +266,9 @@ def _strip_markdown(text: str) -> str:
 # model never gets an over-filled prompt. Override at runtime via env if you
 # pull a model with a larger context (e.g. `LOCAL_MODEL_CTX_qwen3-coder=...`).
 _LOCAL_MODEL_CONTEXT_TOKENS = {
+    # Upstream supports 1M; Jarvis intentionally serves/evaluates at 64K until
+    # endpoint-specific memory and long-context soak tests pass.
+    "glm-5.2": 64000,
     "glm-4.7-flash": 202752,
     "gemma4:e4b": 8192,
     "gemma3:4b": 8192,
@@ -371,12 +415,46 @@ def get_best_available(preferred: str) -> str:
 
 def _is_cloud_tagged_model(model: str) -> bool:
     lower = (model or "").strip().lower()
-    tag = lower.rsplit(":", 1)[-1] if ":" in lower else ""
-    return bool(tag and re.search(r"(?:^|[-_.])cloud(?:$|[-_.])", tag))
+    return bool(re.search(r"(?:^|[:/_.-])cloud(?:$|[:/_.-])", lower))
 
 
-def ask_local(user_input: str, model: str = LOCAL_DEFAULT, system_extra: str = "", track_context: bool = False, raise_on_error: bool = False) -> str:
-    return "".join(ask_local_stream(user_input, model, system_extra=system_extra, track_context=track_context, raise_on_error=raise_on_error))
+def _normalize_model_tag(model: str) -> str:
+    value = (model or "").strip()
+    return value[:-7] if value.endswith(":latest") else value
+
+
+def _exact_available_model(model: str) -> str:
+    requested = _normalize_model_tag(model)
+    if not requested or _is_cloud_tagged_model(requested):
+        raise RuntimeError("A non-cloud exact local model is required.")
+    models = [
+        item.model for item in _client().list().models
+        if not _is_cloud_tagged_model(item.model)
+    ]
+    for available in models:
+        if _normalize_model_tag(available) == requested:
+            return available
+    raise RuntimeError(f"Exact local model is unavailable: {model}")
+
+
+def ask_local(
+    user_input: str,
+    model: str = LOCAL_DEFAULT,
+    system_extra: str = "",
+    track_context: bool = False,
+    raise_on_error: bool = False,
+    strict_model: bool = False,
+    include_memory: bool = True,
+) -> str:
+    return "".join(ask_local_stream(
+        user_input,
+        model,
+        system_extra=system_extra,
+        track_context=track_context,
+        raise_on_error=raise_on_error,
+        strict_model=strict_model,
+        include_memory=include_memory,
+    ))
 
 
 def ask_local_structured(
@@ -413,7 +491,7 @@ def ask_local_structured(
         usage_tracker.record(
             provider="ollama",
             model=model,
-            local=True,
+            local=_ollama_usage_is_local(),
             source="brain_ollama.ask_local_structured",
             prompt_tokens=prompt_eval_count,
             completion_tokens=eval_count,
@@ -421,7 +499,7 @@ def ask_local_structured(
             messages=messages,
             response_text=content,
             estimated=(prompt_eval_count is None and eval_count is None),
-            metadata={"structured": True},
+            metadata={"structured": True, "endpoint_scope": _ollama_endpoint_scope()},
         )
         return content
     except Exception as e:
@@ -484,6 +562,8 @@ def ask_local_stream(
     track_context: bool = False,
     raise_on_error: bool = False,
     context_budget_report: dict[str, Any] | None = None,
+    strict_model: bool = False,
+    include_memory: bool = True,
 ):
     """Stream a response from a local Ollama model."""
     # Inject chain-of-thought boost only for task/question inputs, not casual conversation.
@@ -507,7 +587,7 @@ def ask_local_stream(
         system_extra = _REASONING_BOOST + "\n\n" + system_extra
 
     pruned_prompt = _prune_prompt(user_input, SYSTEM_PROMPT, system_extra)
-    system_base = pruned_prompt + mem.get_context()
+    system_base = pruned_prompt + (mem.get_context() if include_memory else "")
     if track_context:
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
@@ -525,7 +605,13 @@ def ask_local_stream(
 
     # Escalate to a larger-context local model only after the full prompt is
     # assembled. User input alone hides the real cost of system + memory blocks.
-    model = get_best_available(_fits_local(_messages_text(messages), model))
+    fitted_model = _fits_local(_messages_text(messages), model)
+    if strict_model:
+        if _normalize_model_tag(fitted_model) != _normalize_model_tag(model):
+            raise RuntimeError(f"Exact model cannot fit the assembled prompt: {model}")
+        model = _exact_available_model(model)
+    else:
+        model = get_best_available(fitted_model)
 
     full_reply = ""
     prompt_eval_count = None
@@ -586,7 +672,7 @@ def ask_local_stream(
     usage_tracker.record(
         provider="ollama",
         model=model,
-        local=True,
+        local=_ollama_usage_is_local(),
         source="brain_ollama.ask_local_stream",
         prompt_tokens=prompt_eval_count,
         completion_tokens=eval_count,
@@ -596,6 +682,7 @@ def ask_local_stream(
         estimated=(prompt_eval_count is None and eval_count is None),
         metadata={
             "track_context": track_context,
+            "endpoint_scope": _ollama_endpoint_scope(),
             **({"context_budget": context_budget_report} if context_budget_report else {}),
             **({"conversation_budget": conversation_budget_report} if conversation_budget_report else {}),
         },
@@ -983,7 +1070,7 @@ def ask_local_with_tools(
             usage_tracker.record(
                 provider="ollama",
                 model=model,
-                local=True,
+                local=_ollama_usage_is_local(),
                 source="brain_ollama.ask_local_with_tools",
                 prompt_tokens=prompt_count,
                 completion_tokens=eval_count,
@@ -1039,7 +1126,8 @@ def ask_local_with_tools(
                                 "dropped_estimated_tokens", 0
                             ),
                         },
-                    }
+                    },
+                    "endpoint_scope": _ollama_endpoint_scope(),
                 },
             )
         except Exception:

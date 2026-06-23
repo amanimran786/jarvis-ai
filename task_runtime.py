@@ -1414,6 +1414,48 @@ def _extract_bash_calls(text: str) -> list[str]:
     return [m.strip() for m in re.findall(r'<bash>(.*?)</bash>', text, re.DOTALL)]
 
 
+_BASH_TOOL_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "bash_exec",
+        "description": (
+            "Execute a read-only shell command. "
+            "Allowed: grep, find, ls, cat, head, tail, wc, "
+            "git log/diff/status/show, pytest, ruff, echo. "
+            "Pipes between allowed commands work (max 4 stages). "
+            "No redirection (>, 2>), chaining (;, &&), or substitution ($(), backticks). "
+            "Paths must be within the workspace root."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Shell command to run"},
+            },
+            "required": ["command"],
+        },
+    },
+}
+_WRITE_TOOL_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "write_file",
+        "description": (
+            "Create or overwrite a file in the isolated workspace. "
+            "Use relative paths only. Always write the COMPLETE file content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Relative path inside the workspace"},
+                "content": {"type": "string", "description": "Complete file content"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+}
+_NATIVE_LOOP_MAX_ITERS = 5
+_NATIVE_LOOP_MAX_CALLS = 10
+
 _WRITE_MAX_BYTES = 262144
 _WRITE_TAG_RE = re.compile(r'<write_file path="([^"]+)">\n?(.*?)</write_file>', re.DOTALL)
 
@@ -1733,6 +1775,183 @@ def _run_tool_loop(
     return response, model, index, tool_calls_made, _transcript()
 
 
+def _run_native_task_loop(
+    task_id: str,
+    prompt: str,
+    agent_ctx: str,
+    start_index: int = 0,
+    work_root: "Path | None" = None,
+    allow_write: bool = False,
+) -> "tuple[str, str, int, int, str] | None":
+    """
+    Native Ollama function-calling loop for task execution.
+
+    Uses the model's JSON tool-calling API so local models (GLM-4.7-flash, Qwen3)
+    return structured tool calls rather than having to produce exact <bash> text tags.
+
+    Returns (response, model, last_index, tool_calls_made, tool_transcript)
+    or None if Ollama is unavailable — caller falls back to the text-tag path.
+    """
+    try:
+        from brains.brain_ollama import get_best_available, get_client
+        from config import LOCAL_REASONING
+    except ImportError:
+        return None
+
+    try:
+        client = get_client()
+        model = get_best_available(LOCAL_REASONING)
+    except RuntimeError:
+        return None
+
+    tool_schemas = [_BASH_TOOL_SCHEMA]
+    if allow_write and work_root is not None:
+        tool_schemas.append(_WRITE_TOOL_SCHEMA)
+
+    messages: list[dict] = [
+        {"role": "system", "content": agent_ctx},
+        {"role": "user", "content": prompt},
+    ]
+    index = start_index
+    tool_calls_made = 0
+    transcript_parts: list[str] = []
+
+    def _cancel() -> bool:
+        with _LOCK:
+            t = _TASKS.get(task_id)
+            return bool(t and t.get("cancel_requested"))
+
+    def _set_streaming() -> None:
+        with _LOCK:
+            t = _TASKS.get(task_id)
+            if t and t.get("status") != "streaming":
+                _set_task_status(task_id, "streaming")
+
+    try:
+        for _iter in range(_NATIVE_LOOP_MAX_ITERS):
+            if _cancel():
+                break
+
+            try:
+                resp = client.chat(
+                    model=model,
+                    messages=messages,
+                    tools=tool_schemas,
+                    stream=False,
+                )
+            except Exception:
+                log.exception("native task loop: ollama call failed (iter %d)", _iter)
+                return None
+
+            last_msg = getattr(resp, "message", None)
+            if last_msg is None:
+                return None
+
+            raw_calls = list(getattr(last_msg, "tool_calls", None) or [])
+            content = str(getattr(last_msg, "content", "") or "")
+
+            if not raw_calls:
+                # Model gave a final answer — stream it back in chunks
+                _set_streaming()
+                chunk_size = 200
+                for pos in range(0, max(len(content), 1), chunk_size):
+                    if _cancel():
+                        return content, model, index, tool_calls_made, "\n\n".join(transcript_parts)
+                    chunk = content[pos:pos + chunk_size]
+                    if chunk:
+                        index += 1
+                        _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+                return content, model, index, tool_calls_made, "\n\n".join(transcript_parts)
+
+            if tool_calls_made >= _NATIVE_LOOP_MAX_CALLS:
+                break
+
+            # Record assistant turn with its tool_calls
+            messages.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": str(getattr(getattr(tc, "function", None), "name", "") or ""),
+                            "arguments": dict(
+                                getattr(getattr(tc, "function", None), "arguments", {}) or {}
+                            ),
+                        }
+                    }
+                    for tc in raw_calls
+                ],
+            })
+
+            # Execute tool calls, collect results
+            for tc in raw_calls[:5]:
+                func = getattr(tc, "function", None)
+                name = str(getattr(func, "name", "") or "")
+                args = dict(getattr(func, "arguments", {}) or {})
+
+                if name == "bash_exec":
+                    cmd = str(args.get("command", "")).strip()
+                    if not cmd:
+                        continue
+                    result = _tool_bash(cmd, root=work_root)
+                    tool_calls_made += 1
+                    transcript_parts.append(f"$ {cmd}\n{result}")
+                    messages.append({"role": "tool", "content": result})
+                    index += 1
+                    _append_event(
+                        task_id, "chunk",
+                        chunk=f"\n[bash] {cmd}\n{result}\n",
+                        index=index, model=model,
+                    )
+
+                elif name == "write_file" and allow_write and work_root is not None:
+                    path = str(args.get("path", "")).strip()
+                    file_content = str(args.get("content", ""))
+                    result = _tool_write_file(path, file_content, work_root)
+                    tool_calls_made += 1
+                    transcript_parts.append(f"[write_file {path}]\n{result}")
+                    messages.append({"role": "tool", "content": result})
+                    index += 1
+                    _append_event(
+                        task_id, "chunk",
+                        chunk=f"\n[write] {path}: {result}\n",
+                        index=index, model=model,
+                    )
+
+    except Exception:
+        log.exception("native task loop: unexpected error")
+        return None
+
+    # Tool budget exhausted or max iterations hit — one final synthesis call
+    if _cancel():
+        return "\n\n".join(transcript_parts), model, index, tool_calls_made, "\n\n".join(transcript_parts)
+
+    messages.append({
+        "role": "user",
+        "content": (
+            "Tool budget exhausted. Using ONLY the results shown above, "
+            "write your final complete answer now."
+        ),
+    })
+
+    try:
+        final_stream = client.chat(model=model, messages=messages, stream=True)
+        _set_streaming()
+        final_parts: list[str] = []
+        for chunk in final_stream:
+            if _cancel():
+                break
+            delta = str(getattr(getattr(chunk, "message", None), "content", "") or "")
+            if delta:
+                final_parts.append(delta)
+                index += 1
+                _append_event(task_id, "chunk", chunk=delta, index=index, model=model)
+        return "".join(final_parts), model, index, tool_calls_made, "\n\n".join(transcript_parts)
+    except Exception:
+        log.exception("native task loop: final synthesis failed")
+        return "\n\n".join(transcript_parts), model, index, tool_calls_made, "\n\n".join(transcript_parts)
+
+
 # Agents that get live task pipeline state injected before they run
 _MONITOR_AGENTS = {
     "pipeline-monitor",
@@ -1982,38 +2201,54 @@ def _run_task(task_id: str) -> None:
                 # provider; any future cloud escalation needs a separate,
                 # explicit approval gate.
                 prefer_local_run = True
-                stream, model = smart_stream(
-                    prompt, tool="chat", extra_system=agent_ctx,
-                    prefer_local=prefer_local_run, local_only=True,
+                # Try native Ollama function-calling first. This gives local models
+                # (GLM-4.7-flash, Qwen3) a structured tool interface instead of
+                # requiring them to produce exact <bash> text tags.
+                # Set JARVIS_NATIVE_TOOL_LOOP=0 to force the text-tag fallback
+                # (e.g. in tests that mock smart_stream instead of the native loop).
+                _native_enabled = os.getenv("JARVIS_NATIVE_TOOL_LOOP", "1") != "0"
+                _native = (
+                    _run_native_task_loop(
+                        task_id, prompt, agent_ctx,
+                        start_index=0,
+                        work_root=work_root,
+                        allow_write=work_root is not None,
+                    )
+                    if _native_enabled else None
                 )
-                chunks: list[str] = []
-                for index, chunk in enumerate(stream):
-                    with _LOCK:
-                        task = _TASKS[task_id]
-                        if task.get("cancel_requested"):
-                            _set_task_status(task_id, "cancelled", finished_at=_now())
-                            return
-                        if task["status"] != "streaming":
-                            _set_task_status(task_id, "streaming")
-                    chunks.append(chunk)
-                    _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
+                if _native is not None:
+                    response, model, index, tool_calls_made, tool_transcript = _native
+                else:
+                    # Fallback: text-tag approach (Ollama unavailable or import error)
+                    stream, model = smart_stream(
+                        prompt, tool="chat", extra_system=agent_ctx,
+                        prefer_local=prefer_local_run, local_only=True,
+                    )
+                    chunks: list[str] = []
+                    for index, chunk in enumerate(stream):
+                        with _LOCK:
+                            task = _TASKS[task_id]
+                            if task.get("cancel_requested"):
+                                _set_task_status(task_id, "cancelled", finished_at=_now())
+                                return
+                            if task["status"] != "streaming":
+                                _set_task_status(task_id, "streaming")
+                        chunks.append(chunk)
+                        _append_event(task_id, "chunk", chunk=chunk, index=index, model=model)
 
-                initial_response = "".join(chunks)
-                # Phase 2: multi-turn tool-call loop. If the initial response
-                # contains <bash> calls, execute them and feed results back
-                # to the LLM for a genuine continuation (up to 4 more rounds).
-                response, model, index, tool_calls_made, tool_transcript = _run_tool_loop(
-                    task_id,
-                    original_prompt,
-                    agent_ctx,
-                    initial_response,
-                    model,
-                    index,
-                    work_root=work_root,
-                    allow_write=work_root is not None,
-                    prefer_local=prefer_local_run,
-                    has_inherited_execution_evidence=bool(inherited_transcript),
-                )
+                    initial_response = "".join(chunks)
+                    response, model, index, tool_calls_made, tool_transcript = _run_tool_loop(
+                        task_id,
+                        original_prompt,
+                        agent_ctx,
+                        initial_response,
+                        model,
+                        index,
+                        work_root=work_root,
+                        allow_write=work_root is not None,
+                        prefer_local=prefer_local_run,
+                        has_inherited_execution_evidence=bool(inherited_transcript),
+                    )
                 # Deterministic fabrication check: response claims execution
                 # but zero tool calls actually ran. Runs for ALL agents — no
                 # LLM needed, the runtime knows the ground truth. Skipped when
