@@ -9,3 +9,4 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-24 00:00:00] [orchestrator] MASTER_LOG initialized — session_orchestrator.py wired up
 [2026-06-24 00:00:00] [orchestrator] WORK_QUEUE.json pre-populated with 11 tasks across 3 sessions
 [2026-06-24 00:00:00] [orchestrator] SESSIONS.json initialized with 3 known dev sessions
+[2026-06-24 15:02:13] [Jarvis native tool-loop & telemetry] Task added (p2): Validate usage_tracker token accounting matches brain_ollama actual usage

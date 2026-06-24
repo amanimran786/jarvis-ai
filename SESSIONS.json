@@ -25,6 +25,14 @@
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Codex",
       "notes": "Owns brains/brain_ollama.py context budget and model_router.py changes."
+    },
+    {
+      "name": "Jarvis native tool-loop & telemetry",
+      "purpose": "Native tool-loop context, usage_tracker.py telemetry, brain_ollama structured output",
+      "status": "active",
+      "registered_at": "2026-06-24T00:00:00Z",
+      "owner": "Codex",
+      "notes": "Scoped to brains/brain_ollama.py and usage_tracker.py. Do not touch model_router.py — owned by LLM upgrades lane."
     }
   ]
 }
