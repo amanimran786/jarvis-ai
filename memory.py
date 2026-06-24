@@ -6,6 +6,7 @@ import threading
 from datetime import date, datetime
 
 import runtime_state
+from harness.audit import audit_log
 
 _BUNDLED_MEMORY_FILE = os.path.join(os.path.dirname(__file__), "memory.json")
 MEMORY_FILE = str(runtime_state.writable_data_path("memory.json", seed_from=_BUNDLED_MEMORY_FILE))
@@ -148,6 +149,7 @@ def add_fact(fact: str) -> None:
     if fact not in data["facts"]:
         data["facts"].append(fact)
         save(data)
+        audit_log("memory_write", operation="add_fact", fact=fact[:200])
         consolidate_memory()
 
 
@@ -172,6 +174,7 @@ def set_preference(key: str, value: str) -> None:
     data = load()
     data["preferences"][key] = value
     save(data)
+    audit_log("memory_write", operation="set_preference", key=key)
     consolidate_memory()
 
 

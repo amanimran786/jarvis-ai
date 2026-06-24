@@ -14,7 +14,22 @@
       }
     ]
   },
-  "sessions": [],
+  "sessions": [
+    {
+      "session_id": "bf8d64be-3870-48e1-8416-b2888401d6ac",
+      "name": "test2",
+      "last_active": "2026-06-24T21:59:49.963617+00:00",
+      "current_task": null,
+      "completed_tasks": [
+        {
+          "task": "test query",
+          "completed_at": "2026-06-24T21:59:49.963305+00:00"
+        }
+      ],
+      "next_task": null,
+      "status": "offline"
+    }
+  ],
   "session_id": "2a8b51ac-8087-4958-91e6-fd361fc3b7a2",
   "session_name": "test",
   "last_active": "2026-06-24T21:59:09.012167+00:00",

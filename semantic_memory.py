@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import threading
 import contextlib
 import io
@@ -405,6 +406,28 @@ def retrieve_episodic_only(
 
 # ── Writing ──────────────────────────────────────────────────────────────────
 
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write `data` as JSON to `path` atomically via tmp-file + rename.
+
+    If the process is killed mid-write the destination file is either untouched
+    (if it already existed) or absent (new write).  It is never left partially
+    written — eliminating the silent data-loss bug where a corrupt JSON file
+    would be skipped by _load_all_entries() on the next startup.
+    """
+    directory = str(path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=".smem_", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, str(path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write(tier: str, entry: dict[str, Any]) -> Path:
     """
     Write a new semantic memory entry to JSON.
@@ -421,7 +444,7 @@ def write(tier: str, entry: dict[str, Any]) -> Path:
     out_dir = SEMANTIC_DIR / tier
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{entry['id']}.json"
-    path.write_text(json.dumps(entry, indent=2, ensure_ascii=False))
+    _atomic_write_json(path, entry)
 
     invalidate()
     return path
@@ -441,7 +464,7 @@ def write_episodic(domain: str, event: dict[str, Any]) -> Path:
     out_dir = EPISODIC_DIR / domain
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{event['id']}.json"
-    path.write_text(json.dumps(event, indent=2, ensure_ascii=False))
+    _atomic_write_json(path, event)
 
     invalidate()
     return path

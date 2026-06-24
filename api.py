@@ -183,7 +183,7 @@ def _allowed_hostnames() -> set[str]:
             tunnel_host = tu.replace("https://", "").replace("http://", "").split("/")[0].lower()
             allowed.add(tunnel_host)
     except Exception:
-        pass
+        logging.debug("[API] tunnel CORS origin fetch failed", exc_info=True)
 
     return allowed
 
@@ -823,7 +823,7 @@ def chat(req: ChatRequest):
                 try:
                     semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
                 except Exception:
-                    pass
+                    logging.debug("[API] semantic_memory turn log failed", exc_info=True)
                 _record_turn(req.message, response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
@@ -860,7 +860,7 @@ def chat(req: ChatRequest):
                 try:
                     semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
                 except Exception:
-                    pass
+                    logging.debug("[API] semantic_memory turn log failed", exc_info=True)
                 # mem0 cross-session episodic memory — fire-and-forget
                 _record_turn(req.message, response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
@@ -900,7 +900,7 @@ def chat(req: ChatRequest):
         try:
             semantic_memory.log_conversation_turn(req.message, response, model=model, source=source)
         except Exception:
-            pass
+            logging.debug("[API] semantic_memory turn log failed", exc_info=True)
         # mem0 cross-session episodic memory — fire-and-forget
         _record_turn(req.message, response)
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
@@ -1447,7 +1447,7 @@ def _pipeline_health_check() -> dict:
                             "message": f"Task {t.get('id','?')[-8:]} running for {int(age)}s",
                         })
                 except Exception:
-                    pass
+                    logging.debug("[API] stalled-task alert build failed", exc_info=True)
 
     # Detect garbage outputs in recently completed tasks
     garbage_patterns = ("task completed", "successfully created", "open tasks:",
@@ -1622,7 +1622,7 @@ def get_eval_log(request: Request, limit: int = 50, agent: str = "", verdict: st
                     continue
                 entries.append(e)
             except Exception:
-                pass
+                logging.debug("[API] verdict jsonl parse error — skipping line", exc_info=True)
     return {"ok": True, "entries": entries[-limit:][::-1]}
 
 
@@ -1997,7 +1997,7 @@ def manager_status(session_id: str, request: Request):
         if resp.status_code == 200:
             return {"ok": True, "metrics": resp.json()}
     except Exception:
-        pass
+        logging.debug("[API] event_bus metrics fetch failed", exc_info=True)
     return {"ok": True, "metrics": {}, "note": "event_bus_unreachable"}
 
 
@@ -3172,7 +3172,7 @@ def get_system_telemetry() -> dict:
             if "charging" in out.lower() or "ac power" in out.lower():
                 battery_info += " (Charging)"
     except Exception:
-        pass
+        logging.debug("[API] battery stat unavailable", exc_info=True)
 
     cpu_info = "Unknown"
     try:
@@ -3181,7 +3181,7 @@ def get_system_telemetry() -> dict:
         if load_match:
             cpu_info = f"{load_match[0]} (1m load)"
     except Exception:
-        pass
+        logging.debug("[API] CPU stat unavailable", exc_info=True)
 
     memory_info = "Unknown"
     try:
@@ -3195,11 +3195,11 @@ def get_system_telemetry() -> dict:
                 page_size = int(re.search(r"page size of (\d+) bytes", line).group(1))
             elif "Pages free:" in line:
                 free_pages = int(re.search(r"Pages free:\s+(\d+)\.", line).group(1))
-        
+
         used_gb = total_gb - (free_pages * page_size / (1024**3))
         memory_info = f"{used_gb:.1f} / {total_gb:.0f} GB ({int(used_gb/total_gb*100)}%)"
     except Exception:
-        pass
+        logging.debug("[API] memory stat unavailable", exc_info=True)
 
     return {
         "battery": battery_info,
@@ -8017,7 +8017,7 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     try:
         runtime_state.write_api_endpoint(_host, _port, token=_API_TOKEN)
     except Exception:
-        pass
+        logging.warning("[API] failed to write runtime endpoint — UI/CLI may not find Jarvis", exc_info=True)
 
     def _run():
         uvicorn.run(app, host=_host, port=_port, log_level="warning")

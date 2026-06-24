@@ -747,6 +747,44 @@ def _interview_profile_reply(user_input: str) -> str:
     return base
 
 
+def _is_performance_report_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "how are you doing",
+            "how am i doing",
+            "how have you been doing",
+            "show me your performance",
+            "show your performance",
+            "self eval report",
+            "self-eval report",
+            "quality report",
+            "response quality",
+            "quality scores",
+            "quality metrics",
+            "your quality score",
+            "eval scores",
+            "eval report",
+            "performance report",
+            "performance metrics",
+            "how are your responses",
+            "how good are your responses",
+            "where are you weakest",
+            "your weakest area",
+            "your weakest domain",
+            "show eval",
+            "show self eval",
+        )
+    )
+
+
+def _performance_report_reply() -> str:
+    try:
+        import self_eval
+        return self_eval.performance_report(hours=24 * 7)
+    except Exception as exc:
+        return f"Self-eval report unavailable: {exc}"
+
+
 def _is_meta_improvement_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -3563,6 +3601,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(browser.focus_meeting_tab()), "Browser"
     if _is_meta_improvement_query(lower):
         return _s(_meta_improvement_reply()), "Status"
+    if _is_performance_report_query(lower):
+        return _s(_performance_report_reply()), "Self-Eval"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("cost policy", "routing policy", "training policy", "should we train", "should we distill")):
