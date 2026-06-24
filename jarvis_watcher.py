@@ -27,6 +27,7 @@ Public API
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess
@@ -96,7 +97,7 @@ class AmbientTrigger:
                 self._last_fired = time.monotonic()
                 return True
         except Exception:
-            pass
+            logging.debug("[Watcher] trigger %s check/fire failed", self.name, exc_info=True)
         return False
 
 
@@ -109,7 +110,7 @@ def _poll_triggers() -> None:
         try:
             trigger.poll()
         except Exception:
-            pass
+            logging.debug("[Watcher] trigger poll failed for %s", trigger.name, exc_info=True)
 
 # Optional callback: when the watcher wants to speak, it calls this.
 # Set by main.py / ui.py via set_speak_callback().
@@ -140,7 +141,7 @@ def notify(title: str, body: str, subtitle: str = "") -> None:
             stderr=subprocess.DEVNULL,
         )
     except Exception:
-        pass
+        logging.debug("[Watcher] macOS notification failed: %s", title, exc_info=True)
 
 
 def _osa_escape(text: str) -> str:
@@ -192,7 +193,7 @@ def _check_calendar() -> list[tuple[str, str]]:
                 if key not in _notified_keys:
                     alerts.append((key, f"Starting in {int(delta.total_seconds() // 60)} min: {event_str}"))
     except Exception:
-        pass
+        logging.debug("[Watcher] calendar scan failed", exc_info=True)
     return alerts
 
 
@@ -221,7 +222,7 @@ def _check_emails() -> list[tuple[str, str]]:
                     msg = f"Urgent email from {e['sender']}: {e['subject']}"
                     alerts.append((key, msg))
     except Exception:
-        pass
+        logging.debug("[Watcher] email scan failed", exc_info=True)
     return alerts
 
 
@@ -259,7 +260,7 @@ def _check_tasks() -> list[tuple[str, str]]:
                 if key not in _notified_keys:
                     alerts.append((key, f"Urgent task: {clean[:120]}"))
     except Exception:
-        pass
+        logging.debug("[Watcher] task scan failed", exc_info=True)
     return alerts
 
 
@@ -290,7 +291,7 @@ def _deliver_alerts(alerts: list[tuple[str, str]]) -> None:
         try:
             _speak_cb(speech)
         except Exception:
-            pass
+            logging.warning("[Watcher] TTS alert delivery failed", exc_info=True)
 
 
 # ── Morning brief ─────────────────────────────────────────────────────────────
@@ -330,13 +331,16 @@ def _deliver_morning_brief() -> None:
                     f"Today's note created: {_note_path.split('/')[-1]}",
                 )
         except Exception:
-            pass
+            logging.debug("[Watcher] daily note write failed", exc_info=True)
 
         notify("Jarvis — Morning Brief", "Your daily briefing is ready.")
         if _speak_cb is not None and not _is_quiet_hours():
-            _speak_cb(brief)
+            try:
+                _speak_cb(brief)
+            except Exception:
+                logging.warning("[Watcher] TTS morning brief speak failed", exc_info=True)
     except Exception:
-        pass
+        logging.warning("[Watcher] morning brief delivery failed", exc_info=True)
 
 
 # ── End-of-day summary ────────────────────────────────────────────────────────
@@ -381,9 +385,12 @@ def _deliver_eod_summary() -> None:
 
         notify("Jarvis — End of Day", "Closing out — your EOD summary is ready.")
         if _speak_cb is not None and not _is_quiet_hours():
-            _speak_cb(eod_text)
+            try:
+                _speak_cb(eod_text)
+            except Exception:
+                logging.warning("[Watcher] TTS EOD summary speak failed", exc_info=True)
     except Exception:
-        pass
+        logging.warning("[Watcher] EOD summary delivery failed", exc_info=True)
 
 
 # ── Watcher loop ──────────────────────────────────────────────────────────────
@@ -403,14 +410,14 @@ def _watcher_loop() -> None:
             if _should_deliver_morning_brief():
                 _deliver_morning_brief()
         except Exception:
-            pass
+            logging.warning("[Watcher] morning brief loop failed", exc_info=True)
 
         # End-of-day summary fires once per day at the configured hour
         try:
             if _should_deliver_eod():
                 _deliver_eod_summary()
         except Exception:
-            pass
+            logging.warning("[Watcher] EOD summary loop failed", exc_info=True)
 
         alerts: list[tuple[str, str]] = []
         try:
@@ -418,7 +425,7 @@ def _watcher_loop() -> None:
             alerts.extend(_check_tasks())
             alerts.extend(_check_emails())
         except Exception:
-            pass
+            logging.warning("[Watcher] alert check loop failed", exc_info=True)
 
         # Health monitor — surface newly degraded components (once per session)
         try:
@@ -430,19 +437,19 @@ def _watcher_loop() -> None:
                     _notified_keys.add(key)
                     notify("Jarvis — System Alert", f"{component.title()} is degraded. Say 'health check' for details.")
         except Exception:
-            pass
+            logging.warning("[Watcher] health monitor check failed", exc_info=True)
 
         if alerts:
             try:
                 _deliver_alerts(alerts)
             except Exception:
-                pass
+                logging.warning("[Watcher] alert delivery failed", exc_info=True)
 
         # Ambient triggers — fire independently on their own conditions
         try:
             _poll_triggers()
         except Exception:
-            pass
+            logging.warning("[Watcher] trigger poll loop failed", exc_info=True)
 
 
 # ── Built-in ambient triggers ─────────────────────────────────────────────────
@@ -457,7 +464,7 @@ def _vault_new_note_check() -> bool:
             if p.stat().st_mtime > cutoff:
                 return True
     except Exception:
-        pass
+        logging.debug("[Watcher] vault new-note check failed", exc_info=True)
     return False
 
 
@@ -470,7 +477,7 @@ def _vault_new_note_fire() -> None:
         if added > 0:
             notify("Jarvis — Vault", f"{added} new note{'s' if added != 1 else ''} indexed in the brain.")
     except Exception:
-        pass
+        logging.debug("[Watcher] vault re-index notification failed", exc_info=True)
 
 
 def _multica_new_issue_check() -> bool:
@@ -481,7 +488,7 @@ def _multica_new_issue_check() -> bool:
         # Fire if there are unassigned todo issues
         return any(not i.get("assignee_id") for i in issues if isinstance(i, dict))
     except Exception:
-        pass
+        logging.debug("[Watcher] Multica issue check failed", exc_info=True)
     return False
 
 
@@ -495,7 +502,7 @@ def _multica_new_issue_fire() -> None:
             titles = ", ".join(i.get("title", i.get("id", "?")) for i in unassigned[:3])
             notify("Jarvis — Board", f"{len(unassigned)} unassigned issue{'s' if len(unassigned)!=1 else ''}: {titles}")
     except Exception:
-        pass
+        logging.debug("[Watcher] Multica board notification failed", exc_info=True)
 
 
 # Register built-in triggers (they activate when the watcher starts)

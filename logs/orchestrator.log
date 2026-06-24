@@ -1,1 +1,3 @@
 2026-06-24 14:58:35,670 [INFO] Task added — session=Jarvis AI - assess and continue priority=5 task=Test add-task CLI
+2026-06-24 15:02:10,296 [WARNING] Failed to read bad_test.json: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
+2026-06-24 15:02:13,135 [INFO] Task added — session=Jarvis native tool-loop & telemetry priority=2 task=Validate usage_tracker token accounting matches brain_ollama actual usage

@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import subprocess
@@ -195,7 +196,7 @@ def _input_capable_device_indexes() -> set[int] | None:
             if audio is not None:
                 audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] PyAudio terminate failed in device scan", exc_info=True)
 
 
 def _default_input_device_info() -> dict | None:
@@ -214,7 +215,7 @@ def _default_input_device_info() -> dict | None:
             if audio is not None:
                 audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] PyAudio terminate failed in default device probe", exc_info=True)
 
 
 def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
@@ -362,7 +363,7 @@ def _open_microphone_source():
                                     global _mic_level
                                     _mic_level = min(1.0, rms / 8000.0)
                             except Exception:
-                                pass
+                                logging.debug("[Voice] RMS mic level calc failed", exc_info=True)
                             return chunk
                         source.stream.read = _wrapped_read
 
@@ -386,7 +387,7 @@ def _open_microphone_source():
                             audio.terminate()
                         source.stream = None
                 except Exception:
-                    pass
+                    logging.debug("[Voice] mic stream cleanup failed for %s", label, exc_info=True)
 
         detail = str(last_error) if last_error is not None else "No microphone devices are available."
         _mic_last_failure_detail = detail
