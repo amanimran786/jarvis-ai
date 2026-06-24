@@ -11,6 +11,7 @@ The orchestrator replaces the old regex wall. New tools need only an entry
 in orchestrator.TOOLS — no regex patterns to write.
 """
 
+import logging
 import re
 import os
 import sys
@@ -838,8 +839,8 @@ def _self_review_text(area: str | None = None) -> str:
         format_fn = getattr(si, "review_text", None)
         if callable(review_fn) and callable(format_fn):
             return format_fn(review_fn(area=area))
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("[Router] self_review failed, using fallback: %s", exc)
     return _fallback_self_review_text(area=area)
 
 
@@ -1032,7 +1033,7 @@ def _resolve_email_recipient(recipient: str) -> tuple[str, str]:
             if found_email:
                 return found_email.group(0), ""
         except Exception:
-            pass
+            logging.debug("[Router] email-from-memory lookup failed; using contact lookup", exc_info=True)
     # Email-specific lookup — avoids returning phone numbers for contacts that have both
     email_found = msg.lookup_contact_email(recipient)
     if email_found:
@@ -2126,23 +2127,27 @@ def _dispatch_single_intent(query: str) -> str | None:
     if hint == "weather":
         try:
             return tools.get_weather(_extract_weather_location(query))
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Weather fetch failed: %s", exc)
             return "Weather is unavailable right now."
     if hint == "calendar":
         try:
             return gs.get_todays_events()
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Calendar fetch failed: %s", exc)
             return "Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."
     if hint == "email" and _is_email_digest_query(query):
         try:
             import jarvis_agents as _ja
             return _ja.email_digest()
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Email digest failed: %s", exc)
             return "Email is unavailable. You may need to re-authorize Google access."
     if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
-        except Exception:
+        except Exception as exc:
+            logging.warning("[Router] Email read failed: %s", exc)
             return "Email is unavailable. You may need to re-authorize Google access."
     return None
 
@@ -2172,7 +2177,8 @@ def _current_activity_reply(lower: str) -> str:
     """Return a truthful status answer for current-activity questions."""
     try:
         snap = meeting_listener.status_snapshot()
-    except Exception:
+    except Exception as exc:
+        logging.warning("[Router] meeting_listener.status_snapshot failed: %s", exc)
         snap = {}
 
     running = bool(snap.get("running"))
@@ -2382,8 +2388,8 @@ def _start_local_beta_background(*, suite: str = "all", build_training_pack: boo
     label = "engineering beta" if suite == "engineering" else "local beta"
     try:
         local_beta._ensure_dirs()
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning("[Router] local_beta._ensure_dirs failed: %s", exc)
 
     def _run():
         try:
@@ -2399,7 +2405,7 @@ def _start_local_beta_background(*, suite: str = "all", build_training_pack: boo
                     source="local_beta_background",
                 )
             except Exception:
-                pass
+                logging.debug("[Router] teacher-capture of local beta failure could not be recorded", exc_info=True)
 
     threading.Thread(target=_run, daemon=False, name=f"jarvis-{label.replace(' ', '-')}-runner").start()
     training_note = " and training pack" if build_training_pack else ""
@@ -2460,7 +2466,7 @@ def _suggest_reply_from_context(contact: str, incoming: str) -> str | None:
                 )
                 result_holder.append(r.strip())
             except Exception:
-                pass
+                logging.debug("[Router] local reply-draft suggestion failed", exc_info=True)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -4659,6 +4665,50 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             return _s(build_briefing(mem.list_facts())), "Memory"
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
+    # ── Local Artifact — self-contained interactive HTML page (local-first) ───
+    if tool == "artifact":
+        import datetime
+        import pathlib
+        from provider_priority import ask_with_priority
+
+        _ARTIFACT_SYSTEM = (
+            "You are generating a Local Artifact — a single-file, shareable HTML page generated on-device. "
+            "Rules: one .html file with all CSS inline or in <style>. You may pull a few trusted CDNs when they "
+            "add real value (Mermaid.js for diagrams, Chart.js for charts, Prism.js for syntax highlighting, "
+            "Tailwind CDN for styling); these need a network connection to render, so keep the core content "
+            "legible without them. Clean, professional, mobile-friendly design. "
+            "The output must be complete, valid HTML from <!DOCTYPE html> to </html>. "
+            "Produce production-quality output a team can open and share immediately."
+        )
+
+        def _artifact_stream():
+            yield "Building your artifact now, sir."
+            prompt = (
+                f"Create a self-contained HTML page for this request:\n\n{user_input}\n\n"
+                "Generate a complete, working single-file HTML page. Choose the right format: "
+                "Mermaid diagram for architecture/flows, Chart.js for data dashboards, "
+                "structured HTML with code blocks for walkthroughs and PR reviews, "
+                "or a clean report layout for team summaries. "
+                "Include a clear title, navigation if multi-section, and any interactive elements that add value."
+            )
+            try:
+                html = ask_with_priority(prompt, tier="strong", system_extra=_ARTIFACT_SYSTEM)
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_name = re.sub(r"[^a-z0-9]+", "_", user_input[:30].lower()).strip("_")
+                path = pathlib.Path.home() / "Desktop" / f"jarvis_artifact_{safe_name}_{ts}.html"
+                path.write_text(html, encoding="utf-8")
+                notes.add_note(f"# Artifact: {user_input[:80]}\n\nSaved to Desktop: {path.name}")
+                yield (
+                    f" Done. Artifact saved to your Desktop as {path.name}. "
+                    "Open it in your browser to preview, then share the file with your team. "
+                    "I can also package any future diagram, dashboard, or walkthrough as a Local Artifact — just ask."
+                )
+            except Exception as exc:
+                logging.warning("[Router] Artifact generation failed: %s", exc)
+                yield " Artifact generation hit an error. Try again or ask me to build the content as plain text first."
+
+        return _artifact_stream(), "Local Artifact"
+
     # ── Self-improve ──────────────────────────────────────────────────────────
     if tool == "self_improve":
         action = params.get("action", "improve")
@@ -4760,7 +4810,7 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
         import jarvis_extractor as _jex
         _jex.extract_async(user_input, assistant_reply)
     except Exception:
-        pass
+        logging.debug("[Router] background fact extraction (jarvis_extractor) failed to start", exc_info=True)
 
 
 # ── Hardware routing ──────────────────────────────────────────────────────────

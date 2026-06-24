@@ -24,6 +24,8 @@ if os.getenv("CI"):
         # macOS-only GUI
         "PyQt6", "PyQt6.QtWidgets", "PyQt6.QtCore", "PyQt6.QtGui",
         "PyQt6.QtMultimedia", "PyQt6.QtSvg",
+        # macOS Vision framework (used by local_ocr)
+        "Vision", "CoreML",
         # Audio hardware (PortAudio-backed)
         "sounddevice", "pyaudio",
         # Local ML models (large, not installed in CI)
@@ -41,6 +43,11 @@ if os.getenv("CI"):
 # run _auto_verify after _complete_task; without this, tests with a mocked
 # smart_stream still leak real GPT_MINI calls (and pollute the verdict log).
 os.environ.setdefault("JARVIS_AUTO_VERIFY", "0")
+
+# Unit tests mock smart_stream, not _run_native_task_loop. Disabling the native
+# loop here routes all task execution through the smart_stream mock path so
+# existing tests continue to work without modification.
+os.environ.setdefault("JARVIS_NATIVE_TOOL_LOOP", "0")
 
 # Keep test-generated security audit entries out of the real operator ledger
 # (~/.jarvis/security_audit.jsonl) — approve/deny/verdict paths emit on call.

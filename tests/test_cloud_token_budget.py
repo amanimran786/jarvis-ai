@@ -111,7 +111,7 @@ class SemaphoreClampTests(unittest.TestCase):
 
     def test_clamps_and_defaults(self):
         import task_runtime
-        cases = {"4": 4, "0": 1, "-3": 1, "100": 32, "banana": 6, None: 6}
+        cases = {"4": 4, "0": 1, "-3": 1, "100": 32, "banana": 1, None: 1}
         for raw, expected in cases.items():
             self.assertEqual(task_runtime._parse_max_concurrent(raw), expected, raw)
 

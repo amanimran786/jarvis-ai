@@ -18,6 +18,7 @@ Usage:
   agents.stop()
 """
 
+import logging
 import threading
 import time
 import os
@@ -29,6 +30,9 @@ from provider_priority import ask_with_priority
 import memory as mem
 
 # ── Base agent ────────────────────────────────────────────────────────────────
+
+_RUN_TIMEOUT = 25  # seconds per agent run() call before abandoning
+
 
 class Agent(ABC):
     name: str = "Agent"
@@ -47,13 +51,32 @@ class Agent(ABC):
         if not self.enabled or not self.due():
             return
         self._last_run = time.time()
-        try:
-            result = self.run()
-            if result:
-                title, body, speak = result
-                on_alert(title, body, speak)
-        except Exception as e:
-            print(f"[Agent:{self.name}] Error: {e}")
+        result_box: list = [None]
+        exc_box: list = [None]
+
+        def _run():
+            try:
+                result_box[0] = self.run()
+            except Exception as exc:
+                exc_box[0] = exc
+
+        thread = threading.Thread(target=_run, daemon=True, name=f"agent-{self.name}-tick")
+        thread.start()
+        thread.join(timeout=_RUN_TIMEOUT)
+        if thread.is_alive():
+            logging.warning("[Agent:%s] run() timed out after %ds — skipping", self.name, _RUN_TIMEOUT)
+            return
+        if exc_box[0] is not None:
+            _exc = exc_box[0]
+            logging.error(
+                "[Agent:%s] tick failed: %s", self.name, _exc,
+                exc_info=(type(_exc), _exc, _exc.__traceback__),
+            )
+            return
+        result = result_box[0]
+        if result:
+            title, body, speak = result
+            on_alert(title, body, speak)
 
     @abstractmethod
     def run(self) -> tuple[str, str, bool] | None:
@@ -355,7 +378,7 @@ def start(on_alert=None):
     _running = True
 
     def _loop():
-        print(f"[Agents] Running {len(_AGENTS)} proactive agents.")
+        logging.info("[Agents] Running %d proactive agents.", len(_AGENTS))
         while _running:
             for agent in _AGENTS:
                 if not _running:

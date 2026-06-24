@@ -14,12 +14,15 @@ orchestrator automatically knows about them.
 """
 
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from brains.brain_claude import ask_claude
 from config import HAIKU, LOCAL_DEFAULT, LOCAL_STRUCTURED_CLASSIFIER_ENABLED
+import skill_monitor
 import skills
 import model_router
 import tool_registry
@@ -138,15 +141,26 @@ def classify(user_input: str) -> ToolDecision:
         return _attach_skill(user_input, _FALLBACK)
 
     # Full LLM classification
+    _t0 = time.monotonic()
     try:
         raw = ask_claude(
             user_input,
             model=HAIKU,
             system=_build_system(user_input),
         )
-        return _attach_skill(user_input, _parse(raw))
+        decision = _attach_skill(user_input, _parse(raw))
+        skill_monitor.record_call(
+            "orchestrator_classify", success=True,
+            latency_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return decision
     except Exception as e:
-        print(f"[Orchestrator] Classification failed: {e}")
+        skill_monitor.record_call(
+            "orchestrator_classify", success=False,
+            latency_ms=(time.monotonic() - _t0) * 1000,
+            error=str(e)[:200],
+        )
+        logging.warning("[Orchestrator] Classification failed: %s", e)
         return _FALLBACK
 
 
@@ -237,6 +251,13 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Restart
     if re.search(r"\b(restart yourself|restart jarvis|reload yourself|apply changes|hit your restart|do a restart)\b", lower):
         return ToolDecision("self_improve", 0.99, "restart")
+    # Artifact — explicit requests to create shareable/interactive pages
+    if re.search(
+        r"\b(create|make|build|generate|turn (this|it) into|package (this|it) as)\b.{0,40}"
+        r"\b(artifact|diagram|dashboard|visualization|walkthrough|shareable page|interactive page|team report)\b",
+        lower,
+    ) or re.search(r"\bartifact\b", lower):
+        return ToolDecision("artifact", 0.97, "create")
     # Messaging — require "to <name>" or an explicit send/message verb at the START
     # to avoid false positives on phrases like "plain text in a database"
     if re.search(r"\b(text|message|send a text|send a message|imessage)\b.*(to\s+\w+|\w+\s+imran)", lower):
@@ -362,7 +383,7 @@ def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
             return None
         return _parse(raw)
     except Exception as e:
-        print(f"[Orchestrator] Local structured classification failed: {e}")
+        logging.warning("[Orchestrator] Local structured classification failed: %s", e)
         return None
 
 

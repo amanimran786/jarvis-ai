@@ -283,9 +283,12 @@ def audit_records(records: list[dict]) -> list[Finding]:
         passed = r.get("pass")
         tool_calls = r.get("tool_calls")
         retry = r.get("retry_count", 0)
+        verifier_available = r.get("verifier_available", True)
         # Enrichment fields (present only once F adopts the proposed patch):
         fab_flag = r.get("fabrication_flag")            # str: matched exec claim, or ""
         inherited = bool(r.get("had_inherited_evidence", False))
+        runtime_context = bool(r.get("had_runtime_context_evidence", False))
+        has_prefetched_evidence = inherited or runtime_context
         transcript_sha = r.get("transcript_sha256")     # str or None
 
         # Schema sanity — missing hard signals make every other check unsafe.
@@ -295,6 +298,12 @@ def audit_records(records: list[dict]) -> list[Finding]:
                 f"record missing score/pass/tool_calls (score={score}, pass={passed}, tool_calls={tool_calls})",
             ))
             continue
+
+        if verifier_available is False:
+            findings.append(Finding(
+                "VERIFIER_UNAVAILABLE", WARNING, tid, aid,
+                "local structured verifier was unavailable; task failed closed",
+            ))
 
         # I1 — score/pass coherence. The runtime computes pass = score >= 0.65
         # and is explicit that the model's own pass flag is never trusted. If a
@@ -314,8 +323,9 @@ def audit_records(records: list[dict]) -> list[Finding]:
 
         # I2 — fabrication/pass conflict (fires only with the enrichment patch).
         # The runtime's deterministic detector matched an execution claim, the
-        # agent made zero real tool calls, no inherited evidence — yet the
-        # verifier passed it. That is a fabricated result that slipped the gate.
+        # agent made zero real tool calls and has no inherited execution
+        # evidence — yet the verifier passed it. Runtime-prefetched context does
+        # not prove that claimed commands or tests actually ran.
         if fab_flag and bool(passed) and int(tool_calls) == 0 and not inherited:
             findings.append(Finding(
                 "FABRICATION_PASS_CONFLICT", CRITICAL, tid, aid,
@@ -325,11 +335,11 @@ def audit_records(records: list[dict]) -> list[Finding]:
         # I3 — silent pass: a verifiable agent passed with zero tool calls and
         # no carried-over evidence. Detectable with TODAY's schema. Not proof of
         # fabrication, but exactly the shape fabrication takes — worth a human look.
-        if (bool(passed) and int(tool_calls) == 0 and not inherited
+        if (bool(passed) and int(tool_calls) == 0 and not has_prefetched_evidence
                 and aid in verifiable):
             findings.append(Finding(
                 "SILENT_PASS_NO_EVIDENCE", WARNING, tid, aid,
-                "verifiable agent passed with zero tool calls and no inherited evidence",
+                "verifiable agent passed with zero tool calls and no prefetched evidence",
             ))
 
         # I4 — claimed-evidence without captured transcript (enrichment only):
@@ -349,12 +359,23 @@ def audit_records(records: list[dict]) -> list[Finding]:
                 f"failed at retry_count={retry} (budget {MAX_RETRIES}) — could not ground its answer",
             ))
 
-        # I6 — the fabrication defense working as designed (informational, so
-        # operators can see the system actively caught a fake, not just silence).
+        # I6 — zero-call failure observation. A fabrication flag establishes
+        # that the deterministic defense fired, but zero calls alone do not
+        # establish why the verifier failed the response.
         if int(tool_calls) == 0 and not bool(passed) and not inherited:
+            if fab_flag:
+                detail = (
+                    f"failed after deterministic fabrication detection "
+                    f"({fab_flag!r}); zero tool calls (score={score})"
+                )
+            else:
+                detail = (
+                    f"failed with zero tool calls (score={score}); "
+                    "failure cause is not established by audit evidence"
+                )
             findings.append(Finding(
                 "ZERO_CALL_FAIL", INFO, tid, aid,
-                f"correctly failed: zero tool calls (score={score})",
+                detail,
             ))
 
         # I7 — monotonic timestamps: out-of-order ts implies reordering/tamper.

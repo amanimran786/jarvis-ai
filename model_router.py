@@ -18,6 +18,7 @@ Mode commands:
   "what mode are you in"        → status
 """
 
+import logging
 import re
 import time as _time
 import threading as _threading
@@ -877,6 +878,7 @@ def smart_stream(
     tool: str | None = "chat",
     extra_system: str = "",
     prefer_local: bool = False,
+    local_only: bool = False,
     skip_dynamic_context: bool = False,
 ) -> tuple:
     """
@@ -889,6 +891,10 @@ def smart_stream(
     chat-tuned complexity heuristics. Routes local-first when a local model
     is available; cloud fallback chain stays intact.
 
+    local_only: enforce an Ollama-only route. Forced cloud models, mobile cloud
+    fast paths, and provider fallbacks are ignored. If Ollama is unavailable,
+    return the open-source-unavailable response without transmitting the prompt.
+
     skip_dynamic_context: skip vault/graph/semantic-memory/mem0 retrieval.
     For tool-loop continuations the task context hasn't changed since turn 1,
     so re-retrieval only adds tokens, an embedding call per turn, and prompt-
@@ -898,7 +904,7 @@ def smart_stream(
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
     # a generator function and break all callers that expect a (stream, label) tuple.
     # Instead return a (stream, label) tuple just like every other path does.
-    if _is_mobile_web_active():
+    if _is_mobile_web_active() and not local_only:
         mobile_extra = _mobile_web_system_extra()
         merged_extra = extra_system
         if mobile_extra:
@@ -960,7 +966,7 @@ def smart_stream(
     if forced.get("active") and forced.get("provider") == "ollama":
         context_model = forced.get("model") or ""
         context_is_local = True
-    elif mode != "cloud" and local_available:
+    elif (local_only or mode != "cloud") and local_available:
         context_model = local_model
         context_is_local = True
 
@@ -1012,24 +1018,24 @@ def smart_stream(
             _fm = _pool.submit(_get_mem0)
             try:
                 repeat_extra = _fr.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] repeat_context retrieval failed: %s", _exc)
             try:
                 vault_extra = _fv.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] vault retrieval failed: %s", _exc)
             try:
                 graph_extra = _fg.result(timeout=2.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] graph_context retrieval failed: %s", _exc)
             try:
                 smem_hits, smem_ctx = _fs.result(timeout=4.0)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] semantic_memory retrieval failed: %s", _exc)
             try:
                 mem0_extra = _fm.result(timeout=4.0) or ""
-            except Exception:
-                pass
+            except Exception as _exc:
+                logging.debug("[Context] mem0 retrieval failed: %s", _exc)
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
@@ -1063,22 +1069,22 @@ def smart_stream(
                 return
             except Exception as exc:
                 last_error = exc
-                print(f"[ModelRouter] Primary model stream failed: {exc}")
+                logging.warning("[ModelRouter] Primary model stream failed: %s", exc)
 
             for name, factory in fallback_factories:
                 try:
-                    print(f"[ModelRouter] Falling back to {name}.")
+                    logging.info("[ModelRouter] Falling back to %s.", name)
                     yield from factory()
                     return
                 except Exception as exc:
                     last_error = exc
-                    print(f"[ModelRouter] Fallback {name} failed: {exc}")
+                    logging.warning("[ModelRouter] Fallback %s failed: %s", name, exc)
 
             yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
         return _stream()
 
-    if forced.get("active"):
+    if forced.get("active") and (not local_only or forced.get("provider") == "ollama"):
         candidate = provider_router.RouteCandidate(
             provider=forced["provider"],
             model=forced["model"],
@@ -1093,7 +1099,11 @@ def smart_stream(
         )
         return _execute_forced_stream(plan, user_input, system_extra), candidate.label
 
-    if prefer_local and local_available and local_model and mode != "cloud":
+    if local_only:
+        tier = "local"
+        apple_foundation_available = False
+        explicit_cloud = False
+    elif prefer_local and local_available and local_model and mode != "cloud":
         tier = "local"
         apple_foundation_available = False
         explicit_cloud = False
@@ -1118,7 +1128,7 @@ def smart_stream(
 
     plan = provider_router.build_plan(
 
-        mode=mode,
+        mode="open-source" if local_only else mode,
         tier=tier,
         local_available=local_available,
         local_model=local_model,
@@ -1208,7 +1218,7 @@ def smart_stream(
                 return
             except Exception as exc:
                 last_error = exc
-                print(f"[ModelRouter] Candidate {candidate.label} failed: {exc}")
+                logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
     return _execute_plan_stream(), primary_label

@@ -14,6 +14,7 @@ Usage:
   # result = {"report": "...", "sources": [...], "query": "...", "queries_used": [...]}
 """
 
+import logging
 import re
 import urllib.request
 import urllib.error
@@ -44,8 +45,8 @@ def _generate_queries(topic: str) -> list[str]:
             import json
             queries = json.loads(match.group())
             return [str(q) for q in queries[:5]]
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.debug("[Research] Query generation failed, using fallback: %s", exc)
     # Fallback: simple variations
     return [topic, f"{topic} explained", f"{topic} latest research", f"{topic} overview"]
 
@@ -57,7 +58,8 @@ def _search(query: str, n: int = 4) -> list[dict]:
     try:
         with DDGS() as d:
             return list(d.text(query, max_results=n))
-    except Exception:
+    except Exception as exc:
+        logging.warning("[Research] Search failed for %r: %s", query, exc)
         return []
 
 
@@ -81,7 +83,8 @@ def _fetch_page(url: str, max_chars: int = 4000) -> str:
         text = re.sub(r"\s+", " ", text).strip()
 
         return text[:max_chars]
-    except Exception:
+    except Exception as exc:
+        logging.debug("[Research] Page fetch failed for %r: %s", url, exc)
         return ""
 
 

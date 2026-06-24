@@ -49,6 +49,36 @@ import wiki_builder
 from tests.jarvis_golden_cases import ENGINEERING_GOLDEN_CASES
 
 
+
+# --- Personal-corpus gate (CI hermeticity) --------------------------------
+# Some interview/career/brain regression tests assert on Aman's personal
+# corpus (career packs under kb/career/, brain variant notes under vault/),
+# which is gitignored and therefore absent in CI. Skip them when the corpus
+# isn't present so CI stays green without committing personal data publicly.
+_PERSONAL_KB_PRESENT = (
+    (interview_profile.PACKS_DIR / "youtube_pem_2026.md").exists()
+    and interview_profile.BRAIN_ROOT.exists()
+)
+_SKIP_NO_KB = unittest.skipUnless(
+    _PERSONAL_KB_PRESENT,
+    "personal career KB + brain vault are gitignored and absent (e.g. CI)",
+)
+# --------------------------------------------------------------------------
+
+
+
+# --- Real-UI gate (CI hermeticity) ----------------------------------------
+# The meeting/voice/overlay rendering tests below call real methods on
+# ui.JarvisWindow / ui.OrbShellWindow. In headless CI conftest stubs PyQt6 with
+# MagicMock, so those classes are Mocks without the methods. Skip those tests
+# when real PyQt6 is absent (they run normally on a machine that has PyQt6).
+_REAL_UI = isinstance(getattr(ui, "JarvisWindow", None), type)
+_SKIP_NO_UI = unittest.skipUnless(
+    _REAL_UI, "real PyQt6 ui.JarvisWindow unavailable (stubbed in CI / headless)",
+)
+# --------------------------------------------------------------------------
+
+
 class PromptModifierTests(unittest.TestCase):
     def test_eli5_modifier_strips_prefix_and_adds_system_extra(self):
         result = prompt_modifiers.parse("ELI5: explain tcp congestion control")
@@ -1307,10 +1337,12 @@ class InterviewProfileTests(unittest.TestCase):
         self.assertIn("Cybersecurity", text)
         self.assertTrue(any(term in text.lower() for term in ("risk", "detection", "incident", "automation")))
 
+    @_SKIP_NO_KB
     def test_imported_role_pack_is_discoverable(self):
         text = interview_profile.supported_role_families_text()
         self.assertIn("youtube_pem_2026", text)
 
+    @_SKIP_NO_KB
     def test_file_backed_youtube_role_pack_mentions_policy_enforcement_manager(self):
         text = interview_profile.target_role_pack_text("Give me my YouTube PEM 2026 role pack.")
         self.assertIn("Policy Enforcement Manager, Age Appropriateness", text)
@@ -1346,6 +1378,7 @@ class InterviewProfileTests(unittest.TestCase):
         self.assertTrue(any(term in text.lower() for term in ("on-call", "reversed", "post-mortem", "escalation")))
         self.assertIn("story-bank angle", text.lower())
 
+    @_SKIP_NO_KB
     def test_interview_prep_text_uses_playbook_rules_and_role_pack(self):
         text = interview_profile.interview_prep_text("Help me prep for the YouTube Policy Enforcement Manager interview.")
         self.assertIn("company-specific intelligence", text.lower())
@@ -2661,6 +2694,7 @@ class RouterTests(unittest.TestCase):
         self.assertIn("Evaluated", text)
         self.assertIn("Skip", text)
 
+    @_SKIP_NO_KB
     def test_file_backed_youtube_pack_fast_path(self):
         stream, label = router.route_stream("Give me my YouTube PEM 2026 role pack.")
         text = "".join(stream)
@@ -3867,6 +3901,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         def __init__(self):
             self.emit = unittest.mock.Mock()
 
+    @_SKIP_NO_UI
     def test_transcript_callback_forwards_to_live_bridge(self):
         fake = type("FakeJarvis", (), {"_live_updates": type("Bridge", (), {"transcript": self._SignalSink()})()})()
 
@@ -3874,6 +3909,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
 
         fake._live_updates.transcript.emit.assert_called_once_with("Can you explain optimistic locking?")
 
+    @_SKIP_NO_UI
     def test_transcript_rendering_updates_label_and_toolbar_state(self):
         fake = type(
             "FakeJarvis",
@@ -3895,6 +3931,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         self.assertTrue(fake.suggest_panel.visible)
         fake._update_meeting_toolbar_layout.assert_called_once()
 
+    @_SKIP_NO_UI
     def test_compact_suggestion_rendering_shows_panel_and_refreshes_layout(self):
         fake = type(
             "FakeJarvis",
@@ -3922,6 +3959,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         )
         fake._update_meeting_toolbar_layout.assert_called_once()
 
+    @_SKIP_NO_UI
     def test_orb_suggestion_rendering_updates_compact_text(self):
         fake = type(
             "FakeOrb",
@@ -3945,6 +3983,7 @@ class MeetingAssistRenderingTests(unittest.TestCase):
         self.assertEqual(fake._top_chip.text(), "SMART LISTEN ACTIVE")
         fake._set_tray_visible.assert_called_once_with(True)
 
+    @_SKIP_NO_UI
     def test_scoped_ui_message_ignores_stale_worker_response(self):
         added = []
         fake = SimpleNamespace(
@@ -4096,35 +4135,45 @@ class MeetingListenerTests(unittest.TestCase):
         self.assertEqual(line, "Can you explain optimistic locking?")
 
     def test_transcribe_prefers_local_stt_when_available(self):
+        # meeting_listener.client is None in CI (no OPENAI_API_KEY). Patch the
+        # client object itself so patch.object doesn't crash on NoneType.
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.side_effect = AssertionError("openai fallback should not run")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": True, "active_engine": "faster-whisper"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": True, "engine": "faster-whisper", "text": "What is a variable?", "error": ""}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should not run")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "What is a variable?")
         self.assertEqual(meeting_listener._last_stt_backend, "faster-whisper")
 
     def test_transcribe_falls_back_to_openai_when_local_stt_is_unavailable(self):
+        # meeting_listener.client is None in CI (no OPENAI_API_KEY). Patch the
+        # client itself so patch.object doesn't crash on NoneType.
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.return_value = SimpleNamespace(text="What is a variable?")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "openai", "openai_fallback_allowed": True, "model": "small.en"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", return_value=SimpleNamespace(text="What is a variable?")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "What is a variable?")
         self.assertEqual(meeting_listener._last_stt_backend, "openai")
         self.assertEqual(meeting_listener._last_stt_backend_detail, "whisper-1")
 
     def test_transcribe_skips_openai_when_fallback_is_disabled(self):
+        mock_client = MagicMock()
+        mock_client.audio.transcriptions.create.side_effect = AssertionError("openai fallback should stay disabled")
         with TemporaryDirectory() as tmp:
             path = Path(tmp) / "meeting.wav"
             path.write_bytes(b"fake-wav")
             with patch("meeting_listener.local_stt.status", return_value={"local_available": False, "active_engine": "unavailable", "openai_fallback_allowed": False, "model": "small.en"}), \
                  patch("meeting_listener.local_stt.transcribe_file", return_value={"ok": False, "engine": "faster-whisper", "text": "", "error": "faster-whisper is not installed"}), \
-                 patch.object(meeting_listener.client.audio.transcriptions, "create", side_effect=AssertionError("openai fallback should stay disabled")):
+                 patch.object(meeting_listener, "client", mock_client):
                 text = meeting_listener._transcribe(str(path))
         self.assertEqual(text, "")
         self.assertEqual(meeting_listener._last_stt_backend, "unavailable")
@@ -4532,6 +4581,7 @@ class ModelRouterFallbackTests(unittest.TestCase):
 
 
 class OverlayTechnicalGuidanceTests(unittest.TestCase):
+    @_SKIP_NO_UI
     def test_screen_analysis_prompt_includes_engineering_playbook_guidance(self):
         worker = overlay.ScreenAnalysisWorker()
         with patch("desktop.overlay.camera.screenshot_and_describe", return_value="answer") as scan_mock:
@@ -4555,6 +4605,7 @@ class CameraTechnicalGuidanceTests(unittest.TestCase):
 
 
 class LongFormTechnicalGroundingTests(unittest.TestCase):
+    @_SKIP_NO_KB
     def test_research_voice_summary_injects_engineering_grounding_for_technical_query(self):
         result = {
             "query": "How would you design a resilient job queue?",
@@ -4574,6 +4625,7 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
         self.assertIn("Engineering companion guidance", injected)
         self.assertIn("Systems Design Tradeoff Heuristics", injected)
 
+    @_SKIP_NO_KB
     def test_operative_summary_injects_engineering_grounding_for_technical_task(self):
         fake_steps = [
             SimpleNamespace(number=1, description="Inspect logs", ok=True, result="Found queue contention."),
@@ -4619,11 +4671,13 @@ class InterviewProfileBrainRegressionTests(unittest.TestCase):
         path = interview_profile._brain_variant_path("Why am I a fit for Meta trust and safety calibration work?")
         self.assertEqual(path, interview_profile.META_VARIANT)
 
+    @_SKIP_NO_KB
     def test_target_role_pack_uses_openai_brain_variant(self):
         text = interview_profile.target_role_pack_text("How should I position myself for OpenAI trust and safety operations?")
         self.assertIn("OpenAI-style roles", text)
         self.assertIn("high-sensitivity abuse and integrity cases", text)
 
+    @_SKIP_NO_KB
     def test_candidate_profile_hint_includes_career_rules_and_variant_guidance(self):
         text = interview_profile._candidate_profile_hint("Tell me about yourself for OpenAI trust and safety operations.")
         self.assertIn("career-answering rules", text)
@@ -4634,6 +4688,7 @@ class InterviewProfileBrainRegressionTests(unittest.TestCase):
         text = interview_profile.tell_me_about_yourself_text("Tell me about yourself for a trust and safety role.")
         self.assertIn("7+ years", text)
 
+    @_SKIP_NO_KB
     def test_candidate_profile_hint_includes_llnl_technical_guidance_for_engineering_queries(self):
         text = interview_profile._candidate_profile_hint("Tell me about yourself for a backend software engineering role.")
         self.assertIn("Technical credibility note guidance", text)
@@ -5177,7 +5232,13 @@ class LocalTrainingTests(unittest.TestCase):
         }
         with patch("local_runtime.local_model_eval.skills.build_system_extra", return_value=("vault context", [])), \
              patch("local_runtime.local_model_eval.ask_with_priority", return_value='{"pass": true, "score": 4.5, "rationale": "grounded"}') as ask_mock:
-            result = local_model_eval._judge_answer(case, "candidate", "A direct answer.", "claude-3-5-haiku-latest")
+            result = local_model_eval._judge_answer(
+                case,
+                "candidate",
+                "A direct answer.",
+                "claude-3-5-haiku-latest",
+                allow_cloud=True,
+            )
 
         self.assertTrue(result["pass"])
         self.assertEqual(result["score"], 4.5)
@@ -5348,6 +5409,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
             _apply_voice_hint_for_status=unittest.mock.Mock(),
         )
 
+    @_SKIP_NO_UI
     def test_non_voice_status_keeps_existing_mic_state(self):
         window = self._fake_window()
 
@@ -5357,6 +5419,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._apply_voice_hint_for_status.assert_called_once_with("AWAITING WAKE WORD")
         self.assertEqual(window._status_label.text(), "PROCESSING")
 
+    @_SKIP_NO_UI
     def test_voice_prefixed_status_updates_mic_state(self):
         window = self._fake_window()
 
@@ -5366,6 +5429,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._apply_voice_hint_for_status.assert_called_once_with("LISTENING")
         self.assertEqual(window._status_label.text(), "LISTENING")
 
+    @_SKIP_NO_UI
     def test_mic_chip_click_uses_voice_state_not_status_label_text(self):
         window = SimpleNamespace(
             _voice_status_raw="LISTENING",
@@ -5379,6 +5443,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._restart_voice_worker_to_standby.assert_called_once_with()
         trigger_mock.assert_not_called()
 
+    @_SKIP_NO_UI
     def test_mic_chip_click_wakes_if_worker_needs_recovery(self):
         window = SimpleNamespace(
             _voice_status_raw="AWAITING WAKE WORD",
@@ -5391,6 +5456,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
         window._ensure_voice_worker_running.assert_called_once_with()
         trigger_mock.assert_called_once_with()
 
+    @_SKIP_NO_UI
     def test_smart_listen_pause_resume_controls_voice_worker(self):
         worker = SimpleNamespace(
             isRunning=unittest.mock.Mock(return_value=True),
@@ -5413,6 +5479,7 @@ class VoiceStatusUiRegressionTests(unittest.TestCase):
 
 
 class LiveAssistRenderingTests(unittest.TestCase):
+    @_SKIP_NO_UI
     def test_meeting_watchdog_respects_manual_full_window_restore(self):
         window = SimpleNamespace(
             _last_live_listener_started_at=0.0,
@@ -5454,6 +5521,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
 
         window._set_meeting_toolbar_mode.assert_not_called()
 
+    @_SKIP_NO_UI
     def test_toolbar_manual_prompt_renders_when_surface_is_visible(self):
         window = SimpleNamespace(
             _meeting_toolbar_mode=False,
@@ -5475,6 +5543,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         )
         self.assertEqual(window.transcript_label.text(), "[gpt-4o-mini] Manual response ready.")
 
+    @_SKIP_NO_UI
     def test_live_snapshot_refresh_updates_visible_labels(self):
         live_snapshot = {
             "running": True,
@@ -5528,6 +5597,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         self.assertEqual(window.listen_btn.text, "■")
         self.assertTrue(getattr(window, "tray_visible", False))
 
+    @_SKIP_NO_UI
     def test_orb_transcript_update_shows_partial_heard_question(self):
         window = SimpleNamespace(
             transcript_label=_StubTextWidget(),
@@ -5559,6 +5629,7 @@ class LiveAssistRenderingTests(unittest.TestCase):
         self.assertEqual(window._top_chip.text(), "SMART LISTEN ACTIVE")
         window._set_tray_visible.assert_called_once_with(True)
 
+    @_SKIP_NO_UI
     def test_orb_live_call_status_appends_actionable_hint(self):
         suggestion = "Use retries and idempotency. Verify duplicate jobs stay harmless under load."
         live_snapshot = {
@@ -5630,6 +5701,7 @@ class UnderstandingQualitySmokeTests(unittest.TestCase):
         window._set_tray_visible = lambda visible: setattr(window, "tray_visible", visible)
         return window
 
+    @_SKIP_NO_UI
     def test_fragmented_captions_build_a_coherent_prompt_and_update_visible_assist(self):
         previous_history = list(meeting_listener._transcript_history)
         meeting_listener._transcript_history[:] = ["tell me about yourself"]
@@ -5832,7 +5904,7 @@ class MeetingPrepFastPathTests(unittest.TestCase):
         """'what's my next meeting' should fast-path to Calendar label."""
         fake_event = {
             "title": "Design Review",
-            "start": "2026-04-26T14:00:00-07:00",
+            "start": "2026-04-26T14:00:00",  # naive — avoids astimezone() UTC conversion in CI
             "attendees": ["Alice", "Bob"],
         }
         with patch("google_services.get_next_event", return_value=fake_event):
@@ -5847,7 +5919,7 @@ class MeetingPrepFastPathTests(unittest.TestCase):
         """'prep me for my next meeting' should fast-path to Calendar label."""
         fake_event = {
             "title": "Standup",
-            "start": "2026-04-26T09:30:00-07:00",
+            "start": "2026-04-26T09:30:00",  # naive — avoids astimezone() UTC conversion in CI
             "attendees": [],
         }
         with patch("google_services.get_next_event", return_value=fake_event):

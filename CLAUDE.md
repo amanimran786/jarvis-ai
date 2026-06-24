@@ -44,10 +44,11 @@ Do not use Context7 as a substitute for reading this repository’s code or pres
 
 Detailed rules for specialized domains:
 
-- **@.claude/skills/jarvis-voice.md** — Voice/STT/TTS/mic domain rules (verification checklist, common gotchas, runtime artifacts)
-- **@.claude/skills/jarvis-packaging.md** — PyInstaller packaged app rules (when to test, build script, common failures, BrokenPipeError prevention)
-- **@.claude/skills/jarvis-vault.md** — Obsidian brain/vault rules (write-only-when-approved, directory structure, brain schema, vault search)
-- **@.claude/skills/jarvis-testing.md** — Test patterns and mock injection (narrowest tests, pytest commands, mock setup, PyQt6/sounddevice mocking)
+Read the relevant file on demand (no longer auto-imported, to save per-turn context):
+- `.claude/skills/jarvis-voice.md` — Voice/STT/TTS/mic domain rules. Read when touching `voice.py`, `local_runtime/**`, `meeting_listener.py`.
+- `.claude/skills/jarvis-packaging.md` — PyInstaller packaged app rules. Read when touching `Jarvis.spec`, `main.py`, `ui.py`, `local_runtime/**`.
+- `.claude/skills/jarvis-vault.md` — Obsidian brain/vault rules. Read when touching `vault/**`.
+- `.claude/skills/jarvis-testing.md` — Test patterns and mock injection. Read when touching `tests/**`.
 
 ## Repo Facts To Preserve
 
@@ -120,3 +121,11 @@ When working in this codebase, prefer:
 - absolute timestamps when discussing builds or installed apps
 
 If something is still uncertain, say exactly what is known and what is not.
+
+# Compact instructions
+
+When compacting this conversation, keep: code changes and their file paths, test/CI
+failures and their root causes, architectural decisions, and the current next step.
+Drop: raw CI/test log dumps, full-file reads, exploratory dead ends, and verbose tool
+output. Prefer pushing verbose investigation (log reading, multi-file search, test runs)
+into subagents so only a short summary returns to the main thread.

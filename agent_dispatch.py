@@ -55,6 +55,7 @@ def dispatch(
         model=agent["model"],
         system_extra=system_extra,
         tools=callable_tools or None,
+        workspace_confined=agent_name == "backend_engineer",
     )
 
 

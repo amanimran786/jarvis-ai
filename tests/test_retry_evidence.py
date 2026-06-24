@@ -13,11 +13,12 @@ import task_runtime
 def _capture_verify_prompt(**kwargs):
     captured = {}
 
-    def fake_ask_stream(prompt, **_kw):
+    def fake_ask_local_structured(prompt, schema, **_kw):
         captured["prompt"] = prompt
-        return iter(['{"score": 1.0, "reason": "ok"}'])
+        captured["schema"] = schema
+        return '{"score": 1.0, "reason": "ok"}'
 
-    with patch("brains.brain.ask_stream", fake_ask_stream):
+    with patch("brains.brain_ollama.ask_local_structured", fake_ask_local_structured):
         verdict = task_runtime._auto_verify(
             "task_x", "qa-tester", "count files", "There are 77 files.", **kwargs
         )
@@ -25,6 +26,15 @@ def _capture_verify_prompt(**kwargs):
 
 
 class InheritedEvidenceVerifierTests(unittest.TestCase):
+    def test_local_verifier_unavailable_fails_closed(self):
+        with patch("brains.brain_ollama.ask_local_structured", return_value=""):
+            verdict = task_runtime._auto_verify(
+                "task_x", "qa-tester", "run tests", "unknown", tool_calls=0,
+            )
+        self.assertFalse(verdict["pass"])
+        self.assertEqual(verdict["score"], 0.0)
+        self.assertFalse(verdict["verifier_available"])
+
     def test_zero_calls_without_evidence_gets_fabrication_clause(self):
         prompt, _ = _capture_verify_prompt(tool_calls=0)
         self.assertIn("ZERO tool calls", prompt)
@@ -47,9 +57,19 @@ class InheritedEvidenceVerifierTests(unittest.TestCase):
         self.assertIn("foo.py", prompt)
         self.assertNotIn("stale prior evidence", prompt)
 
+    def test_prefetched_runtime_context_is_grounded_evidence(self):
+        prompt, _ = _capture_verify_prompt(
+            tool_calls=0,
+            runtime_context_evidence="=== Repo file contents ===\napi.py\nAPP = FastAPI()",
+        )
+        self.assertIn("prefetched read-only context", prompt)
+        self.assertIn("APP = FastAPI()", prompt)
+        self.assertIn("does NOT prove", prompt)
+        self.assertNotIn("set the overall score to 0.0", prompt)
 
-class VerifiedFailureEscalationTests(unittest.TestCase):
-    """First attempt runs local-first; verifier-rejected retries escalate."""
+
+class VerifiedFailureRoutingTests(unittest.TestCase):
+    """Initial and verifier-rejected attempts both remain local-first."""
 
     def setUp(self):
         task_runtime.reset_for_tests()
@@ -69,8 +89,8 @@ class VerifiedFailureEscalationTests(unittest.TestCase):
     def test_first_attempt_prefers_local(self):
         self.assertTrue(self._capture_prefer_local(meta=None))
 
-    def test_retry_escalates_off_local(self):
-        self.assertFalse(self._capture_prefer_local(meta={"retry_count": 1}))
+    def test_retry_remains_local(self):
+        self.assertTrue(self._capture_prefer_local(meta={"retry_count": 1}))
 
 
 class EmptyResultFallbackTests(unittest.TestCase):

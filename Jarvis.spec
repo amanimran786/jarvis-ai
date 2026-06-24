@@ -22,18 +22,27 @@ EXCLUDE_DIRS = {
     "memory",
     "training",
     ".jarvis_backups",
+    ".worktrees",
+    "runtime",
 }
 EXCLUDE_EXTS = {
+    ".db",
+    ".log",
     ".py",
     ".pyc",
     ".pyo",
+    ".sqlite",
+    ".sqlite3",
     ".spec",
 }
 EXCLUDE_FILES = {
     ".env",
+    "contact_aliases.json",
     "credentials.json",
     "token.json",
+    "usage_state.json",
 }
+EXCLUDE_FILE_SUFFIXES = ("-shm", "-wal", "_state.json")
 
 
 def iter_datas():
@@ -46,7 +55,9 @@ def iter_datas():
             continue
         if path.name in EXCLUDE_FILES:
             continue
-        if path.suffix in EXCLUDE_EXTS:
+        if path.name.startswith(".jarvis_") or path.name.endswith(EXCLUDE_FILE_SUFFIXES):
+            continue
+        if path.suffix.lower() in EXCLUDE_EXTS:
             continue
         if rel.parts[:2] in {("vault", "indexes"), ("vault", "outputs")}:
             continue

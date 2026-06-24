@@ -32,6 +32,7 @@ TOOLS = {
     "osint_domain_typos": "Local typo-squatting scan for a domain using DNSTwist.",
     "osint_subdomains": "Passive subdomain enumeration via subfinder.",
     "osint_whois": "WHOIS lookup for domain registration and ownership information.",
+    "artifact": "Generate a shareable Local Artifact — a self-contained interactive HTML page (diagrams, dashboards, code walkthroughs, PR reviews, data visualizations, or any team-shareable output) created on-device and saved to the Desktop.",
 }
 
 

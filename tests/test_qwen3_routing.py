@@ -18,6 +18,10 @@ def test_qwen36_context_size():
     assert _model_context_limit("qwen3.6:35b-instruct") == 262144
 
 
+def test_glm52_context_size_is_recognized_for_candidate_evals():
+    assert _model_context_limit("glm-5.2") == 64_000
+
+
 def test_glm_flash_escalates_properly():
     # Verify glm-4.7-flash escalates properly when prompt exceeds smaller model context headroom
     # gemma4 has 8192 limit. 8192 * 0.8 = 6553 headroom.

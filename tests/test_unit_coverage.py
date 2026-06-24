@@ -2944,6 +2944,8 @@ class JarvisCliEndpointTests(unittest.TestCase):
     def test_cli_reexecs_into_project_venv_when_available(self):
         import jarvis_cli
 
+        expected_venv = jarvis_cli._project_venv_python()
+
         with patch("jarvis_cli.os.path.exists", return_value=True), \
              patch("jarvis_cli.os.path.realpath", side_effect=lambda p: p), \
              patch.object(jarvis_cli.sys, "executable", "/opt/anaconda3/bin/python3"), \
@@ -2954,16 +2956,18 @@ class JarvisCliEndpointTests(unittest.TestCase):
             jarvis_cli._ensure_supported_cli_runtime()
 
         execve_mock.assert_called_once_with(
-            "/Users/truthseeker/jarvis-ai/venv/bin/python",
-            ["/Users/truthseeker/jarvis-ai/venv/bin/python", "jarvis_cli.py", "--interactive"],
+            expected_venv,
+            [expected_venv, "jarvis_cli.py", "--interactive"],
             {"_JARVIS_CLI_REEXEC_ATTEMPTED": "1"},
         )
 
     def test_cli_reexecs_when_venv_python_symlinks_to_base_interpreter(self):
         import jarvis_cli
 
+        expected_venv = jarvis_cli._project_venv_python()
+
         def _realpath(path):
-            if path in {"/opt/anaconda3/bin/python3", "/Users/truthseeker/jarvis-ai/venv/bin/python"}:
+            if path in {"/opt/anaconda3/bin/python3", expected_venv}:
                 return "/opt/anaconda3/bin/python3.12"
             return path
 
@@ -2976,7 +2980,7 @@ class JarvisCliEndpointTests(unittest.TestCase):
             jarvis_cli._ensure_supported_cli_runtime()
 
         execve_mock.assert_called_once()
-        self.assertEqual(execve_mock.call_args.args[0], "/Users/truthseeker/jarvis-ai/venv/bin/python")
+        self.assertEqual(execve_mock.call_args.args[0], expected_venv)
 
     def test_auth_headers_use_runtime_token_when_present(self):
         import jarvis_cli

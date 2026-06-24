@@ -1,7 +1,7 @@
 {
   "env": {
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80"
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "92"
   },
   "hooks": {
     "PreToolUse": [
