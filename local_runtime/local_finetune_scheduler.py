@@ -135,7 +135,7 @@ def _session_window_date(session: dict | None) -> str | None:
                 parsed = parsed - timedelta(days=1)
             return parsed.strftime("%Y-%m-%d")
         except Exception:
-            pass
+            logging.debug("[FinetuneScheduler] timestamp parse failed: %r", timestamp, exc_info=True)
     date_value = str(session.get("date") or "").strip()
     return date_value or None
 

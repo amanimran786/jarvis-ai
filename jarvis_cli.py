@@ -133,6 +133,7 @@ _SLASH_COMMANDS = (
     "/run",
     "/clear",
     "/exit",
+    "/restore",
 )
 
 
@@ -1913,6 +1914,9 @@ def _handle_console_command(line: str) -> int | None:
     if command == "run":
         return _run_shell_command(args)
 
+    if command == "restore":
+        return _cmd_restore(args)
+
     # Shared-skill fallback: any /<command> that matches a file under
     # .claude/commands/ is treated as a runbook prompt that we send to the
     # LLM. This lets Jarvis execute the same slash commands Claude Code does.
@@ -1925,6 +1929,49 @@ def _handle_console_command(line: str) -> int | None:
     return 1
 
 
+def _cmd_restore(args: str) -> int:
+    """Handle /restore [snapshot_name] — list or restore a memory snapshot."""
+    try:
+        from harness.audit import list_snapshots, restore_snapshot
+    except ImportError:
+        print("Error: audit module not available.", file=sys.stderr)
+        return 1
+
+    snapshots = list_snapshots()
+    if not snapshots:
+        print("No snapshots available.")
+        return 0
+
+    if not args:
+        print(f"{'#':<3} {'Name':<25} {'Status':<14} {'Created'}")
+        print("-" * 72)
+        for i, snap in enumerate(snapshots, 1):
+            created = snap["created_at"][:19].replace("T", " ")
+            print(f"{i:<3} {snap['name']:<25} {snap['status']:<14} {created}")
+        print(f"\nUsage: /restore <number or name>")
+        return 0
+
+    # Resolve by number or name
+    target = None
+    if args.isdigit():
+        idx = int(args) - 1
+        if 0 <= idx < len(snapshots):
+            target = snapshots[idx]["path"]
+    else:
+        for snap in snapshots:
+            if snap["name"].startswith(args) or args in snap["name"]:
+                target = snap["path"]
+                break
+
+    if target is None:
+        print(f"No snapshot matching '{args}'. Run /restore to list available snapshots.", file=sys.stderr)
+        return 1
+
+    ok, msg = restore_snapshot(target)
+    print(msg)
+    return 0 if ok else 1
+
+
 def run_interactive_console() -> int:
     if not _ensure_daemon_running(reason="jarvis_cli_console"):
         print("Error: Jarvis could not start its local daemon.", file=sys.stderr)
@@ -1933,6 +1980,12 @@ def run_interactive_console() -> int:
         import runtime_state
         runtime_state.write_console_session(command="jarvis_cli --interactive")
         atexit.register(runtime_state.clear_console_session)
+    except Exception:
+        pass
+    try:
+        from harness.audit import start_session, end_session
+        start_session("jarvis_cli")
+        atexit.register(end_session)
     except Exception:
         pass
     _print_banner()

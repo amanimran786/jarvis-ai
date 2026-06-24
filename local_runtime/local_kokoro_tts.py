@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import tempfile
@@ -62,7 +63,7 @@ def prewarm_phrase_cache() -> None:
                 with _phrase_cache_lock:
                     _phrase_cache[key] = wav
             except Exception:
-                pass
+                logging.debug("[KokoroTTS] phrase cache pre-render failed for %r", phrase, exc_info=True)
 
     threading.Thread(target=_render, daemon=True, name="KokoroPhraseCache").start()
 
