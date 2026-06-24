@@ -252,10 +252,23 @@ Return only the profile paragraph, no labels or headers."""
         kdata["user_profile"]["last_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
         _save_knowledge(kdata)
         print(f"[Learner] Reflection complete: {profile[:80]}...")
-        return profile
     except Exception as e:
         print(f"[Learner] Reflection error: {e}")
-        return ""
+        profile = ""
+
+    # Also run Jarvis performance self-reflection and append to KB
+    try:
+        import self_eval
+        perf_note = self_eval.jarvis_reflection(hours=24 * 14)
+        if perf_note:
+            self_eval.write_reflection_note(perf_note)
+            kdata.setdefault("jarvis_perf", {})["last_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
+            _save_knowledge(kdata)
+            print("[Learner] Jarvis performance reflection written.")
+    except Exception as e:
+        print(f"[Learner] Jarvis performance reflection error: {e}")
+
+    return profile
 
 
 # ── Get full context for system prompt ────────────────────────────────────────
