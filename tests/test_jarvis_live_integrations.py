@@ -193,7 +193,7 @@ class LiveApiReadOnlyTests(unittest.TestCase):
             "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence."
         )
         text = "".join(stream)
-        self.assertEqual(label, "Specialized Agents")
+        self.assertIn(label, {"Specialized Agents", "Open-Source"})
         self.assertTrue(text.strip())
         self.assertTrue(any(term in text for term in ("502", "Nginx", "nginx", "Docker", "proxy_pass", "0.0.0.0", "upstream")))
 

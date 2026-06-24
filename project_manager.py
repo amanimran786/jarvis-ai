@@ -331,12 +331,8 @@ def _run_project(project_id: str) -> None:
                             # Bypass content-scan for orchestrator-generated tasks.
                             # The prompt is machine-authored, not user voice/text input.
                             "confidence_score": 0.9,
-                            # Skip local-first attempt — project tasks have long prompts
-                            # with injected dep results; running 4+ concurrent Ollama
-                            # instances causes OOM.  retry_count=1 routes straight to
-                            # the cloud tier in task_runtime's smart_stream call.
-                            "retry_count": 1,
                         },
+                        _trusted_runtime_meta=True,
                     )
                     submitted_id = task_result["id"]
                     # Persist task_id immediately so a server restart can correlate

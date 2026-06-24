@@ -104,3 +104,50 @@ def test_list_agents_returns_all_eight():
     for agent in agents:
         assert "role" in agent
         assert "model" in agent
+
+
+def test_dispatch_forwards_context_in_system_extra():
+    # Arrange
+    _mock_brain.ask_local_with_tools.return_value = iter(["ok"])
+    # Act
+    list(agent_dispatch.dispatch("researcher", "What is RAG?", context="focus on latency"))
+    # Assert — system_extra passed to ask_local_with_tools must contain the context block
+    call_kwargs = _mock_brain.ask_local_with_tools.call_args.kwargs
+    assert "focus on latency" in call_kwargs["system_extra"]
+
+
+def test_dispatch_uses_custom_system_prompt_when_present():
+    # Arrange — add a custom system_prompt entry to the roster
+    _mock_config.AGENT_ROSTER["custom_agent"] = {
+        "role": "Custom role",
+        "tools": [],
+        "model": "glm-4.7-flash",
+        "system_prompt": "You are a specialized agent.",
+    }
+    _mock_brain.ask_local_with_tools.return_value = iter(["done"])
+    try:
+        # Act
+        list(agent_dispatch.dispatch("custom_agent", "Do something"))
+        # Assert — custom system_prompt is used verbatim
+        call_kwargs = _mock_brain.ask_local_with_tools.call_args.kwargs
+        assert call_kwargs["system_extra"] == "You are a specialized agent."
+    finally:
+        del _mock_config.AGENT_ROSTER["custom_agent"]
+
+
+def test_dispatch_custom_system_prompt_appends_context():
+    # Arrange
+    _mock_config.AGENT_ROSTER["ctx_agent"] = {
+        "role": "Context test",
+        "tools": [],
+        "model": "glm-4.7-flash",
+        "system_prompt": "Base prompt.",
+    }
+    _mock_brain.ask_local_with_tools.return_value = iter(["done"])
+    try:
+        list(agent_dispatch.dispatch("ctx_agent", "task", context="extra context"))
+        call_kwargs = _mock_brain.ask_local_with_tools.call_args.kwargs
+        assert "Base prompt." in call_kwargs["system_extra"]
+        assert "extra context" in call_kwargs["system_extra"]
+    finally:
+        del _mock_config.AGENT_ROSTER["ctx_agent"]

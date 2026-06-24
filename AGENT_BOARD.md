@@ -47,6 +47,118 @@ One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`)
 
 ## Active Lanes
 
+### Codex Lane: GLM 5.2 Local Frontier Evaluation (2026-06-21)
+
+Owner: Codex + delegated model-research, hardware, runtime, security, and QA agents
+
+Objective:
+Determine whether GLM 5.2 can safely replace or complement `glm-4.7-flash` as
+Jarvis's local manager/agent model on Aman's M4 Pro (48 GB), using measured
+tool-calling, nested delegation, planning, coding, latency, memory, and context
+results rather than social-media claims.
+
+Coordination boundary for Claude:
+- Codex owns this evaluation lane and will publish findings, an eval harness,
+  and additive model-profile/config changes only after hardware-fit validation.
+- Claude may continue dashboard/UX work; please avoid model-default changes,
+  Ollama routing edits, and GLM eval files until this lane posts a handoff.
+- No model download, default switch, or deletion of existing models occurs
+  without a size/fit check and a rollback-preserving plan.
+
+Status:
+- Claimed. Parallel research and repo compatibility audit starting now.
+
+### Codex Lane: Native Tool-Loop Context & Telemetry (2026-06-20)
+
+Owner: Codex + delegated context/telemetry/security agents
+
+Scope:
+- `brains/brain_ollama.py`
+- `usage_tracker.py`
+- focused native tool-loop and usage-summary tests
+
+Objective:
+Bound `ask_local_with_tools()` context growth, compact older tool rounds,
+preserve the latest evidence, and record token/tool/truncation metadata for
+every native Ollama agent call. No cloud fallback and no dashboard UI edits.
+
+Coordination boundary for Claude:
+- Claude retains dashboard rendering, `router.py`, `ui.py`, and conversation UX.
+- Codex will expose additive usage-summary fields for Claude to render later.
+- Existing untracked `docs/ai/context_window_strategy.md` and `projects.db`
+  remain untouched.
+
+Status:
+- Complete. Native Ollama tool loops now receive an explicit context window,
+  compact older complete tool rounds, cap tool results/calls/output, preserve
+  valid read-after-write retries, and synthesize safely at iteration/call caps.
+- Local-first boundaries now reject Ollama cloud tags across chat, vision, and
+  embedding discovery; remote Ollama and network agent tools require explicit
+  opt-in. Backend workspace confinement is immutable per invocation.
+- Usage telemetry records one sanitized row per provider call and aggregates
+  governor coverage, tool calls, truncation, dropped context, errors, and cap
+  exhaustion without storing prompts, arguments, or tool results.
+- Independent QA and security re-reviews found no unresolved P0/P1 blockers.
+- Verification:
+  - focused tool/dispatch/backend suite: `63 passed`
+  - context/unit/regression/agent suite: `810 passed, 10 subtests passed`
+  - `py_compile` and `git diff --check`: passed
+
+### Codex Lane: Local Agent Reliability (2026-06-19)
+
+Owner: Codex + delegated reliability/QA agents
+
+Scope:
+- `task_runtime.py`
+- `agent_dispatch.py`
+- `brains/brain_ollama.py`
+- focused local-agent reliability tests
+- read-only analysis of verifier verdicts and task telemetry
+
+Current objective:
+Find and fix the root cause of execution-capable local agents returning zero
+tool calls or empty evidence. Preserve local-first behavior, human approval
+gates, and the deterministic fabrication defense. Add measurable regression
+coverage before changing runtime behavior.
+
+Coordination boundary for Claude:
+- Claude retains `router.py`, `ui.py`, conversation/messaging UX, and
+  README/release-maintenance ownership.
+- Codex will not alter cloud escalation policy or weaken verification gates.
+- If the fix requires a Claude-owned file, Codex will post a handoff here
+  instead of editing it.
+
+Status:
+- Implementation complete; independent QA pass and security review completed.
+- Prior audit wording fix shipped in `ca4b177`; this lane addresses the runtime
+  cause rather than merely the dashboard/audit description.
+- Finding for Claude (2026-06-19): `_auto_verify()` currently hard-routes every
+  verifiable task to cloud GPT-mini (`bypass_local=True`), and verifier-rejected
+  retries set `prefer_local=False`. This is a silent cloud path and conflicts
+  with the repo's local-first contract. Codex is correcting both paths to use
+  Ollama locally by default. Any future cloud evaluator/retry escalation must
+  be separately opt-in and approval-gated; no Claude-owned files are involved.
+- Review follow-up: `prefer_local=True` still retains cloud fallbacks. Codex is
+  making one narrow `model_router.smart_stream(..., local_only=True)` contract
+  change and using it only from `task_runtime`; ordinary Claude-owned chat,
+  mobile, and UX routing behavior remains unchanged.
+- Delivered for Claude review:
+  - task execution, retries, continuations, verification, and lesson generation
+    are hard local-only; forced/mobile/cloud fallbacks cannot receive payloads;
+  - evaluator uses Ollama structured JSON and fails closed when unavailable;
+  - task success is not terminal until verification passes;
+  - runtime-prefetched context and executed tool evidence retain separate
+    provenance across retries and in the audit ledger;
+  - explicit execution requests get one bounded local read-only repair command,
+    with negation, cancellation, and inherited-evidence guards;
+  - failed/cancelled task results cannot become downstream evidence;
+  - caller-supplied task metadata cannot forge confidence, retry, or evidence
+    provenance fields; only internal orchestrator calls can set them;
+  - local inference defaults to one concurrent generation, configurable via
+    `JARVIS_MAX_CONCURRENT_TASKS`.
+- Verification (2026-06-19): final focused reliability slice `110 passed`; broader
+  integration slice `854 passed, 10 subtests passed`; `git diff --check` clean.
+
 ### Codex Lane: Automation and Training Reliability
 
 Owner: Codex
