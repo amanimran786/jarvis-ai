@@ -12,7 +12,7 @@ class ContextBudgetCompilerTests(unittest.TestCase):
     def test_target_tokens_uses_long_context_local_glm_without_cloud_expansion(self):
         self.assertEqual(
             context_budget.target_tokens_for("chat", model="glm-4.7-flash", local=True),
-            48_000,
+            96_000,
         )
         self.assertEqual(
             context_budget.target_tokens_for("chat", model="gpt-4o", local=False),
@@ -113,7 +113,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
             stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
             self.assertEqual("".join(stream), "ok")
 
-        self.assertEqual(captured["kwargs"]["target_tokens"], 48_000)
+        self.assertEqual(captured["kwargs"]["target_tokens"], 96_000)
 
 
 class OllamaPromptFitTests(unittest.TestCase):
@@ -149,7 +149,7 @@ class OllamaPromptFitTests(unittest.TestCase):
         self.assertTrue(chunks)
         self.assertIn("BASE_SYSTEM", captured["fit_prompt"])
         self.assertIn("FULL_CONTEXT_MARKER", captured["fit_prompt"])
-        self.assertEqual(captured["chat_kwargs"]["options"]["num_ctx"], 64000)
+        self.assertEqual(captured["chat_kwargs"]["options"]["num_ctx"], 131072)
 
     def test_track_context_drops_oldest_messages_before_ollama_call(self):
         captured = {}
