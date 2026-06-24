@@ -18,6 +18,7 @@ import sys
 import shutil
 import threading
 import tools
+from harness.audit import audit_log
 import terminal
 import browser
 from desktop import overlay
@@ -2737,6 +2738,7 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
 
 def route_stream(user_input: str) -> tuple:
     global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions, _pending_email_reply
+    audit_log("query_received", query=user_input[:500])
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
@@ -4832,7 +4834,14 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         return _s(ml.auto_configure_blackhole()), "Meeting"
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
-    return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
+    audit_log("route_decision", tool=tool or "chat", confidence=None)
+    try:
+        result = smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
+        return result
+    except Exception as exc:
+        audit_log("model_call", tool=tool or "chat", success=False, error=str(exc))
+        logging.exception("[Router] smart_stream failed")
+        raise
 
 
 def record_turn(user_input: str, assistant_reply: str) -> None:
