@@ -430,3 +430,14 @@ def _load_json_object(raw: str) -> dict | None:
         if isinstance(data, dict):
             return data
     return None
+
+
+# ── Dev session coordination dashboard ───────────────────────────────────────
+# When this file is run directly (`python orchestrator.py [cmd]`) it launches
+# the file-based session coordination dashboard defined in session_orchestrator.py.
+# Importing this module as a library (from orchestrator import classify) has
+# zero effect from this block — the guard only fires when __name__ == "__main__".
+
+if __name__ == "__main__":
+    from session_orchestrator import main as _session_orch_main
+    _session_orch_main()
