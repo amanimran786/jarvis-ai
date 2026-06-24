@@ -273,8 +273,15 @@ _LOCAL_MODEL_CONTEXT_TOKENS = {
     "gemma4:e4b": 8192,
     "gemma3:4b": 8192,
     "llama3.1:8b": 8192,
-    "qwen3:8b": 40960,
+    "qwen3:8b": 32768,
+    "qwen3:14b": 131072,
+    "qwen3:30b": 131072,
+    "qwen2.5:32b": 131072,
     "qwen2.5-coder:7b": 32768,
+    "qwen2.5-coder:32b": 131072,
+    "devstral": 32768,
+    "phi4-mini": 4096,
+    "phi4": 16384,
     "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
     "qwen3-coder:30b": 262144,
     "qwen3.6:35b": 262144,
@@ -375,11 +382,22 @@ def _ollama_options_for_model(model: str) -> dict[str, int]:
     lower = (model or "").lower()
     options: dict[str, int] = {}
     if "glm" in lower:
-        options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "64000")))
+        # GLM 4.7 Flash supports 202K context; 128K is practical for M4 Pro 48 GB.
+        # Override via GLM_CTX env if you want a different value.
+        options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "131072")))
     if "deepseek" in lower:
         # Cap DeepSeek R1 to limit reasoning token explosion on Mac.
         options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
         options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
+    if "qwen3" in lower:
+        if any(tag in lower for tag in ("30b", "32b", "14b")):
+            # Larger Qwen3 variants: 128K practical window on 48 GB
+            options.setdefault("num_ctx", int(os.getenv("QWEN3_LARGE_CTX", "131072")))
+        else:
+            # qwen3:8b and smaller: native 32K window
+            options.setdefault("num_ctx", int(os.getenv("QWEN3_CTX", "32768")))
+    if "devstral" in lower:
+        options.setdefault("num_ctx", int(os.getenv("DEVSTRAL_CTX", "32768")))
     return options
 
 

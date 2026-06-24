@@ -27,6 +27,7 @@ import os
 import re
 import threading
 import time
+import logging
 import uuid
 import datetime
 from datetime import timezone
@@ -143,7 +144,7 @@ def _check_calendar() -> None:
             if alert:
                 _send_notification("Jarvis — Calendar", msg)
     except Exception:
-        pass
+        logging.debug("[ProactiveWatcher] Calendar check failed", exc_info=True)
 
 
 def _check_emails() -> None:
@@ -162,7 +163,7 @@ def _check_emails() -> None:
             if alert:
                 _send_notification("Jarvis — Email", msg)
     except Exception:
-        pass
+        logging.debug("[ProactiveWatcher] Email check failed", exc_info=True)
 
 
 def _send_notification(title: str, body: str) -> None:
@@ -170,7 +171,7 @@ def _send_notification(title: str, body: str) -> None:
         import jarvis_watcher as _jw
         _jw.notify(title, body)
     except Exception:
-        pass
+        logging.debug("[ProactiveWatcher] Desktop notification failed", exc_info=True)
 
 
 # ── Poll loop ─────────────────────────────────────────────────────────────────

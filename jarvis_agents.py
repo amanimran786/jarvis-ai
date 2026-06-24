@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import threading
@@ -318,7 +319,7 @@ def _agent_meeting_prep(context: str = "") -> dict:
             if vault_hint:
                 lines.append(f"Brain context:\n{vault_hint[:400]}")
         except Exception:
-            pass
+            logging.debug("[JarvisAgents] vault context fetch failed for meeting_prep", exc_info=True)
 
         result = "\n".join(lines)
         return {"agent": "meeting_prep", "status": "ok", "result": result, "escalate": False}
@@ -549,7 +550,7 @@ def _prewarm_synthesis_model():
         from brains.brain_ollama import ask_local
         ask_local("ping", model="jarvis-local", system_extra="Reply: ok")
     except Exception:
-        pass
+        logging.debug("[JarvisAgents] synthesis model pre-warm failed", exc_info=True)
 
 threading.Thread(target=_prewarm_synthesis_model, daemon=True).start()
 
@@ -582,7 +583,7 @@ def _load_checkpoint(run_id: str) -> dict[str, dict]:
             if time.time() - data.get("_ts", 0) < _CHECKPOINT_TTL:
                 return {k: v for k, v in data.items() if not k.startswith("_")}
     except Exception:
-        pass
+        logging.debug("[JarvisAgents] checkpoint load failed for %s", run_id, exc_info=True)
     return {}
 
 
@@ -592,7 +593,7 @@ def _save_checkpoint(run_id: str, completed: dict[str, dict]) -> None:
         payload = {"_ts": time.time(), **completed}
         path.write_text(json.dumps(payload), encoding="utf-8")
     except Exception:
-        pass
+        logging.debug("[JarvisAgents] checkpoint save failed for %s", run_id, exc_info=True)
 
 
 def _evict_old_checkpoints() -> None:
@@ -605,9 +606,9 @@ def _evict_old_checkpoints() -> None:
                 if now - data.get("_ts", 0) > _CHECKPOINT_TTL:
                     p.unlink(missing_ok=True)
             except Exception:
-                pass
+                logging.debug("[JarvisAgents] failed to evict checkpoint %s", p, exc_info=True)
     except Exception:
-        pass
+        logging.debug("[JarvisAgents] checkpoint eviction scan failed", exc_info=True)
 
 
 # ── AgentGraph (ADK-style graph-based workflows) ──────────────────────────────
@@ -807,7 +808,7 @@ def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
                         break
                 result_holder.append("".join(chunks).strip())
             except Exception:
-                pass
+                logging.warning("[JarvisAgents] synthesis LLM call failed", exc_info=True)
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -815,7 +816,7 @@ def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
         if result_holder and result_holder[0]:
             return result_holder[0]
     except Exception:
-        pass
+        logging.warning("[JarvisAgents] briefing synthesis wrapper failed", exc_info=True)
     return raw
 
 
