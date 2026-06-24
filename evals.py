@@ -103,6 +103,18 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
     }
     data["interactions"].append(entry)
     save(data)
+    # Async quality scoring — fire-and-forget, never blocks the caller
+    try:
+        import self_eval
+        routing_tag = (context or {}).get("routing_tag", "")
+        self_eval.score_async(
+            user_input, response,
+            context=context,
+            interaction_id=entry["id"],
+            routing_tag=routing_tag,
+        )
+    except Exception:
+        pass
     return entry
 
 
