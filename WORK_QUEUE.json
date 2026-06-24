@@ -1,0 +1,101 @@
+[
+  {
+    "session_name": "Jarvis AI - assess and continue",
+    "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis AI - assess and continue",
+    "task": "Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis self-improvement & self-eval",
+    "task": "Complete self-eval scoring loop in self_eval.py \u2014 wire score output to eval_trace_score",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis local LLM upgrades & memory",
+    "task": "Wire context window budget into brain_ollama.py tool-loop \u2014 use context_budget.py",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis AI - assess and continue",
+    "task": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis self-improvement & self-eval",
+    "task": "Implement /reflect improvements: save reflection deltas to vault, surface in briefing",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis local LLM upgrades & memory",
+    "task": "Model routing: update model_router.py to respect GLM 5.2 profile once eval lane posts findings",
+    "priority": 2,
+    "status": "blocked",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis local LLM upgrades & memory",
+    "task": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis AI - assess and continue",
+    "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
+    "priority": 3,
+    "status": "blocked",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis self-improvement & self-eval",
+    "task": "Evaluate PreFlect/G3 gate (JARVIS_PREFLECT=1, default-off) \u2014 decide post-R1 landing",
+    "priority": 3,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "Jarvis local LLM upgrades & memory",
+    "task": "Root-cause AGENT_BOARD item 9: Ollama memory-pressure path returning empty in security gate",
+    "priority": 3,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  }
+]

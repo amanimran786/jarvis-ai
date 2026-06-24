@@ -1,0 +1,22 @@
+{
+  "description": "Written by each active dev session to report its current state. The session_orchestrator.py reads this file to build the dashboard.",
+  "schema": {
+    "sessions": [
+      {
+        "name": "string \u2014 matches a name in SESSIONS.json",
+        "last_active": "ISO-8601 UTC timestamp \u2014 update this every time the session does work",
+        "current_task": "string \u2014 what the session is doing right now",
+        "completed_tasks": [
+          "list of completed task strings"
+        ],
+        "next_task": "string \u2014 what the session will do after current_task",
+        "status": "active | idle | stalled | offline | error"
+      }
+    ]
+  },
+  "sessions": [],
+  "session_id": "2a8b51ac-8087-4958-91e6-fd361fc3b7a2",
+  "session_name": "test",
+  "last_active": "2026-06-24T21:59:09.012167+00:00",
+  "current_task": null
+}

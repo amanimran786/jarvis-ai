@@ -1,0 +1,3 @@
+{"ts": "2026-06-24T21:59:09.010999+00:00", "session_id": "2a8b51ac-8087-4958-91e6-fd361fc3b7a2", "event_type": "session_start", "payload": {"session_name": "test", "snapshot": "/Users/truthseeker/jarvis-ai/snapshots/2026-06-24_14-59-09"}, "success": true}
+{"ts": "2026-06-24T21:59:09.011489+00:00", "session_id": "2a8b51ac-8087-4958-91e6-fd361fc3b7a2", "event_type": "query_received", "payload": {"query": "hello world"}, "success": true}
+{"ts": "2026-06-24T21:59:09.012080+00:00", "session_id": "2a8b51ac-8087-4958-91e6-fd361fc3b7a2", "event_type": "session_end", "payload": {"duration_secs": 0.005083, "clean_exit": true}, "success": true}
