@@ -3157,6 +3157,12 @@ def route_stream(user_input: str) -> tuple:
             _fuzzy_contact_suggestions.clear()
             _awaiting_msg_recipient = False
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
+        _sq = _extract_search_query(user_input)
+        if _sq:
+            return _s(tools.web_search(_sq)), "Search"
+        interrupt_early = _pending_draft_interrupt_route(user_input, lower)
+        if interrupt_early is not None:
+            return interrupt_early
         if composed_message:
             recipient, body = composed_message
             unsafe_reply = _unsafe_message_draft_reply(body)

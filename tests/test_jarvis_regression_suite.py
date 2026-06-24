@@ -2289,6 +2289,18 @@ class RouterTests(unittest.TestCase):
                 search_mock.assert_called_once()
                 smart_mock.assert_not_called()
 
+    def test_search_query_bypasses_awaiting_msg_recipient(self):
+        # Jarvis is waiting for a contact name — search should escape rather than be treated as a name
+        router._awaiting_msg_recipient = True
+        router._pending_msg_recipient = ""
+        with patch("router.tools.web_search", return_value="- Result: body") as mock_search:
+            stream, label = router.route_stream("Search the web for latest AI news")
+            text = "".join(stream)
+        self.assertEqual(label, "Search")
+        self.assertIn("- Result", text)
+        self.assertTrue(router._awaiting_msg_recipient)  # state preserved; user still needs to name a contact
+        mock_search.assert_called_once()
+
     def test_general_question_bypasses_pending_message_draft(self):
         router.route_stream("text Dad to get milk")
         with patch("router.smart_stream", return_value=(iter(["Tokyo."]), "Open-Source")):
