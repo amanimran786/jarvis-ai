@@ -51,9 +51,12 @@ class PreferLocalRoutingTests(unittest.TestCase):
 
     def test_without_prefer_local_scaffolding_still_escalates(self):
         # Control: proves the heuristic the fix bypasses actually fires.
+        # Patch FREE_FIRST_ENABLED=False so the routing policy is cloud-first
+        # (no local-preference policy active), isolating the tier escalation behavior.
         kwargs = self._plan_for(AGENT_PROMPT, prefer_local=False)
         self.assertEqual(kwargs["tier"], "sonnet")
-        plan = provider_router.build_plan(**kwargs)
+        with patch.object(provider_router, "FREE_FIRST_ENABLED", False):
+            plan = provider_router.build_plan(**kwargs)
         self.assertFalse(plan.candidates[0].local)
 
     def test_prefer_local_falls_back_to_normal_routing_when_local_down(self):
