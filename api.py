@@ -821,7 +821,7 @@ def chat(req: ChatRequest):
                 interaction = evals.log_interaction(
                     req.message, response, model,
                     source=stream_source,
-                    context={**context_stats, "client_meta": client_meta},
+                    context={**context_stats, "routing_tag": model, "client_meta": client_meta},
                 )
                 evals.maybe_log_automatic_failure(interaction)
                 try:
@@ -859,7 +859,7 @@ def chat(req: ChatRequest):
                     response,
                     model,
                     source=stream_source,
-                    context={**context_stats, "client_meta": client_meta},
+                    context={**context_stats, "routing_tag": model, "client_meta": client_meta},
                 )
                 evals.maybe_log_automatic_failure(interaction)
                 try:
@@ -900,7 +900,7 @@ def chat(req: ChatRequest):
             response,
             model,
             source=source,
-            context={**context_stats, "client_meta": client_meta},
+            context={**context_stats, "routing_tag": model, "client_meta": client_meta},
         )
         evals.maybe_log_automatic_failure(interaction)
         try:

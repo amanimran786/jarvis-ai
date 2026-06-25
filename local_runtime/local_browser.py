@@ -17,6 +17,7 @@ Architecture:
 """
 
 from __future__ import annotations
+import logging
 
 import base64
 import json
@@ -93,7 +94,7 @@ class BrowserSession:
             with open(SKILLS_FILE, "w") as f:
                 json.dump(self._skills, f, indent=2)
         except Exception:
-            pass
+            logging.debug("[LocalBrowser] silent failure in _save_skill", exc_info=True)
 
     def _get_or_open_tab(self) -> bool:
         """Get active tab ID, or open a new one. Return True on success."""
@@ -377,6 +378,6 @@ class BrowserSession:
             try:
                 self.ws_socket.close()
             except Exception:
-                pass
+                logging.debug("[LocalBrowser] silent failure in close", exc_info=True)
             self.ws_socket = None
         self.tab_id = None

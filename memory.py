@@ -1,3 +1,4 @@
+import logging
 import copy
 import json
 import os
@@ -310,7 +311,7 @@ def get_context() -> str:
         if learning:
             parts.append(learning.strip())
     except Exception:
-        pass
+        logging.debug("[MemoryModule] silent failure in get_context", exc_info=True)
 
     if not parts:
         return ""

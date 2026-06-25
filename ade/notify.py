@@ -2,6 +2,7 @@
 ade/notify.py — System-native notifications (macOS osascript / Linux notify-send).
 """
 from __future__ import annotations
+import logging
 
 import platform
 import subprocess
@@ -35,4 +36,4 @@ def _run_silent(cmd: list[str]) -> None:
     try:
         subprocess.run(cmd, capture_output=True, timeout=5, check=False)
     except Exception:
-        pass
+        logging.debug("[ADE.Notify] silent failure in _run_silent", exc_info=True)

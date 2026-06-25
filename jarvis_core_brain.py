@@ -17,6 +17,7 @@ Vault notes used:
 """
 
 from __future__ import annotations
+import logging
 
 import os
 import threading
@@ -149,6 +150,6 @@ def _prewarm() -> None:
     try:
         core_context()
     except Exception:
-        pass
+        logging.debug("[CoreBrain] silent failure in _prewarm", exc_info=True)
 
 threading.Thread(target=_prewarm, daemon=True, name="jarvis-brain-prewarm").start()

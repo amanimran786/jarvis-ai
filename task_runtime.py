@@ -408,7 +408,7 @@ def _drain_task_threads(timeout: float = 0.4) -> None:
             try:
                 thread.join(timeout=timeout)
             except Exception:
-                pass
+                logging.debug("[TaskRuntime] silent failure in _drain_task_threads", exc_info=True)
 
 
 def bootstrap(force_reset: bool = False) -> None:
@@ -2007,7 +2007,7 @@ def _tool_read_files(prompt: str) -> str:
                 sections.append(f"[{rel}  —  {len(content)} chars]\n{content}")
                 break
             except Exception:
-                pass
+                logging.debug("[TaskRuntime] silent failure in _tool_read_files", exc_info=True)
     if not sections:
         return ""
     return "=== Repo file contents (read-only context) ===\n\n" + "\n\n---\n\n".join(sections)
@@ -2666,7 +2666,7 @@ def purge_terminal_tasks() -> int:
             import task_persistence
             task_persistence.save_snapshot({"tasks": list(_TASKS.values()), "events": dict(_TASK_EVENTS)})
         except Exception:
-            pass
+            logging.debug("[TaskRuntime] silent failure in purge_terminal_tasks", exc_info=True)
     return len(to_remove)
 
 

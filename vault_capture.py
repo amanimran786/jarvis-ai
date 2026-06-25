@@ -18,6 +18,7 @@ Integration points:
 """
 
 from __future__ import annotations
+import logging
 
 import re
 from datetime import datetime
@@ -522,4 +523,4 @@ def record_integration_milestone(description: str, affected_files: list[str] | N
     try:
         add_changelog_entry(description, note_refs=affected_files)
     except Exception:
-        pass
+        logging.debug("[VaultCapture] silent failure in record_integration_milestone", exc_info=True)

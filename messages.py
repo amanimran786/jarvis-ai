@@ -3,6 +3,7 @@ iMessage / SMS sending via macOS Messages app using AppleScript.
 Looks up contacts by name from the Contacts app.
 """
 
+import logging
 import subprocess
 import re
 import sqlite3
@@ -38,7 +39,7 @@ def _save_aliases(table: dict) -> None:
     try:
         _ALIASES_PATH.write_text(json.dumps(table, indent=2) + "\n")
     except Exception:
-        pass
+        logging.debug("[Messages] silent failure in _save_aliases", exc_info=True)
 
 
 def save_contact_alias(alias: str, name: str, phone: str) -> None:

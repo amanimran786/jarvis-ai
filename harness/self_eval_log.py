@@ -114,10 +114,22 @@ _DOMAIN_ROUTING: list[tuple[tuple[str, ...], frozenset[str]]] = [
 
 # ── Axis 1: routing_accuracy ──────────────────────────────────────────────────
 
+_LLM_ROUTE_PREFIXES = ("claude", "gpt", "gemini", "llama", "mistral", "deepseek", "qwen", "phi")
+
+
+def _is_model_name_route(route: str) -> bool:
+    lower = route.lower()
+    return any(lower.startswith(p) or f"/{p}" in lower for p in _LLM_ROUTE_PREFIXES)
+
+
 def _score_routing_accuracy(query: str, route: str) -> float:
     """Estimate how well the chosen route fits the query domain."""
     if not route:
         return 0.5  # unknown route — neutral
+
+    # Model names as routes mean the query went to the LLM directly — neutral, not a mismatch
+    if _is_model_name_route(route):
+        return 0.75
 
     lower_q = query.lower()
 
@@ -127,7 +139,7 @@ def _score_routing_accuracy(query: str, route: str) -> float:
             # Query matches this domain
             if any(tag in route for tag in expected_tags):
                 return 0.90  # strong alignment
-            # Signal exists but route is a different domain
+            # Signal exists but route is a named domain that doesn't match
             return 0.35  # likely mismatch
 
     # No strong domain signal in query — could be general chat or Status

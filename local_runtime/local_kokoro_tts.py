@@ -103,7 +103,7 @@ def _kokoro_importable() -> bool:
                 _f.write(f"[{datetime.datetime.now()}] {type(exc).__name__}: {exc}\n")
                 _f.write(_tb.format_exc() + "\n")
         except Exception:
-            pass
+            logging.debug("[KokoroTTS] silent failure in _kokoro_importable", exc_info=True)
         return False
 
 

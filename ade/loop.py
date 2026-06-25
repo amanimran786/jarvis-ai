@@ -4,6 +4,7 @@ ade/loop.py — Plan → Execute → Verify → Retry agent loop.
 Runs inside a tmux pane. Invoked by scripts/ade-loop.
 """
 from __future__ import annotations
+import logging
 
 import argparse
 import os
@@ -37,7 +38,7 @@ def detect_test_cmd(root: Path) -> list[str] | None:
             if "test" in pkg.get("scripts", {}):
                 return ["npm", "test"]
         except Exception:
-            pass
+            logging.debug("[ADE.Loop] silent failure in detect_test_cmd", exc_info=True)
 
     if (root / "Makefile").exists():
         content = (root / "Makefile").read_text()

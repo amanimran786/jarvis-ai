@@ -72,7 +72,7 @@ def _is_another_instance_running() -> bool:
                 payload = json.load(r)
                 return payload.get("status") == "online"
     except Exception:
-        pass
+        logging.debug("[Daemon] silent failure in _is_another_instance_running", exc_info=True)
     return False
 
 
@@ -189,7 +189,7 @@ def start_daemon(host: str | None = None, port: int | None = None, reason: str =
                 if lan_ips:
                     print(f"[API] LAN approval page: http://{lan_ips[0]}:{actual_port}/pending")
             except Exception:
-                pass
+                logging.debug("[Daemon] silent failure in unknown", exc_info=True)
         runtime_state.mark_started(
             host=actual_host,
             port=actual_port,

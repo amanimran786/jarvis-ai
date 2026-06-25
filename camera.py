@@ -1,3 +1,4 @@
+import logging
 import base64
 import tempfile
 import os
@@ -86,7 +87,7 @@ def _quick_ocr_probe(path: str, prompt: str) -> dict[str, object]:
                     "signal": signal,
                 }
         except Exception:
-            pass
+            logging.debug("[Camera] silent failure in _quick_ocr_probe", exc_info=True)
 
     sample = _run_tesseract(path, "6", timeout_seconds=3)
     signal = _ocr_signal(sample)
@@ -236,7 +237,7 @@ def _extract_ocr_text(path: str) -> str:
                 if ocr_lines:
                     return "\n".join(ocr_lines)
         except Exception:
-            pass
+            logging.debug("[Camera] silent failure in _extract_ocr_text", exc_info=True)
 
     candidates = []
     original_passes = ("6", "11")
@@ -300,7 +301,7 @@ def _local_vision_unavailable_message() -> str:
                 "Try again or pull an alternate model like: ollama pull minicpm-v"
             )
     except Exception:
-        pass
+        logging.debug("[Camera] silent failure in _local_vision_unavailable_message", exc_info=True)
     return "No local vision model is available. Pull one with: ollama pull llava:7b"
 
 
