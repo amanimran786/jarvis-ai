@@ -48,3 +48,11 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 04:58:51] [orchestrator] IN_PROGRESS: loop-engineer cycle 3 — context pressure wiring in smart_stream
 [2026-06-25 04:58:51] [orchestrator] IN_PROGRESS: Ollama Cloud brain model_router.py integration
 [2026-06-25 04:58:51] [orchestrator] QUEUE: 2 in_progress / 16 queued / 1 blocked / 13 done
+[2026-06-25 21:16:13] [orchestrator] ROUND 6 — 16h gap (rate limit overnight); purged 10 ghost sessions; harvested 4 commits
+[2026-06-25 21:16:13] [jarvis-local-llm] MILESTONE: all 5 p1 items complete, 56/56 tests passing — lane entering stabilization
+[2026-06-25 21:16:13] [jarvis-local-llm] DONE: harness/loop_watchdog.py + context pressure wiring cycle 3 (commit 8ee8006)
+[2026-06-25 21:16:13] [jarvis-local-llm] DONE: check_resume_signal() + heartbeat() in harness/audit.py (commit fcb85f0)
+[2026-06-25 21:16:13] [jarvis-audit] DONE: reflection_run→self_improve, memory_promotion→consolidate_memory (commit 144a8ca)
+[2026-06-25 21:16:13] [jarvis-board] DONE: fix swallowed exceptions in ui.py (commit 71880a4)
+[2026-06-25 21:16:13] [jarvis-board] 🚨 ESCALATED: AGENT_BOARD items 9/11/13 — 5 rounds no movement; must address first
+[2026-06-25 21:16:13] [orchestrator] QUEUE: 1 in_progress / 15 queued / 1 blocked / 19 done

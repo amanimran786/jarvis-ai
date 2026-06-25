@@ -1,23 +1,13 @@
 [
   {
     "session_name": "jarvis-local-llm",
-    "task": "Integrate Ollama Cloud brain into model_router.py routing table \u2014 respect LOCAL_FIRST priority order",
+    "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
     "priority": 1,
     "status": "in_progress",
-    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
-    "completed_at": null,
-    "created_at": "2026-06-25T04:53:30.353381+00:00",
-    "notes": "loop-engineer session reported 'Ollama Cloud brain integration' as next task after budget"
-  },
-  {
-    "session_name": "jarvis-local-llm",
-    "task": "Complete context pressure wiring in smart_stream \u2014 loop-engineer cycle 3 in progress",
-    "priority": 1,
-    "status": "in_progress",
-    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
+    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "loop-engineer session active at cycle 3; current_task=context pressure wiring in smart_stream"
+    "notes": "Follow-on from c3eb04a routing fix \u2014 validate specialist wins don't regress"
   },
   {
     "session_name": "jarvis-board",
@@ -26,7 +16,8 @@
     "status": "queued",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "notes": "\ud83d\udea8 ESCALATED: 5 orchestrator rounds with zero movement \u2014 jarvis-board must address first"
   },
   {
     "session_name": "jarvis-board",
@@ -55,16 +46,6 @@
     "completed_at": null,
     "created_at": "2026-06-24T22:04:00Z",
     "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires"
-  },
-  {
-    "session_name": "jarvis-local-llm",
-    "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
-    "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
-    "completed_at": null,
-    "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "Follow-on from c3eb04a routing fix \u2014 validate specialist wins don't regress"
   },
   {
     "session_name": "jarvis-audit",
@@ -177,6 +158,28 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Integrate Ollama Cloud brain into model_router.py routing table \u2014 respect LOCAL_FIRST priority order",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "created_at": "2026-06-25T04:53:30.353381+00:00",
+    "notes": "Closed by orchestrator: session reported all 5 p1 items complete",
+    "commit": "3401988"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Complete context pressure wiring in smart_stream \u2014 loop-engineer cycle 3 in progress",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Closed: loop-engineer cycle 3 complete (jarvis-self-eval confirmed)",
+    "commit": "8ee8006"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -309,5 +312,45 @@
     "commit": "44c037d",
     "created_at": "2026-06-25T04:58:37.805404+00:00",
     "notes": "Implements RESUME_SIGNAL.json consumer + heartbeat writer as described in watchdog spec"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix swallowed exceptions in ui.py",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "commit": "71880a4",
+    "created_at": "2026-06-25T21:16:01.564411+00:00"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Wire reflection_run to self_improve and memory_promotion to consolidate_memory",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "commit": "144a8ca",
+    "created_at": "2026-06-25T21:16:01.564411+00:00"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Build harness/loop_watchdog.py \u2014 resume signal + heartbeat consumer protocol",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "commit": "8ee8006",
+    "created_at": "2026-06-25T21:16:01.564411+00:00"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Add check_resume_signal() and heartbeat() to harness/audit.py",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
+    "completed_at": "2026-06-25T21:16:01.564411+00:00",
+    "commit": "fcb85f0",
+    "created_at": "2026-06-25T21:16:01.564411+00:00"
   }
 ]
