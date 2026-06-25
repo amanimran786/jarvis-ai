@@ -153,8 +153,8 @@
     {
       "session_id": "1fe91010-8b17-4911-841f-9c97a4f46a5f",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:58:43.766178+00:00",
-      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
+      "last_active": "2026-06-25T04:59:48.310022+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -162,8 +162,8 @@
     {
       "session_id": "d420d32e-012d-40df-b401-b8be9a0f6202",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:58:34.617639+00:00",
-      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "last_active": "2026-06-25T05:00:41.782736+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -205,8 +205,8 @@
     {
       "session_id": "567335ba-8498-4c69-a21a-26adc0b01483",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:59:05.492249+00:00",
-      "current_task": "message Harry Singh Hello there",
+      "last_active": "2026-06-25T05:00:09.090691+00:00",
+      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -233,6 +233,31 @@
       ],
       "next_task": null,
       "status": "offline"
+    },
+    {
+      "session_id": "6fa0eaa6-d856-4d44-bc21-a8205a30abb0",
+      "name": "jarvis",
+      "last_active": "2026-06-25T05:00:55.798224+00:00",
+      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "e659936a-f707-4d85-93bd-7fe0911792dd",
+      "name": "jarvis",
+      "last_active": "2026-06-25T05:00:15.388688+00:00",
+      "current_task": null,
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "jarvis-self-eval",
+      "name": "jarvis-self-eval",
+      "last_active": "2026-06-25T05:00:21.898148Z",
+      "current_task": "loop_watchdog wired \u2014 cycle 3 complete",
+      "status": "active"
     }
   ],
   "last_updated": "2026-06-25T04:53:09.366826+00:00",
@@ -301,5 +326,12 @@
     "tests_passing": 98,
     "next_target": "improve /reflect diff output: show what changed vs previous reflection",
     "last_updated": "2026-06-25T04:59:01.068309+00:00"
+  },
+  "sessions_map": {
+    "jarvis-audit": {
+      "last_active": "2026-06-25T05:00:15.389277+00:00Z",
+      "current_task": "wiring route_decision at orchestrator",
+      "status": "active"
+    }
   }
 }
