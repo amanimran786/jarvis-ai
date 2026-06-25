@@ -27,3 +27,15 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 04:47:46] [orchestrator] BUILD: session_orchestrator.py — added `register` CLI cmd; writes live entry to ORCHESTRATOR_STATUS.json; auto-fills next_task from queue
 [2026-06-25 04:47:46] [orchestrator] BUILD: session_orchestrator.py — dashboard panel now shows live-session count badge + queue summary in title bar
 [2026-06-25 04:47:46] [orchestrator] BUILD: ORCHESTRATOR_SCHEMA.md — documented JARVIS_SESSION_NAME env var (option A) + register CLI (option B) for session registration
+[2026-06-24 21:51:24] [WATCHDOG] Rate limit reset (hourly). Stalled sessions: jarvis-board. Writing RESUME_SIGNAL.json.
+[2026-06-24 21:51:24] [WATCHDOG] Resume signal written. Sessions should pick up within next poll cycle.
+[2026-06-24 21:51:24] [WATCHDOG] STALL — jarvis-board last active 12m 0s ago, awaiting rate-limit reset
+[2026-06-25 04:53:49] [orchestrator] ROUND 4 — harvested 5 commits; 1 loop-engineer session active (local-llm lane)
+[2026-06-25 04:53:49] [jarvis-local-llm] DONE: budget three-tier rate limiter + /budget command (commit 1850965)
+[2026-06-25 04:53:49] [jarvis-local-llm] DONE: Ollama Cloud middle routing tier (commit 3401988)
+[2026-06-25 04:53:49] [jarvis-self-eval] DONE: 3-axis scorer + /score + self_eval.jsonl (commit 41c082b)
+[2026-06-25 04:53:49] [jarvis-audit] DONE: harden audit_log() + audit_errors.log (commit c0a8ec1)
+[2026-06-25 04:53:49] [jarvis-board] DONE: fix swallowed exceptions in main.py (commit 24e3cdb)
+[2026-06-25 04:53:49] [orchestrator] UNBLOCKED: jarvis-local-llm GLM 5.2 profile task (self_eval.jsonl now available)
+[2026-06-25 04:53:49] [orchestrator] QUEUE: 16 queued / 7 done / 1 blocked — 3 new follow-on tasks added
+[2026-06-25 04:53:49] [orchestrator] LIVE: loop-engineer session (local-llm lane) active, next: Ollama Cloud brain integration

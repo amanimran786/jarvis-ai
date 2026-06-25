@@ -4,13 +4,18 @@
     {
       "session_id": "seed-jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-24T22:04:00Z",
+      "last_active": "2026-06-25T00:15:00Z",
       "current_task": null,
       "completed_tasks": [
         {
           "task": "Fix 18 bare except:pass silent failures in voice.py and jarvis_watcher.py",
           "completed_at": "2026-06-24T22:04:00Z",
           "commit": "6f0745b"
+        },
+        {
+          "task": "Fix swallowed exceptions in main.py",
+          "completed_at": "2026-06-25T00:15:00Z",
+          "commit": "24e3cdb"
         }
       ],
       "next_task": "Review and close open AGENT_BOARD items (9, 11, 13)",
@@ -19,35 +24,133 @@
     {
       "session_id": "seed-jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": null,
+      "last_active": "2026-06-25T01:00:00Z",
       "current_task": null,
-      "completed_tasks": [],
-      "next_task": "Complete self-eval scoring loop in self_eval.py",
+      "completed_tasks": [
+        {
+          "task": "3-axis self-eval scorer + /score command with logs/self_eval.jsonl",
+          "completed_at": "2026-06-25T01:00:00Z",
+          "commit": "41c082b"
+        }
+      ],
+      "next_task": "Wire /score output to eval_trace_score.py surface",
       "status": "idle"
     },
     {
       "session_id": "seed-jarvis-local-llm",
       "name": "jarvis-local-llm",
-      "last_active": null,
+      "last_active": "2026-06-25T04:49:00Z",
       "current_task": null,
-      "completed_tasks": [],
-      "next_task": "Wire context window budget into brain_ollama.py tool-loop",
+      "completed_tasks": [
+        {
+          "task": "Three-tier LOCAL_FIRST rate limiter + /budget command",
+          "completed_at": "2026-06-25T00:00:00Z",
+          "commit": "1850965"
+        },
+        {
+          "task": "Wire Ollama Cloud as middle routing tier",
+          "completed_at": "2026-06-25T02:00:00Z",
+          "commit": "3401988"
+        }
+      ],
+      "next_task": "Integrate Ollama Cloud brain into model_router.py routing table",
       "status": "idle"
     },
     {
       "session_id": "seed-jarvis-audit",
       "name": "jarvis-audit",
-      "last_active": "2026-06-24T22:03:43Z",
+      "last_active": "2026-06-25T00:30:00Z",
       "current_task": null,
       "completed_tasks": [
         {
           "task": "Wire query_received + route_decision events into router.py audit trail",
           "completed_at": "2026-06-24T22:03:43Z",
           "commit": "b4a0fa9"
+        },
+        {
+          "task": "Harden audit_log() \u2014 blanket try/except, audit_errors.log",
+          "completed_at": "2026-06-25T00:30:00Z",
+          "commit": "c0a8ec1"
         }
       ],
-      "next_task": "Wire run_id threading through operative.py → execution_engine.py",
+      "next_task": "Wire run_id threading through operative.py \u2192 execution_engine.py",
       "status": "idle"
+    },
+    {
+      "session_id": "ba7037ad-e9e2-4746-bcbd-964648465f5a",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:53:24.282353+00:00",
+      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "4f50bc04-e822-422c-b561-ebc86e9aba90",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:53:25.761946+00:00",
+      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "a7acbf2b-79ca-4632-a30c-d8f3e83f1a7c",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:53:35.404451+00:00",
+      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "loop-engineer",
+      "name": "loop-engineer",
+      "completed_tasks": [
+        {
+          "task": "harness/budget.py \u2014 3-tier rate limiter, /budget command, 28 tests",
+          "completed_at": "2026-06-25T04:49:36.333209+00:00"
+        },
+        {
+          "task": "ollama_cloud provider: routing, brain, budget tracking \u2014 all wired",
+          "completed_at": "2026-06-25T04:53:09.366826+00:00"
+        }
+      ],
+      "last_active": "2026-06-25T04:53:09.366826+00:00",
+      "status": "active",
+      "current_task": "cycle 3: context pressure wiring in smart_stream"
+    }
+  ],
+  "last_updated": "2026-06-25T04:53:09.366826+00:00",
+  "last_commit": "b8bea92",
+  "last_commit_message": "feat(budget): three-tier LOCAL_FIRST rate limiter + /budget command",
+  "budget_system": {
+    "status": "complete",
+    "providers": [
+      "ollama (local)",
+      "ollama_cloud (free tier)",
+      "anthropic",
+      "openai",
+      "gemini"
+    ],
+    "files": [
+      "harness/budget.py",
+      "tests/test_budget.py"
+    ],
+    "tests": "28/28 passing",
+    "wired_into": [
+      "model_router._candidate_stream()",
+      "router.py /budget command"
+    ],
+    "completed_at": "2026-06-25T04:49:36.333209+00:00"
+  },
+  "completed_cycles": [
+    {
+      "cycle": 2,
+      "commit": "3401988",
+      "description": "Ollama Cloud as middle routing tier \u2014 local\u2192cloud-free\u2192paid",
+      "tests": "46/46 passing",
+      "at": "2026-06-25T04:53:09.366826+00:00"
     }
   ]
 }
