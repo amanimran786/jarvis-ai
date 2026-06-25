@@ -140,17 +140,25 @@ def _parse_age_seconds(iso_ts: str | None) -> float:
 
 
 def _session_health(session: dict) -> str:
-    """Derive session health from last_active timestamp + reported status."""
+    """Derive session health from last_active timestamp + reported status.
+
+    Stall detection only fires on sessions that claim to be 'active' — a
+    session that says 'idle' or 'offline' is trusted at its word regardless
+    of how long ago it last updated. This prevents seed entries and cleanly-
+    shut-down sessions from showing as STALLED.
+    """
     reported = session.get("status", "unknown")
-    if reported in ("stalled", "offline", "error"):
+    # Trust explicit terminal / rest states immediately.
+    if reported in ("offline", "error", "stalled"):
         return reported
+    if reported in ("idle", "done", "complete", "waiting"):
+        return "idle"
+    # For 'active' (or unknown) sessions, apply the stall threshold.
     age = _parse_age_seconds(session.get("last_active"))
     if age == float("inf"):
         return "unknown"
     if age > STALL_THRESHOLD_SECONDS:
         return "stalled"
-    if reported in ("idle", "done", "complete", "waiting"):
-        return "idle"
     return "active"
 
 
