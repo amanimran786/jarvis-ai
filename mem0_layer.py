@@ -52,6 +52,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
+
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 
 # ── Storage paths ──────────────────────────────────────────────────────────────
@@ -221,9 +226,11 @@ def add(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = None) -
         except TypeError:
             m.add(text.strip(), user_id=user_id, metadata=metadata or {})
         _last_error = ""
+        _audit_log("memory_write", operation="mem0_add", preview=text[:120])
         return True
     except Exception as exc:
         _last_error = str(exc)
+        _audit_log("memory_write", operation="mem0_add", success=False, error=str(exc))
         return False
 
 
