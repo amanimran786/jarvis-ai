@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from urllib.parse import urlparse
-from typing import Any
+from typing import Any, Generator
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
 import context_budget
 import memory as mem
@@ -1618,7 +1618,7 @@ def ask_ollama_cloud_stream(
     system_extra: str = "",
     track_context: bool = False,
     raise_on_error: bool = False,
-) -> "_Generator[str, None, None]":
+) -> "Generator[str, None, None]":
     """
     Stream from the Ollama Cloud API (api.ollama.com) using the OpenAI-compat interface.
 
