@@ -203,7 +203,7 @@ class MeetingPrepAgent(Agent):
                     return f"📅 {title} in ~{mins_away} min", brief, True
 
         except Exception:
-            pass
+            logging.debug("[BgAgents] meeting prep run failed", exc_info=True)
         return None
 
 
@@ -228,7 +228,7 @@ class SystemHealthAgent(Agent):
                 if load_1m > cpu_count * 0.9:
                     alerts.append(f"CPU load high: {load_1m:.1f} ({cpu_count} cores)")
         except Exception:
-            pass
+            logging.debug("[BgAgents] CPU load check failed", exc_info=True)
 
         # Disk space
         try:
@@ -243,7 +243,7 @@ class SystemHealthAgent(Agent):
                 if use_pct >= 90:
                     alerts.append(f"Disk {use_pct}% full ({parts[3]} free)")
         except Exception:
-            pass
+            logging.debug("[BgAgents] disk space check failed", exc_info=True)
 
         # Memory pressure (macOS vm_stat)
         try:
@@ -259,7 +259,7 @@ class SystemHealthAgent(Agent):
             if free_mb < 512:
                 alerts.append(f"Memory low: {free_mb:.0f}MB free")
         except Exception:
-            pass
+            logging.debug("[BgAgents] memory pressure check failed", exc_info=True)
 
         if alerts:
             body = " | ".join(alerts)
@@ -293,7 +293,7 @@ class ResearchAgent(Agent):
                     if len(summary) > 20:
                         return f"📡 Intel: {topic}", summary, False
         except Exception:
-            pass
+            logging.debug("[BgAgents] intel feed run failed", exc_info=True)
         return None
 
 
@@ -346,7 +346,7 @@ class IdleContextAgent(Agent):
             return f"💡 {time_of_day.capitalize()} Insight", suggestion, False
 
         except Exception:
-            pass
+            logging.debug("[BgAgents] idle context run failed", exc_info=True)
         return None
 
 
