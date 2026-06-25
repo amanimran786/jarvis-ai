@@ -47,6 +47,10 @@ def _reflection_output() -> Path:
     return _base_dir() / "kb" / "core" / "jarvis_self_eval.md"
 
 
+def _reflection_history_path() -> Path:
+    return _base_dir() / "evals" / "reflection_history.jsonl"
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -85,6 +89,11 @@ class ReflectionResult:
     episodic_context: list[str]
     insights: list[str]
     output_path: str
+    # Diff vs previous reflection (None fields mean no previous snapshot)
+    axis_deltas: dict[str, float | None] = field(default_factory=dict)
+    overall_delta: float | None = None
+    new_flags: list[str] = field(default_factory=list)     # flags that appeared since last run
+    resolved_flags: list[str] = field(default_factory=list)  # flags that went away
 
 
 # ── Load quality log ──────────────────────────────────────────────────────────
@@ -295,10 +304,15 @@ def _generate_insights(
 
 # ── Render the markdown document ──────────────────────────────────────────────
 
-def _render_markdown(
-    result: ReflectionResult,
-    prev_overall: float | None = None,
-) -> str:
+def _delta_str(delta: float | None, threshold: float = 0.005) -> str:
+    """Format a delta for display. Returns '' for None or near-zero changes."""
+    if delta is None or abs(delta) < threshold:
+        return ""
+    arrow = "↑" if delta > 0 else "↓"
+    return f" {arrow}{abs(delta):.3f}"
+
+
+def _render_markdown(result: ReflectionResult) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [
         "# Jarvis Self-Eval Reflection",
@@ -309,10 +323,7 @@ def _render_markdown(
     # Overall quality
     lines.append("## Performance Summary")
     if result.overall_quality is not None:
-        trend = ""
-        if prev_overall is not None:
-            delta = result.overall_quality - prev_overall
-            trend = f" ({'↑' if delta > 0 else '↓'}{abs(delta):.3f} vs previous)"
+        trend = _delta_str(result.overall_delta)
         lines.append(
             f"**Overall quality: {result.overall_quality:.2f}/1.0** "
             f"({_label(result.overall_quality)}){trend}"
@@ -321,13 +332,43 @@ def _render_markdown(
         lines.append("*No scored responses in the lookback window.*")
     lines.append("")
 
-    # Axes
+    # Axes with per-axis deltas
     lines.append("## Axis Breakdown")
     for axis, val in result.axis_averages.items():
         label = _AXIS_LABELS.get(axis, axis)
         val_str = f"{val:.2f}" if val is not None else "—"
-        lines.append(f"- **{label}:** {val_str} ({_label(val)})")
+        delta_s = _delta_str(result.axis_deltas.get(axis))
+        lines.append(f"- **{label}:** {val_str} ({_label(val)}){delta_s}")
     lines.append("")
+
+    # Changes vs previous (only when we have diff data)
+    has_diff = result.overall_delta is not None or result.new_flags or result.resolved_flags
+    if has_diff:
+        lines.append("## Changes vs Previous Reflection")
+        if result.new_flags:
+            lines.append(f"- **New issues:** {', '.join(f'`{f}`' for f in result.new_flags)}")
+        else:
+            lines.append("- New issues: none")
+        if result.resolved_flags:
+            lines.append(f"- **Resolved:** {', '.join(f'`{f}`' for f in result.resolved_flags)}")
+        else:
+            lines.append("- Resolved: none")
+        # Biggest mover
+        valid_deltas = {k: v for k, v in result.axis_deltas.items() if v is not None}
+        if valid_deltas:
+            best_k = max(valid_deltas, key=lambda k: valid_deltas[k])
+            worst_k = min(valid_deltas, key=lambda k: valid_deltas[k])
+            if valid_deltas[best_k] > 0.005:
+                lines.append(
+                    f"- **Biggest improvement:** {_AXIS_LABELS.get(best_k, best_k)} "
+                    f"({valid_deltas[best_k]:+.3f})"
+                )
+            if valid_deltas[worst_k] < -0.005:
+                lines.append(
+                    f"- **Biggest regression:** {_AXIS_LABELS.get(worst_k, worst_k)} "
+                    f"({valid_deltas[worst_k]:+.3f})"
+                )
+        lines.append("")
 
     # Flags
     if result.top_flags:
@@ -396,19 +437,80 @@ def _render_markdown(
     return "\n".join(lines)
 
 
-# ── Read previous overall for trend ──────────────────────────────────────────
+# ── Snapshot history (lightweight numeric snapshots for diff) ─────────────────
 
-def _read_prev_overall(output_path: Path) -> float | None:
-    if not output_path.exists():
+def _load_prev_snapshot() -> dict[str, Any] | None:
+    """Return the most recent valid snapshot from evals/reflection_history.jsonl."""
+    path = _reflection_history_path()
+    if not path.exists():
         return None
     try:
-        text = output_path.read_text(encoding="utf-8")
-        m = re.search(r"Overall quality:\s*([\d.]+)/1\.0", text)
-        if m:
-            return float(m.group(1))
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for line in reversed(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                snap = json.loads(line)
+                if snap.get("overall_quality") is not None:
+                    return snap
+            except json.JSONDecodeError:
+                continue
     except Exception:
-        pass
+        logging.debug("[Reflection] silent failure in _load_prev_snapshot", exc_info=True)
     return None
+
+
+def _save_snapshot(result: ReflectionResult) -> None:
+    """Append a compact numeric snapshot to evals/reflection_history.jsonl."""
+    if result.overall_quality is None:
+        return  # don't snapshot empty runs
+    path = _reflection_history_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        snap = {
+            "ts": result.generated_at,
+            "total_scored": result.total_scored,
+            "overall_quality": result.overall_quality,
+            "axes": {k: v for k, v in result.axis_averages.items() if v is not None},
+            "top_flags": result.top_flags,
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(snap) + "\n")
+    except Exception:
+        log.debug("[reflection] _save_snapshot() failed", exc_info=True)
+
+
+def _compute_diff(
+    prev: dict[str, Any],
+    overall: float | None,
+    axes: dict[str, float | None],
+    top_flags: dict[str, int],
+) -> tuple[float | None, dict[str, float | None], list[str], list[str]]:
+    """Compute deltas vs previous snapshot.
+
+    Returns: (overall_delta, axis_deltas, new_flags, resolved_flags)
+    """
+    prev_overall = prev.get("overall_quality")
+    overall_delta = None
+    if overall is not None and prev_overall is not None:
+        overall_delta = round(overall - prev_overall, 3)
+
+    prev_axes = prev.get("axes", {})
+    axis_deltas: dict[str, float | None] = {}
+    for axis, val in axes.items():
+        prev_val = prev_axes.get(axis)
+        if val is not None and prev_val is not None:
+            axis_deltas[axis] = round(val - prev_val, 3)
+        else:
+            axis_deltas[axis] = None
+
+    prev_flag_set = set(prev.get("top_flags", {}).keys())
+    curr_flag_set = set(top_flags.keys())
+    new_flags = sorted(curr_flag_set - prev_flag_set)
+    resolved_flags = sorted(prev_flag_set - curr_flag_set)
+
+    return overall_delta, axis_deltas, new_flags, resolved_flags
 
 
 # ── Main: run_reflection ──────────────────────────────────────────────────────
@@ -428,9 +530,15 @@ def run_reflection(hours: int = 168) -> ReflectionResult:
             episodic = _load_episodic_context()
             insights = _generate_insights(overall, axes, top_flags, domains, len(records))
 
-            output_path = _reflection_output()
-            prev_overall = _read_prev_overall(output_path)
+            # Diff vs previous snapshot
+            prev = _load_prev_snapshot()
+            overall_delta, axis_deltas, new_flags, resolved_flags = (
+                _compute_diff(prev, overall, axes, top_flags)
+                if prev is not None
+                else (None, {}, [], [])
+            )
 
+            output_path = _reflection_output()
             result = ReflectionResult(
                 generated_at=_now_iso(),
                 lookback_hours=hours,
@@ -442,11 +550,18 @@ def run_reflection(hours: int = 168) -> ReflectionResult:
                 episodic_context=episodic,
                 insights=insights,
                 output_path=str(output_path),
+                axis_deltas=axis_deltas,
+                overall_delta=overall_delta,
+                new_flags=new_flags,
+                resolved_flags=resolved_flags,
             )
 
-            md = _render_markdown(result, prev_overall=prev_overall)
+            md = _render_markdown(result)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(md, encoding="utf-8")
+
+            # Persist snapshot for future diffs
+            _save_snapshot(result)
 
             return result
 
@@ -478,24 +593,33 @@ def reflect_text(hours: int = 168) -> str:
         )
 
     quality_str = f"{result.overall_quality:.2f}/1.0" if result.overall_quality else "—"
-    weakest = None
-    for v, k in sorted(
-        [(v, k) for k, v in result.axis_averages.items() if v is not None],
-        key=lambda kv: kv[0],
-    ):
-        weakest = f"{_AXIS_LABELS.get(k, k)} ({v:.2f})"
-        break
+    overall_trend = _delta_str(result.overall_delta) if result.overall_delta is not None else ""
 
-    top_insight = result.insights[0] if result.insights else "No notable patterns."
+    lines = [f"Reflection complete — {n} responses scored over the last {hours}h."]
+    lines.append(f"Overall quality: {quality_str}{overall_trend}.")
 
-    lines = [
-        f"Reflection complete — {n} responses scored over the last {hours}h.",
-        f"Overall quality: {quality_str}.",
-        f"Weakest axis: {weakest}." if weakest else "",
-        f"Key insight: {top_insight}",
-        f"Full report written → {result.output_path}",
-    ]
-    return "\n".join(line for line in lines if line)
+    # Per-axis breakdown with deltas
+    if result.axis_averages:
+        lines.append("Axes:")
+        for axis, val in result.axis_averages.items():
+            label = _AXIS_LABELS.get(axis, axis)
+            val_s = f"{val:.2f}" if val is not None else "—"
+            delta_s = _delta_str(result.axis_deltas.get(axis))
+            lines.append(f"  {label}: {val_s}{delta_s}")
+
+    # Flag changes
+    if result.new_flags:
+        lines.append(f"New issues: {', '.join(result.new_flags)}")
+    if result.resolved_flags:
+        lines.append(f"Resolved: {', '.join(result.resolved_flags)}")
+
+    # Top insight
+    top_insight = result.insights[0] if result.insights else ""
+    if top_insight:
+        lines.append(f"Insight: {top_insight}")
+
+    lines.append(f"Full report → {result.output_path}")
+    return "\n".join(lines)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
