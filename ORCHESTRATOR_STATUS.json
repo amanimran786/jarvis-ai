@@ -2,45 +2,29 @@
   "description": "Written by harness/audit.py on each session event. sessions is a LIST of dicts. Set JARVIS_SESSION_NAME env var to register under a known ID. Ghost entries (status=active, last_active >6h) are purged by the orchestrator loop.",
   "sessions": [
     {
-      "session_id": "seed-jarvis-board",
+      "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-25T05:00:00Z",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "Fix 18 bare except:pass in voice.py + jarvis_watcher.py",
-          "commit": "6f0745b",
-          "completed_at": "2026-06-24T22:04:00Z"
-        },
-        {
-          "task": "Fix swallowed exceptions in main.py",
-          "commit": "24e3cdb",
-          "completed_at": "2026-06-25T00:15:00Z"
-        },
-        {
-          "task": "Fix swallowed exceptions in _bg_agents.py, local_kokoro_subprocess_tts.py, runtime_state.py",
-          "commit": "4bbe7a8",
-          "completed_at": "2026-06-25T05:00:00Z"
-        }
-      ],
-      "next_task": "Review and close open AGENT_BOARD items (9, 11, 13)",
-      "status": "idle"
+      "last_active": "2026-06-25T21:16:09.604016+00:00",
+      "current_task": "silent-failure sweep complete \u2014 13 files, 90+ exceptions now logged",
+      "status": "active"
     },
     {
       "session_id": "seed-jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T05:00:00Z",
+      "last_active": "2026-06-25T21:16:01.564411+00:00",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "3-axis self-eval scorer + /score + self_eval.jsonl",
-          "commit": "41c082b",
-          "completed_at": "2026-06-25T01:00:00Z"
+          "task": "3-axis scorer + /score + self_eval.jsonl",
+          "commit": "41c082b"
         },
         {
-          "task": "Reflection pipeline + /reflect + kb/core/jarvis_self_eval.md",
-          "commit": "02de25f",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "Reflection pipeline + /reflect + jarvis_self_eval.md",
+          "commit": "02de25f"
+        },
+        {
+          "task": "loop_watchdog wired \u2014 cycle 3 complete",
+          "commit": "8ee8006"
         }
       ],
       "next_task": "Wire /reflect output into daily briefing",
@@ -49,167 +33,108 @@
     {
       "session_id": "seed-jarvis-local-llm",
       "name": "jarvis-local-llm",
-      "last_active": "2026-06-25T05:50:00Z",
+      "last_active": "2026-06-25T21:16:01.564411+00:00",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "Three-tier LOCAL_FIRST rate limiter + /budget",
-          "commit": "1850965",
-          "completed_at": "2026-06-25T00:00:00Z"
+          "task": "Three-tier LOCAL_FIRST budget + /budget",
+          "commit": "1850965"
         },
         {
-          "task": "Wire Ollama Cloud as middle routing tier",
-          "commit": "3401988",
-          "completed_at": "2026-06-25T02:00:00Z"
+          "task": "Ollama Cloud middle routing tier",
+          "commit": "3401988"
         },
         {
-          "task": "Specialist models (devstral/qwen3) win over GLM_FLASH for code/reasoning",
-          "commit": "c3eb04a",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "Specialist routing devstral/qwen3 over GLM_FLASH",
+          "commit": "c3eb04a"
         },
         {
-          "task": "Resume signal + heartbeat primitives for watchdog",
-          "commit": "44c037d",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "Resume signal + heartbeat primitives",
+          "commit": "44c037d"
+        },
+        {
+          "task": "Context pressure wiring in smart_stream (cycle 3)",
+          "commit": "8ee8006"
+        },
+        {
+          "task": "harness/loop_watchdog.py consumer implementation",
+          "commit": "8ee8006"
         }
       ],
-      "next_task": "Complete context pressure wiring in smart_stream (cycle 3 in progress)",
+      "next_task": "Verify devstral/qwen3 routing stability in production [in_progress]",
       "status": "idle"
     },
     {
       "session_id": "seed-jarvis-audit",
       "name": "jarvis-audit",
-      "last_active": "2026-06-25T05:51:00Z",
+      "last_active": "2026-06-25T21:16:01.564411+00:00",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "Wire query_received + route_decision events into router.py",
-          "commit": "b4a0fa9",
-          "completed_at": "2026-06-24T22:03:43Z"
+          "task": "Wire query_received + route_decision events",
+          "commit": "b4a0fa9"
         },
         {
           "task": "Harden audit_log() + audit_errors.log",
-          "commit": "c0a8ec1",
-          "completed_at": "2026-06-25T00:30:00Z"
+          "commit": "c0a8ec1"
         },
         {
-          "task": "Wire route_decision at orchestrator + memory_write in semantic_memory",
-          "commit": "e84263b",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "route_decision + memory_write wiring",
+          "commit": "e84263b"
         },
         {
-          "task": "Wire memory_write to mem0_layer.add() and memory.save_conversation()",
-          "commit": "3af8ba4",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "memory_write to mem0_layer + save_conversation",
+          "commit": "3af8ba4"
+        },
+        {
+          "task": "reflection_run + memory_promotion wiring",
+          "commit": "144a8ca"
+        },
+        {
+          "task": "check_resume_signal() + heartbeat() in harness/audit.py",
+          "commit": "fcb85f0"
         }
       ],
-      "next_task": "Verify audit.jsonl captures memory_write + route_decision end-to-end",
+      "next_task": "Verify audit.jsonl end-to-end: memory_write + route_decision events",
       "status": "idle"
-    },
-    {
-      "session_id": "ba7037ad-e9e2-4746-bcbd-964648465f5a",
-      "name": "jarvis",
-      "last_active": "2026-06-25T04:54:30.410906+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "4f50bc04-e822-422c-b561-ebc86e9aba90",
-      "name": "jarvis",
-      "last_active": "2026-06-25T04:55:32.844710+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "a7acbf2b-79ca-4632-a30c-d8f3e83f1a7c",
-      "name": "jarvis",
-      "last_active": "2026-06-25T04:55:40.806440+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "loop-engineer",
-      "name": "loop-engineer",
-      "completed_tasks": [
-        {
-          "task": "harness/budget.py \u2014 3-tier rate limiter, /budget command, 28 tests",
-          "completed_at": "2026-06-25T04:49:36.333209+00:00"
-        },
-        {
-          "task": "ollama_cloud provider: routing, brain, budget tracking \u2014 all wired",
-          "completed_at": "2026-06-25T04:53:09.366826+00:00"
-        }
-      ],
-      "last_active": "2026-06-25T04:53:09.366826+00:00",
-      "status": "active",
-      "current_task": "cycle 3: context pressure wiring in smart_stream"
-    },
-    {
-      "session_id": "1fe91010-8b17-4911-841f-9c97a4f46a5f",
-      "name": "jarvis",
-      "last_active": "2026-06-25T04:59:48.310022+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "d420d32e-012d-40df-b401-b8be9a0f6202",
-      "name": "jarvis",
-      "last_active": "2026-06-25T05:00:41.782736+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
     },
     {
       "session_id": "jarvis-local-llm",
       "name": "jarvis-local-llm",
       "completed_tasks": [
         {
-          "task": "Three-tier LOCAL_FIRST rate limiter + /budget",
-          "commit": "1850965",
-          "completed_at": "2026-06-25T00:00:00Z"
+          "task": "Three-tier LOCAL_FIRST budget + /budget",
+          "commit": "1850965"
         },
         {
-          "task": "Wire Ollama Cloud as middle routing tier",
-          "commit": "3401988",
-          "completed_at": "2026-06-25T02:00:00Z"
+          "task": "Ollama Cloud middle routing tier",
+          "commit": "3401988"
         },
         {
-          "task": "Specialist models (devstral/qwen3) win over GLM_FLASH for code/reasoning",
-          "commit": "c3eb04a",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "Specialist routing devstral/qwen3 over GLM_FLASH",
+          "commit": "c3eb04a"
         },
         {
-          "task": "Resume signal + heartbeat primitives for watchdog",
-          "commit": "44c037d",
-          "completed_at": "2026-06-25T05:00:00Z"
+          "task": "Resume signal + heartbeat primitives",
+          "commit": "44c037d"
+        },
+        {
+          "task": "Context pressure wiring in smart_stream (cycle 3)",
+          "commit": "8ee8006"
+        },
+        {
+          "task": "harness/loop_watchdog.py consumer implementation",
+          "commit": "8ee8006"
         }
       ],
-      "last_active": "2026-06-25T05:50:00Z",
-      "current_task": "idle \u2014 all 5 priority items complete, 56/56 tests passing",
+      "last_active": "2026-06-25T21:16:01.564411+00:00",
+      "current_task": null,
       "status": "idle",
       "commit": "0c956da",
       "tests": "56/56",
       "cycle": 5,
       "total_commits_this_session": 7,
-      "next_task": "Complete context pressure wiring in smart_stream (cycle 3 in progress)"
-    },
-    {
-      "session_id": "567335ba-8498-4c69-a21a-26adc0b01483",
-      "name": "jarvis",
-      "last_active": "2026-06-25T05:00:09.090691+00:00",
-      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
+      "next_task": "Verify devstral/qwen3 routing stability in production [in_progress]"
     },
     {
       "session_id": "b4de136c-04f9-4630-b17a-8107b316d330",
@@ -235,19 +160,24 @@
       "status": "offline"
     },
     {
-      "session_id": "6fa0eaa6-d856-4d44-bc21-a8205a30abb0",
+      "session_id": "f2e1d9e4-b9b0-43a7-beb4-82a500d42c70",
       "name": "jarvis",
-      "last_active": "2026-06-25T05:00:55.798224+00:00",
-      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
-      "completed_tasks": [],
+      "last_active": "2026-06-25T21:15:05.217832+00:00",
+      "current_task": null,
+      "completed_tasks": [
+        {
+          "task": "ping",
+          "completed_at": "2026-06-25T21:15:05.217832+00:00"
+        }
+      ],
       "next_task": null,
-      "status": "active"
+      "status": "idle"
     },
     {
-      "session_id": "e659936a-f707-4d85-93bd-7fe0911792dd",
+      "session_id": "99310b54-d646-40a7-a23a-ff741d433bf6",
       "name": "jarvis",
-      "last_active": "2026-06-25T05:00:15.388688+00:00",
-      "current_task": null,
+      "last_active": "2026-06-25T21:16:05.651501+00:00",
+      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -255,8 +185,8 @@
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T05:00:21.898148Z",
-      "current_task": "loop_watchdog wired \u2014 cycle 3 complete",
+      "last_active": "2026-06-25T21:16:19.267846Z",
+      "current_task": "reflect diff + snapshot history \u2014 Cycle 4 committed",
       "status": "active"
     }
   ],
@@ -329,8 +259,8 @@
   },
   "sessions_map": {
     "jarvis-audit": {
-      "last_active": "2026-06-25T05:00:15.389277+00:00Z",
-      "current_task": "wiring route_decision at orchestrator",
+      "last_active": "2026-06-25T21:15:39.154100+00:00Z",
+      "current_task": "response_sent + self_eval_score + reflection_run committed",
       "status": "active"
     }
   }
