@@ -246,6 +246,7 @@ def consolidate_memory() -> dict:
     data["working_memory"] = _build_working_memory(data)
     data["long_term_profile"] = _build_long_term_profile(data)
     save(data)
+    audit_log("memory_promotion", facts=len(data.get("facts", [])), preferences=len(data.get("preferences", {})))
     return {
         "ok": True,
         "working_memory": data["working_memory"],
