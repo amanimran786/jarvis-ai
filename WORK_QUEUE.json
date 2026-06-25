@@ -11,6 +11,16 @@
   },
   {
     "session_name": "jarvis-board",
+    "task": "Fix model routing test regressions from LOCAL_CODER_RECOMMENDED chain change",
+    "priority": 1,
+    "status": "in_progress",
+    "assigned_at": "2026-06-25T21:32:01.636379+00:00",
+    "completed_at": null,
+    "created_at": "2026-06-25T21:32:01.636379+00:00",
+    "notes": "jarvis-board live session working on this now. Prerequisite for baseline suite run + freeze lift. Likely triggered by c3eb04a specialist routing change."
+  },
+  {
+    "session_name": "jarvis-board",
     "task": "Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)",
     "priority": 1,
     "status": "queued",
@@ -169,6 +179,16 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Confirm cycle 6 commit \u2014 session reported done 2+ rounds ago, no git evidence yet",
+    "priority": 3,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T21:32:01.636379+00:00",
+    "notes": "WATCH: session says committed but git log shows nothing. Will auto-close when commit lands."
   },
   {
     "session_name": "jarvis-board",
