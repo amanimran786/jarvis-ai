@@ -1166,6 +1166,21 @@ def smart_stream(
                 track_context=True,
                 raise_on_error=True,
             )
+        # Gate all non-local cloud providers through the budget check.
+        # Soft limit → warning already logged inside budget.check().
+        # Hard limit → raise so _execute_plan_stream falls through to next candidate (local).
+        if not candidate.local:
+            try:
+                from harness import budget as _budget
+                bcheck = _budget.check(candidate.provider)
+                if bcheck["hard"]:
+                    raise RuntimeError(
+                        f"[Budget] {candidate.provider} hard rate limit exceeded "
+                        f"({bcheck.get('used_1h') or bcheck.get('used_session', 0):,} tokens) "
+                        f"— falling through to local"
+                    )
+            except ImportError:
+                pass
         if candidate.provider == "openai":
             # bypass_local=True: provider_router already considered local at
             # the planner level. If we're here we explicitly chose OpenAI;
