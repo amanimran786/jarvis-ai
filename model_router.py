@@ -454,21 +454,21 @@ def _best_local(text: str) -> str:
     if LOCAL_PREFER_TUNED and LOCAL_TUNED and _has_model(LOCAL_TUNED, available) and not is_code_task:
         return LOCAL_TUNED
 
-    # 3. Coding tasks — GLM Flash is the primary manager/coder lane.
+    # 3. Coding tasks — specialist models first; GLM_FLASH as fallback.
     if is_code_task:
         for coder in (
-            LOCAL_GLM_FLASH,
+            LOCAL_DEVSTRAL,        # purpose-built for code, fastest on M4
             LOCAL_CODER_RECOMMENDED,
             LOCAL_CODER,
             LOCAL_QWEN3_MID,
-            LOCAL_DEVSTRAL,
+            LOCAL_GLM_FLASH,       # general fallback
         ):
             if coder and _has_model(coder, available):
                 return coder
 
-    # 4. Deep reasoning — GLM Flash has the primary long-context reasoning lane.
+    # 4. Deep reasoning — qwen3-strong > GLM_FLASH (larger context + MoE efficiency).
     if is_deep:
-        for deep in (LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
+        for deep in (LOCAL_QWEN3_STRONG, LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
             if deep and _has_model(deep, available):
                 return deep
 
