@@ -247,6 +247,8 @@ LOCAL_STRICT_FIRST = _env_flag("JARVIS_LOCAL_STRICT_FIRST", True)
 OLLAMA_CLOUD_BASE_URL = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://api.ollama.com").strip() or "https://api.ollama.com"
 OLLAMA_CLOUD_API_KEY  = os.getenv("OLLAMA_CLOUD_API_KEY", "").strip()
 OLLAMA_CLOUD_ENABLED  = _env_flag("OLLAMA_CLOUD_ENABLED", bool(OLLAMA_CLOUD_API_KEY))
+# Default model on Ollama Cloud — larger than what fits locally (70B vs 30B max local)
+OLLAMA_CLOUD_MODEL    = os.getenv("OLLAMA_CLOUD_MODEL", "llama3.3:70b").strip() or "llama3.3:70b"
 ROUTING_TRANSPARENCY_ENABLED = _env_flag("JARVIS_ROUTING_TRANSPARENCY_ENABLED", True)
 LOCAL_STRUCTURED_CLASSIFIER_ENABLED = _env_flag("JARVIS_LOCAL_STRUCTURED_CLASSIFIER_ENABLED", True)
 APPLE_FOUNDATION_ENABLED = _env_flag("JARVIS_APPLE_FOUNDATION_ENABLED", False)

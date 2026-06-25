@@ -900,6 +900,7 @@ def smart_stream(
     so re-retrieval only adds tokens, an embedding call per turn, and prompt-
     prefix churn that defeats Ollama's KV prefix cache.
     """
+    _smart_stream_t0 = _time.monotonic()
     # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
     # a generator function and break all callers that expect a (stream, label) tuple.
@@ -1181,6 +1182,15 @@ def smart_stream(
                     )
             except ImportError:
                 pass
+        if candidate.provider == "ollama_cloud":
+            from brains.brain_ollama import ask_ollama_cloud_stream
+            return ask_ollama_cloud_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                raise_on_error=True,
+            )
         if candidate.provider == "openai":
             # bypass_local=True: provider_router already considered local at
             # the planner level. If we're here we explicitly chose OpenAI;
@@ -1236,6 +1246,18 @@ def smart_stream(
                 logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
+    try:
+        from harness.audit import audit_log as _audit_log
+        _audit_log(
+            "model_call",
+            model_used=primary_label,
+            latency_ms=round((_time.monotonic() - _smart_stream_t0) * 1000),
+            tool=tool,
+            tier=plan.tier,
+            mode=plan.mode,
+        )
+    except Exception:
+        pass
     return _execute_plan_stream(), primary_label
 
 

@@ -1607,3 +1607,102 @@ def local_capabilities() -> dict:
         "reasoning_boost_enabled": True,
         "timeout_seconds": _OLLAMA_TIMEOUT_SECONDS,
     }
+
+
+# ── Ollama Cloud (api.ollama.com) ─────────────────────────────────────────────
+
+def ask_ollama_cloud_stream(
+    user_input: str,
+    model: str = "",
+    *,
+    system_extra: str = "",
+    track_context: bool = False,
+    raise_on_error: bool = False,
+) -> "_Generator[str, None, None]":
+    """
+    Stream from the Ollama Cloud API (api.ollama.com) using the OpenAI-compat interface.
+
+    Requires OLLAMA_CLOUD_API_KEY to be set. If missing, raises RuntimeError so
+    _execute_plan_stream falls through to local.
+
+    Priority: ollama_local → ollama_cloud → paid providers. Use this when the
+    local model isn't capable enough and Ollama Cloud free tier has budget left.
+    """
+    from config import OLLAMA_CLOUD_BASE_URL, OLLAMA_CLOUD_API_KEY, OLLAMA_CLOUD_MODEL
+    from openai import OpenAI, APIError, AuthenticationError
+
+    api_key = OLLAMA_CLOUD_API_KEY.strip()
+    if not api_key:
+        raise RuntimeError("OLLAMA_CLOUD_API_KEY is not set — skipping Ollama Cloud")
+
+    resolved_model = model or OLLAMA_CLOUD_MODEL
+
+    system_parts = [SYSTEM_PROMPT]
+    ctx_text = mem.get_context(user_input) if track_context else ""
+    if ctx_text:
+        system_parts.append(ctx_text)
+    if system_extra:
+        system_parts.append(system_extra)
+    system = "\n\n".join(p for p in system_parts if p)
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_input},
+    ]
+
+    try:
+        client = OpenAI(base_url=OLLAMA_CLOUD_BASE_URL, api_key=api_key)
+        stream = client.chat.completions.create(
+            model=resolved_model,
+            messages=messages,
+            stream=True,
+            timeout=60,
+        )
+
+        full_text = []
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                full_text.append(delta.content)
+                yield delta.content
+            # Capture usage if present in the final chunk
+            if hasattr(chunk, "usage") and chunk.usage:
+                prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+
+        response_text = "".join(full_text)
+        if not prompt_tokens:
+            prompt_tokens = max(1, len(system + user_input) // 4)
+        if not completion_tokens:
+            completion_tokens = max(1, len(response_text) // 4)
+
+        usage_tracker.record(
+            provider="ollama_cloud",
+            model=resolved_model,
+            local=False,
+            source="brain_ollama_cloud",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+
+        # Also log to budget.jsonl
+        try:
+            from harness import budget as _budget
+            _budget.record(
+                provider="ollama_cloud",
+                model=resolved_model,
+                tokens_in=prompt_tokens,
+                tokens_out=completion_tokens,
+            )
+        except Exception:
+            pass
+
+    except (AuthenticationError, Exception) as exc:
+        log.warning("[OllamaCloud] Error: %s", exc)
+        if raise_on_error:
+            raise
+        yield f"[Ollama Cloud unavailable: {exc}]"

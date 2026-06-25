@@ -18,6 +18,8 @@ from config import (
     PROVIDER_PRIORITY_HAIKU,
     PROVIDER_PRIORITY_SONNET,
     PROVIDER_PRIORITY_OPUS,
+    OLLAMA_CLOUD_ENABLED,
+    OLLAMA_CLOUD_MODEL,
     provider_runtime_config,
 )
 
@@ -87,6 +89,18 @@ def _cloud_candidates_for_tier(tier: str) -> list[RouteCandidate]:
     return candidates
 
 
+def _ollama_cloud_candidates() -> list[RouteCandidate]:
+    """Ollama Cloud (free tier) — middle tier between local and paid cloud."""
+    if not OLLAMA_CLOUD_ENABLED:
+        return []
+    return [RouteCandidate(
+        provider="ollama_cloud",
+        model=OLLAMA_CLOUD_MODEL,
+        local=False,
+        label="Ollama Cloud",
+    )]
+
+
 def _local_candidates(
     *,
     tier: str,
@@ -152,12 +166,16 @@ def build_plan(
     if should_prefer_local:
         candidates.extend(local_candidates)
         if not PAID_FALLBACK_ENABLED:
+            # Ollama Cloud is free-tier, not "paid" — include it even when paid fallback disabled
+            candidates.extend(_ollama_cloud_candidates())
             return RoutePlan(
                 mode=normalized_mode,
                 tier=normalized_tier,
                 candidates=tuple(candidates),
                 reason="Local-first policy active; paid fallback disabled.",
             )
+        # Inject Ollama Cloud between local and paid providers
+        candidates.extend(_ollama_cloud_candidates())
         if LOCAL_STRICT_FIRST or normalized_mode == "local":
             candidates.extend(_cloud_candidates_for_tier(normalized_tier))
         else:
@@ -167,6 +185,8 @@ def build_plan(
     else:
         if PAID_FALLBACK_ENABLED or explicit_cloud:
             candidates.extend(_cloud_candidates_for_tier(normalized_tier))
+        # Ollama Cloud as free fallback after paid (or if local unavailable but cloud key set)
+        candidates.extend(_ollama_cloud_candidates())
         if local_available and local_model and normalized_mode in {"auto", "cloud"}:
             candidates.append(RouteCandidate(provider="ollama", model=local_model, local=True, label="Local"))
 
