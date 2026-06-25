@@ -213,11 +213,16 @@ def reflect() -> str:
     Called once a day — makes Jarvis progressively smarter.
     Only runs when there's enough real data to synthesize.
     """
+    kdata = _load_knowledge()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if kdata.get("user_profile", {}).get("last_reflection") == today:
+        print("[Learner] Reflection already ran today — skipping.")
+        return kdata.get("user_profile", {}).get("synthesis", "")
+
     facts = mem.list_facts()
     prefs = mem.get_all_preferences()
     projects = mem.get_projects()
     recent_convos = mem.get_recent_conversations(10)
-    kdata = _load_knowledge()
     insights = kdata.get("insights", [])
 
     # Need at least some real data before reflecting

@@ -336,5 +336,61 @@ class ScoreReportTests(unittest.TestCase):
             self.assertLessEqual(float(s), 1.0, msg=f"Score {s} exceeds 1.0 in report")
 
 
+class DiagnoseReportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._log = Path(self._tmpdir.name) / "self_eval.jsonl"
+        self._patcher = patch(
+            "harness.self_eval_log._log_path",
+            return_value=self._log,
+        )
+        self._patcher.start()
+
+    def tearDown(self):
+        self._patcher.stop()
+        self._tmpdir.cleanup()
+
+    def test_empty_log_returns_no_data_message(self):
+        report = self_eval_log.diagnose_report()
+        self.assertIn("No self-eval scores", report)
+
+    def test_shows_worst_n_interactions(self):
+        for i in range(10):
+            # Mix of high and low quality
+            resp = "error: model failed" if i < 3 else _SPECIFIC_RESPONSE
+            self_eval_log.score(f"query about topic {i}", resp, "Calendar")
+        report = self_eval_log.diagnose_report(n=50, worst_n=3)
+        # Should show 3 entries
+        self.assertIn("Worst 3", report)
+
+    def test_includes_query_and_quality(self):
+        self_eval_log.score("explain recursion", "error: unavailable", "TechAssist")
+        report = self_eval_log.diagnose_report(n=50, worst_n=5)
+        self.assertIn("explain recursion", report)
+        self.assertIn("quality=", report)
+
+    def test_includes_flags_when_present(self):
+        self_eval_log.score("should i buy this stock", "error: model down", "")
+        report = self_eval_log.diagnose_report()
+        # error_response flag should appear
+        self.assertIn("flags:", report)
+
+    def test_includes_route_in_output(self):
+        self_eval_log.score("what's on my calendar", "error: unavailable", "Calendar")
+        report = self_eval_log.diagnose_report()
+        self.assertIn("Calendar", report)
+
+    def test_includes_overall_average(self):
+        for i in range(5):
+            self_eval_log.score(f"query {i}", "error: fail", "DailyOS")
+        report = self_eval_log.diagnose_report()
+        self.assertIn("Overall avg quality", report)
+
+    def test_worst_n_capped_at_available(self):
+        self_eval_log.score("only query", "error: fail", "")
+        report = self_eval_log.diagnose_report(n=50, worst_n=10)
+        self.assertIn("Worst 1", report)
+
+
 if __name__ == "__main__":
     unittest.main()
