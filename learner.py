@@ -13,6 +13,7 @@ Reflection:
 - Periodically synthesizes everything learned into a coherent user model
 """
 
+import logging
 import json
 import os
 import threading
@@ -322,6 +323,6 @@ def get_learning_context() -> str:
         if hint:
             parts.append(hint)
     except Exception:
-        pass
+        logging.debug("[Learner] silent failure in get_learning_context", exc_info=True)
 
     return "\n\n" + "\n\n".join(parts) if parts else ""

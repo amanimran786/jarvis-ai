@@ -126,7 +126,7 @@ def _debug_log(*args, **kwargs) -> None:
         with _VOICE_LOG_PATH.open("a", encoding="utf-8") as fh:
             fh.write(f"[{datetime.now().isoformat(timespec='seconds')}] {line}\n")
     except Exception:
-        pass
+        logging.debug("[Voice] silent failure in _debug_log", exc_info=True)
 
 
 def _get_microphone() -> sr.Microphone:
@@ -427,7 +427,7 @@ def _capture_audio_window(source, *, duration: float, reason: str):
             if getattr(source, "audio", None) is not None:
                 source.audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] silent failure in record_target", exc_info=True)
         raise RuntimeError(f"Audio stream frozen or dead during record for {reason}")
         
     if exception_holder:

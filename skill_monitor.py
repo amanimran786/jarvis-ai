@@ -15,6 +15,7 @@ Public API
 """
 
 from __future__ import annotations
+import logging
 
 import shutil
 import threading
@@ -260,9 +261,9 @@ def integration_status(force: bool = False) -> dict[str, IntegrationStatus]:
                     result = future.result(timeout=0)
                     out[result["name"]] = result
                 except Exception:
-                    pass
+                    logging.debug("[SkillMonitor] silent failure in integration_status", exc_info=True)
         except Exception:
-            pass
+            logging.debug("[SkillMonitor] silent failure in integration_status", exc_info=True)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 

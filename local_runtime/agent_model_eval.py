@@ -1,6 +1,7 @@
 """Non-mutating tool-protocol evaluation for local Ollama candidates."""
 
 from __future__ import annotations
+import logging
 
 import argparse
 import json
@@ -154,7 +155,7 @@ def _record_usage(response: Any, model: str, case_id: str, phase: str) -> None:
             },
         )
     except Exception:
-        pass
+        logging.debug("[AgentModelEval] silent failure in _record_usage", exc_info=True)
 
 
 def _run_case(client: Any, model: str, case: ProtocolCase) -> dict[str, Any]:

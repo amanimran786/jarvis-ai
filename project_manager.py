@@ -253,7 +253,7 @@ def _run_project(project_id: str) -> None:
                 try:
                     task_runtime.cancel_task(info["submitted_id"])
                 except Exception:
-                    pass
+                    logging.debug("[ProjectManager] silent failure in _cancel_in_flight", exc_info=True)
 
         last_heartbeat = time.monotonic()
 
@@ -414,7 +414,7 @@ def _run_project(project_id: str) -> None:
             _set_project_status(project_id, "failed")
             _emit(project_id, "project_error", error="unhandled exception in executor")
         except Exception:
-            pass
+            logging.debug("[ProjectManager] silent failure in unknown", exc_info=True)
     finally:
         with _LOCK:
             _EXECUTORS.pop(project_id, None)
