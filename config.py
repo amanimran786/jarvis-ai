@@ -244,11 +244,12 @@ PAID_FALLBACK_ENABLED = _env_flag("JARVIS_PAID_FALLBACK_ENABLED", True)
 LOCAL_STRICT_FIRST = _env_flag("JARVIS_LOCAL_STRICT_FIRST", True)
 
 # Ollama Cloud (remote free tier) — get API key from https://ollama.com → account → Keys
-OLLAMA_CLOUD_BASE_URL = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://api.ollama.com").strip() or "https://api.ollama.com"
+# ollama.com/v1 is the correct chat endpoint; api.ollama.com POSTs redirect to marketing site
+OLLAMA_CLOUD_BASE_URL = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://ollama.com/v1").strip() or "https://ollama.com/v1"
 OLLAMA_CLOUD_API_KEY  = os.getenv("OLLAMA_CLOUD_API_KEY", "").strip()
 OLLAMA_CLOUD_ENABLED  = _env_flag("OLLAMA_CLOUD_ENABLED", bool(OLLAMA_CLOUD_API_KEY))
-# Default model on Ollama Cloud — larger than what fits locally (70B vs 30B max local)
-OLLAMA_CLOUD_MODEL    = os.getenv("OLLAMA_CLOUD_MODEL", "llama3.3:70b").strip() or "llama3.3:70b"
+# gemma4:31b — confirmed free tier on ollama.com, larger than 30B local cap
+OLLAMA_CLOUD_MODEL    = os.getenv("OLLAMA_CLOUD_MODEL", "gemma4:31b").strip() or "gemma4:31b"
 ROUTING_TRANSPARENCY_ENABLED = _env_flag("JARVIS_ROUTING_TRANSPARENCY_ENABLED", True)
 LOCAL_STRUCTURED_CLASSIFIER_ENABLED = _env_flag("JARVIS_LOCAL_STRUCTURED_CLASSIFIER_ENABLED", True)
 APPLE_FOUNDATION_ENABLED = _env_flag("JARVIS_APPLE_FOUNDATION_ENABLED", False)
