@@ -82,3 +82,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 21:36:05] [jarvis-self-eval] ⚠ WATCH ×3: cycle 6 unverified 3 rounds — expiring watchpoint next round if no commit
 [2026-06-25 21:36:05] [orchestrator] PURGED 6 generic jarvis sessions (rate-limited noise)
 [2026-06-25 21:36:05] [orchestrator] QUEUE: 2 in_progress / 18 queued / 1 blocked / 23 done
+[2026-06-25 21:40:02] [orchestrator] ROUND 12 — 1 commit landed; cycle 6 watchpoint expired; watchdog reset in 19m
+[2026-06-25 21:40:02] [jarvis-board] DONE: SQLite lock flake in test_project_manager (commit ed6b358) — test suite stabilization
+[2026-06-25 21:40:02] [jarvis-board] IN_PROGRESS: routing regression fix — adjacent SQLite fix landed, routing commit pending
+[2026-06-25 21:40:02] [jarvis-self-eval] EXPIRED: cycle 6 watchpoint closed — 4 rounds no git evidence (session may have reported prematurely)
+[2026-06-25 21:40:02] [orchestrator] QUEUE: 2 in_progress / 17 queued / 1 blocked / 25 done
