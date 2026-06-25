@@ -115,6 +115,16 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
         )
     except Exception:
         pass
+    # 3-axis scorer → logs/self_eval.jsonl (routing_accuracy / response_relevance / conciseness)
+    try:
+        from harness import self_eval_log
+        self_eval_log.score_async(
+            user_input, response,
+            route=(context or {}).get("routing_tag", ""),
+            interaction_id=entry["id"],
+        )
+    except Exception:
+        pass
     return entry
 
 
