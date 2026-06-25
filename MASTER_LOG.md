@@ -77,3 +77,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 21:32:01] [jarvis-board] IN_PROGRESS: routing test regression fixes (LOCAL_CODER_RECOMMENDED chain) — prerequisite for baseline suite
 [2026-06-25 21:32:01] [jarvis-self-eval] WATCH: cycle 6 reported committed 2 rounds ago, no git evidence — monitoring
 [2026-06-25 21:32:01] [orchestrator] QUEUE: 2 in_progress / 18 queued / 1 blocked / 23 done
+[2026-06-25 21:36:05] [orchestrator] ROUND 11 — no new commits (round 2); stall pattern on rate limit
+[2026-06-25 21:36:05] [jarvis-board] ⚠ STALL 6m42s — regression fix reported done, commit pending; watchdog reset in 23m55s
+[2026-06-25 21:36:05] [jarvis-self-eval] ⚠ WATCH ×3: cycle 6 unverified 3 rounds — expiring watchpoint next round if no commit
+[2026-06-25 21:36:05] [orchestrator] PURGED 6 generic jarvis sessions (rate-limited noise)
+[2026-06-25 21:36:05] [orchestrator] QUEUE: 2 in_progress / 18 queued / 1 blocked / 23 done
