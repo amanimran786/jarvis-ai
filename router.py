@@ -4407,6 +4407,10 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     tool      = decision.tool
     params    = decision.params
     skill_id  = params.get("skill_id")
+    try:
+        audit_log("route_decision", tool=tool, confidence=decision.confidence)
+    except Exception:
+        pass
     if not skill_id:
         skill = skills.choose_skill(user_input, tool=tool)
         if skill:
