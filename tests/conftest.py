@@ -7,6 +7,7 @@ replace sys.modules["config"] with a MagicMock.  This ensures that
 module-level constants (e.g. APPLE_FOUNDATION_BASE_URL) are bound to real
 values and not to MagicMock objects.
 """
+import logging
 import os
 import sys
 
@@ -78,5 +79,5 @@ for _mod in _EARLY_IMPORTS:
         try:
             __import__(_mod)
         except Exception:
-            pass
+            logging.debug("[Conftest] silent failure in unknown", exc_info=True)
 

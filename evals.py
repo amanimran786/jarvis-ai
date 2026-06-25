@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import threading
 import uuid
@@ -114,7 +115,7 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
             routing_tag=routing_tag,
         )
     except Exception:
-        pass
+        logging.debug("[Evals] silent failure in log_interaction", exc_info=True)
     # 3-axis scorer → logs/self_eval.jsonl (routing_accuracy / response_relevance / conciseness)
     try:
         from harness import self_eval_log
@@ -124,7 +125,7 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
             interaction_id=entry["id"],
         )
     except Exception:
-        pass
+        logging.debug("[Evals] silent failure in log_interaction", exc_info=True)
     return entry
 
 
