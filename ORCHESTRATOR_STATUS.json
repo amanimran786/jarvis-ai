@@ -150,64 +150,10 @@
       "status": "idle"
     },
     {
-      "session_id": "99310b54-d646-40a7-a23a-ff741d433bf6",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:26:18.895450+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
       "last_active": "2026-06-25T21:23:23.379521Z",
       "current_task": "/diagnose command + daily reflection guard \u2014 Cycle 6 committed",
-      "status": "active"
-    },
-    {
-      "session_id": "4ed94764-cdb5-47c0-b896-c310d03d0f81",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:25:39.703299+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "95285270-f1e6-41a7-b579-5932372b1de2",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:19:49.918004+00:00",
-      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "83afeb72-4aff-4ed6-bd33-3f3feca00785",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:27:38.059748+00:00",
-      "current_task": "What is the capital of Japan?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "1bf28099-1b42-44f9-b51f-ed92a89d91e0",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:28:26.147855+00:00",
-      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
-    },
-    {
-      "session_id": "fb707db2-dbbf-4640-b636-845b9ce40873",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:28:40.820925+00:00",
-      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
-      "completed_tasks": [],
-      "next_task": null,
       "status": "active"
     }
   ]
