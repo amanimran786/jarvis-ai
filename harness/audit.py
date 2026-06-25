@@ -431,9 +431,15 @@ def _append_ops_ledger(duration_secs: float, crashed: bool) -> None:
 # ── Session lifecycle ──────────────────────────────────────────────────────────
 
 def start_session(name: str = "jarvis") -> None:
-    """Call once at process start. Logs session_start and snapshots memory."""
+    """Call once at process start. Logs session_start and snapshots memory.
+
+    The name is the session ID that appears on the orchestrator dashboard.
+    It is overridden by the JARVIS_SESSION_NAME env var so dev lanes can
+    register under a known ID without changing calling code:
+        JARVIS_SESSION_NAME=jarvis-board python main.py
+    """
     global _SESSION_NAME, _SESSION_START_TIME
-    _SESSION_NAME = name
+    _SESSION_NAME = os.environ.get("JARVIS_SESSION_NAME", name) or name
     _SESSION_START_TIME = datetime.now(timezone.utc)
 
     snap = _take_snapshot()

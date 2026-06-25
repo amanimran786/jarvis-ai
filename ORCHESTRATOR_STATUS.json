@@ -1,12 +1,18 @@
 {
-  "description": "Written by harness/audit.py on each session event. Read by session_orchestrator.py for the live dashboard. 'sessions' is a LIST of dicts — one entry per active process. Ghost sessions with last_active >6h and status=active are purged by the orchestrator loop.",
+  "description": "Written by harness/audit.py on each session event. sessions is a LIST of dicts. Set JARVIS_SESSION_NAME env var to register under a known ID. Ghost entries (status=active, last_active >6h) are purged by the orchestrator loop.",
   "sessions": [
     {
       "session_id": "seed-jarvis-board",
       "name": "jarvis-board",
-      "last_active": null,
+      "last_active": "2026-06-24T22:04:00Z",
       "current_task": null,
-      "completed_tasks": [],
+      "completed_tasks": [
+        {
+          "task": "Fix 18 bare except:pass silent failures in voice.py and jarvis_watcher.py",
+          "completed_at": "2026-06-24T22:04:00Z",
+          "commit": "6f0745b"
+        }
+      ],
       "next_task": "Review and close open AGENT_BOARD items (9, 11, 13)",
       "status": "idle"
     },
@@ -31,9 +37,15 @@
     {
       "session_id": "seed-jarvis-audit",
       "name": "jarvis-audit",
-      "last_active": null,
+      "last_active": "2026-06-24T22:03:43Z",
       "current_task": null,
-      "completed_tasks": [],
+      "completed_tasks": [
+        {
+          "task": "Wire query_received + route_decision events into router.py audit trail",
+          "completed_at": "2026-06-24T22:03:43Z",
+          "commit": "b4a0fa9"
+        }
+      ],
       "next_task": "Wire run_id threading through operative.py → execution_engine.py",
       "status": "idle"
     }

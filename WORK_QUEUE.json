@@ -1,5 +1,25 @@
 [
   {
+    "session_name": "jarvis-audit",
+    "task": "Wire query_received + route_decision events into router.py audit trail",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-24T22:03:43Z",
+    "completed_at": "2026-06-24T22:03:43Z",
+    "created_at": "2026-06-24T00:00:00Z",
+    "commit": "b4a0fa9"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix 18 bare except:pass silent failures in voice.py and jarvis_watcher.py",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-24T22:04:00Z",
+    "completed_at": "2026-06-24T22:04:00Z",
+    "created_at": "2026-06-24T00:00:00Z",
+    "commit": "6f0745b"
+  },
+  {
     "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
     "priority": 1,
@@ -43,6 +63,16 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Verify audit.jsonl end-to-end: confirm query_received+route_decision entries appear correctly after b4a0fa9",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T22:04:00Z",
+    "notes": "Follow-on from commit b4a0fa9 — validate the wiring actually fires"
   },
   {
     "session_name": "jarvis-board",
