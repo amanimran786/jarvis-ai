@@ -3,8 +3,8 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-25T21:16:09.604016+00:00",
-      "current_task": "silent-failure sweep complete \u2014 13 files, 90+ exceptions now logged",
+      "last_active": "2026-06-25T21:28:38.971628+00:00",
+      "current_task": "fixed 2 model routing test regressions from LOCAL_CODER_RECOMMENDED chain change",
       "status": "active"
     },
     {
@@ -152,8 +152,8 @@
     {
       "session_id": "99310b54-d646-40a7-a23a-ff741d433bf6",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:24:03.949697+00:00",
-      "current_task": "Tell me about yourself.",
+      "last_active": "2026-06-25T21:26:18.895450+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -168,8 +168,8 @@
     {
       "session_id": "4ed94764-cdb5-47c0-b896-c310d03d0f81",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:24:12.955901+00:00",
-      "current_task": "Give me my AI trust and safety role pack.",
+      "last_active": "2026-06-25T21:25:39.703299+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -186,8 +186,8 @@
     {
       "session_id": "83afeb72-4aff-4ed6-bd33-3f3feca00785",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:24:05.818947+00:00",
-      "current_task": "Give me my YouTube PEM 2026 role pack.",
+      "last_active": "2026-06-25T21:27:38.059748+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -195,8 +195,8 @@
     {
       "session_id": "1bf28099-1b42-44f9-b51f-ed92a89d91e0",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:23:59.642919+00:00",
-      "current_task": "What application states should I use?",
+      "last_active": "2026-06-25T21:28:26.147855+00:00",
+      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -204,8 +204,8 @@
     {
       "session_id": "fb707db2-dbbf-4640-b636-845b9ce40873",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:24:18.009230+00:00",
-      "current_task": "what's on my screen",
+      "last_active": "2026-06-25T21:28:40.820925+00:00",
+      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"

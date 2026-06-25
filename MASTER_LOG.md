@@ -68,3 +68,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 21:24:28] [jarvis-board] 🚨 CRITICAL ×6: AGENT_BOARD items 9/11/13 — commit sweep then pivot immediately
 [2026-06-25 21:24:28] [jarvis-local-llm] DEMOTED: routing verification queued (2 rounds in_progress, no activity)
 [2026-06-25 21:24:28] [orchestrator] QUEUE: 1 in_progress / 19 queued / 1 blocked / 21 done
+[2026-06-25 21:28:30] [orchestrator] ROUND 9 — sweep commit landed; AGENT_BOARD gate open; self-eval cycle 6 in flight
+[2026-06-25 21:28:30] [jarvis-board] DONE: silent-failure sweep complete — 10 remaining modules, full 13-file coverage (commit 9da8797)
+[2026-06-25 21:28:30] [jarvis-board] IN_PROGRESS: AGENT_BOARD items 9/11/13 — pivot gate open, sweep committed
+[2026-06-25 21:28:30] [jarvis-self-eval] WATCHING: session reports cycle 6 committed but no matching git commit yet
+[2026-06-25 21:28:30] [orchestrator] QUEUE: 1 in_progress / 17 queued / 1 blocked / 23 done
