@@ -1,5 +1,25 @@
 [
   {
+    "session_name": "jarvis-local-llm",
+    "task": "Integrate Ollama Cloud brain into model_router.py routing table \u2014 respect LOCAL_FIRST priority order",
+    "priority": 1,
+    "status": "in_progress",
+    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
+    "completed_at": null,
+    "created_at": "2026-06-25T04:53:30.353381+00:00",
+    "notes": "loop-engineer session reported 'Ollama Cloud brain integration' as next task after budget"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Complete context pressure wiring in smart_stream \u2014 loop-engineer cycle 3 in progress",
+    "priority": 1,
+    "status": "in_progress",
+    "assigned_at": "2026-06-25T04:58:37.805404+00:00",
+    "completed_at": null,
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "loop-engineer session active at cycle 3; current_task=context pressure wiring in smart_stream"
+  },
+  {
     "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
     "priority": 1,
@@ -38,13 +58,23 @@
   },
   {
     "session_name": "jarvis-local-llm",
-    "task": "Integrate Ollama Cloud brain into model_router.py routing table \u2014 respect LOCAL_FIRST priority order",
+    "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
     "priority": 1,
     "status": "queued",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-25T04:53:30.353381+00:00",
-    "notes": "loop-engineer session reported 'Ollama Cloud brain integration' as next task after budget"
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Follow-on from c3eb04a routing fix \u2014 validate specialist wins don't regress"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Verify audit.jsonl captures memory_write + route_decision events end-to-end after e84263b+3af8ba4",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Both memory wiring commits landed \u2014 needs smoke test to confirm events fire correctly"
   },
   {
     "session_name": "jarvis-board",
@@ -54,25 +84,6 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
-  },
-  {
-    "session_name": "jarvis-self-eval",
-    "task": "Implement /reflect improvements: save reflection deltas to vault, surface in briefing",
-    "priority": 2,
-    "status": "queued",
-    "assigned_at": null,
-    "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
-  },
-  {
-    "session_name": "jarvis-local-llm",
-    "task": "Model routing: update model_router.py to respect GLM 5.2 profile once eval lane posts findings",
-    "priority": 2,
-    "status": "queued",
-    "assigned_at": null,
-    "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z",
-    "unblocked_by": "commit 41c082b \u2014 self_eval.jsonl now available"
   },
   {
     "session_name": "jarvis-local-llm",
@@ -131,13 +142,14 @@
     "notes": "Follow-on from c0a8ec1 \u2014 errors now logged, but no rotation or alerting yet"
   },
   {
-    "session_name": "jarvis-board",
-    "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
-    "priority": 3,
-    "status": "blocked",
+    "session_name": "jarvis-self-eval",
+    "task": "Wire /reflect output into daily briefing \u2014 surface reflection deltas at session start",
+    "priority": 2,
+    "status": "queued",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Follow-on from 02de25f \u2014 /reflect exists, now surface it automatically"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -156,6 +168,36 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
+    "priority": 3,
+    "status": "blocked",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Implement /reflect improvements: save reflection deltas to vault, surface in briefing",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": null,
+    "completed_at": "2026-06-25T05:00:00Z",
+    "created_at": "2026-06-24T00:00:00Z",
+    "commit": "02de25f"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Model routing: update model_router.py to respect GLM 5.2 profile once eval lane posts findings",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": null,
+    "completed_at": "2026-06-25T05:00:00Z",
+    "created_at": "2026-06-24T00:00:00Z",
+    "unblocked_by": "commit 41c082b \u2014 self_eval.jsonl now available",
+    "commit": "c3eb04a"
   },
   {
     "session_name": "jarvis-audit",
@@ -226,5 +268,46 @@
     "completed_at": "2026-06-25T00:15:00Z",
     "commit": "24e3cdb",
     "created_at": "2026-06-25T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix swallowed exceptions in _bg_agents.py, local_kokoro_subprocess_tts.py, runtime_state.py",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T05:00:00Z",
+    "completed_at": "2026-06-25T05:00:00Z",
+    "commit": "4bbe7a8",
+    "created_at": "2026-06-25T04:58:37.805404+00:00"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Wire memory_write events to mem0_layer.add() and memory.save_conversation()",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T05:00:00Z",
+    "completed_at": "2026-06-25T05:00:00Z",
+    "commit": "3af8ba4",
+    "created_at": "2026-06-25T04:58:37.805404+00:00"
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "Wire route_decision at orchestrator + memory_write in semantic_memory",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T05:00:00Z",
+    "completed_at": "2026-06-25T05:00:00Z",
+    "commit": "e84263b",
+    "created_at": "2026-06-25T04:58:37.805404+00:00"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Add resume signal + heartbeat primitives for watchdog control protocol",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T05:00:00Z",
+    "completed_at": "2026-06-25T05:00:00Z",
+    "commit": "44c037d",
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Implements RESUME_SIGNAL.json consumer + heartbeat writer as described in watchdog spec"
   }
 ]

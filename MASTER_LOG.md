@@ -39,3 +39,12 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 04:53:49] [orchestrator] UNBLOCKED: jarvis-local-llm GLM 5.2 profile task (self_eval.jsonl now available)
 [2026-06-25 04:53:49] [orchestrator] QUEUE: 16 queued / 7 done / 1 blocked — 3 new follow-on tasks added
 [2026-06-25 04:53:49] [orchestrator] LIVE: loop-engineer session (local-llm lane) active, next: Ollama Cloud brain integration
+[2026-06-25 04:58:51] [orchestrator] ROUND 5 — harvested 6 commits; 2 in-progress tasks; hourly reset imminent
+[2026-06-25 04:58:51] [jarvis-local-llm] DONE: specialist routing devstral/qwen3 over GLM_FLASH (commit c3eb04a)
+[2026-06-25 04:58:51] [jarvis-local-llm] DONE: resume signal + heartbeat primitives — sessions consuming watchdog schema (commit 44c037d)
+[2026-06-25 04:58:51] [jarvis-self-eval] DONE: reflection pipeline + /reflect command + kb/core/jarvis_self_eval.md (commit 02de25f)
+[2026-06-25 04:58:51] [jarvis-audit] DONE: route_decision + memory_write wiring in orchestrator + semantic_memory (commits e84263b, 3af8ba4)
+[2026-06-25 04:58:51] [jarvis-board] DONE: fix swallowed exceptions in _bg_agents.py, local_kokoro_tts, runtime_state (commit 4bbe7a8)
+[2026-06-25 04:58:51] [orchestrator] IN_PROGRESS: loop-engineer cycle 3 — context pressure wiring in smart_stream
+[2026-06-25 04:58:51] [orchestrator] IN_PROGRESS: Ollama Cloud brain model_router.py integration
+[2026-06-25 04:58:51] [orchestrator] QUEUE: 2 in_progress / 16 queued / 1 blocked / 13 done
