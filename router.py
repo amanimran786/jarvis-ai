@@ -841,6 +841,33 @@ def _reflect_command_reply() -> str:
         return f"/reflect unavailable: {exc}"
 
 
+def _is_diagnose_command(lower: str) -> bool:
+    """Trigger: /diagnose or explicit worst-interactions phrases."""
+    return lower.strip() in ("/diagnose", "diagnose") or any(
+        phrase in lower for phrase in (
+            "/diagnose",
+            "worst interactions",
+            "worst responses",
+            "failing interactions",
+            "lowest scoring",
+            "worst scoring",
+            "what's failing",
+            "what is failing",
+            "show failures",
+            "worst quality",
+            "diagnose quality",
+        )
+    )
+
+
+def _diagnose_command_reply() -> str:
+    try:
+        from harness import self_eval_log
+        return self_eval_log.diagnose_report(n=50, worst_n=5)
+    except Exception as exc:
+        return f"/diagnose unavailable: {exc}"
+
+
 def _is_meta_improvement_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -3664,6 +3691,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(_score_command_reply()), "Self-Eval"
     if _is_reflect_command(lower):
         return _s(_reflect_command_reply()), "Self-Eval"
+    if _is_diagnose_command(lower):
+        return _s(_diagnose_command_reply()), "Self-Eval"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):

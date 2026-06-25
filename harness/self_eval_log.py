@@ -526,6 +526,46 @@ def score_report(n: int = 50) -> str:
     return "\n".join(lines)
 
 
+# ── /diagnose command text ────────────────────────────────────────────────────
+
+def diagnose_report(n: int = 50, worst_n: int = 5) -> str:
+    """Show the worst-scoring recent interactions for targeted improvement."""
+    records = load_recent(n)
+    if not records:
+        return "No self-eval scores logged yet. Run a few queries first."
+
+    # Filter out error records and sort by quality ascending
+    scored = [r for r in records if "response_quality" in r and not r.get("error")]
+    if not scored:
+        return "No valid scored records in the last {n} responses."
+
+    worst = sorted(scored, key=lambda r: r.get("response_quality", 1.0))[:worst_n]
+
+    lines = [f"Worst {len(worst)} interactions (of last {len(scored)} scored):"]
+    for i, r in enumerate(worst, 1):
+        rq = r.get("response_quality", 0.0)
+        rr = r.get("response_relevance", 0.0)
+        ra = r.get("routing_accuracy", 0.0)
+        cs = r.get("conciseness", 0.0)
+        flags = r.get("flags", [])
+        route = r.get("route", "") or "—"
+        query = r.get("query", "")[:70]
+        note = r.get("reflection_note", "")
+
+        lines.append(f"\n{i}. [{route}] \"{query}\"")
+        lines.append(f"   quality={rq:.2f}  routing={ra:.2f}  relevance={rr:.2f}  conciseness={cs:.2f}")
+        if flags:
+            lines.append(f"   flags: {', '.join(flags)}")
+        if note:
+            lines.append(f"   note: {note}")
+
+    avg = rolling_average(n)
+    overall = avg.get("response_quality")
+    if overall is not None:
+        lines.append(f"\nOverall avg quality (last {avg['count']}): {overall:.2f}/1.0")
+    return "\n".join(lines)
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _cli(argv: list[str]) -> int:
