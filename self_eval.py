@@ -31,6 +31,11 @@ from typing import Any
 
 import runtime_state
 
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
+
 log = logging.getLogger(__name__)
 
 # ── Storage ────────────────────────────────────────────────────────────────────
@@ -228,6 +233,7 @@ def score_response(
             "response_len": len(response),
         }
         _append_score(record)
+        _audit_log("self_eval_score", interaction_id=record["id"], composite=composite, routing_tag=routing_tag or ctx.get("routing_tag", ""))
         return record
 
     except Exception:

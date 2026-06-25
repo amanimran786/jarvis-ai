@@ -12,6 +12,7 @@ Triggered by:
   - Automatically after detecting repeated failures in a conversation
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -222,7 +223,7 @@ def _ask_for_analysis(prompt: str) -> str:
             from brains.brain_ollama import ask_local
             return ask_local(prompt, model=LOCAL_REASONING)
     except Exception:
-        pass
+        logging.debug("[SelfImprove] silent failure in _ask_for_analysis", exc_info=True)
     return ask_with_priority(prompt, tier="deep")
 
 
@@ -234,7 +235,7 @@ def _ask_for_code(prompt: str) -> str:
             from brains.brain_ollama import ask_local
             return ask_local(prompt, model=LOCAL_CODER)
     except Exception:
-        pass
+        logging.debug("[SelfImprove] silent failure in _ask_for_code", exc_info=True)
     return ask_with_priority(prompt, tier="deep")
 
 
@@ -798,7 +799,7 @@ def restart_jarvis() -> None:
                 _child.terminate()
                 _child.join(timeout=1.0)
             except Exception:
-                pass
+                logging.debug("[SelfImprove] silent failure in restart_jarvis", exc_info=True)
     except Exception:
-        pass
+        logging.debug("[SelfImprove] silent failure in restart_jarvis", exc_info=True)
     os.execv(sys.executable, [sys.executable] + sys.argv)

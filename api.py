@@ -75,6 +75,10 @@ import security_roe
 import usage_tracker
 import runtime_state
 import provider_router
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
 import task_runtime
 import task_persistence
 import semantic_memory
@@ -846,6 +850,7 @@ def chat(req: ChatRequest):
                         # send SSE comment to hold the connection open
                         yield ": keepalive\n\n"
                 response = "".join(chunks)
+                _audit_log("response_sent", model_used=model, query=req.message[:200], chars=len(response))
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 stream_source = f"{source}_stream"
                 context_stats = ctx.record_request_stats(model, source=stream_source)
@@ -885,6 +890,7 @@ def chat(req: ChatRequest):
         else:
             stream, model = route_stream(req.message)
         response = "".join(stream)
+        _audit_log("response_sent", model_used=model, query=req.message[:200], chars=len(response))
         if source == "mobile_web":
             _mobile_history_append(session_id, req.message, response)
         usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
