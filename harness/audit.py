@@ -154,8 +154,30 @@ def _rotate_logs() -> None:
 
 # ── Core write ────────────────────────────────────────────────────────────────
 
+def _log_audit_error(exc: Exception, event_type: str) -> None:
+    """Write a failure to audit_errors.log — never raises."""
+    try:
+        err_path = _logs_dir() / "audit_errors.log"
+        ts = datetime.now(timezone.utc).isoformat()
+        msg = f"{ts} audit_log({event_type!r}) failed: {type(exc).__name__}: {exc}\n"
+        with open(err_path, "a") as f:
+            f.write(msg)
+    except Exception:
+        pass  # last resort — truly silenced
+
+
 def audit_log(event_type: str, **kwargs: Any) -> None:
-    """Append one audit record to logs/audit.jsonl (thread-safe)."""
+    """Append one audit record to logs/audit.jsonl (thread-safe).
+
+    NEVER raises — any internal failure is written to audit_errors.log.
+    """
+    try:
+        _audit_log_impl(event_type, **kwargs)
+    except Exception as exc:
+        _log_audit_error(exc, event_type)
+
+
+def _audit_log_impl(event_type: str, **kwargs: Any) -> None:
     global _SESSION_QUERY_COUNT, _SESSION_MEMORY_WRITES, _SESSION_ERROR_COUNT
     _rotate_logs()
 
@@ -165,7 +187,7 @@ def audit_log(event_type: str, **kwargs: Any) -> None:
         "event_type": event_type,
     }
     # Pull well-known fields to the top level; rest go into payload
-    top_level = {"model_used", "tokens_in", "tokens_out", "success", "error"}
+    top_level = {"model_used", "tokens_in", "tokens_out", "success", "error", "latency_ms"}
     payload = {}
     for k, v in kwargs.items():
         if k in top_level:
@@ -188,11 +210,8 @@ def audit_log(event_type: str, **kwargs: Any) -> None:
 
     line = json.dumps(record, default=str)
     with _lock:
-        try:
-            with open(_audit_log_path(), "a") as f:
-                f.write(line + "\n")
-        except OSError:
-            pass  # disk full or permissions — never crash the process
+        with open(_audit_log_path(), "a") as f:
+            f.write(line + "\n")
 
     # Keep ORCHESTRATOR_STATUS in sync
     if event_type in ("query_received", "response_sent", "session_start", "session_end"):
