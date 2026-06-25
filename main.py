@@ -1,4 +1,5 @@
 import atexit
+import logging
 import multiprocessing
 import os
 import signal
@@ -21,19 +22,19 @@ def _reap_children() -> None:
         try:
             child.terminate()
         except Exception:
-            pass
+            logging.debug("[Main] child.terminate failed for %s", child.pid, exc_info=True)
     for child in children:
         try:
             child.join(timeout=1.5)
         except Exception:
-            pass
+            logging.debug("[Main] child.join failed for %s", child.pid, exc_info=True)
     # Hard-kill any that ignored SIGTERM
     for child in children:
         try:
             if child.is_alive():
                 child.kill()
         except Exception:
-            pass
+            logging.debug("[Main] child.kill failed for %s", child.pid, exc_info=True)
 
 
 def _shutdown_runtime(reason: str = "") -> None:
@@ -53,14 +54,14 @@ def _shutdown_runtime(reason: str = "") -> None:
             try:
                 stop_call()
             except Exception:
-                pass
+                logging.debug("[Main] shutdown stop_call failed", exc_info=True)
 
         _reap_children()
 
         try:
             runtime_state.mark_stopped(reason)
         except Exception:
-            pass
+            logging.debug("[Main] runtime_state.mark_stopped failed", exc_info=True)
 
 
 def _signal_shutdown(signum, frame) -> None:
@@ -170,7 +171,7 @@ def _append_crash_log(label: str, exc_type, exc_value, exc_traceback) -> None:
             source="runtime_crash",
         )
     except Exception:
-        pass
+        logging.debug("[Main] evals crash log write failed", exc_info=True)
 
 
 def _install_crash_logging() -> None:
@@ -308,7 +309,7 @@ def _run_headless():
                     ])
                     cli.print_status_bar()
                 except Exception:
-                    pass
+                    logging.debug("[Main] status bar update failed", exc_info=True)
             except Exception:
                 traceback.print_exc()
                 speak("Sorry, something went wrong.")
@@ -350,7 +351,7 @@ def _run_deferred_startup_tasks() -> None:
         from local_runtime import local_stt
         local_stt.preload()
     except Exception:
-        pass
+        logging.debug("[Main] STT preload failed", exc_info=True)
 
     # Pin the default local model in Ollama RAM — eliminates 20-40s cold-load latency
     try:
@@ -359,7 +360,7 @@ def _run_deferred_startup_tasks() -> None:
         model = get_best_available(LOCAL_DEFAULT)
         start_keepalive(model)
     except Exception:
-        pass
+        logging.debug("[Main] Ollama keepalive startup failed", exc_info=True)
 
     # Pre-render common TTS phrases so acknowledgements play instantly
     try:
@@ -369,7 +370,7 @@ def _run_deferred_startup_tasks() -> None:
             from local_runtime.local_kokoro_tts import prewarm_phrase_cache
         prewarm_phrase_cache()
     except Exception:
-        pass
+        logging.debug("[Main] TTS phrase cache prewarm failed", exc_info=True)
 
     request_permissions = os.getenv("JARVIS_REQUEST_STARTUP_PERMISSIONS", "").lower() in {"1", "true", "yes", "on"}
     if request_permissions:
@@ -405,7 +406,7 @@ def _interactive_console_command() -> str:
         api_base = str(discovered.get("base_url") or "").strip()
         api_token = str(discovered.get("token") or os.getenv("JARVIS_API_TOKEN", "")).strip()
     except Exception:
-        pass
+        logging.debug("[Main] API endpoint discovery failed", exc_info=True)
 
     exports = []
     if api_base:
@@ -428,7 +429,7 @@ def _interactive_console_already_running() -> bool:
         if session.get("alive"):
             return True
     except Exception:
-        pass
+        logging.debug("[Main] console session read failed", exc_info=True)
     try:
         result = subprocess.run(
             ["pgrep", "-fal", "--", "--console"],
@@ -439,7 +440,7 @@ def _interactive_console_already_running() -> bool:
         if result.returncode == 0 and result.stdout.strip():
             return True
     except Exception:
-        pass
+        logging.debug("[Main] pgrep --console check failed", exc_info=True)
     try:
         result = subprocess.run(
             ["pgrep", "-fal", "jarvis_cli.py --interactive"],
@@ -450,7 +451,7 @@ def _interactive_console_already_running() -> bool:
         if result.returncode == 0 and result.stdout.strip():
             return True
     except Exception:
-        pass
+        logging.debug("[Main] pgrep jarvis_cli check failed", exc_info=True)
     return False
 
 
