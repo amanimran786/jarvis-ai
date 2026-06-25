@@ -245,7 +245,7 @@ def add_async(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = N
             name="mem0-write",
         ).start()
     except RuntimeError:
-        pass
+        logging.warning("[Mem0] thread start for mem0-write failed (thread limit?)", exc_info=True)
 
 
 # ── Read path ──────────────────────────────────────────────────────────────────
@@ -328,13 +328,13 @@ def close() -> None:
         if callable(client_close):
             client_close()
     except Exception:
-        pass
+        logging.debug("[Mem0] vector store client close failed", exc_info=True)
     try:
         memory_close = getattr(m, "close", None)
         if callable(memory_close):
             memory_close()
     except Exception:
-        pass
+        logging.debug("[Mem0] memory instance close failed", exc_info=True)
     _memory_instance = None
     _release_qdrant_lock()
 
