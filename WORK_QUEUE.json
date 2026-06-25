@@ -1,23 +1,13 @@
 [
   {
     "session_name": "jarvis-board",
-    "task": "Silent-failure sweep: 13 files audited, 90+ bare exceptions converted to logged exceptions",
-    "priority": 1,
-    "status": "in_progress",
-    "assigned_at": "2026-06-25T21:20:15.631564+00:00",
-    "completed_at": null,
-    "created_at": "2026-06-25T21:20:15.631564+00:00",
-    "notes": "\u26a0 STALE: session reported complete 2 rounds ago but no commit yet. If jarvis-board stalled, treat as done and move to AGENT_BOARD items."
-  },
-  {
-    "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
     "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
+    "status": "in_progress",
+    "assigned_at": "2026-06-25T21:28:06.332061+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
-    "notes": "\ud83d\udea8 CRITICAL OVERDUE: 6 rounds no movement. jarvis-board: this is the only task after sweep commits. Items: 9=Ollama memory-pressure, 11=?, 13=eval_trace_score surface."
+    "notes": "Sweep committed (9da8797). Pivot gate open. Items: 9=Ollama memory-pressure in security gate, 11=?, 13=eval_trace_score surface (observe-only)"
   },
   {
     "session_name": "jarvis-board",
@@ -66,16 +56,6 @@
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
     "notes": "Both memory wiring commits landed \u2014 needs smoke test to confirm events fire correctly"
-  },
-  {
-    "session_name": "jarvis-board",
-    "task": "\u26a0 NEXT after sweep commit: Review and resolve AGENT_BOARD items 9, 11, 13 \u2014 6 rounds overdue",
-    "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
-    "completed_at": null,
-    "created_at": "2026-06-25T21:20:15.631564+00:00",
-    "notes": "Explicit pivot gate: do not start new sweep work until AGENT_BOARD items are closed"
   },
   {
     "session_name": "jarvis-board",
@@ -198,6 +178,17 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Silent-failure sweep: 13 files audited, 90+ bare exceptions converted to logged exceptions",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:20:15.631564+00:00",
+    "completed_at": "2026-06-25T21:28:06.332061+00:00",
+    "created_at": "2026-06-25T21:20:15.631564+00:00",
+    "notes": "Committed: 10 remaining modules, 13 files total, 90+ exceptions now logged",
+    "commit": "9da8797"
   },
   {
     "session_name": "jarvis-local-llm",
@@ -413,5 +404,16 @@
     "completed_at": "2026-06-25T21:24:17.011387+00:00",
     "commit": "b555d4e",
     "created_at": "2026-06-25T21:24:17.011387+00:00"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix swallowed exceptions in 10 remaining modules (completes full silent-failure sweep)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:28:06.332061+00:00",
+    "completed_at": "2026-06-25T21:28:06.332061+00:00",
+    "commit": "9da8797",
+    "created_at": "2026-06-25T21:28:06.332061+00:00",
+    "notes": "Final batch \u2014 sweep now covers all modules. Total: 13 files, 90+ exceptions logged."
   }
 ]
