@@ -1,38 +1,46 @@
 {
-  "version": 1,
-  "description": "Known Jarvis dev sessions. Sessions can register themselves by adding an entry here.",
+  "version": 2,
+  "description": "Registry of all active Jarvis dev sessions. Short IDs match the name field in ORCHESTRATOR_STATUS.json and session_name in WORK_QUEUE.json.",
   "sessions": [
     {
-      "name": "Jarvis AI - assess and continue",
-      "purpose": "Architecture review, dashboard/UX work, orchestration, top-level AGENT_BOARD items",
+      "name": "jarvis-board",
+      "display": "Jarvis Board — Bug Fixes & AGENT_BOARD",
+      "purpose": "Bug fixes, AGENT_BOARD item closure, baseline suite, freeze lift. Primary conductor lane.",
       "status": "active",
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Claude (Cowork)",
-      "notes": "Primary conductor lane. Coordinates lane dispatch and harvest."
+      "files_owned": ["AGENT_BOARD.md", "router.py"],
+      "notes": "Coordinates lane dispatch and harvest. Do not modify model_router.py or brain_ollama.py."
     },
     {
-      "name": "Jarvis self-improvement & self-eval",
-      "purpose": "Autonomous self-eval scoring loop, /reflect improvements, prompt optimization",
+      "name": "jarvis-self-eval",
+      "display": "Jarvis Self-Eval — Improvement Pipeline",
+      "purpose": "Autonomous self-eval scoring loop, /reflect improvements, PreFlect gate, prompt optimizer.",
       "status": "active",
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Claude (Cowork)",
-      "notes": "Runs self_eval.py harness; writes scores to eval_trace_score output."
+      "files_owned": ["self_eval.py", "self_improve.py", "evals.py"],
+      "notes": "Writes scores to eval_trace_score. PreFlect is default-off (JARVIS_PREFLECT=1 to enable)."
     },
     {
-      "name": "Jarvis local LLM upgrades & memory",
-      "purpose": "Context window wiring, model routing improvements, cross-session memory",
+      "name": "jarvis-local-llm",
+      "display": "Jarvis Local LLM — Budget & Routing",
+      "purpose": "context_budget.py wiring, LOCAL_FIRST routing, model_router.py, cross-session memory persistence.",
       "status": "active",
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Codex",
-      "notes": "Owns brains/brain_ollama.py context budget and model_router.py changes."
+      "files_owned": ["brains/brain_ollama.py", "model_router.py", "context_budget.py"],
+      "notes": "GLM 5.2 model-default changes require eval lane findings first. Memory writes go to vault/."
     },
     {
-      "name": "Jarvis native tool-loop & telemetry",
-      "purpose": "Native tool-loop context, usage_tracker.py telemetry, brain_ollama structured output",
+      "name": "jarvis-audit",
+      "display": "Jarvis Audit — Logging, Snapshots & Restore",
+      "purpose": "harness/audit.py improvements, snapshot UI, /restore command, run_id threading, eval_trace_score surface.",
       "status": "active",
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Codex",
-      "notes": "Scoped to brains/brain_ollama.py and usage_tracker.py. Do not touch model_router.py — owned by LLM upgrades lane."
+      "files_owned": ["harness/audit.py", "logs/", "snapshots/"],
+      "notes": "Owns ORCHESTRATOR_STATUS.json writes via harness/audit.py. Do not edit model_router.py."
     }
   ]
 }
