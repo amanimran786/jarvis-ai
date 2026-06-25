@@ -34,10 +34,10 @@ def test_glm_flash_escalates_properly():
         assert escalated_model == LOCAL_GLM_FLASH
 
 
-def test_glm_flash_selected_for_coding_route():
-    # Coding route: glm-4.7-flash is prioritized
+def test_glm_flash_selected_for_coding_route_without_specialist():
+    # When no specialist coder (devstral/qwen2.5-coder) is installed, glm-4.7-flash is used
     assert _best_local_with(
-        {LOCAL_GLM_FLASH, "qwen2.5-coder:7b", LOCAL_DEFAULT},
+        {LOCAL_GLM_FLASH, LOCAL_DEFAULT},
         "write a python function to parse csv",
     ) == LOCAL_GLM_FLASH
 
