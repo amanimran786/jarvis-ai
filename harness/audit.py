@@ -14,6 +14,7 @@ Public API:
     restore_snapshot(snapshot_dir)   — restore memory from a snapshot dir
 """
 from __future__ import annotations
+import logging
 
 import atexit
 import json
@@ -35,7 +36,7 @@ def _base_dir() -> Path:
             import runtime_state
             return runtime_state.app_data_dir()
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in _base_dir", exc_info=True)
     return Path(__file__).resolve().parent.parent
 
 
@@ -274,7 +275,7 @@ def _update_orch_status(event_type: str, payload: dict) -> None:
                 json.dump(doc, f, indent=2)
             os.replace(tmp, path)
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in _update_orch_status", exc_info=True)
 
 
 # ── Session snapshots ──────────────────────────────────────────────────────────
@@ -343,7 +344,7 @@ def _mark_snapshot(status: str) -> None:
         with open(meta_path, "w") as f:
             json.dump(meta, f, indent=2)
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in _mark_snapshot", exc_info=True)
 
 
 def _purge_old_snapshots() -> None:
@@ -354,7 +355,7 @@ def _purge_old_snapshots() -> None:
             if old.is_dir():
                 shutil.rmtree(old, ignore_errors=True)
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in _purge_old_snapshots", exc_info=True)
 
 
 def list_snapshots() -> list[dict]:
@@ -379,7 +380,7 @@ def list_snapshots() -> list[dict]:
                 "status": meta.get("status", "unknown"),
             })
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in list_snapshots", exc_info=True)
     return result
 
 
@@ -415,7 +416,7 @@ def restore_snapshot(snapshot_path: str | Path) -> tuple[bool, str]:
                 meta = json.load(f)
             created_at = meta.get("created_at", snap.name)
         except Exception:
-            pass
+            logging.debug("[Audit] silent failure in restore_snapshot", exc_info=True)
 
         audit_log("memory_restore", snapshot=str(snap), created_at=created_at)
         return True, f"Restored memory from snapshot {snap.name} (created {created_at})"
@@ -444,7 +445,7 @@ def _append_ops_ledger(duration_secs: float, crashed: bool) -> None:
             with open(_ops_log_path(), "a") as f:
                 f.write(entry)
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in _append_ops_ledger", exc_info=True)
 
 
 # ── Session lifecycle ──────────────────────────────────────────────────────────
@@ -572,4 +573,4 @@ def heartbeat(current_task: str, session_name: str = "jarvis-audit") -> None:
                 json.dump(doc, f, indent=2)
             os.replace(tmp, path)
     except Exception:
-        pass
+        logging.debug("[Audit] silent failure in heartbeat", exc_info=True)
