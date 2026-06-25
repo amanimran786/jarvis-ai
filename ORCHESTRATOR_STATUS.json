@@ -137,29 +137,6 @@
       "next_task": "Verify devstral/qwen3 routing stability in production [in_progress]"
     },
     {
-      "session_id": "b4de136c-04f9-4630-b17a-8107b316d330",
-      "name": "audit-loop",
-      "last_active": "2026-06-25T04:57:15.518805+00:00",
-      "current_task": null,
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "offline"
-    },
-    {
-      "session_id": "908b7977-965f-4c8a-9c02-453698c59a58",
-      "name": "jarvis",
-      "last_active": "2026-06-25T04:58:54.687911+00:00",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "find me flights to NYC",
-          "completed_at": "2026-06-25T04:58:54.687538+00:00"
-        }
-      ],
-      "next_task": null,
-      "status": "offline"
-    },
-    {
       "session_id": "f2e1d9e4-b9b0-43a7-beb4-82a500d42c70",
       "name": "jarvis",
       "last_active": "2026-06-25T21:15:05.217832+00:00",
@@ -176,8 +153,8 @@
     {
       "session_id": "99310b54-d646-40a7-a23a-ff741d433bf6",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:16:05.651501+00:00",
-      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
+      "last_active": "2026-06-25T21:20:02.653201+00:00",
+      "current_task": "Why are you a fit for a technical AI trust and safety role?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -185,8 +162,44 @@
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T21:16:19.267846Z",
-      "current_task": "reflect diff + snapshot history \u2014 Cycle 4 committed",
+      "last_active": "2026-06-25T21:18:54.656253Z",
+      "current_task": "routing_tag wired into all api.py log_interaction calls \u2014 Cycle 5 committed",
+      "status": "active"
+    },
+    {
+      "session_id": "4ed94764-cdb5-47c0-b896-c310d03d0f81",
+      "name": "jarvis",
+      "last_active": "2026-06-25T21:19:56.900671+00:00",
+      "current_task": "Give me my YouTube PEM 2026 role pack.",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "95285270-f1e6-41a7-b579-5932372b1de2",
+      "name": "jarvis",
+      "last_active": "2026-06-25T21:19:49.918004+00:00",
+      "current_task": "Use the vault curator to read [[80 Jarvis Roadmap]].",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "83afeb72-4aff-4ed6-bd33-3f3feca00785",
+      "name": "jarvis",
+      "last_active": "2026-06-25T21:20:33.286469+00:00",
+      "current_task": "what's on my screen",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "1bf28099-1b42-44f9-b51f-ed92a89d91e0",
+      "name": "jarvis",
+      "last_active": "2026-06-25T21:20:27.690556+00:00",
+      "current_task": "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence.",
+      "completed_tasks": [],
+      "next_task": null,
       "status": "active"
     }
   ],

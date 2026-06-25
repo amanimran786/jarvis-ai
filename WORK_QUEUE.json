@@ -11,6 +11,16 @@
   },
   {
     "session_name": "jarvis-board",
+    "task": "Silent-failure sweep: 13 files audited, 90+ bare exceptions converted to logged exceptions",
+    "priority": 1,
+    "status": "in_progress",
+    "assigned_at": "2026-06-25T21:20:15.631564+00:00",
+    "completed_at": null,
+    "created_at": "2026-06-25T21:20:15.631564+00:00",
+    "notes": "jarvis-board live session reports sweep complete \u2014 awaiting commit"
+  },
+  {
+    "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
     "priority": 1,
     "status": "queued",
@@ -56,6 +66,16 @@
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
     "notes": "Both memory wiring commits landed \u2014 needs smoke test to confirm events fire correctly"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "\u26a0 NEXT after sweep commit: Review and resolve AGENT_BOARD items 9, 11, 13 \u2014 6 rounds overdue",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T21:20:15.631564+00:00",
+    "notes": "Explicit pivot gate: do not start new sweep work until AGENT_BOARD items are closed"
   },
   {
     "session_name": "jarvis-board",
@@ -131,6 +151,16 @@
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
     "notes": "Follow-on from 02de25f \u2014 /reflect exists, now surface it automatically"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Capture cycle metrics: track routing_tag distribution across sessions, surface in /score report",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T21:20:15.631564+00:00",
+    "notes": "Follow-on from cycle 5 routing_tag wiring \u2014 now that tags are logged, aggregate them"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -352,5 +382,16 @@
     "completed_at": "2026-06-25T21:16:01.564411+00:00",
     "commit": "fcb85f0",
     "created_at": "2026-06-25T21:16:01.564411+00:00"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Wire routing_tag into all api.py log_interaction calls",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:20:15.631564+00:00",
+    "completed_at": "2026-06-25T21:20:15.631564+00:00",
+    "commit": "2135ae6",
+    "created_at": "2026-06-25T21:20:15.631564+00:00",
+    "notes": "Cycle 5 \u2014 autonomous self-eval loop wired routing_tag across api.py"
   }
 ]
