@@ -49,6 +49,10 @@ from pathlib import Path
 from typing import Any
 
 import runtime_state
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass  # harness not available (e.g. early boot)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -445,6 +449,7 @@ def write(tier: str, entry: dict[str, Any]) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{entry['id']}.json"
     _atomic_write_json(path, entry)
+    _audit_log("memory_write", operation="semantic_write", tier=tier, content_preview=(entry.get("content") or "")[:120])
 
     invalidate()
     return path
@@ -465,6 +470,7 @@ def write_episodic(domain: str, event: dict[str, Any]) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{event['id']}.json"
     _atomic_write_json(path, event)
+    _audit_log("memory_write", operation="episodic_write", domain=domain, content_preview=(event.get("content") or "")[:120])
 
     invalidate()
     return path
