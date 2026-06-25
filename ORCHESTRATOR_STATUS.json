@@ -4,18 +4,23 @@
     {
       "session_id": "seed-jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-25T00:15:00Z",
+      "last_active": "2026-06-25T05:00:00Z",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "Fix 18 bare except:pass silent failures in voice.py and jarvis_watcher.py",
-          "completed_at": "2026-06-24T22:04:00Z",
-          "commit": "6f0745b"
+          "task": "Fix 18 bare except:pass in voice.py + jarvis_watcher.py",
+          "commit": "6f0745b",
+          "completed_at": "2026-06-24T22:04:00Z"
         },
         {
           "task": "Fix swallowed exceptions in main.py",
-          "completed_at": "2026-06-25T00:15:00Z",
-          "commit": "24e3cdb"
+          "commit": "24e3cdb",
+          "completed_at": "2026-06-25T00:15:00Z"
+        },
+        {
+          "task": "Fix swallowed exceptions in _bg_agents.py, local_kokoro_subprocess_tts.py, runtime_state.py",
+          "commit": "4bbe7a8",
+          "completed_at": "2026-06-25T05:00:00Z"
         }
       ],
       "next_task": "Review and close open AGENT_BOARD items (9, 11, 13)",
@@ -24,63 +29,88 @@
     {
       "session_id": "seed-jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T01:00:00Z",
+      "last_active": "2026-06-25T05:00:00Z",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "3-axis self-eval scorer + /score command with logs/self_eval.jsonl",
-          "completed_at": "2026-06-25T01:00:00Z",
-          "commit": "41c082b"
+          "task": "3-axis self-eval scorer + /score + self_eval.jsonl",
+          "commit": "41c082b",
+          "completed_at": "2026-06-25T01:00:00Z"
+        },
+        {
+          "task": "Reflection pipeline + /reflect + kb/core/jarvis_self_eval.md",
+          "commit": "02de25f",
+          "completed_at": "2026-06-25T05:00:00Z"
         }
       ],
-      "next_task": "Wire /score output to eval_trace_score.py surface",
+      "next_task": "Wire /reflect output into daily briefing",
       "status": "idle"
     },
     {
       "session_id": "seed-jarvis-local-llm",
       "name": "jarvis-local-llm",
-      "last_active": "2026-06-25T04:49:00Z",
+      "last_active": "2026-06-25T05:50:00Z",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "Three-tier LOCAL_FIRST rate limiter + /budget command",
-          "completed_at": "2026-06-25T00:00:00Z",
-          "commit": "1850965"
+          "task": "Three-tier LOCAL_FIRST rate limiter + /budget",
+          "commit": "1850965",
+          "completed_at": "2026-06-25T00:00:00Z"
         },
         {
           "task": "Wire Ollama Cloud as middle routing tier",
-          "completed_at": "2026-06-25T02:00:00Z",
-          "commit": "3401988"
+          "commit": "3401988",
+          "completed_at": "2026-06-25T02:00:00Z"
+        },
+        {
+          "task": "Specialist models (devstral/qwen3) win over GLM_FLASH for code/reasoning",
+          "commit": "c3eb04a",
+          "completed_at": "2026-06-25T05:00:00Z"
+        },
+        {
+          "task": "Resume signal + heartbeat primitives for watchdog",
+          "commit": "44c037d",
+          "completed_at": "2026-06-25T05:00:00Z"
         }
       ],
-      "next_task": "Integrate Ollama Cloud brain into model_router.py routing table",
+      "next_task": "Complete context pressure wiring in smart_stream (cycle 3 in progress)",
       "status": "idle"
     },
     {
       "session_id": "seed-jarvis-audit",
       "name": "jarvis-audit",
-      "last_active": "2026-06-25T00:30:00Z",
+      "last_active": "2026-06-25T05:51:00Z",
       "current_task": null,
       "completed_tasks": [
         {
-          "task": "Wire query_received + route_decision events into router.py audit trail",
-          "completed_at": "2026-06-24T22:03:43Z",
-          "commit": "b4a0fa9"
+          "task": "Wire query_received + route_decision events into router.py",
+          "commit": "b4a0fa9",
+          "completed_at": "2026-06-24T22:03:43Z"
         },
         {
-          "task": "Harden audit_log() \u2014 blanket try/except, audit_errors.log",
-          "completed_at": "2026-06-25T00:30:00Z",
-          "commit": "c0a8ec1"
+          "task": "Harden audit_log() + audit_errors.log",
+          "commit": "c0a8ec1",
+          "completed_at": "2026-06-25T00:30:00Z"
+        },
+        {
+          "task": "Wire route_decision at orchestrator + memory_write in semantic_memory",
+          "commit": "e84263b",
+          "completed_at": "2026-06-25T05:00:00Z"
+        },
+        {
+          "task": "Wire memory_write to mem0_layer.add() and memory.save_conversation()",
+          "commit": "3af8ba4",
+          "completed_at": "2026-06-25T05:00:00Z"
         }
       ],
-      "next_task": "Wire run_id threading through operative.py \u2192 execution_engine.py",
+      "next_task": "Verify audit.jsonl captures memory_write + route_decision end-to-end",
       "status": "idle"
     },
     {
       "session_id": "ba7037ad-e9e2-4746-bcbd-964648465f5a",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:53:24.282353+00:00",
-      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
+      "last_active": "2026-06-25T04:54:30.410906+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -88,8 +118,8 @@
     {
       "session_id": "4f50bc04-e822-422c-b561-ebc86e9aba90",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:53:25.761946+00:00",
-      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "last_active": "2026-06-25T04:55:32.844710+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -97,8 +127,8 @@
     {
       "session_id": "a7acbf2b-79ca-4632-a30c-d8f3e83f1a7c",
       "name": "jarvis",
-      "last_active": "2026-06-25T04:53:35.404451+00:00",
-      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "last_active": "2026-06-25T04:55:40.806440+00:00",
+      "current_task": "What is the capital of Japan?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -119,6 +149,90 @@
       "last_active": "2026-06-25T04:53:09.366826+00:00",
       "status": "active",
       "current_task": "cycle 3: context pressure wiring in smart_stream"
+    },
+    {
+      "session_id": "1fe91010-8b17-4911-841f-9c97a4f46a5f",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:58:43.766178+00:00",
+      "current_task": "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "d420d32e-012d-40df-b401-b8be9a0f6202",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:58:34.617639+00:00",
+      "current_task": "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "jarvis-local-llm",
+      "name": "jarvis-local-llm",
+      "completed_tasks": [
+        {
+          "task": "Three-tier LOCAL_FIRST rate limiter + /budget",
+          "commit": "1850965",
+          "completed_at": "2026-06-25T00:00:00Z"
+        },
+        {
+          "task": "Wire Ollama Cloud as middle routing tier",
+          "commit": "3401988",
+          "completed_at": "2026-06-25T02:00:00Z"
+        },
+        {
+          "task": "Specialist models (devstral/qwen3) win over GLM_FLASH for code/reasoning",
+          "commit": "c3eb04a",
+          "completed_at": "2026-06-25T05:00:00Z"
+        },
+        {
+          "task": "Resume signal + heartbeat primitives for watchdog",
+          "commit": "44c037d",
+          "completed_at": "2026-06-25T05:00:00Z"
+        }
+      ],
+      "last_active": "2026-06-25T05:50:00Z",
+      "current_task": "idle \u2014 all 5 priority items complete, 56/56 tests passing",
+      "status": "idle",
+      "commit": "0c956da",
+      "tests": "56/56",
+      "cycle": 5,
+      "total_commits_this_session": 7,
+      "next_task": "Complete context pressure wiring in smart_stream (cycle 3 in progress)"
+    },
+    {
+      "session_id": "567335ba-8498-4c69-a21a-26adc0b01483",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:59:04.634823+00:00",
+      "current_task": "message Aman Imran get milk",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "b4de136c-04f9-4630-b17a-8107b316d330",
+      "name": "audit-loop",
+      "last_active": "2026-06-25T04:57:15.518805+00:00",
+      "current_task": null,
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "offline"
+    },
+    {
+      "session_id": "908b7977-965f-4c8a-9c02-453698c59a58",
+      "name": "jarvis",
+      "last_active": "2026-06-25T04:58:54.687911+00:00",
+      "current_task": null,
+      "completed_tasks": [
+        {
+          "task": "find me flights to NYC",
+          "completed_at": "2026-06-25T04:58:54.687538+00:00"
+        }
+      ],
+      "next_task": null,
+      "status": "offline"
     }
   ],
   "last_updated": "2026-06-25T04:53:09.366826+00:00",
@@ -152,5 +266,40 @@
       "tests": "46/46 passing",
       "at": "2026-06-25T04:53:09.366826+00:00"
     }
-  ]
+  ],
+  "self_eval_loop": {
+    "completed_capabilities": [
+      {
+        "name": "3-axis response scorer",
+        "module": "harness/self_eval_log.py",
+        "log": "logs/self_eval.jsonl",
+        "commit": "41c082b",
+        "completed_at": "2026-06-25T04:50:00Z"
+      },
+      {
+        "name": "/score command",
+        "trigger": "router.py _is_score_command()",
+        "commit": "41c082b",
+        "completed_at": "2026-06-25T04:50:00Z"
+      },
+      {
+        "name": "reflection pipeline",
+        "module": "harness/reflection.py",
+        "output": "kb/core/jarvis_self_eval.md",
+        "trigger": "/reflect command + learner daily cycle",
+        "commit": "02de25f",
+        "completed_at": "2026-06-25T05:00:00Z"
+      },
+      {
+        "name": "prompt self-optimizer",
+        "module": "harness/prompt_tuner.py",
+        "hook": "learner.get_learning_context() \u2192 memory.get_context() \u2192 every LLM call",
+        "commit": "c36c1a7",
+        "completed_at": "2026-06-25T05:15:00Z"
+      }
+    ],
+    "tests_passing": 98,
+    "next_target": "improve /reflect diff output: show what changed vs previous reflection",
+    "last_updated": "2026-06-25T04:59:01.068309+00:00"
+  }
 }
