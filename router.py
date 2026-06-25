@@ -786,6 +786,34 @@ def _performance_report_reply() -> str:
         return f"Self-eval report unavailable: {exc}"
 
 
+def _is_score_command(lower: str) -> bool:
+    """Trigger: /score or explicit rolling-score phrases."""
+    return lower.strip() in ("/score", "score") or any(
+        phrase in lower for phrase in (
+            "/score",
+            "rolling score",
+            "rolling average",
+            "show score",
+            "average score",
+            "last 50",
+            "response score",
+            "self eval score",
+            "self-eval score",
+            "conciseness score",
+            "routing score",
+            "relevance score",
+        )
+    )
+
+
+def _score_command_reply() -> str:
+    try:
+        from harness import self_eval_log
+        return self_eval_log.score_report(n=50)
+    except Exception as exc:
+        return f"/score unavailable: {exc}"
+
+
 def _is_meta_improvement_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -3605,8 +3633,16 @@ def route_stream(user_input: str) -> tuple:
         return _s(_meta_improvement_reply()), "Status"
     if _is_performance_report_query(lower):
         return _s(_performance_report_reply()), "Self-Eval"
+    if _is_score_command(lower):
+        return _s(_score_command_reply()), "Self-Eval"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
+    if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):
+        try:
+            from harness import budget as _budget_module
+            return _s(_budget_module.status_text()), "Budget"
+        except Exception as _exc:
+            return _s(f"Budget module unavailable: {_exc}"), "Budget"
     if any(p in lower for p in ("cost policy", "routing policy", "training policy", "should we train", "should we distill")):
         return _s(cost_policy.policy_text()), "Status"
     if any(p in lower for p in (
