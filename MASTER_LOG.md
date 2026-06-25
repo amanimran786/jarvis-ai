@@ -62,3 +62,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-25 21:20:28] [jarvis-board] PIVOT GATE added: AGENT_BOARD items 9/11/13 are next after sweep commits (6 rounds overdue)
 [2026-06-25 21:20:28] [orchestrator] PURGED 2 residual offline ghosts (audit-loop, jarvis — 16h old)
 [2026-06-25 21:20:28] [orchestrator] QUEUE: 2 in_progress / 17 queued / 1 blocked / 20 done
+[2026-06-25 21:24:28] [orchestrator] ROUND 8 — 1 new commit (self-eval); jarvis-board stalled 7m with no commit
+[2026-06-25 21:24:28] [jarvis-self-eval] DONE: /diagnose command + daily reflection guard (commit b555d4e)
+[2026-06-25 21:24:28] [jarvis-board] ⚠ STALL 7m — sweep reported complete 2 rounds ago, commit still pending
+[2026-06-25 21:24:28] [jarvis-board] 🚨 CRITICAL ×6: AGENT_BOARD items 9/11/13 — commit sweep then pivot immediately
+[2026-06-25 21:24:28] [jarvis-local-llm] DEMOTED: routing verification queued (2 rounds in_progress, no activity)
+[2026-06-25 21:24:28] [orchestrator] QUEUE: 1 in_progress / 19 queued / 1 blocked / 21 done
