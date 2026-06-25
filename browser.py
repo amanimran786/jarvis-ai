@@ -11,6 +11,7 @@ Supports Safari and Chromium-style browsers via AppleScript for:
 - reading live meeting captions from browser tabs
 """
 
+import logging
 import json
 import sqlite3
 import shutil
@@ -1068,7 +1069,7 @@ def launch_chrome_cdp(port: int = 9222) -> str:
         urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1)
         return "Chrome is already running with CDP enabled."
     except Exception:
-        pass
+        logging.debug("[Browser] silent failure in launch_chrome_cdp", exc_info=True)
     
     script = f'''
     tell application "Google Chrome" to quit

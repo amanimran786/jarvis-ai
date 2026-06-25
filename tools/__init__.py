@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 import threading
@@ -161,7 +162,7 @@ def set_brightness(level: int) -> str:
 
         return f"Brightness set to {level}%."
     except Exception:
-        pass
+        logging.debug("[Tools] silent failure in set_brightness", exc_info=True)
 
     # Fallback: 'brightness' CLI (Intel Macs / external DDC displays)
     try:
@@ -170,7 +171,7 @@ def set_brightness(level: int) -> str:
         if result.returncode == 0:
             return f"Brightness set to {level}%."
     except Exception:
-        pass
+        logging.debug("[Tools] silent failure in set_brightness", exc_info=True)
 
     return (
         "Brightness control requires Accessibility permission. "

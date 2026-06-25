@@ -15,6 +15,7 @@ Registry is seeded from AGENT_ROSTER in config.py — no postgres required for
 enforcement. Postgres is for audit persistence only.
 """
 from __future__ import annotations
+import logging
 
 import threading
 import time
@@ -51,7 +52,7 @@ def _audit_rbac_denial(actor: str, target: str, reason: str) -> None:
             rollback_ref="rbac_registry",
         )
     except Exception:
-        pass
+        logging.debug("[RBAC] silent failure in _audit_rbac_denial", exc_info=True)
 
 
 # ─── Rate limiter ─────────────────────────────────────────────────────────────

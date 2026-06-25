@@ -138,7 +138,7 @@ def stop_tunnel():
                 try:
                     _tunnel_proc.kill()
                 except Exception:
-                    pass
+                    logging.debug("[TunnelManager] silent failure in stop_tunnel", exc_info=True)
             _tunnel_proc = None
         _active_tunnel_url = None
 

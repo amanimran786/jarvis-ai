@@ -9,6 +9,7 @@ Commands:
   ade stop  <task_name>                    Kill session + remove worktree
 """
 from __future__ import annotations
+import logging
 
 import argparse
 import os
@@ -139,7 +140,7 @@ def _cpu_for_pid(pid: int | None) -> str:
         p = psutil.Process(pid)
         return f"{p.cpu_percent(interval=0.1):>4.1f}%"
     except Exception:
-        pass
+        logging.debug("[ADE.CLI] silent failure in _cpu_for_pid", exc_info=True)
     try:
         r = subprocess.run(
             ["ps", "-p", str(pid), "-o", "%cpu="],
@@ -148,7 +149,7 @@ def _cpu_for_pid(pid: int | None) -> str:
         if r.returncode == 0 and r.stdout.strip():
             return f"{r.stdout.strip():>5}"
     except Exception:
-        pass
+        logging.debug("[ADE.CLI] silent failure in _cpu_for_pid", exc_info=True)
     return "    -"
 
 

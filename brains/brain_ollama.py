@@ -159,7 +159,7 @@ def _close_client():
         try:
             close()
         except Exception:
-            pass
+            logging.debug("[BrainOllama] silent failure in _close_client", exc_info=True)
 
 
 atexit.register(_close_client)
@@ -193,7 +193,7 @@ def _system_has_headroom() -> bool:
         level = int(result.stdout.strip())
         return level >= int(_KEEPALIVE_MIN_FREE_RAM_FRACTION * 100)
     except Exception:
-        pass
+        logging.debug("[BrainOllama] silent failure in _system_has_headroom", exc_info=True)
     try:
         import psutil
         vm = psutil.virtual_memory()
@@ -1699,7 +1699,7 @@ def ask_ollama_cloud_stream(
                 tokens_out=completion_tokens,
             )
         except Exception:
-            pass
+            logging.debug("[BrainOllama] silent failure in unknown", exc_info=True)
 
     except (AuthenticationError, Exception) as exc:
         log.warning("[OllamaCloud] Error: %s", exc)

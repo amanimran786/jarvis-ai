@@ -35,7 +35,7 @@ def _base_dir() -> Path:
             import runtime_state
             return runtime_state.app_data_dir()
     except Exception:
-        pass
+        logging.debug("[Budget] silent failure in _base_dir", exc_info=True)
     return Path(__file__).resolve().parent.parent
 
 

@@ -23,6 +23,7 @@ Each Result:
 """
 
 from __future__ import annotations
+import logging
 
 import re
 import threading
@@ -110,7 +111,7 @@ def parse_steps(goal: str) -> list[str]:
         if steps:
             return steps[:6]
     except Exception:
-        pass
+        logging.debug("[Executor] silent failure in parse_steps", exc_info=True)
 
     return [goal.strip()]
 
@@ -135,7 +136,7 @@ def execute_step(step: str) -> StepResult:
                     if sum(len(c) for c in chunks) > 800:
                         break
             except Exception:
-                pass
+                logging.debug("[Executor] silent failure in _collect", exc_info=True)
             finally:
                 deadline.set()
 
@@ -192,7 +193,7 @@ def synthesise_results(goal: str, results: list[StepResult]) -> str:
         if text:
             return text
     except Exception:
-        pass
+        logging.debug("[Executor] silent failure in synthesise_results", exc_info=True)
 
     # Fallback: simple concatenation
     ok_steps  = [r for r in results if r["ok"]]
@@ -225,7 +226,7 @@ def run_async(goal: str, callback=None) -> threading.Thread:
             try:
                 callback(result)
             except Exception:
-                pass
+                logging.debug("[Executor] silent failure in _go", exc_info=True)
 
     t = threading.Thread(target=_go, daemon=True, name="jarvis-executor")
     t.start()

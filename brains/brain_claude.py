@@ -1,3 +1,4 @@
+import logging
 import anthropic
 from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT
 import memory as mem
@@ -33,7 +34,7 @@ def _get_client() -> "anthropic.Anthropic":
                     if key:
                         break
         except Exception:
-            pass
+            logging.debug("[BrainClaude] silent failure in _get_client", exc_info=True)
     if key:
         client = anthropic.Anthropic(api_key=key)
     return client

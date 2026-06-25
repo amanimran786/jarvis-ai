@@ -10,6 +10,7 @@ Best-effort by design: any failure here is logged and swallowed so user-facing
 responses are never affected by the capture lane.
 """
 from __future__ import annotations
+import logging
 
 import os
 
@@ -87,4 +88,4 @@ def wrap_stream(prompt, tier, candidate, raw_stream, source: str = "model_router
                     source=source,
                 )
             except Exception:
-                pass
+                logging.debug("[TeacherCapture] silent failure in wrap_stream", exc_info=True)

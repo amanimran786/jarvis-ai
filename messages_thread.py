@@ -6,6 +6,7 @@ maintains a Jarvis-side record of conversations: messages Jarvis sends and incom
 messages the user relays. Stored in Application Support so it persists across restarts.
 """
 
+import logging
 import json
 import os
 import threading
@@ -24,7 +25,7 @@ def _load() -> dict:
         if _THREADS_FILE.exists():
             return json.loads(_THREADS_FILE.read_text())
     except Exception:
-        pass
+        logging.debug("[MessagesThread] silent failure in _load", exc_info=True)
     return {}
 
 
@@ -33,7 +34,7 @@ def _save(data: dict) -> None:
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         _THREADS_FILE.write_text(json.dumps(data, indent=2))
     except Exception:
-        pass
+        logging.debug("[MessagesThread] silent failure in _save", exc_info=True)
 
 
 def _normalize_key(contact: str) -> str:

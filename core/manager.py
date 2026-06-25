@@ -394,7 +394,7 @@ class JarvisManager:
                     data = resp.json()
                     task.status = _map_event_type(data.get("type", ""))
             except Exception:
-                pass
+                logging.debug("[Manager] silent failure in status", exc_info=True)
             out[task.task_id] = task.status
         return out
 

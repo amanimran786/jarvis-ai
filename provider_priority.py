@@ -1,3 +1,4 @@
+import logging
 from config import (
     FREE_FIRST_ENABLED,
     GEMINI_FLASH,
@@ -109,7 +110,7 @@ def ask_with_priority(
                     source="provider_priority_cloud_teacher",
                 )
             except Exception:
-                pass
+                logging.debug("[ProviderPriority] silent failure in ask_with_priority", exc_info=True)
             return answer
         except Exception as exc:
             last_error = exc
