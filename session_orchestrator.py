@@ -323,14 +323,45 @@ def _build_rich_panel(
         qt.add_row("—", "—", Text("—"), "[dim]Queue empty[/dim]")
 
     ts = datetime.now().strftime("%H:%M:%S")
+
+    # Live session count (last_active within 5 min AND status=active)
+    live_count = sum(
+        1 for s in sessions
+        if _parse_age_seconds(s.get("last_active")) <= STALL_THRESHOLD_SECONDS
+        and s.get("status") == "active"
+    )
+    named_ids = {s.get("session_id", "") for s in sessions}
+    seed_ids = {s.get("session_id", "") for s in sessions if s.get("session_id", "").startswith("seed-")}
+    unnamed_live = sum(
+        1 for s in sessions
+        if _parse_age_seconds(s.get("last_active")) <= STALL_THRESHOLD_SECONDS
+        and s.get("status") == "active"
+        and s.get("name") not in {"jarvis-board", "jarvis-self-eval", "jarvis-local-llm", "jarvis-audit"}
+    )
+
+    if live_count == 0:
+        live_badge = "[dim]no live sessions[/dim]"
+    elif unnamed_live:
+        live_badge = f"[green]{live_count} live[/green] [dim]({unnamed_live} unnamed)[/dim]"
+    else:
+        live_badge = f"[green]{live_count} live[/green]"
+
+    queued_count = sum(1 for i in queue if i.get("status") == "queued")
+    done_count = sum(1 for i in queue if i.get("status") == "done")
+    queue_badge = f"[yellow]{queued_count} queued[/yellow]  [dim]{done_count} done[/dim]"
+
     content = rich.padding.Padding(
         Columns([st, qt], expand=True, equal=True),
         (1, 0, 0, 0),
     )
     return Panel(
         content,
-        title=f"[bold cyan]Jarvis Session Orchestrator[/bold cyan]  [dim]updated {ts}[/dim]",
-        subtitle="[dim]Ctrl-C to exit  ·  python orchestrator.py add-task ...[/dim]",
+        title=(
+            f"[bold cyan]Jarvis Session Orchestrator[/bold cyan]"
+            f"  {live_badge}  ·  {queue_badge}"
+            f"  [dim]updated {ts}[/dim]"
+        ),
+        subtitle="[dim]Ctrl-C to exit  ·  python orchestrator.py register <session>  ·  add-task ...[/dim]",
         border_style="blue",
     )
 
@@ -454,6 +485,63 @@ def cmd_history() -> None:
         print(text)
 
 
+def cmd_register(session_name: str, next_task: str = "") -> None:
+    """Write a live entry into ORCHESTRATOR_STATUS.json for the given session.
+
+    Used by sessions that want to appear on the dashboard without running
+    main.py. The entry is set to status=active with the current timestamp.
+    Equivalent to calling harness.audit.start_session(session_name) from code.
+
+    Usage:
+        python orchestrator.py register jarvis-board
+        python orchestrator.py register jarvis-board "Wire context window budget"
+    """
+    import uuid
+    data = _read_json(ORCHESTRATOR_STATUS, {})
+    if not isinstance(data, dict):
+        data = {}
+    sessions = data.get("sessions", [])
+    if not isinstance(sessions, list):
+        sessions = []
+
+    # Remove any existing seed or dead entry for this name
+    sessions = [s for s in sessions if s.get("name") != session_name]
+
+    # Look up next_task from queue if not provided
+    if not next_task:
+        queue = load_queue()
+        candidates = [
+            t for t in queue
+            if t.get("session_name") == session_name and t.get("status") == "queued"
+        ]
+        if candidates:
+            best = min(candidates, key=lambda t: t.get("priority", 99))
+            next_task = best.get("task", "")
+
+    entry = {
+        "session_id": str(uuid.uuid4()),
+        "name": session_name,
+        "last_active": datetime.now(timezone.utc).isoformat(),
+        "current_task": None,
+        "completed_tasks": [],
+        "next_task": next_task or None,
+        "status": "active",
+    }
+    sessions.append(entry)
+    data["sessions"] = sessions
+    _write_json(ORCHESTRATOR_STATUS, data)
+    _append_master_log(session_name, f"Session registered via CLI (next: {next_task!r})")
+    log.info("Session registered: %s", session_name)
+    if RICH:
+        console.print(f"[green]✓[/green] Registered [{session_name}] as active.")
+        if next_task:
+            console.print(f"  Next task: {next_task}")
+    else:
+        print(f"Registered [{session_name}] as active.")
+        if next_task:
+            print(f"  Next: {next_task}")
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -470,7 +558,7 @@ def main() -> None:
 
     elif cmd == "add-task":
         if len(args) < 4:
-            print("Usage: python session_orchestrator.py add-task <session> <task> <priority>")
+            print("Usage: python orchestrator.py add-task <session> <task> <priority>")
             sys.exit(1)
         try:
             priority = int(args[3])
@@ -482,9 +570,15 @@ def main() -> None:
     elif cmd == "history":
         cmd_history()
 
+    elif cmd == "register":
+        if len(args) < 2:
+            print("Usage: python orchestrator.py register <session-name> [next-task]")
+            sys.exit(1)
+        cmd_register(args[1], args[2] if len(args) > 2 else "")
+
     else:
         print(f"Unknown command: {cmd!r}")
-        print("Commands: [no args] | status | add-task <session> <task> <priority> | history")
+        print("Commands: [no args] | status | register <session> [next-task] | add-task <session> <task> <priority> | history")
         sys.exit(1)
 
 

@@ -22,3 +22,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-24 21:41:06] [orchestrator] BUILD: harness/audit.py — JARVIS_SESSION_NAME env var added to start_session(); dev lanes can now register under correct ID without code changes
 [2026-06-24 21:41:12] [jarvis-board] STALL detected — last active 6h 37m ago, current_task=None
 [2026-06-24 21:41:12] [jarvis-audit] STALL detected — last active 6h 37m ago, current_task=None
+[2026-06-25 04:47:46] [orchestrator] ROUND 3 — 2 live jarvis sessions detected (real usage, default name); 0 named dev sessions registered yet
+[2026-06-25 04:47:46] [orchestrator] LIVE: 2x name=jarvis active — handling user queries (screen read, FastAPI debug); not in queue, expected behavior
+[2026-06-25 04:47:46] [orchestrator] BUILD: session_orchestrator.py — added `register` CLI cmd; writes live entry to ORCHESTRATOR_STATUS.json; auto-fills next_task from queue
+[2026-06-25 04:47:46] [orchestrator] BUILD: session_orchestrator.py — dashboard panel now shows live-session count badge + queue summary in title bar
+[2026-06-25 04:47:46] [orchestrator] BUILD: ORCHESTRATOR_SCHEMA.md — documented JARVIS_SESSION_NAME env var (option A) + register CLI (option B) for session registration

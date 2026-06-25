@@ -65,6 +65,26 @@ audit.end_session()                   # marks status=offline, writes ops ledger
 The `name` field is what `session_orchestrator.py` displays. Use the short IDs
 from `SESSIONS.json` so the dashboard can match tasks in `WORK_QUEUE.json`.
 
+### Registering without code changes
+
+Two options for sessions that don't call `harness.audit` directly:
+
+**Option A — env var** (for processes that call `start_session()` internally):
+```bash
+JARVIS_SESSION_NAME=jarvis-board python main.py
+```
+`start_session()` checks `JARVIS_SESSION_NAME` first, then uses its `name` arg.
+
+**Option B — CLI register** (for coordination sessions that don't run main.py):
+```bash
+python orchestrator.py register jarvis-board
+# With explicit next task:
+python orchestrator.py register jarvis-board "Review and close AGENT_BOARD items"
+```
+This writes a live `status=active` entry directly to `ORCHESTRATOR_STATUS.json`
+and auto-fills `next_task` from the highest-priority queued task in WORK_QUEUE
+if none is specified.
+
 ---
 
 ## `WORK_QUEUE.json`
