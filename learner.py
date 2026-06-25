@@ -310,4 +310,13 @@ def get_learning_context() -> str:
         capped = [str(i)[:80] for i in insights[-2:]]
         parts.append("Behavioral insights:\n" + "\n".join(f"- {i}" for i in capped))
 
+    # Adaptive prompt hint from self-eval quality scores — single top issue only
+    try:
+        from harness.prompt_tuner import prompt_appendix
+        hint = prompt_appendix(n=20)
+        if hint:
+            parts.append(hint)
+    except Exception:
+        pass
+
     return "\n\n" + "\n\n".join(parts) if parts else ""
