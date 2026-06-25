@@ -198,6 +198,7 @@ def save_conversation(summary: str) -> None:
     # Keep last 30 conversations
     data["conversation_history"] = data["conversation_history"][-30:]
     save(data)
+    audit_log("memory_write", operation="save_conversation", summary_preview=summary[:120])
     consolidate_memory()
 
 
