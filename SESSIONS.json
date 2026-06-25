@@ -4,6 +4,7 @@
   "sessions": [
     {
       "name": "jarvis-board",
+      "claude_session_id": "local_18e4e8d6-a779-4546-9827-4e7d30b8d03a",
       "display": "Jarvis Board — Bug Fixes & AGENT_BOARD",
       "purpose": "Bug fixes, AGENT_BOARD item closure, baseline suite, freeze lift. Primary conductor lane.",
       "status": "active",
@@ -14,6 +15,7 @@
     },
     {
       "name": "jarvis-self-eval",
+      "claude_session_id": "local_811cb177-7a69-4343-aa9f-f7b035d0c18f",
       "display": "Jarvis Self-Eval — Improvement Pipeline",
       "purpose": "Autonomous self-eval scoring loop, /reflect improvements, PreFlect gate, prompt optimizer.",
       "status": "active",
@@ -24,6 +26,7 @@
     },
     {
       "name": "jarvis-local-llm",
+      "claude_session_id": "local_78547634-7016-4412-9312-c1d733b2f59f",
       "display": "Jarvis Local LLM — Budget & Routing",
       "purpose": "context_budget.py wiring, LOCAL_FIRST routing, model_router.py, cross-session memory persistence.",
       "status": "active",
@@ -34,6 +37,7 @@
     },
     {
       "name": "jarvis-audit",
+      "claude_session_id": "local_20512d85-bf5e-45a8-86bb-b712fa66583d",
       "display": "Jarvis Audit — Logging, Snapshots & Restore",
       "purpose": "harness/audit.py improvements, snapshot UI, /restore command, run_id threading, eval_trace_score surface.",
       "status": "active",
