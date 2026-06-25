@@ -26,6 +26,11 @@ from pathlib import Path
 import vault_edit
 import vault
 
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
+
 # ── well-known note references ────────────────────────────────────────────────
 TASK_HUB        = "90 Task Hub"
 DECISION_LOG    = "70 Jarvis Decision Log"
@@ -251,6 +256,7 @@ def save_to_brain(content: str, title: str, area: str = "vault") -> dict:
         result = vault_edit.append_under_heading(title, "Notes", content)
         if result.get("ok"):
             _resolve_and_patch(title)
+            _audit_log("memory_write", operation="vault_append", note=title[:120], heading="Notes")
         return result
 
     # Create new note from template
@@ -262,6 +268,7 @@ def save_to_brain(content: str, title: str, area: str = "vault") -> dict:
     append_result = vault_edit.append_under_heading(title, "What This Note Holds", content)
     if append_result.get("ok"):
         _resolve_and_patch(title)
+        _audit_log("memory_write", operation="vault_create", title=title[:120])
         return {**create_result, **append_result, "action": "created_and_populated"}
     return create_result
 
@@ -274,6 +281,7 @@ def append_to_note(note_ref: str, heading: str, content: str) -> dict:
     result = vault_edit.append_under_heading(note_ref, heading, content)
     if result.get("ok"):
         _resolve_and_patch(note_ref)
+        _audit_log("memory_write", operation="vault_append", note=note_ref[:120], heading=heading)
     return result
 
 
