@@ -502,3 +502,74 @@ def _on_exit_crash_guard() -> None:
     )
     audit_log("session_end", duration_secs=duration, clean_exit=False)
     _append_ops_ledger(duration, crashed=True)
+
+
+# ── Watchdog / heartbeat ───────────────────────────────────────────────────────
+
+def check_resume_signal(signal_path: str | Path | None = None) -> dict | None:
+    """
+    Check for a watchdog resume signal at RESUME_SIGNAL.json.
+
+    If the file exists and contains {"signal": "resume"}, prints the reason,
+    deletes the file, and returns the signal dict.  Returns None otherwise.
+    Never raises.
+    """
+    try:
+        path = Path(signal_path) if signal_path else _base_dir() / "RESUME_SIGNAL.json"
+        if not path.exists():
+            return None
+        with open(path) as f:
+            sig = json.load(f)
+        if sig.get("signal") == "resume":
+            reason = sig.get("reason", "(no reason given)")
+            print(f"[WATCHDOG] Resume signal received: {reason}. Continuing loop.")
+            audit_log("session_start", trigger="watchdog_resume", reason=reason)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return sig
+    except Exception:
+        return None
+
+
+def heartbeat(current_task: str, session_name: str = "jarvis-audit") -> None:
+    """
+    Write a liveness entry to ORCHESTRATOR_STATUS.json sessions[session_name].
+
+    Safe to call at the end of every loop iteration — never raises.
+    """
+    try:
+        path = _orch_status_path()
+        try:
+            with open(path) as f:
+                doc = json.load(f)
+        except Exception:
+            doc = {}
+
+        sessions = doc.get("sessions")
+        if not isinstance(sessions, dict):
+            # Migrate: if sessions is a list (old format), keep it; add dict key alongside
+            doc["sessions_map"] = doc.get("sessions_map") or {}
+            sessions_map = doc["sessions_map"]
+        else:
+            sessions_map = sessions
+
+        sessions_map[session_name] = {
+            "last_active": datetime.now(timezone.utc).isoformat() + "Z",
+            "current_task": current_task,
+            "status": "active",
+        }
+
+        if isinstance(doc.get("sessions"), dict):
+            doc["sessions"] = sessions_map
+        else:
+            doc["sessions_map"] = sessions_map
+
+        with _lock:
+            tmp = str(path) + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(doc, f, indent=2)
+            os.replace(tmp, path)
+    except Exception:
+        pass
