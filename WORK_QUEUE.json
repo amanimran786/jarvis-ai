@@ -1,15 +1,5 @@
 [
   {
-    "session_name": "jarvis-local-llm",
-    "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
-    "priority": 1,
-    "status": "in_progress",
-    "assigned_at": "2026-06-25T21:16:01.564411+00:00",
-    "completed_at": null,
-    "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "Follow-on from c3eb04a routing fix \u2014 validate specialist wins don't regress"
-  },
-  {
     "session_name": "jarvis-board",
     "task": "Silent-failure sweep: 13 files audited, 90+ bare exceptions converted to logged exceptions",
     "priority": 1,
@@ -17,7 +7,7 @@
     "assigned_at": "2026-06-25T21:20:15.631564+00:00",
     "completed_at": null,
     "created_at": "2026-06-25T21:20:15.631564+00:00",
-    "notes": "jarvis-board live session reports sweep complete \u2014 awaiting commit"
+    "notes": "\u26a0 STALE: session reported complete 2 rounds ago but no commit yet. If jarvis-board stalled, treat as done and move to AGENT_BOARD items."
   },
   {
     "session_name": "jarvis-board",
@@ -27,7 +17,7 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
-    "notes": "\ud83d\udea8 ESCALATED: 5 orchestrator rounds with zero movement \u2014 jarvis-board must address first"
+    "notes": "\ud83d\udea8 CRITICAL OVERDUE: 6 rounds no movement. jarvis-board: this is the only task after sweep commits. Items: 9=Ollama memory-pressure, 11=?, 13=eval_trace_score surface."
   },
   {
     "session_name": "jarvis-board",
@@ -56,6 +46,16 @@
     "completed_at": null,
     "created_at": "2026-06-24T22:04:00Z",
     "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires"
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T04:58:37.805404+00:00",
+    "notes": "Demoted: 2 rounds in_progress with no activity. Re-queue for next active session."
   },
   {
     "session_name": "jarvis-audit",
@@ -161,6 +161,16 @@
     "completed_at": null,
     "created_at": "2026-06-25T21:20:15.631564+00:00",
     "notes": "Follow-on from cycle 5 routing_tag wiring \u2014 now that tags are logged, aggregate them"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Wire /diagnose output into AGENT_BOARD \u2014 surface health issues as actionable items",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-25T21:24:17.011387+00:00",
+    "notes": "Follow-on from b555d4e \u2014 /diagnose exists, connect it to the board workflow"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -393,5 +403,15 @@
     "commit": "2135ae6",
     "created_at": "2026-06-25T21:20:15.631564+00:00",
     "notes": "Cycle 5 \u2014 autonomous self-eval loop wired routing_tag across api.py"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "/diagnose command + daily reflection guard",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:24:17.011387+00:00",
+    "completed_at": "2026-06-25T21:24:17.011387+00:00",
+    "commit": "b555d4e",
+    "created_at": "2026-06-25T21:24:17.011387+00:00"
   }
 ]

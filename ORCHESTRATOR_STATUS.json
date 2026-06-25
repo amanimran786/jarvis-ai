@@ -1,5 +1,4 @@
 {
-  "description": "Written by harness/audit.py on each session event. sessions is a LIST of dicts. Set JARVIS_SESSION_NAME env var to register under a known ID. Ghost entries (status=active, last_active >6h) are purged by the orchestrator loop.",
   "sessions": [
     {
       "session_id": "jarvis-board",
@@ -153,8 +152,8 @@
     {
       "session_id": "99310b54-d646-40a7-a23a-ff741d433bf6",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:20:02.653201+00:00",
-      "current_task": "Why are you a fit for a technical AI trust and safety role?",
+      "last_active": "2026-06-25T21:24:03.949697+00:00",
+      "current_task": "Tell me about yourself.",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -162,15 +161,15 @@
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T21:18:54.656253Z",
-      "current_task": "routing_tag wired into all api.py log_interaction calls \u2014 Cycle 5 committed",
+      "last_active": "2026-06-25T21:23:23.379521Z",
+      "current_task": "/diagnose command + daily reflection guard \u2014 Cycle 6 committed",
       "status": "active"
     },
     {
       "session_id": "4ed94764-cdb5-47c0-b896-c310d03d0f81",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:19:56.900671+00:00",
-      "current_task": "Give me my YouTube PEM 2026 role pack.",
+      "last_active": "2026-06-25T21:24:12.955901+00:00",
+      "current_task": "Give me my AI trust and safety role pack.",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -187,8 +186,8 @@
     {
       "session_id": "83afeb72-4aff-4ed6-bd33-3f3feca00785",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:20:33.286469+00:00",
-      "current_task": "what's on my screen",
+      "last_active": "2026-06-25T21:24:05.818947+00:00",
+      "current_task": "Give me my YouTube PEM 2026 role pack.",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
@@ -196,85 +195,20 @@
     {
       "session_id": "1bf28099-1b42-44f9-b51f-ed92a89d91e0",
       "name": "jarvis",
-      "last_active": "2026-06-25T21:20:27.690556+00:00",
-      "current_task": "My FastAPI app returns 502 behind Nginx in Docker. Give me the most likely causes and a concrete debugging sequence.",
+      "last_active": "2026-06-25T21:23:59.642919+00:00",
+      "current_task": "What application states should I use?",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "fb707db2-dbbf-4640-b636-845b9ce40873",
+      "name": "jarvis",
+      "last_active": "2026-06-25T21:24:18.009230+00:00",
+      "current_task": "what's on my screen",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
     }
-  ],
-  "last_updated": "2026-06-25T04:53:09.366826+00:00",
-  "last_commit": "b8bea92",
-  "last_commit_message": "feat(budget): three-tier LOCAL_FIRST rate limiter + /budget command",
-  "budget_system": {
-    "status": "complete",
-    "providers": [
-      "ollama (local)",
-      "ollama_cloud (free tier)",
-      "anthropic",
-      "openai",
-      "gemini"
-    ],
-    "files": [
-      "harness/budget.py",
-      "tests/test_budget.py"
-    ],
-    "tests": "28/28 passing",
-    "wired_into": [
-      "model_router._candidate_stream()",
-      "router.py /budget command"
-    ],
-    "completed_at": "2026-06-25T04:49:36.333209+00:00"
-  },
-  "completed_cycles": [
-    {
-      "cycle": 2,
-      "commit": "3401988",
-      "description": "Ollama Cloud as middle routing tier \u2014 local\u2192cloud-free\u2192paid",
-      "tests": "46/46 passing",
-      "at": "2026-06-25T04:53:09.366826+00:00"
-    }
-  ],
-  "self_eval_loop": {
-    "completed_capabilities": [
-      {
-        "name": "3-axis response scorer",
-        "module": "harness/self_eval_log.py",
-        "log": "logs/self_eval.jsonl",
-        "commit": "41c082b",
-        "completed_at": "2026-06-25T04:50:00Z"
-      },
-      {
-        "name": "/score command",
-        "trigger": "router.py _is_score_command()",
-        "commit": "41c082b",
-        "completed_at": "2026-06-25T04:50:00Z"
-      },
-      {
-        "name": "reflection pipeline",
-        "module": "harness/reflection.py",
-        "output": "kb/core/jarvis_self_eval.md",
-        "trigger": "/reflect command + learner daily cycle",
-        "commit": "02de25f",
-        "completed_at": "2026-06-25T05:00:00Z"
-      },
-      {
-        "name": "prompt self-optimizer",
-        "module": "harness/prompt_tuner.py",
-        "hook": "learner.get_learning_context() \u2192 memory.get_context() \u2192 every LLM call",
-        "commit": "c36c1a7",
-        "completed_at": "2026-06-25T05:15:00Z"
-      }
-    ],
-    "tests_passing": 98,
-    "next_target": "improve /reflect diff output: show what changed vs previous reflection",
-    "last_updated": "2026-06-25T04:59:01.068309+00:00"
-  },
-  "sessions_map": {
-    "jarvis-audit": {
-      "last_active": "2026-06-25T21:15:39.154100+00:00Z",
-      "current_task": "response_sent + self_eval_score + reflection_run committed",
-      "status": "active"
-    }
-  }
+  ]
 }
