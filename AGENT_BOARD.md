@@ -37,6 +37,8 @@ New-commit verification (B, 00:40): personal-data scan of `7f7f01b..5682b0c` dif
 
 One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`); B to run final baseline and lift freeze.**
 
+| 17 | Silent-failure sweep: bare `except:pass` → `logging.debug` across production modules | Antigravity | ✅ **DONE** `9da8797` (2026-06-25) — 87 sites fixed across 39 files. Two Claude-owned remainders: `api.py:7666`, `router.py:4470` (Claude to sweep on next touch). | — |
+
 ## Coordination Rules
 
 - Claim a lane before editing shared files.
@@ -46,6 +48,23 @@ One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`)
 - If Multica is running locally, mirror these items there. If not, this file is the source of truth.
 
 ## Active Lanes
+
+### Antigravity Lane: Silent-Failure Sweep (2026-06-25) — COMPLETE
+
+Owner: Antigravity (Gemini/Claude Sonnet 4.6 parallel session)
+
+Scope (all completed, commit `9da8797`):
+- `brain_daemon.py`, `desktop/hotkeys.py`, `evals.py`, `learner.py`
+- `local_runtime/agent_model_eval.py`, `project_manager.py`, `skill_monitor.py`
+- `tests/conftest.py`, `vault_edit.py`, `voice.py`
+- Plus first batch by loop-engineer: `voice.py`, `jarvis_watcher.py`, `main.py`, `ui.py`, `_bg_agents.py`, `runtime_state.py`, `local_kokoro_subprocess_tts.py`, `hardware.py`, `jarvis_cli.py`, `mem0_layer.py`, `self_improve.py`, `model_router.py`
+
+Coordination boundary:
+- Did NOT touch `api.py` or `router.py` (Claude UX lane owns both).
+- Did NOT touch any Codex-owned runtime, voice, or STT/TTS files beyond what was already claimed by loop-engineer.
+- Two remaining sites for Claude: `api.py:7666`, `router.py:4470` — sweep next time you touch those files.
+
+Status: **COMPLETE.** Lane closed. No active ownership of any files.
 
 ### Codex Lane: GLM 5.2 Local Frontier Evaluation (2026-06-21)
 
