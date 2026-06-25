@@ -1062,6 +1062,40 @@ def smart_stream(
     if compiled_context["text"]:
         system_extra = system_extra + ("\n\n" if system_extra else "") + compiled_context["text"]
 
+    # Context pressure gate: if context is >75% full, drop episodic blocks and recompile;
+    # if >90% full and local available, force routing to a larger-context local model.
+    try:
+        from harness import budget as _budget_mod
+        ctx_pressure = _budget_mod.context_pressure(
+            compiled_context.get("context_used_tokens", 0),
+            compiled_context.get("context_budget_tokens", 1),
+        )
+        if ctx_pressure == "compress":
+            logging.info("[ContextPressure] >75%% full — dropping episodic (mem0) block and recompiling")
+            compressed = _context_budget.compile_context_blocks(
+                [b for b in [
+                    {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
+                    {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
+                    {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
+                    {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
+                    {"label": "semantic_memory", "content": smem_ctx, "priority": 65, "max_chars": 1200},
+                    # mem0 dropped intentionally to reduce context pressure
+                ] if b["label"] != "mem0"],
+                base_text=system_extra,
+                user_input=user_input,
+                target_tokens=_context_budget.target_tokens_for(tool, model=context_model, local=context_is_local),
+            )
+            compiled_context = compressed
+            system_extra = (system_extra.split("\n\n")[0] if "\n\n" in system_extra else system_extra)
+            if compressed["text"]:
+                system_extra = system_extra + ("\n\n" if system_extra else "") + compressed["text"]
+        elif ctx_pressure == "switch" and local_available and local_model:
+            logging.warning("[ContextPressure] >90%% full — forcing local model with larger context window")
+            prefer_local = True
+            local_only = True
+    except Exception as _ctx_exc:
+        logging.debug("[ContextPressure] check failed: %s", _ctx_exc)
+
     def _resilient_stream(primary_factory, fallback_factories):
         def _stream():
             last_error = None
