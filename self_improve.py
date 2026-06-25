@@ -24,6 +24,11 @@ from config import LOCAL_CODER, LOCAL_REASONING
 from provider_priority import ask_with_priority
 import evals
 
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKUP_DIR = os.path.join(BASE_DIR, ".jarvis_backups")
 CRASH_LOG = os.path.join(BASE_DIR, ".jarvis_crash.log")
@@ -747,6 +752,7 @@ def apply_pending_improvement(pending: dict) -> dict:
             response=validation["summary"],
             source="self_improve_validation",
         )
+        _audit_log("reflection_run", file=filename, instruction=instruction[:200], success=False, error=f"validation failed + auto-reverted: {validation['summary'][:120]}")
         return {
             "error": f"Applied change failed validation and was auto-reverted: {validation['summary']}",
             "file": filename,
@@ -766,6 +772,7 @@ def apply_pending_improvement(pending: dict) -> dict:
         "evidence_ids": evidence_bundle.get("failure_ids", []) if evidence_bundle else [],
     }
     evals.record_improvement(result)
+    _audit_log("reflection_run", file=filename, instruction=instruction[:200], lines_changed=result["lines_changed"], success=True)
     return result
 
 
