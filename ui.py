@@ -1,3 +1,4 @@
+import logging
 import sys
 import re
 import threading
@@ -249,7 +250,7 @@ def _force_text_widget_update(widget, text: str):
         try:
             widget.clear()
         except Exception:
-            pass
+            logging.debug("[UI] widget.clear() failed", exc_info=True)
     if hasattr(widget, "setPlainText"):
         widget.setPlainText(text)
     else:
@@ -270,7 +271,7 @@ def _append_ui_crash_log(label: str, stack: str) -> None:
         with open(runtime_state.crash_log_path(), "a", encoding="utf-8") as fh:
             fh.write(f"[{stamp}] {label}\n{stack}\n")
     except Exception:
-        pass
+        logging.debug("[UI] crash log write failed", exc_info=True)
 
 
 def _log_ui_callback_exception(label: str) -> None:
@@ -288,7 +289,7 @@ def _connect_timer_timeout(timer: QTimer, label: str, callback) -> None:
             try:
                 timer.stop()
             except Exception:
-                pass
+                logging.debug("[UI] timer.stop() on callback failure failed: %s", label, exc_info=True)
             _log_ui_callback_exception(label)
 
     timer.timeout.connect(_wrapped)
@@ -487,7 +488,7 @@ def _apply_macos_identity(app: QApplication, icon: QIcon | None):
         try:
             NSProcessInfo.processInfo().setProcessName_("Jarvis")
         except Exception:
-            pass
+            logging.debug("[UI] NSProcessInfo.setProcessName_ failed", exc_info=True)
 
     if NSBundle is not None:
         try:
@@ -501,7 +502,7 @@ def _apply_macos_identity(app: QApplication, icon: QIcon | None):
                 localized["CFBundleName"] = "Jarvis"
                 localized["CFBundleDisplayName"] = "Jarvis"
         except Exception:
-            pass
+            logging.debug("[UI] NSBundle identity setup failed", exc_info=True)
 
     if NSApplication is not None:
         try:
@@ -510,7 +511,7 @@ def _apply_macos_identity(app: QApplication, icon: QIcon | None):
             # Dock and menu bar use the app identity instead of utility-window behavior.
             ns_app.setActivationPolicy_(0)
         except Exception:
-            pass
+            logging.debug("[UI] NSApplication.setActivationPolicy_ failed", exc_info=True)
 
 
 def _activate_macos_app(window: QMainWindow):
@@ -519,7 +520,7 @@ def _activate_macos_app(window: QMainWindow):
         if state & Qt.WindowState.WindowMinimized:
             window.setWindowState(state & ~Qt.WindowState.WindowMinimized)
     except Exception:
-        pass
+        logging.debug("[UI] window unminimize failed", exc_info=True)
     try:
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen is not None:
@@ -528,19 +529,19 @@ def _activate_macos_app(window: QMainWindow):
             target_y = geo.y() + max(24, (geo.height() - window.height()) // 2)
             window.move(target_x, target_y)
     except Exception:
-        pass
+        logging.debug("[UI] window centering failed", exc_info=True)
     if NSApplication is not None:
         try:
             ns_app = NSApplication.sharedApplication()
             ns_app.activateIgnoringOtherApps_(True)
         except Exception:
-            pass
+            logging.debug("[UI] NSApplication.activateIgnoringOtherApps_ failed", exc_info=True)
     try:
         window.show()
         window.raise_()
         window.activateWindow()
     except Exception:
-        pass
+        logging.debug("[UI] window.raise_/activateWindow failed", exc_info=True)
 
 
 def _widget_debug_node(widget: QWidget) -> dict:
@@ -560,7 +561,7 @@ def _widget_debug_node(widget: QWidget) -> dict:
         try:
             node["text"] = text_fn()
         except Exception:
-            pass
+            logging.debug("[UI] widget text() call failed", exc_info=True)
     tooltip = widget.toolTip() if hasattr(widget, "toolTip") else ""
     if tooltip:
         node["tooltip"] = tooltip
@@ -1981,7 +1982,7 @@ def _summarize(exchanges):
             daemon=True
         ).start()
     except Exception:
-        pass
+        logging.warning("[UI] learner thread launch failed", exc_info=True)
 
 
 # ── Message Bubble ─────────────────────────────────────────────────────────────
@@ -2340,7 +2341,7 @@ class JarvisWindow(QMainWindow):
             status = _bd.status()
             self._agent_panel.update_from_daemon(status)
         except Exception:
-            pass
+            logging.debug("[UI] agent panel daemon status update failed", exc_info=True)
 
     def _on_transcript(self, text: str):
         try:
@@ -2995,7 +2996,7 @@ class JarvisWindow(QMainWindow):
             try:
                 stealth.apply_current_mode(int(overlay.winId()))
             except Exception:
-                pass
+                logging.debug("[UI] stealth overlay mode apply failed", exc_info=True)
         self._refresh_visibility_mode()
 
     def _toggle_visibility_mode(self):
@@ -3636,7 +3637,7 @@ class JarvisWindow(QMainWindow):
                 import api
                 self._latest_sys_telemetry = api.get_system_telemetry()
             except Exception:
-                pass
+                logging.debug("[UI] telemetry poll failed", exc_info=True)
             time.sleep(5)
 
     def _refresh_telemetry(self):
@@ -4077,7 +4078,7 @@ class JarvisWindow(QMainWindow):
             try:
                 live_beta.record_interaction(entry, source="ui")
             except Exception:
-                pass
+                logging.debug("[UI] live_beta.record_interaction failed", exc_info=True)
 
     def _apply_live_beta_state(self):
         if not hasattr(self, "beta_btn"):
@@ -4188,7 +4189,7 @@ class JarvisWindow(QMainWindow):
                 source="ui_feedback",
             )
         except Exception:
-            pass
+            logging.warning("[UI] live_beta.record_feedback failed", exc_info=True)
         self._add_message(f"Logged feedback under {failure['category']} for the last Jarvis answer.", "jarvis", "Eval")
 
     def _set_status(self, text: str):
@@ -4361,27 +4362,27 @@ class JarvisWindow(QMainWindow):
             try:
                 timer.stop()
             except Exception:
-                pass
+                logging.debug("[UI] timer.stop() during close failed", exc_info=True)
         if hasattr(self, "voice_worker"):
             self.voice_worker.stop()
             self.voice_worker.wait(4000)
         try:
             _meeting_stop()
         except Exception:
-            pass
+            logging.debug("[UI] _meeting_stop() during close failed", exc_info=True)
         try:
             hotkeys.stop()
         except Exception:
-            pass
+            logging.debug("[UI] hotkeys.stop() during close failed", exc_info=True)
         try:
             import multiprocessing as _mp
             for _child in _mp.active_children():
                 try:
                     _child.terminate()
                 except Exception:
-                    pass
+                    logging.debug("[UI] child.terminate() during close failed for %s", _child.pid, exc_info=True)
         except Exception:
-            pass
+            logging.debug("[UI] multiprocessing child cleanup during close failed", exc_info=True)
         event.accept()
 
 
