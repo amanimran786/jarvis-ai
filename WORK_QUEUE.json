@@ -17,7 +17,7 @@
     "assigned_at": "2026-06-25T21:32:01.636379+00:00",
     "completed_at": null,
     "created_at": "2026-06-25T21:32:01.636379+00:00",
-    "notes": "jarvis-board live session working on this now. Prerequisite for baseline suite run + freeze lift. Likely triggered by c3eb04a specialist routing change."
+    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed."
   },
   {
     "session_name": "jarvis-board",
@@ -181,16 +181,6 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "jarvis-self-eval",
-    "task": "Confirm cycle 6 commit \u2014 session reported done 2+ rounds ago, no git evidence yet",
-    "priority": 3,
-    "status": "queued",
-    "assigned_at": null,
-    "completed_at": null,
-    "created_at": "2026-06-25T21:32:01.636379+00:00",
-    "notes": "\u26a0 3 rounds unverified. If no commit by round 12, assume cycle 6 did not land \u2014 close watchpoint."
-  },
-  {
     "session_name": "jarvis-board",
     "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
     "priority": 3,
@@ -198,6 +188,16 @@
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z"
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Confirm cycle 6 commit \u2014 session reported done 2+ rounds ago, no git evidence yet",
+    "priority": 3,
+    "status": "done",
+    "assigned_at": null,
+    "completed_at": "2026-06-25T21:40:02.087966+00:00",
+    "created_at": "2026-06-25T21:32:01.636379+00:00",
+    "notes": "EXPIRED: watchpoint closed after 4 rounds with no git commit. Session may have reported prematurely. cycle 6 work not confirmed."
   },
   {
     "session_name": "jarvis-board",
@@ -435,5 +435,16 @@
     "commit": "9da8797",
     "created_at": "2026-06-25T21:28:06.332061+00:00",
     "notes": "Final batch \u2014 sweep now covers all modules. Total: 13 files, 90+ exceptions logged."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Eliminate SQLite lock flake in test_project_manager",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:40:02.087966+00:00",
+    "completed_at": "2026-06-25T21:40:02.087966+00:00",
+    "commit": "ed6b358",
+    "created_at": "2026-06-25T21:40:02.087966+00:00",
+    "notes": "Part of test suite stabilization for baseline suite run. Flaky lock contention removed."
   }
 ]
