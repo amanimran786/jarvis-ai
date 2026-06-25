@@ -3,34 +3,38 @@
 Defines the contract between all active Jarvis dev sessions and the
 coordination layer (`session_orchestrator.py` / `python orchestrator.py`).
 
-All files live at the **project root**. Every session can read any file; each
-session writes only its own status entry in `ORCHESTRATOR_STATUS.json` and
-appends tasks via the CLI. Never truncate these files — they are append-friendly
-by design.
+All files live at the **project root**. Every session can read any file. Sessions
+write their own status entry via `harness/audit.py` (which owns the write path).
+Tasks are added via `python orchestrator.py add-task`. Never truncate these files.
 
 ---
 
 ## `ORCHESTRATOR_STATUS.json`
 
-Written by each dev session. The dashboard reads this to display live health.
+**Writer:** `harness/audit.py` — called automatically on `query_received`,
+`response_sent`, `session_start`, `session_end` events.
 
-**Update frequency:** after every meaningful action (task start, task complete,
-blocking event). At minimum update `last_active` every 5 minutes while the
-session is running — otherwise the orchestrator marks you STALLED.
+**Reader:** `session_orchestrator.py` dashboard (every 30s).
+
+`sessions` is a **list of dicts** — one entry per active process. When a process
+starts it appends its entry; when it ends it sets `status: "offline"`. The
+orchestrator loop purges ghost entries (status=active, last_active >6h old).
 
 ```json
 {
-  "sessions": {
-    "<session-name>": {
+  "sessions": [
+    {
+      "session_id": "uuid4",
+      "name": "jarvis-board",
       "last_active": "2026-06-24T07:00:00Z",
-      "current_task": "Brief description of what the session is doing right now",
+      "current_task": "What the session is doing right now",
       "completed_tasks": [
-        "Short description of each completed task (append, never remove)"
+        {"task": "description", "completed_at": "2026-06-24T06:00:00Z"}
       ],
-      "next_task": "What will happen after current_task is done",
+      "next_task": "What happens after current_task",
       "status": "active | idle | stalled | offline | error"
     }
-  }
+  ]
 }
 ```
 
@@ -38,72 +42,41 @@ session is running — otherwise the orchestrator marks you STALLED.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `last_active` | ISO-8601 UTC string | yes | Must include timezone (`Z` or `+00:00`). Age >5 min → STALLED |
-| `current_task` | string | yes | One line. Empty string is valid when idle |
-| `completed_tasks` | string[] | yes | Append-only. Keep the last 20 max to avoid bloat |
-| `next_task` | string | no | Empty string or omit when unknown |
-| `status` | enum | yes | `active` while running, `idle` between tasks, `offline` when shutting down |
+| `session_id` | UUID string | yes | Set once at process start by `harness/audit.py` |
+| `name` | string | yes | Must match a `name` in `SESSIONS.json`. Set via `harness.audit.start_session(name)` |
+| `last_active` | ISO-8601 UTC | yes | Updated on every event. Age >5 min → STALLED on dashboard |
+| `current_task` | string\|null | yes | Set to `null` when idle |
+| `completed_tasks` | list of `{task, completed_at}` | yes | Capped at 50 by audit.py |
+| `next_task` | string\|null | no | Optional hint for the dashboard |
+| `status` | enum | yes | `active` → working; `idle` → between tasks; `offline` → clean shutdown |
 
-### Write pattern (Python)
+### How to register your session
+
+Call `harness.audit.start_session(name)` at process start — it snapshots memory,
+appends your entry to `sessions[]`, and registers an atexit handler for clean shutdown.
 
 ```python
-import json
-from datetime import datetime, timezone
-from pathlib import Path
-
-STATUS_FILE = Path("ORCHESTRATOR_STATUS.json")
-SESSION_NAME = "jarvis-board"   # must match SESSIONS.json name
-
-def _update_status(current_task: str, next_task: str = "", status: str = "active") -> None:
-    try:
-        data = json.loads(STATUS_FILE.read_text()) if STATUS_FILE.exists() else {}
-    except json.JSONDecodeError:
-        data = {}
-    sessions = data.get("sessions", {})
-    entry = sessions.get(SESSION_NAME, {"completed_tasks": []})
-    entry.update({
-        "last_active": datetime.now(timezone.utc).isoformat(),
-        "current_task": current_task,
-        "next_task": next_task,
-        "status": status,
-    })
-    sessions[SESSION_NAME] = entry
-    data["sessions"] = sessions
-    tmp = STATUS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(STATUS_FILE)
-
-def _complete_task(task_description: str) -> None:
-    try:
-        data = json.loads(STATUS_FILE.read_text()) if STATUS_FILE.exists() else {}
-    except json.JSONDecodeError:
-        data = {}
-    sessions = data.get("sessions", {})
-    entry = sessions.get(SESSION_NAME, {"completed_tasks": []})
-    completed = entry.get("completed_tasks", [])
-    completed.append(task_description)
-    entry["completed_tasks"] = completed[-20:]  # keep last 20
-    entry["last_active"] = datetime.now(timezone.utc).isoformat()
-    sessions[SESSION_NAME] = entry
-    data["sessions"] = sessions
-    tmp = STATUS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(STATUS_FILE)
+import harness.audit as audit
+audit.start_session("jarvis-board")   # name must match SESSIONS.json
+# ... do work ...
+audit.end_session()                   # marks status=offline, writes ops ledger
 ```
+
+The `name` field is what `session_orchestrator.py` displays. Use the short IDs
+from `SESSIONS.json` so the dashboard can match tasks in `WORK_QUEUE.json`.
 
 ---
 
 ## `WORK_QUEUE.json`
 
-Prioritized task list across all sessions. Any session can read this to
-discover its next task. Only the orchestrator CLI writes new entries; sessions
-mark their own tasks `in_progress` or `done`.
+Prioritized task list across all sessions. Any session reads this to find its
+next task. The orchestrator loop writes new entries; sessions update `status`.
 
 ```json
 [
   {
     "session_name": "jarvis-board",
-    "task": "One-line description of the task",
+    "task": "One-line task description",
     "priority": 1,
     "status": "queued | in_progress | done | blocked | cancelled",
     "assigned_at": "2026-06-24T07:00:00Z or null",
@@ -117,36 +90,29 @@ mark their own tasks `in_progress` or `done`.
 
 | Priority | Meaning |
 |---|---|
-| 1 | Blocking — must ship before anything else in this session |
+| 1 | Blocking — must complete before anything else in this session |
 | 2 | High — current sprint focus |
-| 3 | Normal — queued, not urgent |
-| 4+ | Backlog / nice-to-have |
+| 3 | Normal — queued but not urgent |
+| 4+ | Backlog |
 
 ### CLI to add a task
 
 ```bash
-python orchestrator.py add-task "session-name" "task description" <priority>
-# Example:
 python orchestrator.py add-task "jarvis-board" "Fix _awaiting_msg_recipient bypass" 1
 ```
 
-### Session pick-up pattern (Python)
+### Session pick-up pattern
 
 ```python
 import json
 from pathlib import Path
 
-QUEUE_FILE = Path("WORK_QUEUE.json")
-
-def _pick_next_task(session_name: str) -> dict | None:
+def pick_next(session: str) -> dict | None:
     try:
-        queue = json.loads(QUEUE_FILE.read_text())
+        queue = json.loads(Path("WORK_QUEUE.json").read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return None
-    candidates = [
-        t for t in queue
-        if t.get("session_name") == session_name and t.get("status") == "queued"
-    ]
+    candidates = [t for t in queue if t.get("session_name") == session and t.get("status") == "queued"]
     return min(candidates, key=lambda t: t.get("priority", 99), default=None)
 ```
 
@@ -154,57 +120,65 @@ def _pick_next_task(session_name: str) -> dict | None:
 
 ## `SESSIONS.json`
 
-Registry of all known dev sessions. Sessions register themselves here once;
-the orchestrator uses this for cross-reference and health checks.
+Registry of all known dev sessions. Write once when a session is created;
+update `status` to `offline` when the session winds down.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "sessions": [
     {
       "name": "jarvis-board",
-      "purpose": "Short human-readable description of what this session does",
+      "display": "Human-readable display name",
+      "purpose": "What this session works on",
       "status": "active | idle | offline",
       "registered_at": "2026-06-24T00:00:00Z",
       "owner": "Claude (Cowork) | Codex | User",
-      "notes": "Optional coordination notes — lane boundaries, file ownership, etc."
+      "files_owned": ["list of files this session may edit"],
+      "notes": "Coordination notes — lane boundaries, dependencies, etc."
     }
   ]
 }
 ```
 
-Sessions should update their own `status` field here when going offline so
-other sessions know not to assign them work.
+The `name` field is the short ID used in `ORCHESTRATOR_STATUS.json` and
+`WORK_QUEUE.json`. Keep it kebab-case, ≤20 chars.
 
 ---
 
 ## `MASTER_LOG.md`
 
-Append-only event log. Written by `session_orchestrator.py` automatically
-whenever:
-- A task is added to WORK_QUEUE
-- A STALL is first detected for a session
-- The dashboard starts or stops
-- A session marks itself offline
+Append-only human-readable audit trail. Written by the orchestrator loop on
+every coordination round. Sessions may also append directly.
 
 **Format (strict):**
 ```
-[YYYY-MM-DD HH:MM:SS] [SESSION-NAME] event description in plain English
+[YYYY-MM-DD HH:MM:SS] [SESSION-NAME] event in plain English
 ```
-
-Sessions may also append directly:
 
 ```python
 from pathlib import Path
 from datetime import datetime
 
-def _log(session: str, event: str) -> None:
+def log(session: str, event: str) -> None:
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open("MASTER_LOG.md", "a") as fh:
         fh.write(f"[{ts}] [{session}] {event}\n")
 ```
 
-Never rewrite or truncate this file. It is the audit trail.
+Never rewrite or truncate. It is the audit trail.
+
+---
+
+## Stall detection
+
+A session is **STALLED** when `last_active` is >5 minutes old AND `status` is
+not `idle` or `offline`. The dashboard flags it with ⚠ and logs a single warning
+per stall event (not every refresh cycle).
+
+Sessions set `status: "idle"` between tasks and `status: "offline"` on shutdown
+to suppress false stall alerts. Seed entries with `last_active: null` are shown
+as `idle` / `never` — not stalled.
 
 ---
 
@@ -217,18 +191,5 @@ python orchestrator.py add-task "session" "task" <priority>
 python orchestrator.py history      # print MASTER_LOG.md
 ```
 
-`orchestrator.py` delegates the coordination UI to `session_orchestrator.py`
-when run as `__main__`. When imported as a module (`from orchestrator import classify`)
-it behaves as the LLM intent classifier — the `__main__` guard is never triggered.
-
----
-
-## Stall detection
-
-A session is STALLED when `last_active` is more than **5 minutes** old and its
-`status` is not `idle` or `offline`. The orchestrator logs each new stall to
-`logs/orchestrator.log` and appends a line to `MASTER_LOG.md`. It does not
-re-log the same session's stall every refresh cycle — only on the first detection.
-
-Sessions should set `status: "idle"` when between tasks and `status: "offline"`
-when shutting down to avoid false stall alerts.
+`orchestrator.py` is the LLM intent classifier when imported as a module.
+When run directly it delegates to `session_orchestrator.py` via `__main__`.

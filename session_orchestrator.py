@@ -192,11 +192,23 @@ def _health_text_ansi(health: str) -> str:
 # ── data loaders ──────────────────────────────────────────────────────────────
 
 def load_session_statuses() -> list[dict]:
+    """Load sessions from ORCHESTRATOR_STATUS.json.
+
+    harness/audit.py writes sessions as a list of dicts under the key
+    "sessions". Handles both list-of-dicts and dict-of-dicts gracefully.
+    """
     data = _read_json(ORCHESTRATOR_STATUS, {})
-    if isinstance(data, dict):
-        return data.get("sessions", [])
     if isinstance(data, list):
         return data
+    if not isinstance(data, dict):
+        return []
+    raw = data.get("sessions", [])
+    # harness/audit.py writes a list; if someone wrote a dict keyed by name,
+    # convert it to list form so the display code is uniform.
+    if isinstance(raw, dict):
+        return [{"name": k, **v} for k, v in raw.items()]
+    if isinstance(raw, list):
+        return raw
     return []
 
 
@@ -310,7 +322,7 @@ def _build_rich_panel(
     return Panel(
         content,
         title=f"[bold cyan]Jarvis Session Orchestrator[/bold cyan]  [dim]updated {ts}[/dim]",
-        subtitle="[dim]Ctrl-C to exit  ·  python session_orchestrator.py add-task ...[/dim]",
+        subtitle="[dim]Ctrl-C to exit  ·  python orchestrator.py add-task ...[/dim]",
         border_style="blue",
     )
 

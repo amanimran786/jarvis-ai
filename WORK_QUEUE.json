@@ -1,6 +1,6 @@
 [
   {
-    "session_name": "Jarvis AI - assess and continue",
+    "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
     "priority": 1,
     "status": "queued",
@@ -9,7 +9,7 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis AI - assess and continue",
+    "session_name": "jarvis-board",
     "task": "Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)",
     "priority": 1,
     "status": "queued",
@@ -18,8 +18,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis self-improvement & self-eval",
-    "task": "Complete self-eval scoring loop in self_eval.py \u2014 wire score output to eval_trace_score",
+    "session_name": "jarvis-self-eval",
+    "task": "Complete self-eval scoring loop in self_eval.py — wire score output to eval_trace_score",
     "priority": 1,
     "status": "queued",
     "assigned_at": null,
@@ -27,8 +27,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis local LLM upgrades & memory",
-    "task": "Wire context window budget into brain_ollama.py tool-loop \u2014 use context_budget.py",
+    "session_name": "jarvis-local-llm",
+    "task": "Wire context window budget into brain_ollama.py tool-loop — use context_budget.py",
     "priority": 1,
     "status": "queued",
     "assigned_at": null,
@@ -36,8 +36,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis native tool-loop & telemetry",
-    "task": "Wire run_id threading through operative.py \u2192 execution_engine.py (R1 prereq, AGENT_BOARD item 12)",
+    "session_name": "jarvis-audit",
+    "task": "Wire run_id threading through operative.py → execution_engine.py (R1 prereq, AGENT_BOARD item 12)",
     "priority": 1,
     "status": "queued",
     "assigned_at": null,
@@ -45,8 +45,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis AI - assess and continue",
-    "task": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
+    "session_name": "jarvis-board",
+    "task": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
     "priority": 2,
     "status": "queued",
     "assigned_at": null,
@@ -54,7 +54,7 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis self-improvement & self-eval",
+    "session_name": "jarvis-self-eval",
     "task": "Implement /reflect improvements: save reflection deltas to vault, surface in briefing",
     "priority": 2,
     "status": "queued",
@@ -63,7 +63,7 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis local LLM upgrades & memory",
+    "session_name": "jarvis-local-llm",
     "task": "Model routing: update model_router.py to respect GLM 5.2 profile once eval lane posts findings",
     "priority": 2,
     "status": "blocked",
@@ -72,7 +72,7 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis local LLM upgrades & memory",
+    "session_name": "jarvis-local-llm",
     "task": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
     "priority": 2,
     "status": "queued",
@@ -81,8 +81,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis native tool-loop & telemetry",
-    "task": "Implement eval_trace_score.py --trace-score surface; observe-only \u22652wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
+    "session_name": "jarvis-audit",
+    "task": "eval_trace_score.py --trace-score surface: observe-only ≥2wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
     "priority": 2,
     "status": "queued",
     "assigned_at": null,
@@ -90,8 +90,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis native tool-loop & telemetry",
-    "task": "Add usage summary tests for brain_ollama structured output path \u2014 scoped to tests/test_brain_ollama.py",
+    "session_name": "jarvis-audit",
+    "task": "Add usage summary tests for brain_ollama structured output path — scoped to tests/test_brain_ollama.py",
     "priority": 2,
     "status": "queued",
     "assigned_at": null,
@@ -99,16 +99,16 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis native tool-loop & telemetry",
+    "session_name": "jarvis-audit",
     "task": "Validate usage_tracker token accounting matches brain_ollama actual usage",
     "priority": 2,
     "status": "queued",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T22:02:13.135268+00:00"
+    "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis AI - assess and continue",
+    "session_name": "jarvis-board",
     "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
     "priority": 3,
     "status": "blocked",
@@ -117,8 +117,8 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis self-improvement & self-eval",
-    "task": "Evaluate PreFlect/G3 gate (JARVIS_PREFLECT=1, default-off) \u2014 decide post-R1 landing",
+    "session_name": "jarvis-self-eval",
+    "task": "Evaluate PreFlect/G3 gate (JARVIS_PREFLECT=1, default-off) — decide post-R1 landing",
     "priority": 3,
     "status": "queued",
     "assigned_at": null,
@@ -126,7 +126,7 @@
     "created_at": "2026-06-24T00:00:00Z"
   },
   {
-    "session_name": "Jarvis local LLM upgrades & memory",
+    "session_name": "jarvis-local-llm",
     "task": "Root-cause AGENT_BOARD item 9: Ollama memory-pressure path returning empty in security gate",
     "priority": 3,
     "status": "queued",
