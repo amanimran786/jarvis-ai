@@ -33,6 +33,20 @@ ORCH_LOG = LOGS_DIR / "orchestrator.log"
 
 STALL_THRESHOLD_SECONDS = 300   # 5 minutes
 REFRESH_INTERVAL = 30           # dashboard refresh cadence
+WATCH_INTERVAL = 60             # watchdog poll cadence
+
+RESUME_SIGNAL = ROOT / "RESUME_SIGNAL.json"
+BUDGET_LOG = LOGS_DIR / "budget.jsonl"
+
+# Claude Code session IDs for the four named dev lanes (provided by user).
+# Used as a secondary match when sessions register under a default name.
+_KNOWN_SESSIONS: dict[str, str] = {
+    "jarvis-board":     "local_18e4e8d6-a779-4546-9827-4e7d30b8d03a",
+    "jarvis-self-eval": "local_811cb177-7a69-4343-aa9f-f7b035d0c18f",
+    "jarvis-local-llm": "local_78547634-7016-4412-9312-c1d733b2f59f",
+    "jarvis-audit":     "local_20512d85-bf5e-45a8-86bb-b712fa66583d",
+}
+_KNOWN_SESSION_NAMES = set(_KNOWN_SESSIONS.keys())
 
 # ── logging ──────────────────────────────────────────────────────────────────
 
@@ -542,6 +556,168 @@ def cmd_register(session_name: str, next_task: str = "") -> None:
             print(f"  Next: {next_task}")
 
 
+# ── watchdog / rate-limit reset ───────────────────────────────────────────────
+
+def _seconds_until_next_hour() -> float:
+    """Seconds until the next top-of-hour (UTC)."""
+    now = datetime.now(timezone.utc)
+    return 3600.0 - (now.minute * 60 + now.second + now.microsecond / 1_000_000)
+
+
+def _hourly_reset_crossed(last_poll: datetime) -> bool:
+    """True if at least one UTC hour boundary fell between last_poll and now."""
+    now = datetime.now(timezone.utc)
+    last_hour_start = last_poll.replace(minute=0, second=0, microsecond=0)
+    now_hour_start  = now.replace(minute=0, second=0, microsecond=0)
+    return now_hour_start > last_hour_start
+
+
+def _stalled_named(sessions: list[dict]) -> list[str]:
+    """Names of stalled sessions that belong to the known dev lanes."""
+    result = []
+    for s in sessions:
+        name = s.get("name", "")
+        sid  = s.get("session_id", "")
+        is_known = name in _KNOWN_SESSION_NAMES or sid in _KNOWN_SESSIONS.values()
+        if is_known and _session_health(s) == "stalled":
+            result.append(name)
+    return result
+
+
+def _write_resume_signal(stalled_names: list[str]) -> None:
+    signal = {
+        "signal": "resume",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "reason": "rate_limit_reset",
+        "sessions": stalled_names if stalled_names else ["all"],
+    }
+    _write_json(RESUME_SIGNAL, signal)
+    log.info("RESUME_SIGNAL.json written — sessions: %s", stalled_names)
+
+
+def _purge_stale_signal() -> None:
+    """Remove RESUME_SIGNAL.json if it is older than 10 minutes."""
+    try:
+        if not RESUME_SIGNAL.exists():
+            return
+        data = _read_json(RESUME_SIGNAL, {})
+        if _parse_age_seconds(data.get("ts")) > 600:
+            RESUME_SIGNAL.unlink(missing_ok=True)
+            log.info("Purged stale RESUME_SIGNAL.json")
+    except OSError as exc:
+        log.warning("Could not purge RESUME_SIGNAL.json: %s", exc)
+
+
+def _watchdog_tick(last_poll: datetime) -> tuple[datetime, bool]:
+    """One poll cycle. Returns (new_poll_ts, reset_fired).
+
+    Never raises — all errors are caught and logged so the watch loop
+    continues regardless of filesystem or parse failures.
+    """
+    now = datetime.now(timezone.utc)
+    reset_fired = False
+
+    try:
+        sessions = load_session_statuses()
+    except Exception as exc:
+        log.error("Watchdog: failed to load sessions: %s", exc)
+        _append_master_log("WATCHDOG", f"ERROR loading sessions (continuing): {exc}")
+        return now, False
+
+    stalled = _stalled_named(sessions)
+
+    if _hourly_reset_crossed(last_poll):
+        reset_fired = True
+        stalled_label = ", ".join(stalled) if stalled else "none"
+        msg = (
+            f"Rate limit reset (hourly). Stalled sessions: {stalled_label}. "
+            "Writing RESUME_SIGNAL.json."
+        )
+        log.info("[WATCHDOG] %s", msg)
+        _append_master_log("WATCHDOG", msg)
+        _write_resume_signal(stalled)
+        _append_master_log(
+            "WATCHDOG",
+            "Resume signal written. Sessions should pick up within next poll cycle.",
+        )
+    elif stalled:
+        # Not a reset window yet — log newly stalled sessions once each
+        for name in stalled:
+            if name not in _last_stall_logged:
+                age = _parse_age_seconds(
+                    next(
+                        (s.get("last_active") for s in sessions if s.get("name") == name),
+                        None,
+                    )
+                )
+                _append_master_log(
+                    "WATCHDOG",
+                    f"STALL — {name} last active {_fmt_age(age)}, awaiting rate-limit reset",
+                )
+                _last_stall_logged.add(name)
+
+    _purge_stale_signal()
+    return now, reset_fired
+
+
+def cmd_watch() -> None:
+    """Run the rate-limit watchdog in the foreground.
+
+    Polls ORCHESTRATOR_STATUS.json every 60 seconds. On each top-of-hour
+    UTC boundary (Anthropic free-tier resets hourly), if any named dev session
+    is stalled, writes RESUME_SIGNAL.json and logs to MASTER_LOG.md.
+
+    Sessions read RESUME_SIGNAL.json at the top of their loop. If the file is
+    present and newer than their last check, they resume immediately and delete
+    the file (or let the watchdog purge it after 10 minutes).
+
+    Session IDs monitored (from SESSIONS.json):
+        jarvis-board      local_18e4e8d6-...
+        jarvis-self-eval  local_811cb177-...
+        jarvis-local-llm  local_78547634-...
+        jarvis-audit      local_20512d85-...
+    """
+    print("Watchdog started. Ctrl-C to stop.")
+    print(f"  Poll interval  : {WATCH_INTERVAL}s")
+    secs = _seconds_until_next_hour()
+    print(f"  Next reset in  : {int(secs // 60)}m {int(secs % 60)}s")
+    print()
+
+    _append_master_log("WATCHDOG", f"Started — polling every {WATCH_INTERVAL}s")
+
+    last_poll = datetime.now(timezone.utc)
+    try:
+        while True:
+            try:
+                last_poll, reset_fired = _watchdog_tick(last_poll)
+            except Exception as exc:
+                # Belt-and-suspenders: tick already catches internally, but
+                # wrap the whole call so nothing propagates to the loop.
+                log.error("Watchdog outer tick error: %s", exc, exc_info=True)
+                _append_master_log("WATCHDOG", f"OUTER TICK ERROR (continuing): {exc}")
+
+            # Status line printed every poll cycle
+            try:
+                sessions  = load_session_statuses()
+                stalled   = _stalled_named(sessions)
+                live      = [s.get("name","?") for s in sessions if _session_health(s) == "active"]
+                secs_left = _seconds_until_next_hour()
+                badge     = " ⚡ RESET" if reset_fired else ""
+                ts_label  = datetime.now().strftime("%H:%M:%S")
+                print(
+                    f"  {ts_label} | live={live or 'none':30} | "
+                    f"stalled={stalled or 'none':30} | "
+                    f"reset in {int(secs_left // 60)}m{int(secs_left % 60):02d}s{badge}"
+                )
+            except Exception:
+                pass  # status print failure must not kill the loop
+
+            time.sleep(WATCH_INTERVAL)
+    except KeyboardInterrupt:
+        _append_master_log("WATCHDOG", "Stopped (KeyboardInterrupt)")
+        print("\nWatchdog stopped.")
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -576,9 +752,15 @@ def main() -> None:
             sys.exit(1)
         cmd_register(args[1], args[2] if len(args) > 2 else "")
 
+    elif cmd == "watch":
+        cmd_watch()
+
     else:
         print(f"Unknown command: {cmd!r}")
-        print("Commands: [no args] | status | register <session> [next-task] | add-task <session> <task> <priority> | history")
+        print(
+            "Commands: [no args] | status | watch | register <session> [next-task]"
+            " | add-task <session> <task> <priority> | history"
+        )
         sys.exit(1)
 
 
