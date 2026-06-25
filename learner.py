@@ -268,6 +268,17 @@ Return only the profile paragraph, no labels or headers."""
     except Exception as e:
         print(f"[Learner] Jarvis performance reflection error: {e}")
 
+    # 3-axis reflection pipeline — writes kb/core/jarvis_self_eval.md
+    try:
+        from harness import reflection
+        result = reflection.run_reflection(hours=24 * 7)
+        if result.total_scored > 0:
+            kdata.setdefault("jarvis_perf", {})["last_3axis_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
+            _save_knowledge(kdata)
+            print(f"[Learner] 3-axis reflection: {result.total_scored} responses, quality {result.overall_quality:.2f}")
+    except Exception as e:
+        print(f"[Learner] 3-axis reflection error: {e}")
+
     return profile
 
 

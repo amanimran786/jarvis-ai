@@ -814,6 +814,33 @@ def _score_command_reply() -> str:
         return f"/score unavailable: {exc}"
 
 
+def _is_reflect_command(lower: str) -> bool:
+    """Trigger: /reflect or explicit reflection-request phrases."""
+    return lower.strip() in ("/reflect", "reflect") or any(
+        phrase in lower for phrase in (
+            "/reflect",
+            "run reflection",
+            "trigger reflection",
+            "reflection pipeline",
+            "self reflection",
+            "reflect on",
+            "jarvis performance reflection",
+            "run self eval reflection",
+            "update self eval",
+            "generate reflection",
+            "write reflection",
+        )
+    )
+
+
+def _reflect_command_reply() -> str:
+    try:
+        from harness import reflection
+        return reflection.reflect_text(hours=168)
+    except Exception as exc:
+        return f"/reflect unavailable: {exc}"
+
+
 def _is_meta_improvement_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -3635,6 +3662,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(_performance_report_reply()), "Self-Eval"
     if _is_score_command(lower):
         return _s(_score_command_reply()), "Self-Eval"
+    if _is_reflect_command(lower):
+        return _s(_reflect_command_reply()), "Self-Eval"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):
