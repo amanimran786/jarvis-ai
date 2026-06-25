@@ -39,6 +39,7 @@ Usage:
   python jarvis_cli.py -p fix the login bug        # alias for --task
 """
 
+import logging
 import sys
 import json
 import os
@@ -192,7 +193,7 @@ def _base() -> str:
         if discovered:
             return str(discovered["base_url"]).rstrip("/")
     except Exception:
-        pass
+        logging.debug("[CLI] API endpoint discovery failed", exc_info=True)
 
     return "http://127.0.0.1:8765"
 
@@ -207,7 +208,7 @@ def _clear_owned_daemon_state() -> None:
         runtime_state.clear_api_endpoint()
         runtime_state.clear_console_session()
     except Exception:
-        pass
+        logging.debug("[CLI] daemon state cleanup failed", exc_info=True)
     _OWNS_DAEMON = False
 
 
@@ -1338,7 +1339,7 @@ def _banner_text() -> str:
         status = str(payload.get("status", "unknown")).upper()
         mode = str(payload.get("mode", "unknown")).upper()
     except Exception:
-        pass
+        logging.debug("[CLI] /status fetch for status bar failed", exc_info=True)
     return "\n".join(
         [
             "JARVIS // Command Deck",
@@ -1981,13 +1982,13 @@ def run_interactive_console() -> int:
         runtime_state.write_console_session(command="jarvis_cli --interactive")
         atexit.register(runtime_state.clear_console_session)
     except Exception:
-        pass
+        logging.debug("[CLI] console session write failed", exc_info=True)
     try:
         from harness.audit import start_session, end_session
         start_session("jarvis_cli")
         atexit.register(end_session)
     except Exception:
-        pass
+        logging.debug("[CLI] audit session start failed", exc_info=True)
     _print_banner()
     while True:
         try:

@@ -1183,7 +1183,7 @@ def smart_stream(
                 from brains.brain_ollama import start_keepalive
                 start_keepalive(candidate.model)
             except Exception:
-                pass
+                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1291,7 +1291,7 @@ def smart_stream(
             mode=plan.mode,
         )
     except Exception:
-        pass
+        logging.debug("[ModelRouter] silent failure in unknown", exc_info=True)
     return _execute_plan_stream(), primary_label
 
 
@@ -1302,7 +1302,7 @@ def _execute_forced_stream(plan: provider_router.RoutePlan, user_input: str, sys
                 from brains.brain_ollama import start_keepalive
                 start_keepalive(candidate.model)
             except Exception:
-                pass
+                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             return ask_local_stream(
                 user_input,
                 candidate.model,
