@@ -54,6 +54,8 @@ class ReflectionPipelineTests(unittest.TestCase):
         self._log = base / "logs" / "self_eval.jsonl"
         self._log.parent.mkdir(parents=True)
         self._output = base / "kb" / "core" / "jarvis_self_eval.md"
+        self._history = base / "evals" / "reflection_history.jsonl"
+        self._history.parent.mkdir(parents=True)
         self._episodic = base / "memory" / "episodic"
         self._episodic.mkdir(parents=True)
 
@@ -61,6 +63,7 @@ class ReflectionPipelineTests(unittest.TestCase):
         self._patches = [
             patch("harness.reflection._self_eval_log", return_value=self._log),
             patch("harness.reflection._reflection_output", return_value=self._output),
+            patch("harness.reflection._reflection_history_path", return_value=self._history),
             patch("harness.reflection._episodic_dir", return_value=self._episodic),
         ]
         for p in self._patches:
@@ -189,13 +192,20 @@ class ReflectionPipelineTests(unittest.TestCase):
         self.assertIn("no responses scored", text.lower())
 
     def test_trend_shown_when_previous_output_exists(self):
-        # Write a previous reflection with a known quality
-        self._output.parent.mkdir(parents=True, exist_ok=True)
-        self._output.write_text("Overall quality: 0.70/1.0\n")
+        # Seed a snapshot at lower quality so the real run shows an upward delta
+        import json as _json
+        prev_snap = {
+            "ts": "2026-06-24T00:00:00+00:00",
+            "total_scored": 3,
+            "overall_quality": 0.50,
+            "axes": {"routing_accuracy": 0.40, "response_relevance": 0.40, "conciseness": 0.50},
+            "top_flags": {"poor_relevance": 5},
+        }
+        self._history.write_text(_json.dumps(prev_snap) + "\n")
         self._seed_scores()
         reflection.run_reflection(hours=168)
         content = self._output.read_text()
-        # Trend arrow should appear
+        # Trend arrow should appear in the markdown report
         self.assertTrue("↑" in content or "↓" in content)
 
     def test_never_raises_on_malformed_log(self):
