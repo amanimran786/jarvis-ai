@@ -198,9 +198,9 @@ LOCAL_DEFAULT = os.getenv("LOCAL_DEFAULT_MODEL", LOCAL_GLM_FLASH)
 # Speculative decoding drafter. Leave empty unless a compatible drafter is
 # installed for the selected default model.
 LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")
-LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", LOCAL_GLM_FLASH)
-LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", LOCAL_GLM_FLASH)
-LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", LOCAL_GLM_FLASH)
+LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", "devstral")
+LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen2.5-coder:32b")
+LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", "qwen3:30b-a3b")
 
 # ── Qwen3 model fleet (2026-04) ───────────────────────────────────────────────
 # Qwen3 outperforms prior models at each size class.  Pull the ones that fit:
