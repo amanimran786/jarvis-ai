@@ -160,3 +160,11 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 17:51:22] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 34 done (54 total)
 [2026-06-26 17:51:22] [orchestrator] Remaining in_progress: [jarvis-board] AGENT_BOARD items 9, 11, 13
 [2026-06-26 17:51:22] [orchestrator] Next: round 22 — verify sessions resuming post-signal; watch for AGENT_BOARD closures
+
+[2026-06-26 17:56:00] [orchestrator] ROUND 22 — SESSIONS RESUMED (post weekly-reset)
+[2026-06-26 17:56:00] [orchestrator] 93f3b34: fix Ollama test patching — tests were calling real Ollama (180s each); now patch ollama.Client.chat directly
+[2026-06-26 17:56:00] [orchestrator] a669c5e: 12 tests for workspace_context (P6 complete) — cache, TTL, git fallback, thread safety, format_for_prompt
+[2026-06-26 17:56:00] [orchestrator] jarvis-board resumed within 4m of weekly reset — 2 commits back-to-back
+[2026-06-26 17:56:00] [orchestrator] RESUME_SIGNAL.json purged — signal consumed, sessions active
+[2026-06-26 17:56:00] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 36 done (56 total)
+[2026-06-26 17:56:00] [orchestrator] Remaining in_progress: [jarvis-board] AGENT_BOARD items 9, 11, 13

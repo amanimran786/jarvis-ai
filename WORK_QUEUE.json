@@ -536,5 +536,25 @@
     "completed_at": "2026-06-26T03:52:37Z",
     "created_at": "2026-06-26T03:45:00Z",
     "notes": "Committed ec9d29c \u2014 retroactive harvest. specialized_agent\u2192agent_dispatch.dispatch(), code_task\u2192coder_workbench.fix_loop(). Background task list fast-path added to router."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix Ollama test patching in task_planner + coder_workbench \u2014 patch ollama.Client.chat directly (not ask_local)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:48:00Z",
+    "completed_at": "2026-06-26T17:51:37Z",
+    "created_at": "2026-06-26T17:48:00Z",
+    "notes": "Committed 93f3b34 \u2014 retroactive harvest. Tests were calling real Ollama (180s timeout each). Patch ollama.Client.chat + brains.brain_ollama.get_best_available."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Add 12 tests for workspace_context snapshot + format_for_prompt (P6 test coverage)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:51:00Z",
+    "completed_at": "2026-06-26T17:54:53Z",
+    "created_at": "2026-06-26T17:51:00Z",
+    "notes": "Committed a669c5e \u2014 P6 tests: required keys, cache hit/miss, TTL expiry, git failure fallback, key_files filtering, thread safety, prompt formatting. workspace_context.py had zero coverage before."
   }
 ]
