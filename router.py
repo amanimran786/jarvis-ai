@@ -4149,6 +4149,33 @@ def route_stream(user_input: str) -> tuple:
             f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
         ), "Tasks"
 
+    # ── Background task status fast-path ─────────────────────────────────────
+    _TASK_STATUS_TRIGGERS = (
+        "what's the status of background tasks",
+        "what is the status of background tasks",
+        "background task status",
+        "status of my tasks",
+        "task queue status",
+        "what tasks are running",
+        "what tasks are in progress",
+        "show background tasks",
+        "list background tasks",
+        "any background tasks",
+        "tasks running",
+    )
+    if any(t in lower for t in _TASK_STATUS_TRIGGERS):
+        import task_runtime as _tr
+        tasks = _tr.list_tasks(limit=10)
+        if not tasks:
+            return _s("No background tasks in the queue."), "Tasks"
+        lines = []
+        for t in tasks:
+            tid = t.get("id", "?")[:8]
+            st = t.get("status", "?")
+            desc = (t.get("description") or t.get("kind") or "task")[:60]
+            lines.append(f"• [{tid}] {st}: {desc}")
+        return _s("Background tasks:\n" + "\n".join(lines)), "Tasks"
+
     # ── Screen vision fast-path ───────────────────────────────────────────────
     # Routes directly to camera.screenshot_and_describe() — local llava first,
     # OCR+local-LLM second — without touching the cloud orchestrator.

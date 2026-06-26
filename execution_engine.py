@@ -226,6 +226,26 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         )
         return True, json.dumps(result)
 
+    if tool == "specialized_agent":
+        import agent_dispatch
+        agent_name = params.get("agent", "").strip()
+        agent_task = params.get("task", step.description)
+        context = params.get("context", "")
+        try:
+            chunks = list(agent_dispatch.dispatch(agent_name, agent_task, context))
+            return True, "".join(chunks)
+        except RuntimeError as exc:
+            return False, str(exc)
+
+    if tool == "code_task":
+        import coder_workbench
+        agent_task = params.get("task", step.description)
+        max_iter = int(params.get("max_iterations", 5))
+        result = coder_workbench.fix_loop(agent_task, max_iterations=max_iter)
+        if result.get("ok"):
+            return True, f"Code task completed in {result['iterations']} iteration(s).\n{result['output']}"
+        return False, result.get("error", "Code task failed") + f"\n{result.get('output', '')}"
+
     prompt = params.get("prompt", params.get("content", step.description))
     if step_results:
         last = step_results.get(max(step_results.keys()))
