@@ -622,6 +622,154 @@ def reflect_text(hours: int = 168) -> str:
     return "\n".join(lines)
 
 
+# ── LLM-synthesized improvement notes ────────────────────────────────────────
+
+_IMPROVE_PROMPT = """\
+You are Jarvis's self-improvement analyst. Review these quality metrics from the last {n} \
+responses and write SPECIFIC, ACTIONABLE improvement notes.
+
+## Quality Data
+Overall quality: {overall}/1.0
+Routing accuracy: {routing}/1.0
+Response relevance: {relevance}/1.0
+Conciseness: {conciseness}/1.0
+
+Recurring issues (flag → count):
+{flags}
+
+Worst-performing queries (low quality score):
+{worst_queries}
+
+Best-performing routes:
+{best_routes}
+
+## Instructions
+Write 3-5 concrete improvement notes. Each note must:
+- Name the specific problem (e.g. "Responses to scheduling queries are too long")
+- State the target behaviour
+- Be actionable by the system prompt or routing logic
+
+Format each note as: "NOTE: <problem> → <fix>"
+Do not repeat the input data. Do not hedge. Be direct."""
+
+
+def _improvement_log_path() -> Path:
+    return _base_dir() / "kb" / "self_improvement_log.md"
+
+
+def write_improvement_notes(n: int = 50) -> str:
+    """Read last n self-eval entries, use LOCAL_REASONING to synthesize improvement notes,
+    and append a dated entry to kb/self_improvement_log.md.
+
+    Returns the notes text, or an empty string if the log is empty or model fails.
+    """
+    from harness.self_eval_log import load_recent, rolling_average
+
+    records = load_recent(n)
+    if not records:
+        log.debug("[reflection] write_improvement_notes: no scored records")
+        return ""
+
+    avg = rolling_average(n)
+    overall = avg.get("response_quality") or 0.0
+    routing = avg.get("routing_accuracy") or 0.0
+    relevance = avg.get("response_relevance") or 0.0
+    conciseness = avg.get("conciseness") or 0.0
+
+    # Top flags
+    top_flags = avg.get("top_flags", {})
+    flags_text = "\n".join(f"  {flag}: {cnt}×" for flag, cnt in top_flags.items()) or "  (none)"
+
+    # Worst 5 queries by response_quality
+    scored = [r for r in records if "response_quality" in r]
+    worst = sorted(scored, key=lambda r: r.get("response_quality", 1.0))[:5]
+    worst_text = "\n".join(
+        f'  [{r.get("route","?") or "Unknown"}] "{r.get("query","")[:60]}" '
+        f'(quality={r.get("response_quality",0):.2f}, flags={r.get("flags",[])})'
+        for r in worst
+    ) or "  (none)"
+
+    # Best routes (quality >= 0.75 with ≥ 2 responses)
+    from collections import defaultdict as _dd, Counter as _Counter
+    route_q: dict[str, list[float]] = _dd(list)
+    for r in scored:
+        route = r.get("route", "") or "Unknown"
+        route_q[route].append(r.get("response_quality", 0.0))
+    best_routes = [
+        f"  {route}: avg {sum(qs)/len(qs):.2f} ({len(qs)} responses)"
+        for route, qs in sorted(route_q.items(), key=lambda kv: sum(kv[1])/len(kv[1]), reverse=True)
+        if len(qs) >= 2 and sum(qs)/len(qs) >= 0.75
+    ][:4]
+    best_routes_text = "\n".join(best_routes) or "  (insufficient data)"
+
+    prompt = _IMPROVE_PROMPT.format(
+        n=len(records),
+        overall=f"{overall:.2f}",
+        routing=f"{routing:.2f}",
+        relevance=f"{relevance:.2f}",
+        conciseness=f"{conciseness:.2f}",
+        flags=flags_text,
+        worst_queries=worst_text,
+        best_routes=best_routes_text,
+    )
+
+    try:
+        from brains.brain_ollama import ask_local
+        from config import LOCAL_REASONING
+        raw_notes = ask_local(
+            prompt,
+            model=LOCAL_REASONING,
+            system_extra="",
+            include_memory=False,
+            raise_on_error=True,
+        ).strip()
+    except Exception as exc:
+        log.warning("[reflection] LLM improvement notes failed: %s", exc)
+        return ""
+
+    if not raw_notes:
+        return ""
+
+    # Normalize: ensure each NOTE: starts on its own line
+    notes_text = re.sub(r"(?<!\n)(NOTE:)", r"\n\1", raw_notes).strip()
+
+    # Build a dated markdown entry
+    now = datetime.now(timezone.utc)
+    header = f"## {now.strftime('%Y-%m-%d %H:%M UTC')} — {len(records)} responses sampled"
+    stats_line = (
+        f"*quality={overall:.2f} | routing={routing:.2f} | "
+        f"relevance={relevance:.2f} | conciseness={conciseness:.2f}*"
+    )
+    entry = f"\n{header}\n{stats_line}\n\n{notes_text}\n"
+
+    log_path = _improvement_log_path()
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure file has a header if new
+        if not log_path.exists():
+            log_path.write_text(
+                "# Jarvis Self-Improvement Log\n"
+                "*Appended automatically every 100 interactions and on /reflect.*\n",
+                encoding="utf-8",
+            )
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+        log.info("[reflection] Improvement notes written to %s", log_path)
+    except OSError as exc:
+        log.warning("[reflection] Could not write improvement log: %s", exc)
+
+    return notes_text
+
+
+def write_improvement_notes_async(n: int = 50) -> None:
+    """Fire-and-forget wrapper — never blocks the caller."""
+    threading.Thread(
+        target=write_improvement_notes,
+        args=(n,),
+        daemon=True,
+    ).start()
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _cli(argv: list[str]) -> int:

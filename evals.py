@@ -11,6 +11,11 @@ import runtime_state
 _BUNDLED_EVALS_FILE = os.path.join(os.path.dirname(__file__), "evals.json")
 EVALS_FILE = str(runtime_state.writable_data_path("evals.json", seed_from=_BUNDLED_EVALS_FILE))
 
+# Auto-trigger improvement notes every N interactions
+_IMPROVE_EVERY = 100
+_interaction_count = 0
+_improve_lock = threading.Lock()
+
 _DEFAULTS = {
     "interactions": [],
     "failures": [],
@@ -126,6 +131,18 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
         )
     except Exception:
         logging.debug("[Evals] silent failure in log_interaction", exc_info=True)
+    # Auto-trigger LLM improvement notes every _IMPROVE_EVERY interactions
+    global _interaction_count
+    with _improve_lock:
+        _interaction_count += 1
+        should_improve = (_interaction_count % _IMPROVE_EVERY == 0)
+    if should_improve:
+        try:
+            from harness.reflection import write_improvement_notes_async
+            write_improvement_notes_async(n=50)
+            logging.info("[Evals] auto-triggered improvement notes at interaction %d", _interaction_count)
+        except Exception:
+            logging.debug("[Evals] silent failure in auto improvement trigger", exc_info=True)
     return entry
 
 

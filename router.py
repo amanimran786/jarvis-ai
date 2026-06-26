@@ -836,7 +836,13 @@ def _is_reflect_command(lower: str) -> bool:
 def _reflect_command_reply() -> str:
     try:
         from harness import reflection
-        return reflection.reflect_text(hours=168)
+        summary = reflection.reflect_text(hours=168)
+        # Also kick off LLM improvement notes (async — doesn't block response)
+        try:
+            reflection.write_improvement_notes_async(n=50)
+        except Exception:
+            pass
+        return summary
     except Exception as exc:
         return f"/reflect unavailable: {exc}"
 
@@ -4481,6 +4487,53 @@ def route_stream(user_input: str) -> tuple:
     return _orchestrate(user_input, lower, modifier_system=modifier_system)
 
 
+def _parse_file_request(text: str) -> tuple[str, str, str]:
+    """Parse a natural-language file request into (action, path, content).
+
+    action: 'read' | 'write' | 'list'
+    path:   expanded path string, or '' if not found
+    content: text to write (write action only), or ''
+    """
+    lower = (text or "").lower()
+    if re.search(r"\b(write|save|append|create.*file)\b", lower):
+        action = "write"
+    elif re.search(r"\b(list|ls)\b.{0,20}\b(files?|folder|dir|directory)\b"
+                   r"|\b(what(?:'s| is) in|show me)\b.{0,20}\b(folder|dir|directory)\b", lower):
+        action = "list"
+    else:
+        action = "read"
+
+    # Extract path — four strategies in priority order.
+    _EXT = r"(?:pdf|txt|md|py|json|csv|log|docx|xlsx|yaml|yml|toml|sh|rst)"
+    path = ""
+    m = (
+        # 1. Quoted: 'My Report.pdf' or "~/path/file.pdf" — any content between quotes
+        re.search(r"[\"']([^\"']+)[\"']", text)
+        # 2. ~/… ending at a known extension — lazy so it handles spaces in names
+        or re.search(r"(~/[\w\s.\-/]+?\." + _EXT + r")\b", text, re.IGNORECASE)
+        # 3. /absolute/… ending at a known extension
+        or re.search(r"(/[\w\s.\-/]+?\." + _EXT + r")\b", text, re.IGNORECASE)
+        # 4. ~/dir or /dir with no extension (for list action or extensionless files)
+        or re.search(r"(~/[\w.\-/]+|/[\w.\-/]+)", text)
+        # 5. Bare filename.ext — no directory, no spaces
+        or re.search(r"([\w.\-]+\." + _EXT + r")\b", text, re.IGNORECASE)
+    )
+    if m:
+        path = m.group(1).rstrip(".,;:")
+
+    content = ""
+    if action == "write":
+        content_match = re.search(
+            r"(?::\s*[\"']?|saying\s+[\"']?|content[:\s]+[\"']?|with[:\s]+[\"']?)(.+)$",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if content_match:
+            content = content_match.group(1).strip().strip("\"'")
+
+    return action, path, content
+
+
 # ── Orchestrator dispatch ─────────────────────────────────────────────────────
 
 def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tuple:
@@ -4990,6 +5043,60 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     if tool == "meeting":
         import meeting_listener as ml
         return _s(ml.auto_configure_blackhole()), "Meeting"
+
+    # ── File ──────────────────────────────────────────────────────────────────
+    if tool == "file":
+        action = params.get("action", "")
+        path = params.get("path", "")
+        content = params.get("content", "")
+
+        if not path:
+            _parsed_action, path, _parsed_content = _parse_file_request(user_input)
+            if not action:
+                action = _parsed_action
+            if not content:
+                content = _parsed_content
+
+        if not path:
+            return _s("What file path would you like me to work with?"), "File"
+
+        if not action:
+            action = "read"
+
+        if action == "list":
+            dir_result = terminal.list_directory(path)
+            return format_with_mini(
+                f"Directory listing for {path}:\n{dir_result}\nDescribe what files are here briefly.",
+                skill_id=skill_id,
+                tool=tool,
+                extra_system=modifier_system,
+                ground_query=user_input,
+            ), "File"
+
+        if action == "write":
+            if not content:
+                return _s(f"What should I write to {path}?"), "File"
+            write_result = terminal.write_file(path, content)
+            return _s(write_result), "File"
+
+        # read (default)
+        raw = terminal.read_file(path)
+        summarize = any(
+            p in lower
+            for p in ("summarize", "summarise", "what does it say", "tell me about",
+                      "brief", "overview", "explain", "describe")
+        )
+        path_expanded = os.path.expanduser(path)
+        if summarize or path_expanded.lower().endswith(".pdf"):
+            return format_with_mini(
+                f"The user asked: {user_input!r}\n\nFile contents ({path}):\n{raw}"
+                "\n\nSummarize clearly and concisely.",
+                skill_id=skill_id,
+                tool=tool,
+                extra_system=modifier_system,
+                ground_query=user_input,
+            ), "File"
+        return _s(raw), "File"
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
     audit_log("route_decision", tool=tool or "chat", confidence=None)

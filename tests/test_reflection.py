@@ -240,5 +240,100 @@ class DomainStatsTests(unittest.TestCase):
         self.assertEqual(ds.avg("routing_accuracy"), 0.8)
 
 
+class ImprovementNotesTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        base = Path(self._tmpdir.name)
+        self._log = base / "logs" / "self_eval.jsonl"
+        self._log.parent.mkdir(parents=True)
+        self._improve_log = base / "kb" / "self_improvement_log.md"
+        self._improve_log.parent.mkdir(parents=True)
+        self._history = base / "evals" / "reflection_history.jsonl"
+        self._history.parent.mkdir(parents=True)
+
+        self._patches = [
+            patch("harness.reflection._self_eval_log", return_value=self._log),
+            patch("harness.reflection._improvement_log_path", return_value=self._improve_log),
+            # write_improvement_notes uses self_eval_log.load_recent which reads _log_path
+            patch("harness.self_eval_log._log_path", return_value=self._log),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self._patches:
+            p.stop()
+        self._tmpdir.cleanup()
+
+    def _seed(self):
+        records = _make_sample_scores()
+        with open(self._log, "w") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+    def _mock_local(self, text: str):
+        return patch("brains.brain_ollama.ask_local", return_value=text)
+
+    def test_returns_empty_when_no_data(self):
+        result = reflection.write_improvement_notes(n=50)
+        self.assertEqual(result, "")
+
+    def test_returns_empty_when_local_model_fails(self):
+        self._seed()
+        with patch("brains.brain_ollama.ask_local", side_effect=RuntimeError("model down")):
+            result = reflection.write_improvement_notes(n=50)
+        self.assertEqual(result, "")
+
+    def test_creates_log_file_when_missing(self):
+        self._seed()
+        notes = "NOTE: routing is weak → fix it"
+        with self._mock_local(notes):
+            reflection.write_improvement_notes(n=50)
+        self.assertTrue(self._improve_log.exists())
+
+    def test_log_file_has_header_on_first_write(self):
+        self._seed()
+        with self._mock_local("NOTE: fix routing"):
+            reflection.write_improvement_notes(n=50)
+        content = self._improve_log.read_text()
+        self.assertIn("Self-Improvement Log", content)
+
+    def test_appends_dated_entry(self):
+        self._seed()
+        with self._mock_local("NOTE: improve relevance"):
+            reflection.write_improvement_notes(n=50)
+        with self._mock_local("NOTE: reduce verbosity"):
+            reflection.write_improvement_notes(n=50)
+        content = self._improve_log.read_text()
+        self.assertEqual(content.count("## 20"), 2)
+
+    def test_entry_includes_quality_stats(self):
+        self._seed()
+        with self._mock_local("NOTE: fix it"):
+            reflection.write_improvement_notes(n=50)
+        content = self._improve_log.read_text()
+        self.assertIn("quality=", content)
+        self.assertIn("routing=", content)
+
+    def test_note_formatting_splits_on_note_prefix(self):
+        self._seed()
+        raw = "NOTE: first issue → fix A.NOTE: second issue → fix B."
+        with self._mock_local(raw):
+            result = reflection.write_improvement_notes(n=50)
+        self.assertIn("\nNOTE:", result)
+
+    def test_returns_notes_text(self):
+        self._seed()
+        with self._mock_local("NOTE: routing is low → adjust weights"):
+            result = reflection.write_improvement_notes(n=50)
+        self.assertIn("NOTE:", result)
+
+    def test_async_wrapper_does_not_raise(self):
+        # Just verify it spawns without error
+        with self._mock_local("NOTE: test"):
+            reflection.write_improvement_notes_async(n=50)
+        import time; time.sleep(0.05)  # let thread start
+
+
 if __name__ == "__main__":
     unittest.main()
