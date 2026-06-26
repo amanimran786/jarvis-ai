@@ -198,3 +198,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 18:17:30] [orchestrator] Next hourly reset: 19:00 UTC (43m away) — may be rate-limited
 [2026-06-26 18:17:30] [orchestrator] Not escalating yet (3 rounds within threshold); 2 ghosts purged
 [2026-06-26 18:17:30] [orchestrator] Queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
+
+[2026-06-26 19:01:42] [orchestrator] ROUND 28 — HOURLY RESET 19:00 UTC, RESUME_SIGNAL written
+[2026-06-26 19:01:42] [orchestrator] Stall confirmed: board=52m, self-eval=61m, local-llm=937m, audit=1305m
+[2026-06-26 19:01:42] [orchestrator] RESUME_SIGNAL.json written — all lanes signaled to resume
+[2026-06-26 19:01:42] [orchestrator] No new commits since 392d192 at 18:07 UTC (54m ago)
+[2026-06-26 19:01:42] [orchestrator] AGENT_BOARD items 11+13 still pending; freeze not lifted yet
+[2026-06-26 19:01:42] [orchestrator] 1 ghost purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
