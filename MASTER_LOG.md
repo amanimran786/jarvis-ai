@@ -205,3 +205,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 19:01:42] [orchestrator] No new commits since 392d192 at 18:07 UTC (54m ago)
 [2026-06-26 19:01:42] [orchestrator] AGENT_BOARD items 11+13 still pending; freeze not lifted yet
 [2026-06-26 19:01:42] [orchestrator] 1 ghost purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
+
+[2026-06-26 19:06:32] [orchestrator] ROUND 29 — signal unanswered (5m post-reset)
+[2026-06-26 19:06:32] [orchestrator] RESUME_SIGNAL.json still present — sessions have not polled yet
+[2026-06-26 19:06:32] [orchestrator] board=56m stalled, self-eval=65m stalled; no new commits
+[2026-06-26 19:06:32] [orchestrator] 0 ghosts: none. Extending cadence to 5m, watching for pickup.
