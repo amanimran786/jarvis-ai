@@ -4468,7 +4468,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     try:
         audit_log("route_decision", tool=tool, confidence=decision.confidence)
     except Exception:
-        pass
+        logging.debug("[Router] audit_log route_decision failed", exc_info=True)
     if not skill_id:
         skill = skills.choose_skill(user_input, tool=tool)
         if skill:
@@ -4657,6 +4657,28 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
 
         return _operative_stream(), "Operative"
+
+    # ── Code task (write + test + fix loop) ──────────────────────────────────
+    if tool == "code_task":
+        task = params.get("task", user_input)
+
+        def _code_task_stream():
+            yield "On it. Writing code and running tests locally now."
+            result = coder_workbench.fix_loop(task)
+            if result["ok"]:
+                files_list = ", ".join(result.get("files", {}).keys()) or "files"
+                yield f" Done in {result['iterations']} iteration(s). Files: {files_list}."
+                if result.get("output"):
+                    lines = result["output"].strip().splitlines()
+                    summary = "\n".join(lines[-6:]) if len(lines) > 6 else result["output"].strip()
+                    yield f"\n\nTest output:\n{summary}"
+            else:
+                yield (
+                    f" Still failing after {result['iterations']} iteration(s)."
+                    f" Last output: {result.get('output', '')[-300:]}"
+                )
+
+        return _code_task_stream(), "Code Task"
 
     # ── Specialized agents ───────────────────────────────────────────────────
     if tool == "specialized_agent":
