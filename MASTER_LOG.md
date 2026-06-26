@@ -129,3 +129,11 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 03:30:26] [orchestrator] jarvis-local-llm: active 6m, P7 circuit breakers in progress; no commit yet
 [2026-06-26 03:30:26] [orchestrator] jarvis-self-eval: healthy 16m stale; Cycle 7 complete
 [2026-06-26 03:30:26] [orchestrator] 1 ghost purged; queue unchanged: 2 in_progress / 18 queued / 1 blocked / 31 done
+
+[2026-06-26 03:33:54] [orchestrator] ROUND 18 — OBSERVE + COORDINATE
+[2026-06-26 03:33:54] [orchestrator] New commit: a0a7fac (jarvis-board) — plan_task() local-first test regression fixed; _plan_task_local patched to raise in test so ask_claude fallback is exercised
+[2026-06-26 03:33:54] [orchestrator] CLOSED in_progress: "Fix model routing test regressions from LOCAL_CODER_RECOMMENDED chain change" — resolved after 6 rounds
+[2026-06-26 03:33:54] [orchestrator] jarvis-board: Antigravity silent-failure sweep still in progress (6m); circuit breakers (jarvis-local-llm) still pending
+[2026-06-26 03:33:54] [orchestrator] 3 ghost sessions purged → 4 clean sessions
+[2026-06-26 03:33:54] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 33 done (53 total)
+[2026-06-26 03:33:54] [orchestrator] Remaining in_progress: [jarvis-board] AGENT_BOARD items 9, 11, 13
