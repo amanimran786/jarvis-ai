@@ -183,3 +183,8 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 18:05:27] [orchestrator] ROUND 24 — quiet (post-burst cooldown, ~5m no commits)
 [2026-06-26 18:05:27] [orchestrator] jarvis-board: 4m stale, AGENT_BOARD items 11+13 pending; jarvis-self-eval: 4m stale
 [2026-06-26 18:05:27] [orchestrator] 4 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 42 done
+
+[2026-06-26 18:09:41] [orchestrator] ROUND 25 — 1 new commit
+[2026-06-26 18:09:41] [orchestrator] 392d192: fix operative summary grounding test — force DEFAULT_MODE=cloud (same bypass as a0a7fac plan_task pattern)
+[2026-06-26 18:09:41] [orchestrator] jarvis-board: test suite cleanup ongoing before baseline run; AGENT_BOARD items 11+13 next
+[2026-06-26 18:09:41] [orchestrator] 2 ghosts purged; queue: 1 in_progress / 18 queued / 1 blocked / 43 done
