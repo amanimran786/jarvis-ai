@@ -1,13 +1,13 @@
 [
   {
     "session_name": "jarvis-board",
-    "task": "Review and close open AGENT_BOARD items (items 9, 11, 13 still open)",
+    "task": "Review and close open AGENT_BOARD items (items 11, 13 still open \u2014 item 9 CLOSED)",
     "priority": 1,
     "status": "in_progress",
     "assigned_at": "2026-06-25T21:28:06.332061+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
-    "notes": "Sweep committed (9da8797). Pivot gate open. Items: 9=Ollama memory-pressure in security gate, 11=?, 13=eval_trace_score surface (observe-only)"
+    "notes": "Sweep committed (9da8797). Pivot gate open. Items: 9=Ollama memory-pressure in security gate, 11=?, 13=eval_trace_score surface (observe-only) | AGENT_BOARD item 9 CLOSED round 23 (Ollama memory-pressure security gate). Items 11, 13 remain."
   },
   {
     "session_name": "jarvis-board",
@@ -556,5 +556,65 @@
     "completed_at": "2026-06-26T17:54:53Z",
     "created_at": "2026-06-26T17:51:00Z",
     "notes": "Committed a669c5e \u2014 P6 tests: required keys, cache hit/miss, TTL expiry, git failure fallback, key_files filtering, thread safety, prompt formatting. workspace_context.py had zero coverage before."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Memory persistence tests \u2014 JSON+SQLite survive process restart",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:55:00Z",
+    "completed_at": "2026-06-26T17:56:00Z",
+    "created_at": "2026-06-26T17:55:00Z",
+    "notes": "Committed e8634e1 \u2014 proves persistence layer survives restart."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Raise agent thread cap from 1 to cpu_count (P4)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:56:00Z",
+    "completed_at": "2026-06-26T17:57:00Z",
+    "created_at": "2026-06-26T17:56:00Z",
+    "notes": "Committed 69ef6de \u2014 parallel agent execution now scales to hardware."
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "LLM improvement notes pipeline \u2014 auto every 100 interactions + /reflect (self-eval)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:56:00Z",
+    "completed_at": "2026-06-26T17:57:00Z",
+    "created_at": "2026-06-26T17:56:00Z",
+    "notes": "Committed 2473853 \u2014 write_improvement_notes auto-triggered; /reflect surfaces suggestions."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Replace Redis event bus with SQLite-backed bus (P4)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:57:00Z",
+    "completed_at": "2026-06-26T17:58:00Z",
+    "created_at": "2026-06-26T17:57:00Z",
+    "notes": "Committed 81311e9 \u2014 eliminates Redis dependency; local-first event bus."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Start task_runtime + harness heartbeat in main.py (P4)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:58:00Z",
+    "completed_at": "2026-06-26T17:59:00Z",
+    "created_at": "2026-06-26T17:58:00Z",
+    "notes": "Committed fe74af4 \u2014 task_runtime and watchdog heartbeat wired into app startup."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Stream operative progress tokens live via thread+queue in router (P8)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:59:00Z",
+    "completed_at": "2026-06-26T17:59:49Z",
+    "created_at": "2026-06-26T17:59:00Z",
+    "notes": "Committed 1b796a8 \u2014 P8: progress tokens stream to UI in real time via background thread+queue."
   }
 ]

@@ -168,3 +168,14 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 17:56:00] [orchestrator] RESUME_SIGNAL.json purged — signal consumed, sessions active
 [2026-06-26 17:56:00] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 36 done (56 total)
 [2026-06-26 17:56:00] [orchestrator] Remaining in_progress: [jarvis-board] AGENT_BOARD items 9, 11, 13
+
+[2026-06-26 18:00:53] [orchestrator] ROUND 23 — 6-COMMIT BURST post weekly reset
+[2026-06-26 18:00:53] [orchestrator] e8634e1: memory persistence tests (JSON+SQLite survive restart)
+[2026-06-26 18:00:53] [orchestrator] 69ef6de: agent thread cap raised 1→cpu_count (P4)
+[2026-06-26 18:00:53] [orchestrator] 2473853: LLM improvement notes pipeline (self-eval: auto@100 interactions + /reflect)
+[2026-06-26 18:00:53] [orchestrator] 81311e9: Redis event bus REPLACED with SQLite-backed bus (P4, local-first)
+[2026-06-26 18:00:53] [orchestrator] fe74af4: task_runtime + harness heartbeat wired into main.py startup (P4)
+[2026-06-26 18:00:53] [orchestrator] 1b796a8: P8 — operative progress tokens stream live via thread+queue in router
+[2026-06-26 18:00:53] [orchestrator] AGENT_BOARD item 9 CLOSED (Ollama memory-pressure security gate). Items 11, 13 remain.
+[2026-06-26 18:00:53] [orchestrator] Board future timestamp fixed (was 18:30, corrected to now). 3 ghosts purged.
+[2026-06-26 18:00:53] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 42 done (62 total)
