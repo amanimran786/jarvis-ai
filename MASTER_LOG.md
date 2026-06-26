@@ -216,3 +216,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 19:11:30] [orchestrator] board=61m, self-eval=70m stalled; RESUME_SIGNAL.json kept for when they restart
 [2026-06-26 19:11:30] [orchestrator] Next hourly reset: 20:00 UTC (49m). Extending wakeup cadence to ~45m.
 [2026-06-26 19:11:30] [orchestrator] Queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
+
+[2026-06-26 20:01:37] [orchestrator] ROUND 31 — 2nd hourly reset (20:00 UTC), sessions still offline
+[2026-06-26 20:01:37] [orchestrator] Stale signal (60m) purged; fresh RESUME_SIGNAL written for 20:00 reset
+[2026-06-26 20:01:37] [orchestrator] board=112m, self-eval=120m offline — definitively not rate-limited, sessions closed
+[2026-06-26 20:01:37] [orchestrator] No new commits since 392d192 at 18:07 UTC (114m ago total)
+[2026-06-26 20:01:37] [orchestrator] Wakeup extended to 21:00 UTC. Queue: 1 in_progress / 18 queued / 1 blocked / 43 done
