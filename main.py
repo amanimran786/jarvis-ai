@@ -398,6 +398,22 @@ def _start_deferred_startup_tasks() -> None:
     ).start()
 
 
+def _start_harness_heartbeat() -> None:
+    """Beat ORCHESTRATOR_STATUS.json every 30 s via harness/loop.py."""
+    import time
+
+    def _beat() -> None:
+        from harness.loop import heartbeat
+        while True:
+            try:
+                heartbeat("Jarvis runtime active")
+            except Exception:
+                logging.debug("[Main] harness heartbeat error", exc_info=True)
+            time.sleep(30)
+
+    threading.Thread(target=_beat, daemon=True, name="JarvisHarnessHeartbeat").start()
+
+
 def _interactive_console_command() -> str:
     api_base = ""
     api_token = ""
@@ -483,6 +499,11 @@ def _run():
     jarvis_daemon.start_daemon(host=api_host, port=api_port)
     jarvis_watcher.start()
     brain_daemon.start()
+
+    import task_runtime as _task_runtime
+    _task_runtime.bootstrap()
+    _start_harness_heartbeat()
+
     _start_deferred_startup_tasks()
 
     if "--console" in sys.argv:
