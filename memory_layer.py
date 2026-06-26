@@ -24,3 +24,8 @@ def remember(fact: str) -> None:
 
 def forget(keyword: str) -> bool:
     return _memory.forget(keyword)
+
+
+def retrieve(query: str, top_k: int = 5, min_score: float = 0.3) -> list[dict]:
+    """Return semantic memory hits with relevance ≥ min_score."""
+    return _semantic_memory.retrieve(query, top_k=top_k, min_score=min_score)

@@ -21,7 +21,7 @@ from typing import Callable
 
 from brains.brain_claude import ask_claude
 from config import HAIKU
-from task_planner import TaskStep as Step, plan_task
+from task_planner import TaskStep as Step, plan_task, replan_after_failure
 from execution_engine import execute_step
 import preflect
 
@@ -82,7 +82,19 @@ def run_task(
         _prog(f"  {status} {step.description}", preview)
 
         if not ok:
-            _prog(f"Step {step.number} failed — continuing", result)
+            _prog(f"Step {step.number} failed — attempting recovery", result)
+            corrective = replan_after_failure(
+                task,
+                completed_steps=[s for s in steps if s.ok],
+                failed_step=step,
+                error=result,
+            )
+            if corrective:
+                _prog(
+                    f"Recovery plan: {len(corrective)} corrective step(s)",
+                    " → ".join(s.description for s in corrective),
+                )
+                steps.extend(corrective)
 
     # Final summary
     completed = [s for s in steps if s.ok]
