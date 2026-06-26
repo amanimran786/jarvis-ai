@@ -3,31 +3,18 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-25T21:28:38.971628+00:00",
-      "current_task": "fixed 2 model routing test regressions from LOCAL_CODER_RECOMMENDED chain change",
-      "status": "active"
+      "last_active": "2026-06-25T21:39:20.644607+00:00",
+      "current_task": "fix(tests): eliminate SQLite lock flake in test_project_manager \u2014 joined executor threads in fixture teardown to prevent cross-test DB access",
+      "status": "active",
+      "stall_note": "STALLED 337m \u2014 routing regression commit pending; watchpoint round 14"
     },
     {
-      "session_id": "seed-jarvis-self-eval",
+      "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T21:16:01.564411+00:00",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "3-axis scorer + /score + self_eval.jsonl",
-          "commit": "41c082b"
-        },
-        {
-          "task": "Reflection pipeline + /reflect + jarvis_self_eval.md",
-          "commit": "02de25f"
-        },
-        {
-          "task": "loop_watchdog wired \u2014 cycle 3 complete",
-          "commit": "8ee8006"
-        }
-      ],
-      "next_task": "Wire /reflect output into daily briefing",
-      "status": "idle"
+      "last_active": "2026-06-26T03:13:56.883011Z",
+      "current_task": "corrective replanning after step failure \u2014 Cycle 7 committed",
+      "status": "active",
+      "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py"
     },
     {
       "session_id": "seed-jarvis-local-llm",
@@ -96,65 +83,8 @@
       ],
       "next_task": "Verify audit.jsonl end-to-end: memory_write + route_decision events",
       "status": "idle"
-    },
-    {
-      "session_id": "jarvis-local-llm",
-      "name": "jarvis-local-llm",
-      "completed_tasks": [
-        {
-          "task": "Three-tier LOCAL_FIRST budget + /budget",
-          "commit": "1850965"
-        },
-        {
-          "task": "Ollama Cloud middle routing tier",
-          "commit": "3401988"
-        },
-        {
-          "task": "Specialist routing devstral/qwen3 over GLM_FLASH",
-          "commit": "c3eb04a"
-        },
-        {
-          "task": "Resume signal + heartbeat primitives",
-          "commit": "44c037d"
-        },
-        {
-          "task": "Context pressure wiring in smart_stream (cycle 3)",
-          "commit": "8ee8006"
-        },
-        {
-          "task": "harness/loop_watchdog.py consumer implementation",
-          "commit": "8ee8006"
-        }
-      ],
-      "last_active": "2026-06-25T21:16:01.564411+00:00",
-      "current_task": null,
-      "status": "idle",
-      "commit": "0c956da",
-      "tests": "56/56",
-      "cycle": 5,
-      "total_commits_this_session": 7,
-      "next_task": "Verify devstral/qwen3 routing stability in production [in_progress]"
-    },
-    {
-      "session_id": "f2e1d9e4-b9b0-43a7-beb4-82a500d42c70",
-      "name": "jarvis",
-      "last_active": "2026-06-25T21:15:05.217832+00:00",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "ping",
-          "completed_at": "2026-06-25T21:15:05.217832+00:00"
-        }
-      ],
-      "next_task": null,
-      "status": "idle"
-    },
-    {
-      "session_id": "jarvis-self-eval",
-      "name": "jarvis-self-eval",
-      "last_active": "2026-06-25T21:23:23.379521Z",
-      "current_task": "/diagnose command + daily reflection guard \u2014 Cycle 6 committed",
-      "status": "active"
     }
-  ]
+  ],
+  "last_updated": "2026-06-26T03:16:17.815999+00:00",
+  "orchestrator_round": 13
 }
