@@ -82,9 +82,43 @@ def run_admin_command(command: str) -> str:
         return f"Error running admin command: {e}"
 
 
-def read_file(path: str) -> str:
-    """Read a file and return its contents."""
+def read_pdf(path: str) -> str:
+    """Extract text from a PDF. Tries pdftotext first, falls back to pypdf."""
     path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return f"File not found: {path}"
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", path, "-"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        text = result.stdout.strip()
+        if text:
+            if len(text) > 12000:
+                text = text[:12000] + f"\n... [truncated — {len(text)} chars total]"
+            return text
+    except Exception:
+        pass
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(path)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+        if len(text) > 12000:
+            text = text[:12000] + f"\n... [truncated — {len(text)} chars total]"
+        return text or "PDF appears to have no extractable text."
+    except Exception as e:
+        return f"Could not read PDF: {e}"
+
+
+def read_file(path: str) -> str:
+    """Read a file and return its contents. PDFs are extracted as text."""
+    path = os.path.expanduser(path)
+    if path.lower().endswith(".pdf"):
+        return read_pdf(path)
     if not os.path.exists(path):
         return f"File not found: {path}"
     try:

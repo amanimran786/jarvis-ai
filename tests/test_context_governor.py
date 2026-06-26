@@ -57,6 +57,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
              patch.object(model_router._smem, "format_for_prompt", return_value="SEMANTIC_CONTEXT"), \
              patch.object(model_router._m0, "search", return_value=[]), \
              patch.object(model_router._m0, "format_for_prompt", return_value="MEM0_CONTEXT"), \
+             patch.object(model_router._mem, "get_context", return_value="MEMORY_CONTEXT"), \
              patch.object(model_router._repeat_context, "context_for_prompt", return_value="REPEAT_CONTEXT"), \
              patch.object(model_router.vault, "build_context", return_value="VAULT_CONTEXT"), \
              patch.object(model_router._gctx, "context_for_query", return_value="GRAPH_CONTEXT"), \
@@ -72,7 +73,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
 
         self.assertEqual(
             [b["label"] for b in captured["blocks"]],
-            ["repeat_context", "vault", "graph", "semantic_hint", "semantic_memory", "mem0"],
+            ["working_memory", "repeat_context", "vault", "graph", "semantic_hint", "semantic_memory", "mem0"],
         )
         self.assertIn("SELECTED_CONTEXT", ask_local.call_args.kwargs["system_extra"])
         self.assertEqual(

@@ -190,6 +190,15 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Volume/brightness/system
     if re.search(r"\b(volume|mute|unmute|brightness|screenshot|lock screen|lock my screen)\b", lower):
         return ToolDecision("system", 0.99, "control")
+    # File ops — must come before app so "open ~/foo.pdf" routes to file, not app
+    _has_path = bool(re.search(r"~/|(?:\.pdf|\.txt|\.md|\.py|\.json|\.csv|\.log|\.docx|\.xlsx|\.sh)\b", lower))
+    if _has_path:
+        if re.search(r"\b(read|open|show|view|cat|display|load|summarize|summarise)\b", lower):
+            return ToolDecision("file", 0.95, "read")
+        if re.search(r"\b(write|save|create|append)\b", lower):
+            return ToolDecision("file", 0.95, "write")
+        if re.search(r"\b(list|ls|what.{0,5}in|show.{0,10}(files?|folder|dir))\b", lower):
+            return ToolDecision("file", 0.92, "list")
     # App open
     if re.match(r"\b(open|launch|start)\b\s+\w+", lower) and "interface" not in lower:
         app = re.sub(r"^(open|launch|start)\s+", "", lower).strip()
