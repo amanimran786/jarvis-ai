@@ -98,7 +98,9 @@ class TaskPlannerSanitizerTests(unittest.TestCase):
                 {"number": 2, "description": "search", "tool": "search", "params": {"query": "jarvis"}},
             ]
         )
-        with patch("task_planner.ask_claude", return_value=response):
+        # Force cloud path: local planner raises so plan_task falls through to ask_claude
+        with patch("task_planner._plan_task_local", side_effect=RuntimeError("mock local failure")), \
+             patch("task_planner.ask_claude", return_value=response):
             steps = task_planner.plan_task("test plan")
         self.assertEqual(steps[0].tool, "chat")
         self.assertEqual(steps[1].tool, "search")
