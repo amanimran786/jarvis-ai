@@ -4731,21 +4731,43 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
     # ── Operative agent ───────────────────────────────────────────────────────
     if tool == "operative":
+        import queue as _queue
+        import threading as _threading
         from operative import run_task
         task = params.get("task", user_input)
 
         def _operative_stream():
             yield "Understood. Running the task autonomously now, sir."
-            steps_done = []
 
-            def _progress(step_desc, detail):
-                steps_done.append(step_desc)
+            _q: _queue.Queue = _queue.Queue()
+            _DONE = object()
 
-            result = run_task(task, on_progress=_progress)
-            yield " " + result["summary"]
-            if not result["ok"]:
-                failed = [s.description for s in result["steps"] if not s.ok]
-                yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
+            def _progress(step_desc, _detail):
+                _q.put(f" Working on: {step_desc}.")
+
+            def _run():
+                try:
+                    result = run_task(task, on_progress=_progress)
+                    _q.put((_DONE, result))
+                except Exception as exc:
+                    _q.put((_DONE, {"ok": False, "summary": str(exc), "steps": []}))
+
+            _threading.Thread(target=_run, daemon=True, name="Operative").start()
+
+            result = None
+            while True:
+                item = _q.get()
+                if isinstance(item, tuple) and item[0] is _DONE:
+                    result = item[1]
+                    break
+                yield item
+
+            if result:
+                yield " " + result["summary"]
+                if not result["ok"]:
+                    failed = [s.description for s in result.get("steps", []) if not s.ok]
+                    if failed:
+                        yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
 
         return _operative_stream(), "Operative"
 
