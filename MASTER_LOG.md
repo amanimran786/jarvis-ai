@@ -97,3 +97,12 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 03:16:29] [orchestrator] Queue: 2 in_progress / 18 queued / 1 blocked / 27 done (48 total)
 [2026-06-26 03:16:29] [orchestrator] in_progress: [jarvis-board] AGENT_BOARD items 9,11,13 | routing regression fix
 [2026-06-26 03:16:29] [orchestrator] Next: round 14 — verify routing regression commit landed; advance baseline suite if board cleared
+
+[2026-06-26 03:20:23] [orchestrator] ROUND 14 — OBSERVE + COORDINATE
+[2026-06-26 03:20:23] [orchestrator] New commit: f0a9995 (jarvis-board) — classifier fallback fix; short queries <20 words no longer misroute to chat 40% of the time
+[2026-06-26 03:20:23] [orchestrator] jarvis-board: heartbeat stale (340m) but committing actively — routing work ongoing
+[2026-06-26 03:20:23] [orchestrator] jarvis-self-eval: healthy, Cycle 7 complete, 5m stale
+[2026-06-26 03:20:23] [orchestrator] Routing regression watchpoint CLOSED — routing work landed (f0a9995)
+[2026-06-26 03:20:23] [orchestrator] LOCAL_CODER_RECOMMENDED regression fix still unconfirmed; "Fix model routing test regressions" stays in_progress
+[2026-06-26 03:20:23] [orchestrator] ORCHESTRATOR_STATUS: purged 2 new ghost jarvis sessions → 4 clean sessions
+[2026-06-26 03:20:23] [orchestrator] Queue: 2 in_progress / 17 queued / 1 blocked / 29 done (49 total)

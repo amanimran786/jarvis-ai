@@ -17,7 +17,7 @@
     "assigned_at": "2026-06-25T21:32:01.636379+00:00",
     "completed_at": null,
     "created_at": "2026-06-25T21:32:01.636379+00:00",
-    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed."
+    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed. | f0a9995: classifier short-query fix. LOCAL_CODER_RECOMMENDED regression still unconfirmed."
   },
   {
     "session_name": "jarvis-board",
@@ -471,10 +471,20 @@
     "session_name": "jarvis-board",
     "task": "Watchpoint: routing regression fix commit expected \u2014 jarvis-board stalled 5h35m with fix in_progress",
     "priority": 2,
-    "status": "queued",
+    "status": "done",
     "assigned_at": null,
-    "completed_at": null,
+    "completed_at": "2026-06-26T03:20:11.903238+00:00",
     "created_at": "2026-06-26T03:16:17.815999+00:00",
-    "notes": "routing regression watchpoint \u2014 board last active 337m ago. Expires round 14 if no commit."
+    "notes": "routing regression watchpoint \u2014 board last active 337m ago. Expires round 14 if no commit. \u2014 CLOSED: routing work landed (f0a9995). LOCAL_CODER_RECOMMENDED regression may be separate; kept in_progress."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix classifier fallback for short queries in local mode \u2014 orchestrator.classify() now uses 3s timeout before chat fallback (P5)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:00:00Z",
+    "completed_at": "2026-06-26T03:18:22Z",
+    "created_at": "2026-06-26T03:00:00Z",
+    "notes": "Committed f0a9995 \u2014 retroactive harvest. Routing fix: ~40% short-query misroute eliminated via _classify_with_local_structured_timed()."
   }
 ]

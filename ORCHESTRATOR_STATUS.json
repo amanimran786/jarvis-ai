@@ -6,7 +6,7 @@
       "last_active": "2026-06-25T21:39:20.644607+00:00",
       "current_task": "fix(tests): eliminate SQLite lock flake in test_project_manager \u2014 joined executor threads in fixture teardown to prevent cross-test DB access",
       "status": "active",
-      "stall_note": "STALLED 337m \u2014 routing regression commit pending; watchpoint round 14"
+      "orchestrator_note": "Heartbeat stale but f0a9995 committed at 03:18 UTC \u2014 session active via commits"
     },
     {
       "session_id": "jarvis-self-eval",
@@ -85,6 +85,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T03:16:17.815999+00:00",
-  "orchestrator_round": 13
+  "last_updated": "2026-06-26T03:20:11.903238+00:00",
+  "orchestrator_round": 14
 }
