@@ -411,7 +411,8 @@ def fix_loop(
           "history": [{"iteration": int, "output": str, "ok": bool, "elapsed_seconds": float}],
         }
     """
-    from brains.brain_ollama import ask_local, get_best_available
+    import ollama as _ollama_lib
+    from brains.brain_ollama import get_best_available
     from config import LOCAL_CODER
 
     cwd = (workspace or ROOT / "workspace").resolve()
@@ -429,6 +430,14 @@ def fix_loop(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
+    # Use a direct Ollama client with coding-appropriate timeouts (code gen can be slow)
+    try:
+        import httpx
+        _code_timeout = httpx.Timeout(connect=30.0, read=300.0, write=60.0, pool=30.0)
+        _ollama_client = _ollama_lib.Client(timeout=_code_timeout)
+    except ImportError:
+        _ollama_client = _ollama_lib.Client(timeout=300.0)
+
     model = get_best_available(LOCAL_CODER)
     log.info("[fix_loop] Starting — model=%s cwd=%s task=%s", model, cwd, task[:80])
 
@@ -439,7 +448,7 @@ def fix_loop(
                 "Write all necessary Python files (implementation + tests) to complete this task. "
                 "Return JSON with 'files' list and 'test_command'."
             )
-            system_extra = _CODER_WRITE_SYSTEM
+            system = _CODER_WRITE_SYSTEM
         else:
             files_summary = "\n\n".join(
                 f"File: {p}\n```python\n{c}\n```" for p, c in files.items()
@@ -451,16 +460,19 @@ def fix_loop(
                 f"Failure output:\n{test_output[:3000]}\n\n"
                 "Fix the code so all tests pass."
             )
-            system_extra = _CODER_FIX_SYSTEM
+            system = _CODER_FIX_SYSTEM
 
         try:
-            raw = ask_local(
-                prompt,
+            response = _ollama_client.chat(
                 model=model,
-                system_extra=system_extra,
-                include_memory=False,
-                raise_on_error=True,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=False,
+                options={"temperature": 0},
             )
+            raw = (response.message.content or "").strip()
             parsed = _parse_coder_json(raw)
         except Exception as exc:
             log.warning("[fix_loop] iteration %d parse error: %s", iteration, exc)

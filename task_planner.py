@@ -118,26 +118,46 @@ def _build_steps(data: list[dict]) -> list[TaskStep]:
 
 
 def _plan_task_local(task: str) -> list[TaskStep]:
-    """Plan with LOCAL_REASONING (qwen3:30b-a3b). Up to 3 parse retries."""
-    from brains.brain_ollama import ask_local
+    """Plan with LOCAL_REASONING. Up to 3 parse retries.
 
-    system_extra = _PLAN_SYSTEM_LOCAL.format(
+    Uses a dedicated Ollama client with planning-appropriate timeouts:
+    - 30s connect/pool (model may still be loading)
+    - 180s read (large planning prompts take longer to generate)
+    Does NOT inherit the singleton's short timeouts or GLM 131072-context reload.
+    """
+    import ollama as _ollama_lib
+    from brains.brain_ollama import get_best_available
+
+    try:
+        import httpx
+        _timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
+        client = _ollama_lib.Client(timeout=_timeout)
+    except ImportError:
+        client = _ollama_lib.Client(timeout=180.0)
+
+    model = get_best_available(LOCAL_REASONING)
+    system = _PLAN_SYSTEM_LOCAL.format(
         tool_summaries=tool_registry.callable_tool_summaries()
     )
-    prompt = f"Plan this task: {task}"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": f"Plan this task: {task}"},
+    ]
 
     last_error: Exception | None = None
     for attempt in range(3):
         try:
-            raw = ask_local(
-                prompt,
-                model=LOCAL_REASONING,
-                system_extra=system_extra,
-                include_memory=False,
-                raise_on_error=True,
+            response = client.chat(
+                model=model,
+                messages=messages,
+                stream=False,
+                options={"temperature": 0},
             )
+            raw = (response.message.content or "").strip()
             data = _extract_json_steps(raw)
-            return _build_steps(data)
+            steps = _build_steps(data)
+            log.info("[Planner] Local planning succeeded on attempt %d — %d steps", attempt + 1, len(steps))
+            return steps
         except Exception as exc:
             last_error = exc
             log.warning("[Planner] Local attempt %d/3 failed: %s", attempt + 1, exc)
@@ -174,8 +194,17 @@ def replan_after_failure(
     Step numbers are offset to continue after the failed step.
     """
     try:
-        from brains.brain_ollama import ask_local
+        import ollama as _ollama_lib
+        from brains.brain_ollama import get_best_available
 
+        try:
+            import httpx
+            _timeout = httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0)
+            client = _ollama_lib.Client(timeout=_timeout)
+        except ImportError:
+            client = _ollama_lib.Client(timeout=180.0)
+
+        model = get_best_available(LOCAL_REASONING)
         completed_desc = "\n".join(
             f"  Step {s.number} [{s.tool}]: {s.description} — OK"
             for s in completed_steps
@@ -191,13 +220,16 @@ def replan_after_failure(
         system = _REPLAN_SYSTEM_LOCAL.format(
             tool_summaries=tool_registry.callable_tool_summaries()
         )
-        raw = ask_local(
-            prompt,
-            model=LOCAL_REASONING,
-            system_extra=system,
-            include_memory=False,
-            raise_on_error=True,
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+            options={"temperature": 0},
         )
+        raw = (response.message.content or "").strip()
         data = _extract_json_steps(raw)
         corrective = _build_steps(data)
         # Renumber to continue after failed step

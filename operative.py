@@ -20,10 +20,36 @@ import uuid
 from typing import Callable
 
 from brains.brain_claude import ask_claude
-from config import HAIKU
+from config import DEFAULT_MODE, HAIKU, LOCAL_DEFAULT
 from task_planner import TaskStep as Step, plan_task, replan_after_failure
 from execution_engine import execute_step
 import preflect
+
+
+def _summarize(prompt: str, system_extra: str = "") -> str:
+    """Summarize task results. Uses local model unless in cloud-only mode."""
+    if DEFAULT_MODE != "cloud":
+        try:
+            import ollama as _ollama_lib
+            from brains.brain_ollama import get_best_available
+            try:
+                import httpx
+                client = _ollama_lib.Client(
+                    timeout=httpx.Timeout(connect=10.0, read=90.0, write=15.0, pool=10.0)
+                )
+            except ImportError:
+                client = _ollama_lib.Client(timeout=90.0)
+            model = get_best_available(LOCAL_DEFAULT)
+            messages = [{"role": "user", "content": prompt}]
+            if system_extra:
+                messages = [{"role": "system", "content": system_extra}] + messages
+            response = client.chat(model=model, messages=messages, stream=False)
+            return (response.message.content or "").strip()
+        except Exception:
+            pass
+        # Graceful local fallback — no model call needed
+        return prompt.split("\nTask: ", 1)[-1].split("\n")[0].strip() or "Task complete."
+    return ask_claude(prompt, model=HAIKU, system_extra=system_extra or None)
 
 
 # ── Step definition ───────────────────────────────────────────────────────────
@@ -124,7 +150,7 @@ def run_task(
             f"Steps completed: {[s.description for s in completed]}\n"
             f"Final output preview: {step_results.get(len(steps), '')[:500]}"
         )
-    summary = ask_claude(summary_prompt, model=HAIKU, system_extra=system_extra or None)
+    summary = _summarize(summary_prompt, system_extra=system_extra)
 
     _prog("Task complete", summary[:100])
 
