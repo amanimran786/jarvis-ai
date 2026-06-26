@@ -125,6 +125,11 @@ def classify(user_input: str) -> ToolDecision:
         local_short = _local_short_query_classify(user_input.lower().strip())
         if local_short:
             return _attach_skill(user_input, local_short)
+        # Regex missed it — try fast local LLM with a hard 3s timeout before
+        # falling back to chat. Never call a slow model here; speed is the point.
+        local_fast = _classify_with_local_structured_timed(user_input, timeout=3.0)
+        if local_fast:
+            return _attach_skill(user_input, local_fast)
         return _attach_skill(user_input, _FALLBACK)
 
     # Use the fast heuristic specialist classifier in every mode.
@@ -161,6 +166,10 @@ def classify(user_input: str) -> ToolDecision:
             error=str(e)[:200],
         )
         logging.warning("[Orchestrator] Classification failed: %s", e)
+        # Cloud failed — try local structured classifier before falling back to chat
+        local_fallback = _classify_with_local_structured(user_input)
+        if local_fallback:
+            return _attach_skill(user_input, local_fallback)
         return _FALLBACK
 
 
@@ -385,6 +394,29 @@ def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
     except Exception as e:
         logging.warning("[Orchestrator] Local structured classification failed: %s", e)
         return None
+
+
+def _classify_with_local_structured_timed(user_input: str, timeout: float = 3.0) -> ToolDecision | None:
+    """Classify with a hard wall-clock timeout (default 3s).
+
+    Returns None on timeout or error so the caller can fall back to chat
+    rather than waiting on a slow local model for a short query.
+    """
+    if not LOCAL_STRUCTURED_CLASSIFIER_ENABLED:
+        return None
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    _pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = _pool.submit(_classify_with_local_structured, user_input)
+        return future.result(timeout=timeout)
+    except _FutTimeout:
+        logging.debug("[Orchestrator] Short-query classifier timed out (%.1fs)", timeout)
+        return None
+    except Exception as exc:
+        logging.debug("[Orchestrator] Short-query classifier error: %s", exc)
+        return None
+    finally:
+        _pool.shutdown(wait=False)
 
 
 def _parse(raw: str) -> ToolDecision:
