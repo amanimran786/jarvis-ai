@@ -192,3 +192,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 18:13:23] [orchestrator] ROUND 26 — quiet (2nd consecutive post-burst, no commits ~4m)
 [2026-06-26 18:13:23] [orchestrator] jarvis-board: 3m stale, test cleanup complete, AGENT_BOARD 11+13 next
 [2026-06-26 18:13:23] [orchestrator] 2 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
+
+[2026-06-26 18:17:30] [orchestrator] ROUND 27 — quiet (3rd consecutive, ~10m no commits)
+[2026-06-26 18:17:30] [orchestrator] Stall pattern emerging: board last committed 392d192 at 18:07 UTC (10m ago), self-eval 20m
+[2026-06-26 18:17:30] [orchestrator] Next hourly reset: 19:00 UTC (43m away) — may be rate-limited
+[2026-06-26 18:17:30] [orchestrator] Not escalating yet (3 rounds within threshold); 2 ghosts purged
+[2026-06-26 18:17:30] [orchestrator] Queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
