@@ -992,7 +992,8 @@ def smart_stream(
     def _get_smem():
         if runtime_voice_query:
             return [], ""
-        hits = _smem.retrieve(user_input, top_k=3)
+        # min_score=0.3 filters low-relevance noise before injection
+        hits = _smem.retrieve(user_input, top_k=5, min_score=0.3)
         return hits, _smem.format_for_prompt(hits, max_chars=1200)
 
     def _get_mem0():
@@ -1002,7 +1003,19 @@ def smart_stream(
         hits = _m0.search(user_input, top_k=5)
         return _m0.format_for_prompt(hits, max_chars=600)
 
-    repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = ""
+    def _get_working_mem():
+        """Working memory: facts, preferences, projects from memory.json."""
+        if runtime_voice_query:
+            return ""
+        ctx = _mem.get_context()
+        if not ctx:
+            return ""
+        # Cap at ~500 tokens (~2000 chars); split on newline to avoid mid-line truncation
+        if len(ctx) > 2000:
+            ctx = ctx[:2000].rsplit("\n", 1)[0]
+        return f"<memory>\n{ctx}\n</memory>"
+
+    repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = working_mem_extra = ""
     smem_hits: list[dict] = []
     if not skip_dynamic_context:
         # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins
@@ -1010,13 +1023,14 @@ def smart_stream(
         # socket timeout would block this request forever despite the result()
         # timeouts below (live incident 2026-06-10: agent task stuck in
         # "streaming" for 50+ min behind a hung embedding request).
-        _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="ctx")
+        _pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="ctx")
         try:
             _fr = _pool.submit(_get_repeat)
             _fv = _pool.submit(_get_vault)
             _fg = _pool.submit(_get_graph)
             _fs = _pool.submit(_get_smem)
             _fm = _pool.submit(_get_mem0)
+            _fw = _pool.submit(_get_working_mem)
             try:
                 repeat_extra = _fr.result(timeout=2.0) or ""
             except Exception as _exc:
@@ -1037,12 +1051,19 @@ def smart_stream(
                 mem0_extra = _fm.result(timeout=4.0) or ""
             except Exception as _exc:
                 logging.debug("[Context] mem0 retrieval failed: %s", _exc)
+            try:
+                working_mem_extra = _fw.result(timeout=2.0) or ""
+            except Exception as _exc:
+                logging.debug("[Context] working_memory retrieval failed: %s", _exc)
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
     semantic_hint = _semantic_memory_hint(smem_hits)
     compiled_context = _context_budget.compile_context_blocks(
         [
+            # working_memory: facts/prefs/projects from memory.json — highest priority,
+            # always relevant since it describes the user directly.
+            {"label": "working_memory", "content": working_mem_extra, "priority": 98, "max_chars": 2000},
             {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
             {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
             {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
