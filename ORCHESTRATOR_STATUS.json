@@ -3,10 +3,10 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-26T03:27:34.238356+00:00",
-      "current_task": "fix(silent-failures): api.py:7666 + router.py:4470 \u2014 Antigravity sweep",
-      "status": "idle",
-      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
+      "last_active": "2026-06-26T17:55:50.373468+00:00",
+      "current_task": "P6 tests: 12 workspace_context tests + Ollama patching fix",
+      "status": "active",
+      "orchestrator_note": "Resumed post-weekly-reset: 93f3b34 + a669c5e committed within 4m of reset"
     },
     {
       "session_id": "jarvis-self-eval",
@@ -62,6 +62,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T17:51:11.844899+00:00",
-  "orchestrator_round": 21
+  "last_updated": "2026-06-26T17:55:50.373468+00:00",
+  "orchestrator_round": 22
 }
