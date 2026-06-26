@@ -1,5 +1,6 @@
 """Tests for task_planner — focusing on replan_after_failure and _extract_json_steps."""
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from task_planner import (
@@ -8,6 +9,11 @@ from task_planner import (
     _build_steps,
     replan_after_failure,
 )
+
+
+def _ollama_response(content: str) -> object:
+    """Minimal mock that looks like ollama.Client.chat() return value."""
+    return SimpleNamespace(message=SimpleNamespace(content=content))
 
 
 # ── _extract_json_steps ───────────────────────────────────────────────────────
@@ -75,11 +81,14 @@ class ReplanAfterFailureTests(unittest.TestCase):
         return [s]
 
     def _mock_local(self, raw: str):
-        return patch("brains.brain_ollama.ask_local", return_value=raw)
+        resp = _ollama_response(raw)
+        return patch("ollama.Client.chat", return_value=resp), \
+               patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b")
 
     def test_returns_corrective_steps_on_success(self):
         raw = '{"steps": [{"number": 1, "description": "retry write", "tool": "chat", "params": {}}]}'
-        with self._mock_local(raw):
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure(
                 "do the task", self._completed(), self._failed_step(), "Permission denied"
             )
@@ -88,7 +97,8 @@ class ReplanAfterFailureTests(unittest.TestCase):
 
     def test_corrective_step_numbers_offset_after_failed(self):
         raw = '{"steps": [{"number": 1, "description": "fix", "tool": "chat", "params": {}}]}'
-        with self._mock_local(raw):
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure(
                 "task", self._completed(), self._failed_step(), "error"
             )
@@ -96,14 +106,16 @@ class ReplanAfterFailureTests(unittest.TestCase):
         self.assertEqual(result[0].number, 3)
 
     def test_returns_none_when_local_fails(self):
-        with patch("brains.brain_ollama.ask_local", side_effect=RuntimeError("model down")):
+        with patch("ollama.Client.chat", side_effect=RuntimeError("model down")), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure(
                 "task", self._completed(), self._failed_step(), "error"
             )
         self.assertIsNone(result)
 
     def test_returns_none_on_unparseable_output(self):
-        with self._mock_local("I cannot help with that."):
+        with patch("ollama.Client.chat", return_value=_ollama_response("I cannot help with that.")), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure(
                 "task", self._completed(), self._failed_step(), "error"
             )
@@ -111,13 +123,15 @@ class ReplanAfterFailureTests(unittest.TestCase):
 
     def test_handles_empty_completed_steps(self):
         raw = '{"steps": [{"number": 1, "description": "start over", "tool": "chat", "params": {}}]}'
-        with self._mock_local(raw):
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure("task", [], self._failed_step(), "error")
         self.assertIsNotNone(result)
 
     def test_multiple_corrective_steps_renumbered(self):
         raw = '{"steps": [{"number": 1, "description": "A", "tool": "chat", "params": {}}, {"number": 2, "description": "B", "tool": "chat", "params": {}}]}'
-        with self._mock_local(raw):
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
             result = replan_after_failure(
                 "task", self._completed(), self._failed_step(), "error"
             )
