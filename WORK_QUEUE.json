@@ -17,7 +17,7 @@
     "assigned_at": "2026-06-25T21:32:01.636379+00:00",
     "completed_at": null,
     "created_at": "2026-06-25T21:32:01.636379+00:00",
-    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed. | f0a9995: classifier short-query fix. LOCAL_CODER_RECOMMENDED regression still unconfirmed."
+    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed. | f0a9995: classifier short-query fix. LOCAL_CODER_RECOMMENDED regression still unconfirmed. | 1d39577: code_task + coder_workbench wired \u2014 may address LOCAL_CODER_RECOMMENDED regression directly."
   },
   {
     "session_name": "jarvis-board",
@@ -486,5 +486,35 @@
     "completed_at": "2026-06-26T03:18:22Z",
     "created_at": "2026-06-26T03:00:00Z",
     "notes": "Committed f0a9995 \u2014 retroactive harvest. Routing fix: ~40% short-query misroute eliminated via _classify_with_local_structured_timed()."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Wire coder_workbench.fix_loop as routable code_task tool \u2014 adds code_task to tool_registry, dispatches to fix_loop(task) with devstral",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:15:00Z",
+    "completed_at": "2026-06-26T03:20:31Z",
+    "created_at": "2026-06-26T03:15:00Z",
+    "notes": "Committed 1d39577 \u2014 retroactive harvest. Local devstral write-test-patch loop, up to 5 iterations. Verified: classify('write a Python function...') \u2192 code_task confidence=1.00."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Inject workspace_context snapshot for terminal/code_task/self_improve \u2014 git status + commits + tree, 60s cache",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:18:00Z",
+    "completed_at": "2026-06-26T03:21:57Z",
+    "created_at": "2026-06-26T03:18:00Z",
+    "notes": "Committed 2c4c348 \u2014 retroactive harvest. New workspace_context.py (~90 lines), format_for_prompt() injected into modifier_system in _orchestrate()."
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "Implement circuit breakers for local model routing (P7) \u2014 jarvis-local-llm woke, reported P7 next",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T03:23:57.878284+00:00",
+    "notes": "jarvis-local-llm self-reported at round 15: 'P6 workspace_context done; checking P7 circuit breakers next'"
   }
 ]
