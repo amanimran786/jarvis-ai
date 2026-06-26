@@ -5,18 +5,17 @@
       "name": "jarvis-board",
       "last_active": "2026-06-26T03:27:34.238356+00:00",
       "current_task": "fix(silent-failures): api.py:7666 + router.py:4470 \u2014 Antigravity sweep",
-      "status": "stalled",
-      "orchestrator_note": "Heartbeat RECOVERED after 3 stale rounds. Mid-commit on silent-failure sweep.",
-      "stall_note": "Rate-limit hold confirmed \u2014 stale 14m. Hourly reset 04:00 UTC."
+      "status": "idle",
+      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
     },
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
       "last_active": "2026-06-26T03:13:56.883011Z",
       "current_task": "corrective replanning after step failure \u2014 Cycle 7 committed",
-      "status": "stalled",
+      "status": "idle",
       "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
-      "stall_note": "Rate-limit hold confirmed \u2014 stale 28m. Hourly reset 04:00 UTC."
+      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
     },
     {
       "session_id": "jarvis-local-llm",
@@ -24,9 +23,9 @@
       "completed_tasks": [],
       "last_active": "2026-06-26T03:23:57.878284+00:00",
       "current_task": "P6 workspace_context done; checking P7 circuit breakers next",
-      "status": "stalled",
+      "status": "idle",
       "notes": "Woke after 367m idle. Progressing through AGENT_BOARD P6/P7 items.",
-      "stall_note": "Rate-limit hold confirmed \u2014 stale 18m. Hourly reset 04:00 UTC."
+      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
     },
     {
       "session_id": "seed-jarvis-audit",
@@ -63,6 +62,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T03:41:52.478701+00:00",
-  "orchestrator_round": 20
+  "last_updated": "2026-06-26T17:51:11.844899+00:00",
+  "orchestrator_round": 21
 }

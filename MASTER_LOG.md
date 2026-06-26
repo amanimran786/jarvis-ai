@@ -150,3 +150,13 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 03:41:52] [orchestrator] Sessions marked stalled in ORCHESTRATOR_STATUS; watchdog will write resume signal at reset
 [2026-06-26 03:41:52] [orchestrator] 2 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 33 done
 [2026-06-26 03:41:52] [orchestrator] Wakeup extended to ~04:01 UTC to catch reset + write RESUME_SIGNAL
+
+[2026-06-26 17:51:22] [orchestrator] ROUND 21 — POST WEEKLY RESET (14h gap since round 20)
+[2026-06-26 17:51:22] [orchestrator] Resuming at 17:50 UTC — all sessions stalled since 03:41 UTC (14h ago)
+[2026-06-26 17:51:22] [orchestrator] RESUME_SIGNAL.json written — all 4 named lanes signaled to resume
+[2026-06-26 17:51:22] [orchestrator] New commit: ec9d29c (P4) — specialized_agent+code_task wired to execution_engine; 10 coder_workbench tests
+[2026-06-26 17:51:22] [orchestrator] ec9d29c detail: specialized_agent→agent_dispatch.dispatch(), code_task→coder_workbench.fix_loop(), background task list fast-path in router
+[2026-06-26 17:51:22] [orchestrator] Sessions reset to idle; ORCHESTRATOR_STATUS cleaned (2 ghosts purged)
+[2026-06-26 17:51:22] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 34 done (54 total)
+[2026-06-26 17:51:22] [orchestrator] Remaining in_progress: [jarvis-board] AGENT_BOARD items 9, 11, 13
+[2026-06-26 17:51:22] [orchestrator] Next: round 22 — verify sessions resuming post-signal; watch for AGENT_BOARD closures
