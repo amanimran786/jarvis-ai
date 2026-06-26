@@ -294,6 +294,80 @@ def prune_webhook_receipts(older_than_days: int = 30) -> int:
         return 0
 
 
+def claim_oldest_queued_task() -> "dict[str, Any] | None":
+    """Atomically claim the oldest queued task.
+
+    Marks it 'assigned' in a single transaction and returns the task dict.
+    Returns None when nothing is queued.
+    """
+    if not _ensure_schema():
+        return None
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                row = conn.execute(
+                    "SELECT id, payload_json FROM tasks "
+                    "WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
+                ).fetchone()
+                if not row:
+                    return None
+                task = json.loads(row["payload_json"])
+                task["status"] = "assigned"
+                updated = conn.execute(
+                    "UPDATE tasks SET status='assigned', "
+                    "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), "
+                    "payload_json=? WHERE id=? AND status='queued'",
+                    (_json_dumps(task), row["id"]),
+                ).rowcount
+                return task if updated > 0 else None
+    except Exception:
+        log.exception("claim_oldest_queued_task failed")
+        return None
+
+
+def list_tasks_with_status(status: str, limit: int = 100) -> "list[dict[str, Any]]":
+    """Return tasks with the given status, newest first."""
+    if not _ensure_schema():
+        return []
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                rows = conn.execute(
+                    "SELECT payload_json FROM tasks WHERE status=? "
+                    "ORDER BY created_at DESC LIMIT ?",
+                    (status, max(int(limit), 1)),
+                ).fetchall()
+                return [json.loads(r["payload_json"]) for r in rows]
+    except Exception:
+        log.exception("list_tasks_with_status failed for status=%s", status)
+        return []
+
+
+def update_task_status(task_id: str, status: str, *, result: str = "") -> bool:
+    """Update a task's status and optionally its result field."""
+    if not _ensure_schema():
+        return False
+    try:
+        import datetime as _dt
+        with _LOCK:
+            with _connect() as conn:
+                row = conn.execute(
+                    "SELECT payload_json FROM tasks WHERE id=?", (task_id,)
+                ).fetchone()
+                if not row:
+                    return False
+                task = json.loads(row["payload_json"])
+                task["status"] = status
+                if result:
+                    task["result"] = result
+                if status in ("succeeded", "failed", "cancelled"):
+                    task["finished_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+        return upsert_task(task)
+    except Exception:
+        log.exception("update_task_status failed for task_id=%s", task_id)
+        return False
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:
