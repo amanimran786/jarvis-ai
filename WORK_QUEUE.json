@@ -616,5 +616,15 @@
     "completed_at": "2026-06-26T17:59:49Z",
     "created_at": "2026-06-26T17:59:00Z",
     "notes": "Committed 1b796a8 \u2014 P8: progress tokens stream to UI in real time via background thread+queue."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix operative summary grounding test \u2014 force cloud mode so ask_claude is called (same bypass as a0a7fac)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T18:05:00Z",
+    "completed_at": "2026-06-26T18:07:17Z",
+    "created_at": "2026-06-26T18:05:00Z",
+    "notes": "Committed 392d192 \u2014 patch DEFAULT_MODE=cloud in test so _summarize() routes to ask_claude. Regression suite cleanup track."
   }
 ]
