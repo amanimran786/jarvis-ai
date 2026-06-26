@@ -179,3 +179,7 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 18:00:53] [orchestrator] AGENT_BOARD item 9 CLOSED (Ollama memory-pressure security gate). Items 11, 13 remain.
 [2026-06-26 18:00:53] [orchestrator] Board future timestamp fixed (was 18:30, corrected to now). 3 ghosts purged.
 [2026-06-26 18:00:53] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 42 done (62 total)
+
+[2026-06-26 18:05:27] [orchestrator] ROUND 24 — quiet (post-burst cooldown, ~5m no commits)
+[2026-06-26 18:05:27] [orchestrator] jarvis-board: 4m stale, AGENT_BOARD items 11+13 pending; jarvis-self-eval: 4m stale
+[2026-06-26 18:05:27] [orchestrator] 4 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 42 done
