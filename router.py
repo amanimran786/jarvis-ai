@@ -4465,6 +4465,17 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     tool      = decision.tool
     params    = decision.params
     skill_id  = params.get("skill_id")
+
+    # Inject workspace snapshot for coding/terminal tools
+    if tool in ("code_task", "terminal", "self_improve"):
+        try:
+            import workspace_context as _wctx
+            ws_block = _wctx.format_for_prompt()
+            if ws_block:
+                modifier_system = (modifier_system + "\n\n" + ws_block).strip()
+        except Exception as _wctx_exc:
+            logging.debug("[Router] workspace_context failed: %s", _wctx_exc)
+
     try:
         audit_log("route_decision", tool=tool, confidence=decision.confidence)
     except Exception:
