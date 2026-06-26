@@ -242,6 +242,33 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         timeout_seconds=30,
         verifier="json_object",
     ),
+    "specialized_agent": ToolSpec(
+        name="specialized_agent",
+        description="Run a specialist agent by name for a scoped sub-task.",
+        args_schema={
+            "agent": {"type": "string"},
+            "task": {"type": "string"},
+            "context": {"type": "string", "default": ""},
+        },
+        required=("agent", "task"),
+        side_effects=True,
+        timeout_seconds=120,
+        verifier="non_empty_text",
+        idempotent=False,
+    ),
+    "code_task": ToolSpec(
+        name="code_task",
+        description="Write, test, and fix Python code in a local workspace loop.",
+        args_schema={
+            "task": {"type": "string"},
+            "max_iterations": {"type": "int", "default": 5},
+        },
+        required=("task",),
+        side_effects=True,
+        timeout_seconds=300,
+        verifier="non_empty_text",
+        idempotent=False,
+    ),
 }
 
 
