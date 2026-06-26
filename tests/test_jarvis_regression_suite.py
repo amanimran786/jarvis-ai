@@ -4643,7 +4643,10 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
             SimpleNamespace(number=1, description="Inspect logs", ok=True, result="Found queue contention."),
             SimpleNamespace(number=2, description="Propose fix", ok=True, result="Add idempotent worker handling."),
         ]
+        # Force cloud mode so _summarize() calls ask_claude (not local Ollama),
+        # letting us assert on the prompt and system_extra it receives.
         with patch("operative.plan_task", return_value=fake_steps), \
+             patch("operative.DEFAULT_MODE", "cloud"), \
              patch(
                  "operative.execute_step",
                  side_effect=[
