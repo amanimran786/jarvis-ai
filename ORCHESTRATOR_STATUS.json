@@ -5,23 +5,22 @@
       "name": "jarvis-board",
       "last_active": "2026-06-26T18:09:41.516129+00:00",
       "current_task": "Test suite regression fixes (DEFAULT_MODE=cloud bypass pattern). AGENT_BOARD 11+13 next.",
-      "status": "active",
+      "status": "stalled",
       "commits": [
         "a669c5e (P6 workspace_context tests)",
         "19c6936 (P7 circuit breaker tests + close item 9)",
         "1b796a8 (P8 operative streaming)"
       ],
-      "orchestrator_note": "6 commits this round: p4 task_runtime, Redis\u2192SQLite, thread cap, main.py, p8 streaming, p7 circuit breakers",
-      "stall_note": "Last commit 392d192 at 18:07 UTC. 3 quiet rounds. May be rate-limited; next reset 19:00 UTC."
+      "stall_note": "Stale 52m \u2014 rate-limit hold. RESUME_SIGNAL written at 19:01 UTC reset."
     },
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
       "last_active": "2026-06-26T18:00:43.421027+00:00",
       "current_task": "LLM improvement notes pipeline \u2014 auto-trigger every 100 interactions + /reflect",
-      "status": "active",
+      "status": "stalled",
       "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
-      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
+      "stall_note": "Stale 61m \u2014 rate-limit hold. RESUME_SIGNAL written at 19:01 UTC reset."
     },
     {
       "session_id": "jarvis-local-llm",
@@ -68,6 +67,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T18:17:30.353710+00:00",
-  "orchestrator_round": 27
+  "last_updated": "2026-06-26T19:01:42.692362+00:00",
+  "orchestrator_round": 28
 }

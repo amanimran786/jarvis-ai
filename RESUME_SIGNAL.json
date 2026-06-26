@@ -1,0 +1,11 @@
+{
+  "signal": "resume",
+  "ts": "2026-06-26T19:01:42.692362+00:00",
+  "reason": "hourly_reset \u2014 all named lanes stalled 52-61m",
+  "sessions": [
+    "jarvis-board",
+    "jarvis-self-eval",
+    "jarvis-local-llm",
+    "jarvis-audit"
+  ]
+}
