@@ -143,3 +143,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 03:37:48] [orchestrator] No RESUME_SIGNAL.json — watchdog has not fired; next hourly reset at 04:00 UTC (~23m away)
 [2026-06-26 03:37:48] [orchestrator] Not escalating yet — 3 quiet rounds within normal range for large batch fixes
 [2026-06-26 03:37:48] [orchestrator] 2 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 33 done
+
+[2026-06-26 03:41:52] [orchestrator] ROUND 20 — STALL CONFIRMED (4th quiet round, ~18m no commits)
+[2026-06-26 03:41:52] [orchestrator] Rate-limit hold: board=14m, self-eval=27m, local-llm=17m — all active lanes stalled
+[2026-06-26 03:41:52] [orchestrator] Hourly reset at 04:00 UTC (19m away) — RESUME_SIGNAL.json will be written at reset
+[2026-06-26 03:41:52] [orchestrator] Sessions marked stalled in ORCHESTRATOR_STATUS; watchdog will write resume signal at reset
+[2026-06-26 03:41:52] [orchestrator] 2 ghosts purged; queue unchanged: 1 in_progress / 18 queued / 1 blocked / 33 done
+[2026-06-26 03:41:52] [orchestrator] Wakeup extended to ~04:01 UTC to catch reset + write RESUME_SIGNAL
