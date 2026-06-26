@@ -13,11 +13,11 @@
     "session_name": "jarvis-board",
     "task": "Fix model routing test regressions from LOCAL_CODER_RECOMMENDED chain change",
     "priority": 1,
-    "status": "in_progress",
+    "status": "done",
     "assigned_at": "2026-06-25T21:32:01.636379+00:00",
-    "completed_at": null,
+    "completed_at": "2026-06-26T03:33:44.423684+00:00",
     "created_at": "2026-06-25T21:32:01.636379+00:00",
-    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed. | f0a9995: classifier short-query fix. LOCAL_CODER_RECOMMENDED regression still unconfirmed. | 1d39577: code_task + coder_workbench wired \u2014 may address LOCAL_CODER_RECOMMENDED regression directly."
+    "notes": "SQLite flake fix landed (ed6b358) \u2014 routing regression fix likely in follow-up commit. Keep in_progress until confirmed. | f0a9995: classifier short-query fix. LOCAL_CODER_RECOMMENDED regression still unconfirmed. | 1d39577: code_task + coder_workbench wired \u2014 may address LOCAL_CODER_RECOMMENDED regression directly. | CLOSED round 18: a0a7fac fixes plan_task local-first test regression \u2014 LOCAL_CODER_RECOMMENDED chain regression resolved."
   },
   {
     "session_name": "jarvis-board",
@@ -516,5 +516,15 @@
     "completed_at": null,
     "created_at": "2026-06-26T03:23:57.878284+00:00",
     "notes": "jarvis-local-llm self-reported at round 15: 'P6 workspace_context done; checking P7 circuit breakers next'"
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix sanitizer test for plan_task() local-first path \u2014 patch _plan_task_local to raise so ask_claude fallback is reached",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:25:00Z",
+    "completed_at": "2026-06-26T03:30:54Z",
+    "created_at": "2026-06-26T03:25:00Z",
+    "notes": "Committed a0a7fac \u2014 retroactive harvest. Closes routing regression: LOCAL_CODER_RECOMMENDED chain made plan_task() prefer local-first, breaking test that patched ask_claude."
   }
 ]
