@@ -33,6 +33,7 @@ TOOLS = {
     "osint_subdomains": "Passive subdomain enumeration via subfinder.",
     "osint_whois": "WHOIS lookup for domain registration and ownership information.",
     "artifact": "Generate a shareable Local Artifact — a self-contained interactive HTML page (diagrams, dashboards, code walkthroughs, PR reviews, data visualizations, or any team-shareable output) created on-device and saved to the Desktop.",
+    "code_task": "Write Python code files and tests locally, run tests, and fix failures in a loop until passing. Use for: implement X, write a function that does Y, fix the failing test, create a script that does Z.",
 }
 
 
