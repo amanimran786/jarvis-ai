@@ -4,6 +4,9 @@ import email as email_lib
 import email.mime.text
 import shutil
 import argparse
+import logging
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 import re
 from google.auth.transport.requests import Request
@@ -11,6 +14,47 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import runtime_state
+
+log = logging.getLogger(__name__)
+
+# ── Tool circuit breaker ──────────────────────────────────────────────────────
+# After 3 failures in 300s, block the tool for 600s to avoid storm spam.
+_CB_LOCK = threading.Lock()
+_CB_WINDOW = 300    # seconds: rolling window for failure counting
+_CB_THRESHOLD = 3   # failures in window → open circuit
+_CB_OPEN_TTL = 600  # seconds: how long the circuit stays open
+_cb_state: dict[str, dict] = {}  # {tool: {"fails": [(ts,),...], "open_until": float}}
+
+
+def _cb_check(tool: str) -> bool:
+    """Return True if the tool is circuit-open (should be skipped)."""
+    now = time.monotonic()
+    with _CB_LOCK:
+        state = _cb_state.get(tool)
+        if state and state.get("open_until", 0) > now:
+            return True
+    return False
+
+
+def _cb_record_failure(tool: str) -> None:
+    """Record one failure; open circuit if threshold exceeded."""
+    now = time.monotonic()
+    with _CB_LOCK:
+        state = _cb_state.setdefault(tool, {"fails": [], "open_until": 0.0})
+        state["fails"] = [t for t in state["fails"] if now - t < _CB_WINDOW]
+        state["fails"].append(now)
+        if len(state["fails"]) >= _CB_THRESHOLD:
+            state["open_until"] = now + _CB_OPEN_TTL
+            log.warning("[CircuitBreaker] %s: %d failures in %ds — circuit open for %ds",
+                        tool, _CB_THRESHOLD, _CB_WINDOW, _CB_OPEN_TTL)
+
+
+def _cb_record_success(tool: str) -> None:
+    """Clear failures on success so partial recovery doesn't re-open."""
+    with _CB_LOCK:
+        state = _cb_state.get(tool)
+        if state:
+            state["fails"] = []
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar",
@@ -89,15 +133,39 @@ def _get_creds() -> Credentials:
 
 
 def _calendar():
-    return build("calendar", "v3", credentials=_get_creds())
+    if _cb_check("calendar"):
+        raise RuntimeError("Google Calendar circuit open — too many recent failures")
+    try:
+        svc = build("calendar", "v3", credentials=_get_creds())
+        _cb_record_success("calendar")
+        return svc
+    except Exception:
+        _cb_record_failure("calendar")
+        raise
 
 
 def _gmail():
-    return build("gmail", "v1", credentials=_get_creds())
+    if _cb_check("gmail"):
+        raise RuntimeError("Gmail circuit open — too many recent failures")
+    try:
+        svc = build("gmail", "v1", credentials=_get_creds())
+        _cb_record_success("gmail")
+        return svc
+    except Exception:
+        _cb_record_failure("gmail")
+        raise
 
 
 def _drive():
-    return build("drive", "v3", credentials=_get_creds())
+    if _cb_check("drive"):
+        raise RuntimeError("Google Drive circuit open — too many recent failures")
+    try:
+        svc = build("drive", "v3", credentials=_get_creds())
+        _cb_record_success("drive")
+        return svc
+    except Exception:
+        _cb_record_failure("drive")
+        raise
 
 
 def _extract_drive_file_id(source: str) -> str | None:
