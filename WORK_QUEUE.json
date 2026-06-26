@@ -446,5 +446,35 @@
     "commit": "ed6b358",
     "created_at": "2026-06-25T21:40:02.087966+00:00",
     "notes": "Part of test suite stabilization for baseline suite run. Flaky lock contention removed."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Fix stale test timestamps in test_reflection (dynamic now() instead of hardcoded ISO strings)",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-25T21:30:00Z",
+    "completed_at": "2026-06-25T21:39:00Z",
+    "created_at": "2026-06-25T21:30:00Z",
+    "notes": "Committed a953f42 \u2014 retroactive harvest. Test suite stabilization track."
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Corrective replanning after step failure \u2014 replan_after_failure() in task_planner.py + operative.py wiring (Cycle 7)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:00:00Z",
+    "completed_at": "2026-06-26T03:13:52Z",
+    "created_at": "2026-06-26T03:00:00Z",
+    "notes": "Committed 68d35df \u2014 Cycle 7 milestone. Asks LOCAL_REASONING (qwen3:30b-a3b) for 1-3 corrective steps on failure."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Watchpoint: routing regression fix commit expected \u2014 jarvis-board stalled 5h35m with fix in_progress",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T03:16:17.815999+00:00",
+    "notes": "routing regression watchpoint \u2014 board last active 337m ago. Expires round 14 if no commit."
   }
 ]
