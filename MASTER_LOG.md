@@ -123,3 +123,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 03:27:42] [orchestrator] ORCHESTRATOR_STATUS: purged 3 ghost sessions → 4 clean sessions
 [2026-06-26 03:27:42] [orchestrator] Queue unchanged: 2 in_progress / 18 queued / 1 blocked / 31 done
 [2026-06-26 03:27:42] [orchestrator] Next: round 17 — expect silent-failure commit from board + circuit breaker commit from local-llm
+
+[2026-06-26 03:30:26] [orchestrator] ROUND 17 — quiet (no new commits)
+[2026-06-26 03:30:26] [orchestrator] jarvis-board: 2nd round mid-Antigravity silent-failure sweep (api.py:7666, router.py:4470); commit imminent
+[2026-06-26 03:30:26] [orchestrator] jarvis-local-llm: active 6m, P7 circuit breakers in progress; no commit yet
+[2026-06-26 03:30:26] [orchestrator] jarvis-self-eval: healthy 16m stale; Cycle 7 complete
+[2026-06-26 03:30:26] [orchestrator] 1 ghost purged; queue unchanged: 2 in_progress / 18 queued / 1 blocked / 31 done
