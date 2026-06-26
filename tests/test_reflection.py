@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,41 +11,50 @@ from harness import reflection
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-_SAMPLE_SCORES = [
-    {
-        "ts": "2026-06-25T00:00:00+00:00",
-        "query": "debug my python error",
-        "route": "TechAssist",
-        "routing_accuracy": 0.9,
-        "response_relevance": 0.8,
-        "conciseness": 1.0,
-        "response_quality": 0.87,
-        "flags": [],
-        "reflection_note": "Good quality overall",
-    },
-    {
-        "ts": "2026-06-25T01:00:00+00:00",
-        "query": "what's on my calendar",
-        "route": "Calendar",
-        "routing_accuracy": 0.9,
-        "response_relevance": 0.55,
-        "conciseness": 0.9,
-        "response_quality": 0.73,
-        "flags": ["poor_relevance"],
-        "reflection_note": "Response didn't address the query well",
-    },
-    {
-        "ts": "2026-06-25T02:00:00+00:00",
-        "query": "interview prep behavioral",
-        "route": "InterviewIntel",
-        "routing_accuracy": 0.9,
-        "response_relevance": 0.72,
-        "conciseness": 0.5,
-        "response_quality": 0.68,
-        "flags": ["verbose"],
-        "reflection_note": "Response was verbose",
-    },
-]
+def _recent_ts(hours_ago: float = 1.0) -> str:
+    ts = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    return ts.isoformat()
+
+
+def _make_sample_scores():
+    return [
+        {
+            "ts": _recent_ts(3),
+            "query": "debug my python error",
+            "route": "TechAssist",
+            "routing_accuracy": 0.9,
+            "response_relevance": 0.8,
+            "conciseness": 1.0,
+            "response_quality": 0.87,
+            "flags": [],
+            "reflection_note": "Good quality overall",
+        },
+        {
+            "ts": _recent_ts(2),
+            "query": "what's on my calendar",
+            "route": "Calendar",
+            "routing_accuracy": 0.9,
+            "response_relevance": 0.55,
+            "conciseness": 0.9,
+            "response_quality": 0.73,
+            "flags": ["poor_relevance"],
+            "reflection_note": "Response didn't address the query well",
+        },
+        {
+            "ts": _recent_ts(1),
+            "query": "interview prep behavioral",
+            "route": "InterviewIntel",
+            "routing_accuracy": 0.9,
+            "response_relevance": 0.72,
+            "conciseness": 0.5,
+            "response_quality": 0.68,
+            "flags": ["verbose"],
+            "reflection_note": "Response was verbose",
+        },
+    ]
+
+
+_SAMPLE_SCORES = _make_sample_scores()
 
 
 class ReflectionPipelineTests(unittest.TestCase):
@@ -75,7 +85,7 @@ class ReflectionPipelineTests(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def _seed_scores(self, records=None):
-        records = records or _SAMPLE_SCORES
+        records = records if records is not None else _make_sample_scores()
         with open(self._log, "w") as f:
             for rec in records:
                 f.write(json.dumps(rec) + "\n")
@@ -144,7 +154,7 @@ class ReflectionPipelineTests(unittest.TestCase):
 
     def test_lookback_window_filters_old_records(self):
         # Mix old and new records
-        records = list(_SAMPLE_SCORES)
+        records = list(_make_sample_scores())
         records.append({
             "ts": "2020-01-01T00:00:00+00:00",  # way in the past
             "query": "old query",
