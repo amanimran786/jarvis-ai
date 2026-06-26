@@ -41,7 +41,7 @@ def _parse_max_concurrent(raw: str | None) -> int:
 
 
 _MODEL_SEMAPHORE = threading.Semaphore(
-    _parse_max_concurrent(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", "1"))
+    _parse_max_concurrent(os.getenv("JARVIS_MAX_CONCURRENT_TASKS", str(os.cpu_count() or 4)))
 )
 
 
