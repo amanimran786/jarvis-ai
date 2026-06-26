@@ -3,17 +3,22 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-26T17:55:50.373468+00:00",
-      "current_task": "P6 tests: 12 workspace_context tests + Ollama patching fix",
+      "last_active": "2026-06-26T18:30:00.000000+00:00",
+      "current_task": "P8 done: live operative progress streaming via thread+queue. 59/59 green. ROADMAP P1-P8 complete.",
       "status": "active",
-      "orchestrator_note": "Resumed post-weekly-reset: 93f3b34 + a669c5e committed within 4m of reset"
+      "commits": [
+        "a669c5e (P6 workspace_context tests)",
+        "19c6936 (P7 circuit breaker tests + close item 9)",
+        "1b796a8 (P8 operative streaming)"
+      ],
+      "orchestrator_note": "4 commits this session. ROADMAP P1-P8 done. Items 9/13 closed. Voice TTS + UI panel need loop-in."
     },
     {
       "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-26T03:13:56.883011Z",
-      "current_task": "corrective replanning after step failure \u2014 Cycle 7 committed",
-      "status": "idle",
+      "last_active": "2026-06-26T17:56:30.137879Z",
+      "current_task": "LLM improvement notes \u2014 write_improvement_notes auto-triggered every 100 interactions + /reflect",
+      "status": "active",
       "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
       "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
     },
@@ -60,8 +65,35 @@
       ],
       "next_task": "Verify audit.jsonl end-to-end: memory_write + route_decision events",
       "status": "idle"
+    },
+    {
+      "session_id": "12f84abe-adee-454f-bd52-05e16b4d06c6",
+      "name": "jarvis",
+      "last_active": "2026-06-26T17:58:29.173075+00:00",
+      "current_task": "second turn",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "48711412-1940-4d3d-b015-f145f2e66828",
+      "name": "jarvis",
+      "last_active": "2026-06-26T17:57:14.415092+00:00",
+      "current_task": "make a diagram of the system",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "874ce462-c8a0-418b-b67e-81f6c1bb5c41",
+      "name": "jarvis",
+      "last_active": "2026-06-26T18:00:18.565629+00:00",
+      "current_task": "what's on my screen",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
     }
   ],
-  "last_updated": "2026-06-26T17:55:50.373468+00:00",
-  "orchestrator_round": 22
+  "last_updated": "2026-06-26T19:00:00.000000+00:00",
+  "orchestrator_round": 24
 }
