@@ -14,7 +14,8 @@
       "last_active": "2026-06-26T03:13:56.883011Z",
       "current_task": "corrective replanning after step failure \u2014 Cycle 7 committed",
       "status": "active",
-      "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py"
+      "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
+      "stall_note": "Stale 24m \u2014 Cycle 7 done, awaiting Cycle 8 start or rate-limited"
     },
     {
       "session_id": "jarvis-local-llm",
@@ -23,7 +24,8 @@
       "last_active": "2026-06-26T03:23:57.878284+00:00",
       "current_task": "P6 workspace_context done; checking P7 circuit breakers next",
       "status": "active",
-      "notes": "Woke after 367m idle. Progressing through AGENT_BOARD P6/P7 items."
+      "notes": "Woke after 367m idle. Progressing through AGENT_BOARD P6/P7 items.",
+      "stall_note": "Stale 14m \u2014 P7 circuit breakers in progress, no commit yet"
     },
     {
       "session_id": "seed-jarvis-audit",
@@ -60,6 +62,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T03:33:44.423684+00:00",
-  "orchestrator_round": 18
+  "last_updated": "2026-06-26T03:37:48.975136+00:00",
+  "orchestrator_round": 19
 }
