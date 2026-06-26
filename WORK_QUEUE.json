@@ -526,5 +526,15 @@
     "completed_at": "2026-06-26T03:30:54Z",
     "created_at": "2026-06-26T03:25:00Z",
     "notes": "Committed a0a7fac \u2014 retroactive harvest. Closes routing regression: LOCAL_CODER_RECOMMENDED chain made plan_task() prefer local-first, breaking test that patched ask_claude."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Wire specialized_agent+code_task to execution_engine + add 10 coder_workbench tests (P4)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T03:45:00Z",
+    "completed_at": "2026-06-26T03:52:37Z",
+    "created_at": "2026-06-26T03:45:00Z",
+    "notes": "Committed ec9d29c \u2014 retroactive harvest. specialized_agent\u2192agent_dispatch.dispatch(), code_task\u2192coder_workbench.fix_loop(). Background task list fast-path added to router."
   }
 ]
