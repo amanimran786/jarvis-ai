@@ -3,10 +3,9 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-25T21:39:20.644607+00:00",
-      "current_task": "fix(tests): eliminate SQLite lock flake in test_project_manager \u2014 joined executor threads in fixture teardown to prevent cross-test DB access",
-      "status": "active",
-      "orchestrator_note": "Heartbeat stale but f0a9995 committed at 03:18 UTC \u2014 session active via commits"
+      "last_active": "2026-06-26T03:24:05.016658+00:00",
+      "current_task": "fix(silent-failures): api.py:7666 + router.py:4470 \u2014 Antigravity sweep complete; all open AGENT_BOARD sweep items closed",
+      "status": "active"
     },
     {
       "session_id": "jarvis-self-eval",
@@ -17,38 +16,13 @@
       "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py"
     },
     {
-      "session_id": "seed-jarvis-local-llm",
+      "session_id": "jarvis-local-llm",
       "name": "jarvis-local-llm",
-      "last_active": "2026-06-25T21:16:01.564411+00:00",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "Three-tier LOCAL_FIRST budget + /budget",
-          "commit": "1850965"
-        },
-        {
-          "task": "Ollama Cloud middle routing tier",
-          "commit": "3401988"
-        },
-        {
-          "task": "Specialist routing devstral/qwen3 over GLM_FLASH",
-          "commit": "c3eb04a"
-        },
-        {
-          "task": "Resume signal + heartbeat primitives",
-          "commit": "44c037d"
-        },
-        {
-          "task": "Context pressure wiring in smart_stream (cycle 3)",
-          "commit": "8ee8006"
-        },
-        {
-          "task": "harness/loop_watchdog.py consumer implementation",
-          "commit": "8ee8006"
-        }
-      ],
-      "next_task": "Verify devstral/qwen3 routing stability in production [in_progress]",
-      "status": "idle"
+      "completed_tasks": [],
+      "last_active": "2026-06-26T03:23:57.878284+00:00",
+      "current_task": "P6 workspace_context done; checking P7 circuit breakers next",
+      "status": "active",
+      "notes": "Woke after 367m idle. Progressing through AGENT_BOARD P6/P7 items."
     },
     {
       "session_id": "seed-jarvis-audit",
@@ -85,6 +59,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T03:20:11.903238+00:00",
-  "orchestrator_round": 14
+  "last_updated": "2026-06-26T03:23:57.878284+00:00",
+  "orchestrator_round": 15
 }
