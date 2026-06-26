@@ -7,13 +7,17 @@ actual git state instead of generic coding-agent advice.
 
 from __future__ import annotations
 
-import os
 import json
+import logging
+import os
+import re
 import shlex
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -311,6 +315,204 @@ def _latest_benchmark() -> dict[str, Any]:
     except Exception:
         return {}
     return latest
+
+
+# ── Git write operations ──────────────────────────────────────────────────────
+
+def git_diff(args: list[str] | None = None) -> str:
+    """Return git diff for the working tree (or staged if args includes --cached)."""
+    return _git(["diff", *(args or [])])
+
+
+def git_commit(msg: str, paths: list[str] | None = None) -> str:
+    """Stage specified paths (or all changes) and commit with msg.
+
+    Uses list args throughout — no shell=True.
+    """
+    if paths:
+        code, out = _run(["git", "add", "--", *paths])
+    else:
+        code, out = _run(["git", "add", "-A"])
+    if code != 0:
+        return f"git add failed: {out}"
+    code, out = _run(["git", "commit", "-m", msg])
+    if code != 0:
+        return f"git commit failed: {out}"
+    return out
+
+
+# ── Code fix loop (P2 — Cursor/Codex gap) ────────────────────────────────────
+
+_CODER_WRITE_SYSTEM = """\
+You are a precise Python coding agent. When given a task:
+- Write all necessary Python files (implementation + tests).
+- Return ONLY a valid JSON object — no markdown, no explanation, no preamble.
+Format:
+{"files": [{"path": "relative/path.py", "content": "...full code..."}], "test_command": "python -m pytest test_foo.py -q"}
+
+Rules:
+- Write tests in a file prefixed with 'test_'
+- Use pytest for testing
+- paths are relative to the working directory
+- Output ONLY the JSON object\
+"""
+
+_CODER_FIX_SYSTEM = """\
+You are a Python debugging agent. Fix the failing code so the tests pass.
+Return ONLY a valid JSON object — no markdown, no explanation.
+Format:
+{"files": [{"path": "relative/path.py", "content": "...complete fixed code..."}]}
+
+Output ONLY the JSON object with the fixed file(s).\
+"""
+
+
+def _parse_coder_json(raw: str) -> dict:
+    """Extract JSON object from coder model response."""
+    text = raw.strip()
+    # Strip markdown fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:]).strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    obj_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if obj_match:
+        return json.loads(obj_match.group())
+    raise ValueError(f"No JSON object in coder response (first 200 chars): {text[:200]}")
+
+
+def fix_loop(
+    task: str,
+    *,
+    workspace: Path | None = None,
+    max_iterations: int = 5,
+) -> dict[str, Any]:
+    """Write code with devstral, run tests, patch on failure, repeat.
+
+    LOOP:
+      ask devstral to write code → run test_command → capture output
+      if exit 0 → return success
+      if exit ≠ 0 → send failure + current files back to devstral → apply patch
+      if max_iterations hit → return best attempt with failure log
+
+    Args:
+        task: Natural language description (e.g. "write a function that reverses a string and test it")
+        workspace: Working directory; defaults to <jarvis-root>/workspace
+        max_iterations: Max write-test-fix cycles (default 5)
+
+    Returns:
+        {
+          "ok": bool,
+          "iterations": int,
+          "files": {path: content},
+          "test_command": str,
+          "output": str,
+          "history": [{"iteration": int, "output": str, "ok": bool, "elapsed_seconds": float}],
+        }
+    """
+    from brains.brain_ollama import ask_local, get_best_available
+    from config import LOCAL_CODER
+
+    cwd = (workspace or ROOT / "workspace").resolve()
+    cwd.mkdir(parents=True, exist_ok=True)
+
+    files: dict[str, str] = {}
+    test_command = ""
+    test_output = ""
+    history: list[dict[str, Any]] = []
+
+    def _safe_write(rel_path: str, content: str) -> None:
+        target = (cwd / rel_path).resolve()
+        if not str(target).startswith(str(cwd)):
+            raise PermissionError(f"Path traversal rejected: {rel_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    model = get_best_available(LOCAL_CODER)
+    log.info("[fix_loop] Starting — model=%s cwd=%s task=%s", model, cwd, task[:80])
+
+    for iteration in range(1, max_iterations + 1):
+        if iteration == 1:
+            prompt = (
+                f"Task: {task}\n\n"
+                "Write all necessary Python files (implementation + tests) to complete this task. "
+                "Return JSON with 'files' list and 'test_command'."
+            )
+            system_extra = _CODER_WRITE_SYSTEM
+        else:
+            files_summary = "\n\n".join(
+                f"File: {p}\n```python\n{c}\n```" for p, c in files.items()
+            )
+            prompt = (
+                f"Task: {task}\n\n"
+                f"Current files:\n{files_summary}\n\n"
+                f"Test command: {test_command}\n"
+                f"Failure output:\n{test_output[:3000]}\n\n"
+                "Fix the code so all tests pass."
+            )
+            system_extra = _CODER_FIX_SYSTEM
+
+        try:
+            raw = ask_local(
+                prompt,
+                model=model,
+                system_extra=system_extra,
+                include_memory=False,
+                raise_on_error=True,
+            )
+            parsed = _parse_coder_json(raw)
+        except Exception as exc:
+            log.warning("[fix_loop] iteration %d parse error: %s", iteration, exc)
+            history.append({"iteration": iteration, "output": f"Model/parse error: {exc}", "ok": False, "elapsed_seconds": 0.0})
+            continue
+
+        # Write files from this iteration
+        for fspec in parsed.get("files", []):
+            rel_path = str(fspec.get("path", "output.py")).strip()
+            content = str(fspec.get("content", ""))
+            try:
+                _safe_write(rel_path, content)
+                files[rel_path] = content
+            except PermissionError as exc:
+                return {"ok": False, "error": str(exc), "iterations": iteration, "files": files, "history": history}
+
+        # Determine test command on first iteration
+        if iteration == 1:
+            test_command = str(parsed.get("test_command", "")).strip()
+        if not test_command:
+            test_files = [p for p in files if os.path.basename(p).startswith("test_")]
+            if test_files:
+                test_command = f"python -m pytest {' '.join(test_files)} -q"
+            else:
+                main_files = [p for p in files if not os.path.basename(p).startswith("test_")]
+                test_command = f"python {main_files[0]}" if main_files else "echo 'no runnable file'"
+
+        returncode, test_output, elapsed = _run_shell(test_command, cwd=cwd, timeout_seconds=60)
+        ok = returncode == 0
+
+        log.info("[fix_loop] iteration %d exit=%d elapsed=%.1fs", iteration, returncode, elapsed)
+        history.append({"iteration": iteration, "output": test_output, "ok": ok, "elapsed_seconds": round(elapsed, 2)})
+
+        if ok:
+            return {
+                "ok": True,
+                "iterations": iteration,
+                "files": files,
+                "test_command": test_command,
+                "output": test_output,
+                "history": history,
+            }
+
+    return {
+        "ok": False,
+        "iterations": max_iterations,
+        "files": files,
+        "test_command": test_command,
+        "output": test_output,
+        "history": history,
+        "error": f"Still failing after {max_iterations} iterations",
+    }
 
 
 def improvement_text() -> str:

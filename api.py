@@ -7664,7 +7664,7 @@ def get_voice_diagnostics():
             lines = log_path.read_text(errors="replace").splitlines()
             diag["voice_log_tail"] = lines[-20:]
     except Exception:
-        pass
+        log.debug("[API] voice log tail read failed", exc_info=True)
     return {"ok": True, "diagnostics": diag}
 
 
