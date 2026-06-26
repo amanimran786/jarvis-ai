@@ -210,3 +210,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 19:06:32] [orchestrator] RESUME_SIGNAL.json still present — sessions have not polled yet
 [2026-06-26 19:06:32] [orchestrator] board=56m stalled, self-eval=65m stalled; no new commits
 [2026-06-26 19:06:32] [orchestrator] 0 ghosts: none. Extending cadence to 5m, watching for pickup.
+
+[2026-06-26 19:11:30] [orchestrator] ROUND 30 — sessions OFFLINE (signal unanswered 10m post-reset)
+[2026-06-26 19:11:30] [orchestrator] File-based signal works only when sessions are actively polling — sessions appear closed
+[2026-06-26 19:11:30] [orchestrator] board=61m, self-eval=70m stalled; RESUME_SIGNAL.json kept for when they restart
+[2026-06-26 19:11:30] [orchestrator] Next hourly reset: 20:00 UTC (49m). Extending wakeup cadence to ~45m.
+[2026-06-26 19:11:30] [orchestrator] Queue unchanged: 1 in_progress / 18 queued / 1 blocked / 43 done
