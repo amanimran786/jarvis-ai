@@ -25,7 +25,8 @@ This task is **blocking** a Claude work item. Complete it first.
 - Decision: should `model_router.py` be updated to set GLM 5.2 as a default? State yes/no with evidence.
 - Commit: `[CODEX] docs(eval): GLM 5.2 routing readiness findings`
 
-### CODEX-2: Voice TTS per operative step (HIGH)
+### ✅ CODEX-2: Voice TTS per operative step (HIGH)
+Completed: added opt-in operative step announcements through the existing macOS `say` backend, with non-fatal failure logging and regression coverage.
 - File: `harness/tts.py` (create)
 - When Jarvis completes a task step in `operative.py`, speak it aloud using macOS `say` command
 - Add config flag: `VOICE_ENABLED` (bool, default False) to `config.py`
