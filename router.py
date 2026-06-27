@@ -4956,13 +4956,29 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     if tool == "calendar":
         action = params.get("action", "read")
         if action == "read":
-            return _s(gs.get_todays_events()), "Calendar"
+            try:
+                raw = gs.get_todays_events()
+                return format_with_mini(
+                    f"The user asked: {user_input}\n\nCalendar data:\n{raw}",
+                    extra_system="Summarize the calendar events concisely and directly.",
+                ), "Calendar"
+            except Exception as exc:
+                logging.warning("[Router] Calendar fetch failed: %s", exc)
+                return _s(_GOOGLE_REAUTH_MSG), "Calendar"
         # create — fall through to chat for now
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Email ─────────────────────────────────────────────────────────────────
     if tool == "email":
-        return _s(gs.get_unread_emails()), "Gmail"
+        try:
+            raw = gs.get_unread_emails()
+            return format_with_mini(
+                f"The user asked: {user_input}\n\nEmail data:\n{raw}",
+                extra_system="Summarize the emails concisely and directly.",
+            ), "Gmail"
+        except Exception as exc:
+            logging.warning("[Router] Email fetch failed: %s", exc)
+            return _s(_GOOGLE_REAUTH_MSG), "Gmail"
 
     # ── Weather ───────────────────────────────────────────────────────────────
     if tool == "weather":
