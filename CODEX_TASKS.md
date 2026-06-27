@@ -36,7 +36,8 @@ Completed: added opt-in operative step announcements through the existing macOS 
 - Test: `tests/test_voice_tts_regression.py` already exists — extend it, don't break it
 - Commit: `[CODEX] feat(tts): voice utterance per operative step`
 
-### CODEX-3: PyQt6 system tray panel (HIGH)
+### ✅ CODEX-3: PyQt6 system tray panel (HIGH)
+Completed: added a standalone PyQt6 tray with live green/yellow/red status, Jarvis launch, latest-task details, and quit actions.
 - File: `ui/tray.py` (create, or extend `ui.py` if that's cleaner — check first)
 - A minimal macOS system tray icon showing Jarvis status
 - Menu items: "Open Jarvis", "Last task status", "Quit"
