@@ -3,15 +3,15 @@
     {
       "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-26T18:09:41.516129+00:00",
-      "current_task": "Test suite regression fixes (DEFAULT_MODE=cloud bypass pattern). AGENT_BOARD 11+13 next.",
-      "status": "stalled",
+      "last_active": "2026-06-27T00:12:04.352227+00:00",
+      "current_task": "git_ops tool (30 tests) + /task command end-to-end. AGENT_BOARD 11+13 next.",
+      "status": "active",
       "commits": [
         "a669c5e (P6 workspace_context tests)",
         "19c6936 (P7 circuit breaker tests + close item 9)",
         "1b796a8 (P8 operative streaming)"
       ],
-      "stall_note": "OFFLINE 6h \u2014 prior RESUME_SIGNAL consumed but no output. Fresh signal written 00:02 UTC."
+      "orchestrator_note": "Stale heartbeat but committing: 66a587f + c37f45a at 00:09-00:10 UTC"
     },
     {
       "session_id": "jarvis-self-eval",
@@ -77,17 +77,8 @@
         "tests/test_glm52_readiness.py",
         "CODEX_TASKS.md"
       ]
-    },
-    {
-      "session_id": "a6ea6391-f7a7-429d-804d-775448ef9f49",
-      "name": "jarvis",
-      "last_active": "2026-06-27T00:07:27.865666+00:00",
-      "current_task": "Give me my canonical career narrative for interviews.",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:07:12.946528+00:00",
-  "orchestrator_round": 33
+  "last_updated": "2026-06-27T00:12:04.352227+00:00",
+  "orchestrator_round": 34
 }
