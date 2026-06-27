@@ -244,3 +244,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:12:04] [orchestrator] jarvis-board: stale heartbeat but committing at 00:09-00:10 UTC — marked active
 [2026-06-27 00:12:04] [orchestrator] codex: active (4m), CODEX-1 in progress, no [CODEX] commit yet
 [2026-06-27 00:12:04] [orchestrator] 5 ghost sessions purged; queue: 2 in_progress / 26 queued / 1 blocked / 48 done
+
+[2026-06-27 00:16:12] [orchestrator] ROUND 35 — 1 [CLAUDE] commit; no [CODEX] yet; nudges written
+[2026-06-27 00:16:12] [orchestrator] 9179a67 [CLAUDE]: web search migrated to harness/web_search.py (DDGS+fetch+summarise, local LLM)
+[2026-06-27 00:16:12] [orchestrator] codex: active 8m, CODEX-1 GLM readiness eval running — first [CODEX] commit expected soon
+[2026-06-27 00:16:12] [orchestrator] NUDGE queued: jarvis-self-eval (375m stall) — resume Cycle 8 + /diagnose wiring
+[2026-06-27 00:16:12] [orchestrator] NUDGE queued: jarvis-local-llm (1252m idle) — P7 circuit breakers + devstral routing
+[2026-06-27 00:16:12] [orchestrator] 4 ghost sessions purged; queue: 2 in_progress / 28 queued / 1 blocked / 49 done
