@@ -273,6 +273,14 @@ def _parse_browser_click_target(text: str):
     return label or None
 
 
+def _extract_url(text: str) -> str:
+    """Pull the first https?:// URL from freeform text."""
+    m = re.search(r"https?://\S+", text)
+    if not m:
+        return ""
+    return m.group(0).rstrip(".,;:\"')")
+
+
 def _parse_source_target(text: str) -> str | None:
     match = re.search(
         r"\b(?:ingest|add to the vault|put in the vault)\b(?:\s+(?:source|file|repo|repository|url|notes))?(?:\s+from)?\s+(.+)",
@@ -872,6 +880,67 @@ def _diagnose_command_reply() -> str:
         return self_eval_log.diagnose_report(n=50, worst_n=5)
     except Exception as exc:
         return f"/diagnose unavailable: {exc}"
+
+
+def _is_task_command(lower: str) -> bool:
+    """Trigger: /task <description> — run an operative task end-to-end."""
+    stripped = lower.strip()
+    return stripped == "/task" or stripped.startswith("/task ")
+
+
+def _task_command_stream(task: str):
+    """Generator that runs operative.run_task and yields live progress."""
+    import queue as _q
+    import threading as _th
+
+    if not task.strip():
+        yield "Usage: /task <natural language description of what to do>"
+        return
+
+    from operative import run_task
+
+    progress_q: _q.Queue = _q.Queue()
+    _DONE = object()
+
+    def _on_progress(step_desc: str, detail: str = "") -> None:
+        progress_q.put(("progress", step_desc, detail))
+
+    def _run() -> None:
+        try:
+            result = run_task(task, on_progress=_on_progress)
+            progress_q.put(("done", result))
+        except Exception as exc:
+            logging.exception("[/task] operative failed")
+            progress_q.put(("error", str(exc)))
+
+    _th.Thread(target=_run, daemon=True, name="TaskCommand").start()
+
+    yield f"Task: {task}\n\n"
+
+    while True:
+        item = progress_q.get()
+        kind = item[0]
+
+        if kind == "progress":
+            _, step_desc, detail = item
+            line = f"• {step_desc}"
+            if detail:
+                line += f": {detail[:120]}"
+            yield line + "\n"
+
+        elif kind == "done":
+            result = item[1]
+            steps = result.get("steps", [])
+            summary = result.get("summary", "")
+            ok = result.get("ok", False)
+            n_ok = sum(1 for s in steps if s.ok)
+            status = "Done" if ok else "Partial"
+            yield f"\n{status} ({n_ok}/{len(steps)} steps)\n\n{summary}"
+            break
+
+        elif kind == "error":
+            yield f"\nTask failed: {item[1]}"
+            break
 
 
 def _is_meta_improvement_query(lower: str) -> bool:
@@ -3693,6 +3762,9 @@ def route_stream(user_input: str) -> tuple:
         return _s(_meta_improvement_reply()), "Status"
     if _is_performance_report_query(lower):
         return _s(_performance_report_reply()), "Self-Eval"
+    if _is_task_command(lower):
+        task_desc = user_input.strip()[len("/task"):].strip()
+        return _task_command_stream(task_desc), "Operative"
     if _is_score_command(lower):
         return _s(_score_command_reply()), "Self-Eval"
     if _is_reflect_command(lower):
@@ -4674,6 +4746,14 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
             or user_input
         )
         click_target = params.get("link_text") or params.get("text") or params.get("label") or _parse_browser_click_target(user_input) or ""
+
+        # Headless URL fetch — no browser window needed
+        _fetch_url = _extract_url(user_input)
+        if action == "fetch" or (_fetch_url and re.search(r"\b(fetch|read|get|show|load|summarize|summarise)\b", lower)):
+            url_to_fetch = _fetch_url or target
+            page_text = browser.web_fetch(url_to_fetch)
+            prompt = f"The user asked: {user_input}\n\nPage content from {url_to_fetch}:\n\n{page_text}"
+            return format_with_mini(prompt, extra_system="Summarize the page content in a clear, concise response. Answer the user's specific question if they asked one."), "Browser"
 
         if any(term in lower for term in ("copy current page url", "copy page url", "copy page link", "send this page", "share this page")):
             return _s(browser.copy_current_page_url()), "Browser"
