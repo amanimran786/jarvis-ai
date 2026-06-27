@@ -52,11 +52,27 @@ class ToolSpec:
 TOOL_SPECS: dict[str, ToolSpec] = {
     "search": ToolSpec(
         name="search",
-        description="Quick web search for current info.",
-        args_schema={"query": {"type": "string"}, "max_results": {"type": "int", "default": 5}},
+        description="Search the web via DuckDuckGo. Returns ranked results with titles, URLs, and snippets, summarised by a local model.",
+        args_schema={
+            "query": {"type": "string"},
+            "max_results": {"type": "int", "default": 5},
+            "fetch_top": {"type": "bool", "default": False},
+        },
         required=("query",),
         side_effects=False,
-        timeout_seconds=20,
+        timeout_seconds=30,
+        verifier="non_empty_text",
+    ),
+    "fetch_page": ToolSpec(
+        name="fetch_page",
+        description="Fetch a web page and return its plain-text content for further processing.",
+        args_schema={
+            "url": {"type": "string"},
+            "max_chars": {"type": "int", "default": 6000},
+        },
+        required=("url",),
+        side_effects=False,
+        timeout_seconds=15,
         verifier="non_empty_text",
     ),
     "research": ToolSpec(

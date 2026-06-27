@@ -112,10 +112,21 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         return True, result["report"]
 
     if tool == "search":
-        from tools import web_search
+        from tools import web_search, web_search_with_fetch
         query = params.get("query", step.description)
         max_results = int(params.get("max_results", 5))
+        fetch_top = str(params.get("fetch_top", "false")).lower() in ("true", "1", "yes")
+        if fetch_top:
+            return True, web_search_with_fetch(query, max_results=max_results)
         return True, web_search(query, max_results=max_results)
+
+    if tool == "fetch_page":
+        from tools import fetch_page
+        url = params.get("url", "").strip()
+        if not url:
+            return False, "fetch_page requires a url parameter"
+        max_chars = int(params.get("max_chars", 6000))
+        return True, fetch_page(url, max_chars=max_chars)
 
     if tool == "notes":
         import notes as notes_mod
