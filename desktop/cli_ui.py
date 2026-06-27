@@ -122,19 +122,49 @@ class CLISession:
             print(f"\n[36m{status_line}[0m")
 
     def stream_jarvis_response(self, generator: Generator[str, None, None]) -> str:
-        """Consume generator, print tokens as they arrive, return full text."""
+        """Consume generator, print tokens as they arrive, return full text.
+
+        Shows a thinking indicator until the first token arrives so the terminal
+        never goes silent during LLM generation (the ThinkingIndicator in main.py
+        only covers the routing phase; this covers the generation phase).
+        """
         full_text = ""
+        first_token = True
+
+        # Thinking indicator — visible until the first token replaces it.
         if self.use_rich:
-            self.console.print("JARVIS ▶ ", style="bold cyan", end="", highlight=False)
+            self.console.print(
+                "JARVIS [dim cyan]···[/dim cyan]",
+                end="",
+                style="bold cyan",
+                highlight=False,
+            )
         else:
-            print("\n[36mJARVIS ▶[0m ", end="", flush=True)
+            print("\033[36mJARVIS\033[0m \033[36m···\033[0m", end="", flush=True)
 
         for chunk in generator:
+            if first_token:
+                first_token = False
+                # Swap indicator for the response header on first real token.
+                if self.use_rich:
+                    self.console.print()  # end indicator line
+                    self.console.print("JARVIS ▶ ", style="bold cyan", end="", highlight=False)
+                else:
+                    sys.stdout.write("\r" + " " * 60 + "\r")
+                    print("\n\033[36mJARVIS ▶\033[0m ", end="", flush=True)
             full_text += chunk
             if self.use_rich:
                 self.console.print(chunk, style="white", end="", highlight=False)
             else:
                 sys.stdout.write(chunk)
+                sys.stdout.flush()
+
+        if first_token:
+            # Empty generator — clear indicator quietly.
+            if self.use_rich:
+                self.console.print()
+            else:
+                sys.stdout.write("\r" + " " * 60 + "\r")
                 sys.stdout.flush()
 
         if self.use_rich:
