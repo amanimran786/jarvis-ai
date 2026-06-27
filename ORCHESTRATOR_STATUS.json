@@ -4,8 +4,8 @@
     {
       "name": "jarvis-board",
       "status": "active",
-      "last_active": "2026-06-27T00:13:54Z",
-      "current_task": "[CLAUDE] web_search harness + /task command. AGENT_BOARD items 11+13 next.",
+      "last_active": "2026-06-27T00:25:46.650623+00:00",
+      "current_task": "email/calendar error handling + web search fix. AGENT_BOARD 11+13 next.",
       "orchestrator_note": "Last commit 9179a67 at 00:13 UTC. Active via commits; heartbeat not self-updating.",
       "owner": "Claude (Cowork)",
       "files_owned": [
@@ -63,17 +63,8 @@
         "tests/test_glm52_readiness.py",
         "CODEX_TASKS.md"
       ]
-    },
-    {
-      "session_id": "edf697c4-a3d4-4d81-9b94-1a092edd9c38",
-      "name": "jarvis",
-      "last_active": "2026-06-27T00:21:09.244861+00:00",
-      "current_task": "Give me my YouTube PEM 2026 role pack.",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:21:01.771925+00:00",
-  "orchestrator_round": 36
+  "last_updated": "2026-06-27T00:25:46.650623+00:00",
+  "orchestrator_round": 37
 }

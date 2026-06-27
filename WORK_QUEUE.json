@@ -642,9 +642,9 @@
     "session_name": "codex-lane",
     "task": "CODEX-2: Voice TTS per operative step \u2014 harness/tts.py + VOICE_ENABLED config + operative.py wiring",
     "priority": 1,
-    "status": "queued",
+    "status": "in_progress",
     "assigned_to": "Codex",
-    "assigned_at": null,
+    "assigned_at": "2026-06-27T00:21:53Z",
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
     "notes": "Reuse voice.py TTS path if possible. Never crash Jarvis on TTS failure. See CODEX_TASKS.md CODEX-2."
@@ -815,5 +815,15 @@
     "completed_at": "2026-06-27T00:16:59Z",
     "created_at": "2026-06-27T00:13:00Z",
     "notes": "Committed 50c95bf \u2014 self-eval RESUMED after nudge. harness/prompt_optimizer.py: reads N eval entries, surfaces 6 low-scoring patterns, asks LOCAL_REASONING for identity.md patches, writes to kb/prompt_suggestions.md."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Email/calendar auth error handling + web search fix in router.py",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:18:00Z",
+    "completed_at": "2026-06-27T00:21:48Z",
+    "created_at": "2026-06-27T00:18:00Z",
+    "notes": "Committed 042501b \u2014 calendar/email try/except catches auth failures (invalid_grant, circuit-open) \u2192 GOOGLE_REAUTH_MSG. Results piped through format_with_mini."
   }
 ]
