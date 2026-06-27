@@ -882,6 +882,34 @@ def _diagnose_command_reply() -> str:
         return f"/diagnose unavailable: {exc}"
 
 
+def _is_optimize_command(lower: str) -> bool:
+    """Trigger: /optimize [apply <id>] — prompt self-optimization."""
+    stripped = lower.strip()
+    return stripped.startswith("/optimize") or stripped.startswith("optimize apply ") or any(
+        phrase in lower for phrase in (
+            "prompt optimization",
+            "optimize prompts",
+            "optimize system prompt",
+            "suggest prompt edits",
+            "prompt suggestions",
+            "improve system prompt",
+        )
+    )
+
+
+def _optimize_command_reply(raw_input: str) -> str:
+    try:
+        from harness import prompt_optimizer
+        lower = raw_input.strip().lower()
+        # Handle: /optimize apply s001
+        apply_m = re.search(r"\bapply\s+(s\d+)\b", lower)
+        if apply_m:
+            return prompt_optimizer.apply_suggestion(apply_m.group(1))
+        return prompt_optimizer.optimize_text(n=200)
+    except Exception as exc:
+        return f"/optimize unavailable: {exc}"
+
+
 def _is_task_command(lower: str) -> bool:
     """Trigger: /task <description> — run an operative task end-to-end."""
     stripped = lower.strip()
@@ -3557,6 +3585,11 @@ def route_stream(user_input: str) -> tuple:
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
 
+    # ── /task command — run operative end-to-end ─────────────────────────────
+    if _is_task_command(lower):
+        task_desc = user_input.strip()[len("/task"):].strip()
+        return _task_command_stream(task_desc), "Operative"
+
     # ── Task list fast-path: "what are my tasks" / "show task list" ─────────
     if _is_task_list_query(lower):
         try:
@@ -3762,15 +3795,14 @@ def route_stream(user_input: str) -> tuple:
         return _s(_meta_improvement_reply()), "Status"
     if _is_performance_report_query(lower):
         return _s(_performance_report_reply()), "Self-Eval"
-    if _is_task_command(lower):
-        task_desc = user_input.strip()[len("/task"):].strip()
-        return _task_command_stream(task_desc), "Operative"
     if _is_score_command(lower):
         return _s(_score_command_reply()), "Self-Eval"
     if _is_reflect_command(lower):
         return _s(_reflect_command_reply()), "Self-Eval"
     if _is_diagnose_command(lower):
         return _s(_diagnose_command_reply()), "Self-Eval"
+    if _is_optimize_command(lower):
+        return _s(_optimize_command_reply(user_input)), "Self-Eval"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):
