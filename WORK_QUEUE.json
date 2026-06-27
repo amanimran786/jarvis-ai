@@ -653,12 +653,12 @@
     "session_name": "codex-lane",
     "task": "CODEX-3: PyQt6 system tray panel \u2014 ui/tray.py, reads ORCHESTRATOR_STATUS.json every 5s",
     "priority": 1,
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "Codex",
     "assigned_at": "2026-06-27T00:32:56Z",
-    "completed_at": null,
+    "completed_at": "2026-06-27T00:39:10Z",
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Status: green=idle, yellow=running, red=error. See CODEX_TASKS.md CODEX-3."
+    "notes": "Added ui/tray.py with 5-second status refresh, colored indicator, Open Jarvis, Last task status, Quit, Qt path guard, and focused tests."
   },
   {
     "session_name": "codex-lane",
@@ -854,5 +854,15 @@
     "assigned_at": "2026-06-27T00:35:02.706425+00:00",
     "created_at": "2026-06-27T00:35:02.706425+00:00",
     "notes": "NUDGE round 39 \u2014 self-eval idle 18m since 50c95bf. Expected: Cycle 8 next steps."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "[CLAUDE] Fix test mock patches \u2014 update from tools.web_search to harness.web_search.search",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:35:00Z",
+    "completed_at": "2026-06-27T00:38:36Z",
+    "created_at": "2026-06-27T00:35:00Z",
+    "notes": "Committed bfd8f35 [CLAUDE] \u2014 4 tests were patching old tools.web_search symbol, making real network calls. Fixed to patch harness.web_search._ws.search."
   }
 ]

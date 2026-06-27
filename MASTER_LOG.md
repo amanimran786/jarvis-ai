@@ -284,3 +284,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:35:02] [orchestrator] codex: CODEX-2 shipped before CODEX-1; GLM eval (CODEX-1) still running
 [2026-06-27 00:35:02] [orchestrator] jarvis-self-eval: 18m idle post-optimizer — nudge queued round 39
 [2026-06-27 00:35:02] [orchestrator] 4 ghosts purged; queue: {'blocked': 1, 'done': 56, 'in_progress': 2, 'queued': 26}
+
+[2026-06-27 00:39:41] [orchestrator] ROUND 40 — 1 [CLAUDE] commit; no new [CODEX]; self-eval 23m idle
+[2026-06-27 00:39:41] [orchestrator] bfd8f35 [CLAUDE]: test mock patches updated — tools.web_search → harness.web_search._ws.search (4 tests making real network calls fixed)
+[2026-06-27 00:39:41] [orchestrator] jarvis-board: 7th commit since reset; AGENT_BOARD 11+13 still pending
+[2026-06-27 00:39:41] [orchestrator] codex: CODEX-1 GLM eval still running — no new [CODEX] commits
+[2026-06-27 00:39:41] [orchestrator] jarvis-self-eval: 23m idle — nudge queued round 39, unanswered
+[2026-06-27 00:39:41] [orchestrator] 4 ghosts purged; queue: {'blocked': 1, 'done': 58, 'in_progress': 1, 'queued': 26}

@@ -4,8 +4,8 @@
     {
       "name": "jarvis-board",
       "status": "active",
-      "last_active": "2026-06-27T00:29:44.419141+00:00",
-      "current_task": "[CLAUDE] REPL live token streaming fixed. AGENT_BOARD 11+13 next.",
+      "last_active": "2026-06-27T00:39:41.932637+00:00",
+      "current_task": "[CLAUDE] test mock patches fixed for harness.web_search. AGENT_BOARD 11+13 next.",
       "orchestrator_note": "Last commit 9179a67 at 00:13 UTC. Active via commits; heartbeat not self-updating.",
       "owner": "Claude (Cowork)",
       "files_owned": [
@@ -64,17 +64,8 @@
         "CODEX_TASKS.md"
       ],
       "orchestrator_note": "First [CODEX] commits round 39. CODEX-2 shipped before CODEX-1."
-    },
-    {
-      "session_id": "9952a709-9b27-4026-9e7c-7af983f19ebf",
-      "name": "jarvis",
-      "last_active": "2026-06-27T00:35:03.908708+00:00",
-      "current_task": "What roles are you targeting?",
-      "completed_tasks": [],
-      "next_task": null,
-      "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:35:02.706425+00:00",
-  "orchestrator_round": 39
+  "last_updated": "2026-06-27T00:39:41.932637+00:00",
+  "orchestrator_round": 40
 }
