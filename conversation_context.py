@@ -16,8 +16,9 @@ from datetime import datetime, timedelta
 import memory as mem
 
 
-MAX_ACTIVE_TURNS = 6
+MAX_ACTIVE_TURNS = 20
 SESSION_TIMEOUT_MINUTES = 20
+_COMPACT_SUMMARY_MAX = 1200  # max chars for accumulated past_context summary
 TOPIC_OVERLAP_THRESHOLD = 0.12
 MIN_ROTATE_MESSAGES = 2
 RECENT_REQUEST_STATS = 50
@@ -147,6 +148,46 @@ def end_turn(response: str) -> None:
         _compact_if_needed()
 
 
+def _llm_compact_async(compacted: list[dict], existing_summary: str) -> None:
+    """Fire-and-forget background thread that upgrades the naive summary with an LLM summary.
+
+    Called after _compact_if_needed() sets the naive fallback. The thread acquires
+    _LOCK only to write the result — no lock is held during the LLM call.
+    Silently drops on any failure, leaving the naive summary intact.
+    """
+    def _run() -> None:
+        try:
+            from brains.brain_ollama import ask_local, get_best_available
+            from config import LOCAL_DEFAULT
+            model = get_best_available(LOCAL_DEFAULT)
+            transcript = "\n".join(
+                f"{m['role'].title()}: {_trim_text(m['content'], 200)}"
+                for m in compacted[-12:]
+            )
+            prior = f"\n\nPrevious summary:\n{existing_summary}" if existing_summary else ""
+            prompt = f"Summarize this conversation exchange.{prior}\n\nExchange:\n{transcript}"
+            system = (
+                "Summarize these conversation turns in 2-4 sentences. "
+                "Cover: what was asked, what was answered, any decisions made, "
+                "and specific facts (names, values, file paths, outcomes) that may be referenced later. "
+                "Be precise. No preamble. No markdown."
+            )
+            text = ask_local(prompt, model=model, system_extra=system)
+            if not text or len(text.strip()) < 20:
+                return
+            result = text.strip()
+            if existing_summary:
+                result = _trim_text(f"{existing_summary} | {result}", _COMPACT_SUMMARY_MAX)
+            else:
+                result = _trim_text(result, _COMPACT_SUMMARY_MAX)
+            with _LOCK:
+                _STATE["summary"] = result
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _compact_if_needed() -> None:
     max_messages = MAX_ACTIVE_TURNS * 2
     if len(_STATE["messages"]) <= max_messages:
@@ -155,7 +196,11 @@ def _compact_if_needed() -> None:
     overflow = len(_STATE["messages"]) - max_messages
     compacted = _STATE["messages"][:overflow]
     _STATE["messages"] = _STATE["messages"][overflow:]
-    _STATE["summary"] = _session_summary(compacted, _STATE["summary"])
+    existing_summary = _STATE["summary"]
+    # Set naive summary synchronously so the context is never empty on the next turn.
+    _STATE["summary"] = _session_summary(compacted, existing_summary)
+    # Kick off LLM summarization — replaces the naive summary when thread finishes.
+    _llm_compact_async(compacted, existing_summary)
 
 
 def build_prompt_state(system_prompt: str, system_extra: str = "") -> tuple[str, list[dict], dict]:
@@ -163,8 +208,9 @@ def build_prompt_state(system_prompt: str, system_extra: str = "") -> tuple[str,
         system_parts = [system_prompt]
         if _STATE["summary"]:
             system_parts.append(
-                "Active conversation carry-over summary:\n"
+                "<past_context>\n"
                 + _STATE["summary"]
+                + "\n</past_context>"
             )
         if _STATE["recent_user_topics"]:
             topics = "; ".join(_STATE["recent_user_topics"][-3:])
