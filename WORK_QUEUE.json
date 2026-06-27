@@ -755,5 +755,25 @@
     "completed_at": "2026-06-26T17:06:17Z",
     "created_at": "2026-06-26T17:05:00Z",
     "notes": "Committed 4c430cc \u2014 summarise uses get_best_available(LOCAL_DEFAULT); voice summarise timeout 12s."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Add git_ops tool \u2014 safe agentic git operations (read free, gated writes, push excluded); 30 tests",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:06:00Z",
+    "completed_at": "2026-06-27T00:09:06Z",
+    "created_at": "2026-06-27T00:06:00Z",
+    "notes": "Committed 66a587f \u2014 tools/git_ops.py: status/diff/log/branch/show free; add/commit gated; push excluded. 30 tests."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Add /task command \u2014 wire operative end-to-end with live progress streaming to UI",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:09:00Z",
+    "completed_at": "2026-06-27T00:10:50Z",
+    "created_at": "2026-06-27T00:09:00Z",
+    "notes": "Committed c37f45a \u2014 /task <nl> routes task_planner\u2192execution_engine\u2192operative; each step yields bullet to UI."
   }
 ]

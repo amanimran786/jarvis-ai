@@ -237,3 +237,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:07:24] [orchestrator] RULE: Track [CODEX]-prefixed commits each round
 [2026-06-27 00:07:24] [orchestrator] New commits harvested: 3d35f9e (coordination setup), c1b32e6 (web_fetch), 4c430cc (search+17 tests)
 [2026-06-27 00:07:24] [orchestrator] Queue: 2 in_progress / 26 queued / 1 blocked / 46 done (75 total, +23 Codex/Gemini tasks)
+
+[2026-06-27 00:12:04] [orchestrator] ROUND 34 — 2 new commits, Codex active (no [CODEX] commit yet)
+[2026-06-27 00:12:04] [orchestrator] 66a587f: git_ops tool — safe agentic git ops, push excluded, 30 tests
+[2026-06-27 00:12:04] [orchestrator] c37f45a: /task command — task_planner→operative pipeline wired end-to-end with live streaming
+[2026-06-27 00:12:04] [orchestrator] jarvis-board: stale heartbeat but committing at 00:09-00:10 UTC — marked active
+[2026-06-27 00:12:04] [orchestrator] codex: active (4m), CODEX-1 in progress, no [CODEX] commit yet
+[2026-06-27 00:12:04] [orchestrator] 5 ghost sessions purged; queue: 2 in_progress / 26 queued / 1 blocked / 48 done
