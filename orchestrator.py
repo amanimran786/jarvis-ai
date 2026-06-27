@@ -203,6 +203,10 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     if re.match(r"\b(open|launch|start)\b\s+\w+", lower) and "interface" not in lower:
         app = re.sub(r"^(open|launch|start)\s+", "", lower).strip()
         return ToolDecision("app", 0.99, "open", {"app": app})
+    # Web fetch (headless URL read) — must come before generic browser open
+    _has_url = bool(re.search(r"https?://\S+", lower))
+    if _has_url and re.search(r"\b(fetch|read|get|show|display|load|summarize|summarise|what.{0,10}(say|on|does))\b", lower):
+        return ToolDecision("browser", 0.96, "fetch")
     # Browser
     if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|search the web|search google for|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
         return ToolDecision("browser", 0.97, "browse")

@@ -24,6 +24,13 @@ import urllib.request
 import re
 from html import unescape
 
+try:
+    import requests as _requests
+    import bs4 as _bs4
+    _REQUESTS_AVAILABLE = True
+except ImportError:
+    _REQUESTS_AVAILABLE = False
+
 import runtime_state
 from model_router import format_with_mini
 
@@ -887,6 +894,47 @@ def _fetch_url_html(url: str) -> str:
             return resp.read().decode("utf-8", errors="replace")
     except Exception:
         return ""
+
+
+def web_fetch(url: str, max_chars: int = _MAX_PAGE_TEXT) -> str:
+    """Fetch a URL and return its readable text content, headless (no browser window).
+
+    Uses requests + BeautifulSoup for clean extraction. Falls back to urllib + regex.
+    Returns an error string if the fetch fails.
+    """
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    if _REQUESTS_AVAILABLE:
+        try:
+            resp = _requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; Jarvis/2.0)"},
+                timeout=15,
+                allow_redirects=True,
+            )
+            resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "")
+            if "text" not in content_type and "html" not in content_type:
+                return f"Non-text content ({content_type}) at {url} — cannot extract text."
+            soup = _bs4.BeautifulSoup(resp.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "aside", "form"]):
+                tag.decompose()
+            title = soup.title.string.strip() if soup.title and soup.title.string else ""
+            text = soup.get_text(separator="\n", strip=True)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+            if title:
+                text = f"# {title}\n\n{text}"
+            if len(text) > max_chars:
+                text = text[:max_chars] + f"\n\n... [truncated — {len(text)} chars total]"
+            return text or f"Page at {url} appears to have no readable text."
+        except Exception as exc:
+            logging.debug("[web_fetch] requests failed for %s: %s", url, exc)
+
+    # Fallback: urllib + regex strip
+    text = _fetch_url_text(url)
+    return text or f"Could not fetch {url}."
 
 
 def _find_link_url(page_url: str, target_text: str) -> str:
