@@ -222,3 +222,9 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-26 20:01:37] [orchestrator] board=112m, self-eval=120m offline — definitively not rate-limited, sessions closed
 [2026-06-26 20:01:37] [orchestrator] No new commits since 392d192 at 18:07 UTC (114m ago total)
 [2026-06-26 20:01:37] [orchestrator] Wakeup extended to 21:00 UTC. Queue: 1 in_progress / 18 queued / 1 blocked / 43 done
+
+[2026-06-27 00:03:25] [orchestrator] ROUND 32 — 00:02 UTC June 27 (woke 3h late)
+[2026-06-27 00:03:25] [orchestrator] Prior RESUME_SIGNAL consumed but no commits — session checked in without output
+[2026-06-27 00:03:25] [orchestrator] Sessions offline 6h: board=353m, self-eval=362m, local-llm=1239m, audit=1607m
+[2026-06-27 00:03:25] [orchestrator] Fresh RESUME_SIGNAL.json written. Extending wakeup to 20min interval.
+[2026-06-27 00:03:25] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 43 done — no change since round 27
