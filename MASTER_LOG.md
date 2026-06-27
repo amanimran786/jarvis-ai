@@ -275,3 +275,5 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:29:44] [orchestrator] codex: active but no output after 25m — GLM readiness tests may be long-running
 [2026-06-27 00:29:44] [orchestrator] jarvis-local-llm: idle 1275m, 1 nudge queued, unanswered
 [2026-06-27 00:29:44] [orchestrator] 5 ghosts purged; queue: 2 in_progress / 26 queued / 1 blocked / 54 done
+
+[2026-06-27 00:30 UTC] [CODEX] Completed: Voice TTS per operative step — 1754e09
