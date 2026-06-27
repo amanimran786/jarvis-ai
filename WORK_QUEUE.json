@@ -790,11 +790,11 @@
     "session_name": "jarvis-self-eval",
     "task": "NUDGE \u2014 self-eval lane stalled 375m. Resume: check RESUME_SIGNAL, continue Cycle 8, wire /diagnose\u2192AGENT_BOARD",
     "priority": 1,
-    "status": "queued",
+    "status": "done",
     "assigned_at": null,
-    "completed_at": null,
+    "completed_at": "2026-06-27T00:21:01.771925+00:00",
     "created_at": "2026-06-27T00:16:12.743700+00:00",
-    "notes": "NUDGE added round 35 \u2014 stalled since 18:20 UTC. Last task: LLM improvement notes. Next: Cycle 8, /diagnose wiring, /reflect\u2192daily briefing."
+    "notes": "NUDGE added round 35 \u2014 stalled since 18:20 UTC. Last task: LLM improvement notes. Next: Cycle 8, /diagnose wiring, /reflect\u2192daily briefing. \u2014 CLOSED: self-eval resumed round 36 with 50c95bf."
   },
   {
     "session_name": "jarvis-local-llm",
@@ -805,5 +805,15 @@
     "completed_at": null,
     "created_at": "2026-06-27T00:16:12.743700+00:00",
     "notes": "NUDGE added round 35 \u2014 idle since ~03:13 UTC Jun 26. P7 circuit breakers still pending. Verify devstral/qwen3:30b production routing."
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Prompt self-optimizer \u2014 analysis of low-scoring patterns + /optimize command patches identity.md",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:13:00Z",
+    "completed_at": "2026-06-27T00:16:59Z",
+    "created_at": "2026-06-27T00:13:00Z",
+    "notes": "Committed 50c95bf \u2014 self-eval RESUMED after nudge. harness/prompt_optimizer.py: reads N eval entries, surfaces 6 low-scoring patterns, asks LOCAL_REASONING for identity.md patches, writes to kb/prompt_suggestions.md."
   }
 ]

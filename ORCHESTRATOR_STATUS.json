@@ -1,84 +1,79 @@
 {
+  "description": "Jarvis dev session registry \u2014 orchestrator-managed",
   "sessions": [
     {
-      "session_id": "jarvis-board",
       "name": "jarvis-board",
-      "last_active": "2026-06-27T00:16:12.743700+00:00",
-      "current_task": "[CLAUDE] web search migrated to harness/web_search.py. AGENT_BOARD 11+13 next.",
       "status": "active",
-      "commits": [
-        "a669c5e (P6 workspace_context tests)",
-        "19c6936 (P7 circuit breaker tests + close item 9)",
-        "1b796a8 (P8 operative streaming)"
-      ],
-      "orchestrator_note": "Stale heartbeat but committing: 66a587f + c37f45a at 00:09-00:10 UTC"
+      "last_active": "2026-06-27T00:13:54Z",
+      "current_task": "[CLAUDE] web_search harness + /task command. AGENT_BOARD items 11+13 next.",
+      "orchestrator_note": "Last commit 9179a67 at 00:13 UTC. Active via commits; heartbeat not self-updating.",
+      "owner": "Claude (Cowork)",
+      "files_owned": [
+        "AGENT_BOARD.md",
+        "router.py"
+      ]
     },
     {
-      "session_id": "jarvis-self-eval",
       "name": "jarvis-self-eval",
-      "last_active": "2026-06-26T18:00:43.421027+00:00",
-      "current_task": "LLM improvement notes pipeline \u2014 auto-trigger every 100 interactions + /reflect",
-      "status": "stalled",
-      "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
-      "stall_note": "OFFLINE 6h \u2014 prior RESUME_SIGNAL consumed but no output. Fresh signal written 00:02 UTC."
+      "status": "active",
+      "last_active": "2026-06-27T00:21:01.771925+00:00",
+      "current_task": "50c95bf: prompt self-optimizer \u2014 analysis + /optimize command. Cycle 8 next.",
+      "orchestrator_note": "RESUMED after nudge (round 35). Committed 50c95bf at 00:16 UTC.",
+      "owner": "Claude (Cowork)",
+      "files_owned": [
+        "self_eval.py",
+        "self_improve.py",
+        "evals.py"
+      ]
     },
     {
-      "session_id": "jarvis-local-llm",
       "name": "jarvis-local-llm",
-      "completed_tasks": [],
-      "last_active": "2026-06-26T03:23:57.878284+00:00",
-      "current_task": "P6 workspace_context done; checking P7 circuit breakers next",
       "status": "idle",
-      "notes": "Woke after 367m idle. Progressing through AGENT_BOARD P6/P7 items.",
-      "orchestrator_note": "Reset to idle at round 21 \u2014 weekly limit reset, RESUME_SIGNAL written. Last commit: ec9d29c."
+      "last_active": "2026-06-26T03:13:56Z",
+      "current_task": "P7 circuit breakers (pending \u2014 nudge queued round 35)",
+      "orchestrator_note": "Idle 1257m. Nudge task written round 35.",
+      "owner": "Codex",
+      "files_owned": [
+        "brains/brain_ollama.py",
+        "model_router.py",
+        "context_budget.py"
+      ]
     },
     {
-      "session_id": "seed-jarvis-audit",
       "name": "jarvis-audit",
-      "last_active": "2026-06-25T21:16:01.564411+00:00",
-      "current_task": null,
-      "completed_tasks": [
-        {
-          "task": "Wire query_received + route_decision events",
-          "commit": "b4a0fa9"
-        },
-        {
-          "task": "Harden audit_log() + audit_errors.log",
-          "commit": "c0a8ec1"
-        },
-        {
-          "task": "route_decision + memory_write wiring",
-          "commit": "e84263b"
-        },
-        {
-          "task": "memory_write to mem0_layer + save_conversation",
-          "commit": "3af8ba4"
-        },
-        {
-          "task": "reflection_run + memory_promotion wiring",
-          "commit": "144a8ca"
-        },
-        {
-          "task": "check_resume_signal() + heartbeat() in harness/audit.py",
-          "commit": "fcb85f0"
-        }
-      ],
-      "next_task": "Verify audit.jsonl end-to-end: memory_write + route_decision events",
-      "status": "idle"
+      "status": "idle",
+      "last_active": "2026-06-25T21:16:01Z",
+      "current_task": "run_id threading + audit.jsonl end-to-end (queued)",
+      "orchestrator_note": "Idle 1625m. No recent activity.",
+      "owner": "Codex",
+      "files_owned": [
+        "harness/audit.py",
+        "logs/",
+        "snapshots/"
+      ]
     },
     {
       "name": "codex",
       "status": "active",
-      "last_active": "2026-06-27T00:07:12.946528+00:00",
-      "current_task": "CODEX-1: GLM 5.2 readiness eval \u2014 running tests/test_glm52_readiness.py",
-      "notes": "External agent. File-based coordination via WORK_QUEUE.json + CODEX_TASKS.md. Never write RESUME_SIGNAL.json for Codex. Track [CODEX] commits.",
+      "last_active": "2026-06-27T00:21:01.771925+00:00",
+      "current_task": "CODEX-1: GLM 5.2 readiness eval \u2014 tests/test_glm52_readiness.py (no commit yet)",
+      "notes": "External agent. File-based coordination. Never write RESUME_SIGNAL.json for Codex.",
       "owner": "Codex (OpenAI)",
       "files_owned": [
         "tests/test_glm52_readiness.py",
         "CODEX_TASKS.md"
       ]
+    },
+    {
+      "session_id": "edf697c4-a3d4-4d81-9b94-1a092edd9c38",
+      "name": "jarvis",
+      "last_active": "2026-06-27T00:21:09.244861+00:00",
+      "current_task": "Give me my YouTube PEM 2026 role pack.",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:16:12.743700+00:00",
-  "orchestrator_round": 35
+  "last_updated": "2026-06-27T00:21:01.771925+00:00",
+  "orchestrator_round": 36
 }

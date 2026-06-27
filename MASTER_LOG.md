@@ -251,3 +251,13 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:16:12] [orchestrator] NUDGE queued: jarvis-self-eval (375m stall) — resume Cycle 8 + /diagnose wiring
 [2026-06-27 00:16:12] [orchestrator] NUDGE queued: jarvis-local-llm (1252m idle) — P7 circuit breakers + devstral routing
 [2026-06-27 00:16:12] [orchestrator] 4 ghost sessions purged; queue: 2 in_progress / 28 queued / 1 blocked / 49 done
+
+[2026-06-27 00:21:01] [orchestrator] ROUND 36 — STATUS REBUILT (ghost overwrite), self-eval RESUMED
+[2026-06-27 00:21:01] [orchestrator] ORCHESTRATOR_STATUS was overwritten with ghosts only — rebuilt 5 named sessions from known state
+[2026-06-27 00:21:01] [orchestrator] 50c95bf: prompt self-optimizer (harness/prompt_optimizer.py) — jarvis-self-eval RESUMED after nudge
+[2026-06-27 00:21:01] [orchestrator] jarvis-self-eval nudge task CLOSED — session back and committing
+[2026-06-27 00:21:01] [orchestrator] codex: active, CODEX-1 still running — no [CODEX] commit yet
+[2026-06-27 00:21:01] [orchestrator] jarvis-local-llm nudge still open (idle 1257m+)
+[2026-06-27 00:21:01] [orchestrator] Queue: 2 in_progress / 27 queued / 1 blocked / 50 done (80 total)
+
+[2026-06-27 00:20 UTC] [CODEX] Completed: GLM 5.2 eval findings — 0105e5f
