@@ -228,3 +228,12 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:03:25] [orchestrator] Sessions offline 6h: board=353m, self-eval=362m, local-llm=1239m, audit=1607m
 [2026-06-27 00:03:25] [orchestrator] Fresh RESUME_SIGNAL.json written. Extending wakeup to 20min interval.
 [2026-06-27 00:03:25] [orchestrator] Queue: 1 in_progress / 18 queued / 1 blocked / 43 done — no change since round 27
+
+[2026-06-27 00:07:24] [orchestrator] ROUND 33 — CODEX AGENT JOINED
+[2026-06-27 00:07:24] [orchestrator] Codex registered in ORCHESTRATOR_STATUS — external agent, file-based coordination
+[2026-06-27 00:07:24] [orchestrator] Codex claimed CODEX-1: GLM 5.2 readiness eval (tests/test_glm52_readiness.py)
+[2026-06-27 00:07:24] [orchestrator] CODEX tasks 1-5 in queue: GLM eval, TTS, system tray, CLI UX, plugin scaffold
+[2026-06-27 00:07:24] [orchestrator] RULE: Never write RESUME_SIGNAL.json for Codex — it runs externally
+[2026-06-27 00:07:24] [orchestrator] RULE: Track [CODEX]-prefixed commits each round
+[2026-06-27 00:07:24] [orchestrator] New commits harvested: 3d35f9e (coordination setup), c1b32e6 (web_fetch), 4c430cc (search+17 tests)
+[2026-06-27 00:07:24] [orchestrator] Queue: 2 in_progress / 26 queued / 1 blocked / 46 done (75 total, +23 Codex/Gemini tasks)
