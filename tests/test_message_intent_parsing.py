@@ -612,15 +612,18 @@ class MessageIntentParsingTests(unittest.TestCase):
 
     def test_pending_message_draft_does_not_swallow_web_search(self):
         """Searches should escape pending draft state instead of replacing body."""
+        from unittest.mock import patch
         self.router._clear_message_state()
         self.router._set_pending_message_draft("+15105550124", "Hey Farhan this is Jarvis")
-        self.router.tools.web_search = lambda query: f"searched:{query}"
 
-        stream, label = self.router.route_stream("Search the web for latest AI news")
-        text = "".join(stream)
+        import router as _router_mod
+        with patch.object(_router_mod._ws, "search", return_value="searched:latest AI news"), \
+             patch.object(_router_mod, "format_with_mini", side_effect=lambda prompt, **kw: iter([prompt])):
+            stream, label = self.router.route_stream("Search the web for latest AI news")
+            text = "".join(stream)
 
         self.assertEqual(label, "Search")
-        self.assertEqual(text, "searched:latest AI news")
+        self.assertIn("searched:latest AI news", text)
         self.assertTrue(self.router._has_pending_message_draft())
 
     def test_pending_message_recipient_does_not_swallow_standalone_question(self):

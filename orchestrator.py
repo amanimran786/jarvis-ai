@@ -207,8 +207,11 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     _has_url = bool(re.search(r"https?://\S+", lower))
     if _has_url and re.search(r"\b(fetch|read|get|show|display|load|summarize|summarise|what.{0,10}(say|on|does))\b", lower):
         return ToolDecision("browser", 0.96, "fetch")
+    # Web search (text query, no URL — keep separate from browser/open)
+    if re.search(r"\b(search the web for|search google for|search online for|look it up online)\b", lower):
+        return ToolDecision("search", 0.97, "search")
     # Browser
-    if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|search the web|search google for|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
+    if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
         return ToolDecision("browser", 0.97, "browse")
     # Weather
     if re.search(r"\b(weather|forecast|temperature)\b", lower):
@@ -255,7 +258,7 @@ def _fast_classify(lower: str) -> ToolDecision | None:
             action = "status"
         return ToolDecision("knowledge", 0.97, action)
     # Calendar
-    if re.search(r"\b(my schedule|my calendar|what do i have today|any events)\b", lower):
+    if re.search(r"\b(my schedule|my calendar|what do i have today|any events|next event|next meeting|upcoming meetings?|any meetings?)\b", lower):
         return ToolDecision("calendar", 0.99, "read")
     # Memory
     if re.match(r"^(remember |forget )", lower):
