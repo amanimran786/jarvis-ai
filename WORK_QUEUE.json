@@ -631,12 +631,12 @@
     "session_name": "codex-lane",
     "task": "CODEX-1: GLM 5.2 eval findings \u2014 run readiness test, evaluate on 5 query types, publish findings to CODEX_GLM_EVAL.md",
     "priority": 1,
-    "status": "in_progress",
+    "status": "done",
     "assigned_to": "Codex",
     "assigned_at": "2026-06-27T00:05:08Z",
-    "completed_at": null,
+    "completed_at": "2026-06-27T00:20:03Z",
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Blocks Claude: GLM 5.2 model_router.py update awaits Codex lane findings. See CODEX_TASKS.md CODEX-1."
+    "notes": "CODEX_GLM_EVAL.md: 5/5 readiness tests passed; five cloud query attempts returned subscription-required HTTP 403. Decision: do not make GLM 5.2 the default."
   },
   {
     "session_name": "codex-lane",
