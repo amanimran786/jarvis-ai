@@ -18,7 +18,7 @@
       "status": "active",
       "last_active": "2026-06-27T00:21:01.771925+00:00",
       "current_task": "50c95bf: prompt self-optimizer \u2014 analysis + /optimize command. Cycle 8 next.",
-      "orchestrator_note": "RESUMED after nudge (round 35). Committed 50c95bf at 00:16 UTC.",
+      "orchestrator_note": "Last commit 50c95bf at 00:16 UTC. 18m idle \u2014 nudge queued round 39.",
       "owner": "Claude (Cowork)",
       "files_owned": [
         "self_eval.py",
@@ -55,25 +55,26 @@
     {
       "name": "codex",
       "status": "active",
-      "last_active": "2026-06-27T00:21:01.771925+00:00",
-      "current_task": "CODEX-1: GLM 5.2 readiness eval \u2014 tests/test_glm52_readiness.py (no commit yet)",
+      "last_active": "2026-06-27T00:35:02.706425+00:00",
+      "current_task": "CODEX-1: GLM eval (running) | CODEX-2 DONE: TTS per operative step (1754e09)",
       "notes": "External agent. File-based coordination. Never write RESUME_SIGNAL.json for Codex.",
       "owner": "Codex (OpenAI)",
       "files_owned": [
         "tests/test_glm52_readiness.py",
         "CODEX_TASKS.md"
-      ]
+      ],
+      "orchestrator_note": "First [CODEX] commits round 39. CODEX-2 shipped before CODEX-1."
     },
     {
       "session_id": "9952a709-9b27-4026-9e7c-7af983f19ebf",
       "name": "jarvis",
-      "last_active": "2026-06-27T00:29:44.674488+00:00",
-      "current_task": "I have a Dockerized FastAPI app that works locally but returns 502 behind Nginx in production. What are the top likely causes and how would you narrow them down?",
+      "last_active": "2026-06-27T00:35:03.908708+00:00",
+      "current_task": "What roles are you targeting?",
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:29:44.419141+00:00",
-  "orchestrator_round": 38
+  "last_updated": "2026-06-27T00:35:02.706425+00:00",
+  "orchestrator_round": 39
 }
