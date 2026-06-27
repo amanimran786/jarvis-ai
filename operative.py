@@ -61,6 +61,7 @@ def _summarize(prompt: str, system_extra: str = "") -> str:
 def run_task(
     task: str,
     on_progress: Callable[[str, str], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     """
     Execute a multi-step task autonomously.
@@ -104,6 +105,9 @@ def run_task(
     step_results: dict[int, str] = {}
 
     for step in steps:
+        if cancel_event and cancel_event.is_set():
+            _prog("Task cancelled", "stopping before step")
+            break
         _prog(f"Step {step.number}: {step.description}")
         ok, result = execute_step(step, step_results, run_id=run_id)
         step.ok     = ok
@@ -174,10 +178,11 @@ def run_task_async(
     task: str,
     on_progress: Callable[[str, str], None] | None = None,
     on_complete: Callable[[dict], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> threading.Thread:
     """Run task in background. Calls on_complete(result) when done."""
     def _run():
-        result = run_task(task, on_progress=on_progress)
+        result = run_task(task, on_progress=on_progress, cancel_event=cancel_event)
         if on_complete:
             on_complete(result)
 

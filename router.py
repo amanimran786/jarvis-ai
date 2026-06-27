@@ -917,8 +917,13 @@ def _is_task_command(lower: str) -> bool:
     return stripped == "/task" or stripped.startswith("/task ")
 
 
+# Module-level cancel event — set by /cancel, consumed by _task_command_stream.
+_active_task_cancel: "threading.Event | None" = None
+
+
 def _task_command_stream(task: str):
     """Generator that runs operative.run_task and yields live progress."""
+    global _active_task_cancel
     import queue as _q
     import threading as _th
 
@@ -929,15 +934,17 @@ def _task_command_stream(task: str):
     from operative import run_task
 
     progress_q: _q.Queue = _q.Queue()
-    _DONE = object()
+    cancel = _th.Event()
+    _active_task_cancel = cancel
 
     def _on_progress(step_desc: str, detail: str = "") -> None:
         progress_q.put(("progress", step_desc, detail))
 
     def _run() -> None:
         try:
-            result = run_task(task, on_progress=_on_progress)
-            progress_q.put(("done", result))
+            result = run_task(task, on_progress=_on_progress, cancel_event=cancel)
+            kind = "cancelled" if cancel.is_set() else "done"
+            progress_q.put((kind, result))
         except Exception as exc:
             logging.exception("[/task] operative failed")
             progress_q.put(("error", str(exc)))
@@ -947,7 +954,14 @@ def _task_command_stream(task: str):
     yield f"Task: {task}\n\n"
 
     while True:
-        item = progress_q.get()
+        try:
+            item = progress_q.get(timeout=0.5)
+        except _q.Empty:
+            if cancel.is_set():
+                yield "\nCancelled."
+                break
+            continue
+
         kind = item[0]
 
         if kind == "progress":
@@ -965,11 +979,131 @@ def _task_command_stream(task: str):
             n_ok = sum(1 for s in steps if s.ok)
             status = "Done" if ok else "Partial"
             yield f"\n{status} ({n_ok}/{len(steps)} steps)\n\n{summary}"
+            _active_task_cancel = None
+            break
+
+        elif kind == "cancelled":
+            result = item[1]
+            steps = result.get("steps", [])
+            n_ok = sum(1 for s in steps if s.ok)
+            yield f"\nCancelled after {n_ok}/{len(steps)} steps."
+            _active_task_cancel = None
             break
 
         elif kind == "error":
             yield f"\nTask failed: {item[1]}"
+            _active_task_cancel = None
             break
+
+
+def _is_cancel_task_command(lower: str) -> bool:
+    """Trigger: /cancel — stop the active operative task."""
+    stripped = lower.strip()
+    return stripped in ("/cancel", "/cancel task", "cancel task", "stop task", "/stop task")
+
+
+def _cancel_task_reply() -> str:
+    global _active_task_cancel
+    if _active_task_cancel is not None and not _active_task_cancel.is_set():
+        _active_task_cancel.set()
+        return "Cancelling — task will stop after the current step."
+    return "No active task to cancel."
+
+
+# ── Git operations ─────────────────────────────────────────────────────────────
+
+def _is_git_status_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+status\b"
+        r"|\bwhat(?:'s|\s+is|\s+are)?\s+(?:modified|changed|staged|unstaged|dirty)\b"
+        r"|\bshow\s+(?:me\s+)?(?:modified|changed|unstaged|staged)\s+files?\b"
+        r"|\bwhat\s+files?\s+(?:did\s+i\s+change|changed|are\s+modified)\b",
+        lower,
+    ))
+
+
+def _is_git_diff_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+diff\b"
+        r"|\bshow\s+(?:me\s+)?(?:the\s+)?diff\b"
+        r"|\bwhat\s+(?:did\s+i\s+change|changed|are\s+(?:my\s+)?changes)\b"
+        r"|\bshow\s+(?:me\s+)?(?:my\s+)?changes?\b"
+        r"|\bdiff\s+(?:my\s+)?(?:changes|code|files?)\b",
+        lower,
+    ))
+
+
+def _is_git_log_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+log\b"
+        r"|\b(?:show|list)\s+(?:recent\s+)?commits?\b"
+        r"|\bcommit\s+history\b"
+        r"|\blast\s+\d+\s+commits?\b"
+        r"|\brecent\s+commits?\b",
+        lower,
+    ))
+
+
+def _parse_git_commit_message(text: str) -> str | None:
+    """Extract commit message from 'commit my changes with message X' etc."""
+    patterns = [
+        r'(?:commit|stage\s+and\s+commit|save\s+and\s+commit).*?(?:with\s+message|message|as|saying)\s+["\']?(.+?)["\']?\s*$',
+        r'(?:commit|save)\s+(?:these|my|all|the)\s+changes?\s+(?:as|with|with\s+message)\s+["\']?(.+?)["\']?\s*$',
+        r'git\s+commit\s+(?:-m\s+)?["\']?(.+?)["\']?\s*$',
+        r'(?:commit|save)\s+(?:this|it)\s+(?:as|with)\s+["\']?(.+?)["\']?\s*$',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE | re.DOTALL)
+        if m:
+            msg = m.group(1).strip().strip('"\'')
+            if len(msg) >= 5:
+                return msg
+    return None
+
+
+def _is_git_commit_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+commit\b"
+        r"|\bcommit\s+(?:my|these|all|the|this)?\s*(?:changes?|files?|code|work)\b"
+        r"|\bstage\s+and\s+commit\b"
+        r"|\bsave\s+(?:and\s+commit|my\s+changes?\s+(?:as|with))\b",
+        lower,
+    )) and "push" not in lower
+
+
+def _git_status_reply() -> str:
+    from tools.git_ops import git_status
+    return git_status()
+
+
+def _git_diff_reply(lower: str) -> str:
+    from tools.git_ops import git_diff
+    staged = "staged" in lower or "cached" in lower
+    return git_diff(staged=staged)
+
+
+def _git_log_reply(lower: str) -> str:
+    from tools.git_ops import git_log
+    m = re.search(r"\b(\d+)\s+commits?\b", lower)
+    n = int(m.group(1)) if m else 10
+    return git_log(n=min(n, 20))
+
+
+def _git_commit_reply(user_input: str) -> str:
+    from tools.git_ops import git_add_all, git_commit, git_status
+    msg = _parse_git_commit_message(user_input)
+    if not msg:
+        status = git_status()
+        return (
+            f"Current status:\n{status}\n\n"
+            "What commit message should I use? Say: commit my changes with message <your message>"
+        )
+    status_before = git_status()
+    if status_before == "Working tree is clean.":
+        return "Nothing to commit — working tree is already clean."
+    git_add_all()
+    result = git_commit(msg)
+    return result
 
 
 def _is_meta_improvement_query(lower: str) -> bool:
@@ -3589,10 +3723,24 @@ def route_stream(user_input: str) -> tuple:
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
 
+    # ── /cancel — stop active operative task ─────────────────────────────────
+    if _is_cancel_task_command(lower):
+        return _s(_cancel_task_reply()), "Operative"
+
     # ── /task command — run operative end-to-end ─────────────────────────────
     if _is_task_command(lower):
         task_desc = user_input.strip()[len("/task"):].strip()
         return _task_command_stream(task_desc), "Operative"
+
+    # ── Git operations ────────────────────────────────────────────────────────
+    if _is_git_commit_query(lower):
+        return _s(_git_commit_reply(user_input)), "Git"
+    if _is_git_diff_query(lower):
+        return _s(_git_diff_reply(lower)), "Git"
+    if _is_git_status_query(lower):
+        return _s(_git_status_reply()), "Git"
+    if _is_git_log_query(lower):
+        return _s(_git_log_reply(lower)), "Git"
 
     # ── Task list fast-path: "what are my tasks" / "show task list" ─────────
     if _is_task_list_query(lower):

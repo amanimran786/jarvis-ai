@@ -102,6 +102,16 @@ def git_add(paths: list[str]) -> str:
         return f"git add failed: {exc}"
 
 
+def git_add_all() -> str:
+    """Stage all changes (respects .gitignore). Returns new status."""
+    try:
+        _run(["git", "add", "-A"])
+        out = _run(["git", "status", "--short"])
+        return out if out else "All changes staged (working tree now clean)."
+    except Exception as exc:
+        return f"git add -A failed: {exc}"
+
+
 def git_commit(message: str) -> str:
     """Commit staged changes with message. Refuses empty or suspiciously short messages."""
     message = (message or "").strip()
@@ -164,4 +174,7 @@ def dispatch(action: str, params: dict) -> tuple[bool, str]:
     if action == "commit":
         return True, git_commit(params.get("message", ""))
 
-    return False, f"Unknown git action: {action!r}. Valid: status, diff, log, branch, show, add, commit."
+    if action == "add_all":
+        return True, git_add_all()
+
+    return False, f"Unknown git action: {action!r}. Valid: status, diff, log, branch, show, add, add_all, commit."
