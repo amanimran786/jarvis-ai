@@ -37,7 +37,9 @@ New-commit verification (B, 00:40): personal-data scan of `7f7f01b..5682b0c` dif
 
 One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`); B to run final baseline and lift freeze.**
 
-| 17 | Silent-failure sweep: bare `except:pass` → `logging.debug` across production modules | Antigravity | ✅ **DONE** `9da8797` (2026-06-25) — 87 sites fixed across 39 files. Two Claude-owned remainders: `api.py:7666`, `router.py:4470` (Claude to sweep on next touch). | — |
+| 17 | Silent-failure sweep: bare `except:pass` → `logging.debug` across production modules | Antigravity | ✅ **DONE** `9da8797` (2026-06-25) — 87 sites fixed across 39 files. Remainders `api.py:7666`, `router.py:4470` re-checked 2026-06-27 — both already have `log.debug(..., exc_info=True)`, no bare-pass remains. | — |
+| 18 | Git operations tool (`git status/diff/log/branch/show/add/commit`) | Loop-engineer | ✅ **COMMITTED** 2026-06-27: `tools/git_ops.py` + ToolSpec + execution_engine handler; push excluded (remote write); path traversal guards on `add`; shell injection guards on `commit`; 30 tests green. | — |
+| 19 | Web search improvements: URLs in results, `fetch_page`, `web_search_with_fetch`, fix `_summarise_for_voice` model | Loop-engineer | ✅ **COMMITTED** 2026-06-27 (`4c430cc`): 17 tests green. | — |
 
 ## Coordination Rules
 
