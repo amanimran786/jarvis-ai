@@ -65,7 +65,7 @@ e24dc02 feat(orchestrator): loop round 27 — quiet (3rd), stall pattern emergin
 | Silent-failure sweep (90+ exceptions) | Claude | ✅ Done |
 | Fix_loop / code_task as routable tool | Claude | ✅ Done |
 | coder_workbench write-test-patch loop | Claude | ✅ Done |
-| Web search tool | Claude | 🔄 In progress |
+| Web search tool | Claude | ✅ Done — harness/web_search.py + 21 tests |
 | /task command (user-facing) | Claude | 🔄 In progress |
 | audit.jsonl end-to-end verification | Claude | 🔄 In progress |
 | run_id threading (operative → engine) | Claude | 🔄 Queued |

@@ -19,6 +19,7 @@ import shutil
 import threading
 import tools
 from harness.audit import audit_log
+from harness import web_search as _ws
 import terminal
 import browser
 from desktop import overlay
@@ -2875,7 +2876,7 @@ def _pending_draft_interrupt_route(user_input: str, lower: str) -> tuple | None:
         return _briefing_gen(), "Jarvis"
     search_query = _extract_search_query(user_input)
     if search_query:
-        return _s(tools.web_search(search_query)), "Search"
+        return _s(_ws.search(search_query)), "Search"
     if _is_timer_request(lower):
         parsed = _parse_timer(lower)
         if parsed:
@@ -3268,7 +3269,7 @@ def route_stream(user_input: str) -> tuple:
             return _s(_message_confirmation_prompt(recipient_correction, body)), "Messages"
         search_query = _extract_search_query(user_input)
         if search_query:
-            return _s(tools.web_search(search_query)), "Search"
+            return _s(_ws.search(search_query)), "Search"
         # Interrupt route: briefing, time, weather etc. escape from pending draft context
         interrupt_early = _pending_draft_interrupt_route(user_input, lower)
         if interrupt_early is not None:
@@ -3384,7 +3385,7 @@ def route_stream(user_input: str) -> tuple:
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
         _sq = _extract_search_query(user_input)
         if _sq:
-            return _s(tools.web_search(_sq)), "Search"
+            return _s(_ws.search(_sq)), "Search"
         interrupt_early = _pending_draft_interrupt_route(user_input, lower)
         if interrupt_early is not None:
             return interrupt_early
@@ -4096,7 +4097,7 @@ def route_stream(user_input: str) -> tuple:
     # Web search fast-path (return results, don't open browser)
     _sq = _extract_search_query(user_input)
     if _sq:
-        raw = tools.web_search(_sq)
+        raw = _ws.search(_sq)
         return _s(raw), "Search"
 
     # Browser
@@ -4673,7 +4674,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     # ── Search ────────────────────────────────────────────────────────────────
     if tool == "search":
         query = params.get("query", user_input)
-        raw = tools.web_search(query)
+        raw = _ws.search(query, summarise=False)
         return format_with_mini(
             f"Summarize these search results concisely in Jarvis voice:\n{raw}",
             skill_id=skill_id,
