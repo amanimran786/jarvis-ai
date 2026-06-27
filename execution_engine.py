@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -8,10 +9,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+
+log = logging.getLogger("jarvis.execution_engine")
 from pathlib import Path
 
 from brains.brain_claude import ask_claude
-from config import SONNET
+from config import DEFAULT_MODE, LOCAL_DEFAULT, SONNET
 import skills
 import tool_registry
 import runtime_state
@@ -110,6 +113,11 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         depth = int(params.get("depth", 2))
         result = deep_research(query, depth=depth)
         return True, result["report"]
+
+    if tool == "git":
+        from tools.git_ops import dispatch as _git_dispatch
+        action = params.get("action", "status")
+        return _git_dispatch(action, params)
 
     if tool == "search":
         from tools import web_search, web_search_with_fetch
@@ -263,6 +271,25 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         if last and "$" not in prompt:
             prompt = f"Context from previous step:\n{last[:1500]}\n\nTask: {prompt}"
     system_extra, _ = skills.build_system_extra(prompt, tool="chat")
+    if DEFAULT_MODE != "cloud":
+        try:
+            import ollama as _ollama_lib
+            from brains.brain_ollama import get_best_available
+            try:
+                import httpx as _httpx
+                _local_client = _ollama_lib.Client(
+                    timeout=_httpx.Timeout(connect=10.0, read=90.0, write=15.0, pool=10.0)
+                )
+            except ImportError:
+                _local_client = _ollama_lib.Client(timeout=90.0)
+            _model = get_best_available(LOCAL_DEFAULT)
+            _messages = [{"role": "user", "content": prompt}]
+            if system_extra:
+                _messages = [{"role": "system", "content": system_extra}] + _messages
+            _resp = _local_client.chat(model=_model, messages=_messages, stream=False)
+            return True, (_resp.message.content or "").strip()
+        except Exception:
+            log.debug("[ExecutionEngine] local chat fallback failed; trying cloud", exc_info=True)
     return True, ask_claude(prompt, model=SONNET, system_extra=system_extra)
 
 

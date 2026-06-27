@@ -50,6 +50,25 @@ class ToolSpec:
 
 
 TOOL_SPECS: dict[str, ToolSpec] = {
+    "git": ToolSpec(
+        name="git",
+        description="Run git operations: status, diff, log, branch, show (read-only); add, commit (write). Push is excluded — must be done manually.",
+        args_schema={
+            "action": {"type": "string"},
+            "message": {"type": "string", "default": ""},
+            "paths": {"type": "string", "default": ""},
+            "path": {"type": "string", "default": ""},
+            "staged": {"type": "bool", "default": False},
+            "n": {"type": "int", "default": 10},
+            "ref": {"type": "string", "default": "HEAD"},
+            "oneline": {"type": "bool", "default": True},
+        },
+        required=("action",),
+        side_effects=True,
+        timeout_seconds=20,
+        verifier="non_empty_text",
+        idempotent=False,
+    ),
     "search": ToolSpec(
         name="search",
         description="Search the web via DuckDuckGo. Returns ranked results with titles, URLs, and snippets, summarised by a local model.",
