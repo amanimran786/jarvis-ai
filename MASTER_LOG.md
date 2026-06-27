@@ -261,3 +261,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:21:01] [orchestrator] Queue: 2 in_progress / 27 queued / 1 blocked / 50 done (80 total)
 
 [2026-06-27 00:20 UTC] [CODEX] Completed: GLM 5.2 eval findings — 0105e5f
+
+[2026-06-27 00:25:46] [orchestrator] ROUND 37 — 1 [CLAUDE] commit; codex still running CODEX-1 (no [CODEX] commit)
+[2026-06-27 00:25:46] [orchestrator] 042501b: email/calendar auth error handling + web search fix in router.py
+[2026-06-27 00:25:46] [orchestrator] jarvis-board: hot streak continues — 5th commit since reset
+[2026-06-27 00:25:46] [orchestrator] jarvis-local-llm: nudge unanswered 1271m — still queued
+[2026-06-27 00:25:46] [orchestrator] codex: active 4m, CODEX-1 running tests, first [CODEX] commit overdue
+[2026-06-27 00:25:46] [orchestrator] 7 ghosts purged; queue: 1 in_progress / 27 queued / 1 blocked / 53 done
