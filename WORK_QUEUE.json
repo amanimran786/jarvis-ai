@@ -825,5 +825,15 @@
     "completed_at": "2026-06-27T00:21:48Z",
     "created_at": "2026-06-27T00:18:00Z",
     "notes": "Committed 042501b \u2014 calendar/email try/except catches auth failures (invalid_grant, circuit-open) \u2192 GOOGLE_REAUTH_MSG. Results piped through format_with_mini."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "[CLAUDE] Fix REPL token streaming gap \u2014 ThinkingIndicator now covers full LLM generation phase",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:24:00Z",
+    "completed_at": "2026-06-27T00:27:33Z",
+    "created_at": "2026-06-27T00:24:00Z",
+    "notes": "Committed ef7422a [CLAUDE] \u2014 stream_jarvis_response shows 'JARVIS \u00b7\u00b7\u00b7' immediately, waits for first token, then streams. Eliminates 2-8s silent gap."
   }
 ]
