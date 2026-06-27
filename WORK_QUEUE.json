@@ -653,9 +653,9 @@
     "session_name": "codex-lane",
     "task": "CODEX-3: PyQt6 system tray panel \u2014 ui/tray.py, reads ORCHESTRATOR_STATUS.json every 5s",
     "priority": 1,
-    "status": "queued",
+    "status": "in_progress",
     "assigned_to": "Codex",
-    "assigned_at": null,
+    "assigned_at": "2026-06-27T00:32:56Z",
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
     "notes": "Status: green=idle, yellow=running, red=error. See CODEX_TASKS.md CODEX-3."
@@ -835,5 +835,24 @@
     "completed_at": "2026-06-27T00:27:33Z",
     "created_at": "2026-06-27T00:24:00Z",
     "notes": "Committed ef7422a [CLAUDE] \u2014 stream_jarvis_response shows 'JARVIS \u00b7\u00b7\u00b7' immediately, waits for first token, then streams. Eliminates 2-8s silent gap."
+  },
+  {
+    "session_name": "codex",
+    "task": "CODEX-2: Voice TTS utterance per operative step \u2014 harness/tts.py + operative.py + 39 regression tests",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:25:00Z",
+    "completed_at": "2026-06-27T00:31:40Z",
+    "created_at": "2026-06-27T00:25:00Z",
+    "notes": "Committed 1754e09 [CODEX] + 1b05b53 [CODEX] \u2014 TTS utterance on each operative step via harness/tts.py. config.py TTS_PER_STEP flag. 39 tests in test_voice_tts_regression.py. CODEX_TASKS.md marked \u2705."
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "NUDGE: Resume Cycle 8 \u2014 /diagnose \u2192 AGENT_BOARD, /reflect \u2192 daily briefing. Last commit 18m ago.",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": "2026-06-27T00:35:02.706425+00:00",
+    "created_at": "2026-06-27T00:35:02.706425+00:00",
+    "notes": "NUDGE round 39 \u2014 self-eval idle 18m since 50c95bf. Expected: Cycle 8 next steps."
   }
 ]
