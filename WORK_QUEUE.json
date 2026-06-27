@@ -631,9 +631,9 @@
     "session_name": "codex-lane",
     "task": "CODEX-1: GLM 5.2 eval findings \u2014 run readiness test, evaluate on 5 query types, publish findings to CODEX_GLM_EVAL.md",
     "priority": 1,
-    "status": "queued",
+    "status": "in_progress",
     "assigned_to": "Codex",
-    "assigned_at": null,
+    "assigned_at": "2026-06-27T00:05:08Z",
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
     "notes": "Blocks Claude: GLM 5.2 model_router.py update awaits Codex lane findings. See CODEX_TASKS.md CODEX-1."
@@ -725,5 +725,35 @@
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
     "notes": "Use 1M context to read all eval entries at once. Identify low-score patterns, correlate with system prompt sections. See GEMINI_TASKS.md GEMINI-4."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Multi-AI coordination setup \u2014 AI_AGENTS_COORDINATION.md, CODEX_TASKS.md, GEMINI_TASKS.md, WORK_QUEUE Codex items",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:00:00Z",
+    "completed_at": "2026-06-26T17:04:32Z",
+    "created_at": "2026-06-26T17:00:00Z",
+    "notes": "Committed 3d35f9e [CLAUDE] \u2014 coordination scaffolding for Codex + Gemini. CODEX-1 through CODEX-5 added to queue."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Add headless web_fetch() via requests+BeautifulSoup4 \u2014 browser.py",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:04:00Z",
+    "completed_at": "2026-06-26T17:05:10Z",
+    "created_at": "2026-06-26T17:04:00Z",
+    "notes": "Committed c1b32e6 \u2014 strips nav/footer/scripts, 12k cap, urllib fallback."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "web_search_with_fetch + 17 tests; fix summarise model; search results include URLs",
+    "priority": 2,
+    "status": "done",
+    "assigned_at": "2026-06-26T17:05:00Z",
+    "completed_at": "2026-06-26T17:06:17Z",
+    "created_at": "2026-06-26T17:05:00Z",
+    "notes": "Committed 4c430cc \u2014 summarise uses get_best_available(LOCAL_DEFAULT); voice summarise timeout 12s."
   }
 ]

@@ -65,8 +65,29 @@
       ],
       "next_task": "Verify audit.jsonl end-to-end: memory_write + route_decision events",
       "status": "idle"
+    },
+    {
+      "name": "codex",
+      "status": "active",
+      "last_active": "2026-06-27T00:07:12.946528+00:00",
+      "current_task": "CODEX-1: GLM 5.2 readiness eval \u2014 running tests/test_glm52_readiness.py",
+      "notes": "External agent. File-based coordination via WORK_QUEUE.json + CODEX_TASKS.md. Never write RESUME_SIGNAL.json for Codex. Track [CODEX] commits.",
+      "owner": "Codex (OpenAI)",
+      "files_owned": [
+        "tests/test_glm52_readiness.py",
+        "CODEX_TASKS.md"
+      ]
+    },
+    {
+      "session_id": "a6ea6391-f7a7-429d-804d-775448ef9f49",
+      "name": "jarvis",
+      "last_active": "2026-06-27T00:07:27.865666+00:00",
+      "current_task": "Give me my canonical career narrative for interviews.",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
     }
   ],
-  "last_updated": "2026-06-27T00:03:25.304296+00:00",
-  "orchestrator_round": 32
+  "last_updated": "2026-06-27T00:07:12.946528+00:00",
+  "orchestrator_round": 33
 }
