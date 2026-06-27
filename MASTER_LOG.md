@@ -268,3 +268,10 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:25:46] [orchestrator] jarvis-local-llm: nudge unanswered 1271m — still queued
 [2026-06-27 00:25:46] [orchestrator] codex: active 4m, CODEX-1 running tests, first [CODEX] commit overdue
 [2026-06-27 00:25:46] [orchestrator] 7 ghosts purged; queue: 1 in_progress / 27 queued / 1 blocked / 53 done
+
+[2026-06-27 00:29:44] [orchestrator] ROUND 38 — 1 [CLAUDE] commit; codex 25m into CODEX-1, no [CODEX] yet
+[2026-06-27 00:29:44] [orchestrator] ef7422a [CLAUDE]: REPL live streaming — ThinkingIndicator now covers full LLM generation (eliminates 2-8s gap)
+[2026-06-27 00:29:44] [orchestrator] jarvis-board: 6th commit since reset; AGENT_BOARD 11+13 still pending
+[2026-06-27 00:29:44] [orchestrator] codex: active but no output after 25m — GLM readiness tests may be long-running
+[2026-06-27 00:29:44] [orchestrator] jarvis-local-llm: idle 1275m, 1 nudge queued, unanswered
+[2026-06-27 00:29:44] [orchestrator] 5 ghosts purged; queue: 2 in_progress / 26 queued / 1 blocked / 54 done
