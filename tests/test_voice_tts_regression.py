@@ -5,7 +5,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 
+import operative
 import voice
+from harness import tts as progress_tts
 
 
 class VoiceTtsRegressionTests(unittest.TestCase):
@@ -76,6 +78,43 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         eleven_mock.assert_not_called()
         openai_mock.assert_not_called()
         self.assertTrue(voice._done_speaking.is_set())
+
+    def test_operative_speaks_completed_step_when_enabled(self):
+        step = operative.Step(number=1, description="Write the report", tool="chat")
+
+        with patch("operative.VOICE_ENABLED", True), \
+             patch("operative.plan_task", return_value=[step]), \
+             patch("operative.execute_step", return_value=(True, "report written")), \
+             patch("operative.preflect.is_enabled", return_value=False), \
+             patch("operative._summarize", return_value="Task complete."), \
+             patch("operative.speak_step") as speak_mock:
+            result = operative.run_task("Write a report")
+
+        self.assertTrue(result["ok"])
+        speak_mock.assert_called_once_with(1, "Write the report", ok=True)
+
+    def test_operative_does_not_speak_completed_step_when_disabled(self):
+        step = operative.Step(number=1, description="Write the report", tool="chat")
+
+        with patch("operative.VOICE_ENABLED", False), \
+             patch("operative.plan_task", return_value=[step]), \
+             patch("operative.execute_step", return_value=(True, "report written")), \
+             patch("operative.preflect.is_enabled", return_value=False), \
+             patch("operative._summarize", return_value="Task complete."), \
+             patch("operative.speak_step") as speak_mock:
+            operative.run_task("Write a report")
+
+        speak_mock.assert_not_called()
+
+    def test_operative_step_tts_logs_failure_and_continues(self):
+        with patch(
+            "harness.tts.local_tts.speak",
+            return_value={"ok": False, "error": "say unavailable"},
+        ), patch("harness.tts.logging.exception") as log_mock:
+            spoken = progress_tts.speak_step(2, "Run tests", ok=False)
+
+        self.assertFalse(spoken)
+        log_mock.assert_called_once()
 
     def test_speak_stream_splits_complete_sentences_without_breaking_decimals(self):
         spoken = []

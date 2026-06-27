@@ -357,6 +357,7 @@ def stt_runtime_config() -> dict:
 # Text-to-speech runtime config.
 # Keep this config-first like STT so the voice path can move to local-first
 # without breaking the current paid fallbacks or the existing voice module.
+VOICE_ENABLED = _env_flag("VOICE_ENABLED", False)
 TTS_BACKENDS = _resolve_tts_backends()
 TTS_PRIMARY_BACKEND = TTS_BACKENDS[0]
 LOCAL_TTS_ENABLED = "say" in TTS_BACKENDS

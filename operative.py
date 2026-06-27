@@ -20,7 +20,8 @@ import uuid
 from typing import Callable
 
 from brains.brain_claude import ask_claude
-from config import DEFAULT_MODE, HAIKU, LOCAL_DEFAULT
+from config import DEFAULT_MODE, HAIKU, LOCAL_DEFAULT, VOICE_ENABLED
+from harness.tts import speak_step
 from task_planner import TaskStep as Step, plan_task, replan_after_failure
 from execution_engine import execute_step
 import preflect
@@ -77,10 +78,16 @@ def run_task(
         }
     """
 
-    def _prog(msg, detail=""):
+    def _prog(msg, detail="", *, announce_step: Step | None = None):
         print(f"[Operative] {msg}" + (f": {detail[:100]}" if detail else ""))
         if on_progress:
             on_progress(msg, detail)
+        if VOICE_ENABLED and announce_step is not None:
+            speak_step(
+                announce_step.number,
+                announce_step.description,
+                ok=announce_step.ok,
+            )
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
 
@@ -105,7 +112,7 @@ def run_task(
 
         preview = result[:120].replace("\n", " ")
         status  = "✓" if ok else "✗"
-        _prog(f"  {status} {step.description}", preview)
+        _prog(f"  {status} {step.description}", preview, announce_step=step)
 
         if not ok:
             _prog(f"Step {step.number} failed — attempting recovery", result)
