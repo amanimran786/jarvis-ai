@@ -370,6 +370,15 @@ def score(
             record["interaction_id"] = interaction_id
 
         _append(record)
+
+        # Feed quality signal back to adaptive router (fire-and-forget, never blocks)
+        if route:
+            try:
+                from harness import adaptive_router
+                adaptive_router.record_quality(route, rq, ra, rr)
+            except Exception:
+                pass
+
         return record
 
     except Exception:
