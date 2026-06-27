@@ -1630,7 +1630,7 @@ class RouterTests(unittest.TestCase):
     def test_search_query_bypasses_pending_email_draft(self):
         router.route_stream("Email beta@example.com subject: Beta body: Ship it")
 
-        with patch("router.tools.web_search", return_value="- Result: body"):
+        with patch("harness.web_search.search", return_value="- Result: body"):
             stream, label = router.route_stream("search web for local-first assistant")
             text = "".join(stream)
 
@@ -2264,7 +2264,7 @@ class RouterTests(unittest.TestCase):
 
     def test_search_query_bypasses_pending_message_draft(self):
         router.route_stream("text Dad to get milk")
-        with patch("router.tools.web_search", return_value="- Result: body"):
+        with patch("harness.web_search.search", return_value="- Result: body"):
             stream, label = router.route_stream("Search the web for latest AI news")
             text = "".join(stream)
         self.assertEqual(label, "Search")
@@ -2278,7 +2278,7 @@ class RouterTests(unittest.TestCase):
                 router._clear_message_state()
                 with patch("router._eager_resolve_contact", return_value=None):
                     router.route_stream("text Dad to get milk")
-                with patch("router.tools.web_search", return_value="- Result: body") as search_mock, \
+                with patch("harness.web_search.search", return_value="- Result: body") as search_mock, \
                      patch("router.smart_stream") as smart_mock:
                     stream, label = router.route_stream(phrase)
                     text = "".join(stream)
@@ -2293,7 +2293,7 @@ class RouterTests(unittest.TestCase):
         # Jarvis is waiting for a contact name — search should escape rather than be treated as a name
         router._awaiting_msg_recipient = True
         router._pending_msg_recipient = ""
-        with patch("router.tools.web_search", return_value="- Result: body") as mock_search:
+        with patch("harness.web_search.search", return_value="- Result: body") as mock_search:
             stream, label = router.route_stream("Search the web for latest AI news")
             text = "".join(stream)
         self.assertEqual(label, "Search")
