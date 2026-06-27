@@ -13,7 +13,8 @@ Run `python -m pytest tests/ -x -q` to verify your work before committing.
 
 ## Your tasks (priority order)
 
-### CODEX-1: GLM 5.2 eval findings (HIGH — blocks Claude)
+### ✅ CODEX-1: GLM 5.2 eval findings (HIGH — blocks Claude)
+Completed: published `CODEX_GLM_EVAL.md`; readiness tests pass, but five live query attempts were subscription-blocked, so GLM 5.2 must not become the default.
 This task is **blocking** a Claude work item. Complete it first.
 
 - Read `RECOMMENDED_MODELS.md` and `model_router.py` to understand the current GLM routing setup
