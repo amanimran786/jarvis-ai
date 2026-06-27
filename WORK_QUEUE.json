@@ -626,5 +626,104 @@
     "completed_at": "2026-06-26T18:07:17Z",
     "created_at": "2026-06-26T18:05:00Z",
     "notes": "Committed 392d192 \u2014 patch DEFAULT_MODE=cloud in test so _summarize() routes to ask_claude. Regression suite cleanup track."
+  },
+  {
+    "session_name": "codex-lane",
+    "task": "CODEX-1: GLM 5.2 eval findings \u2014 run readiness test, evaluate on 5 query types, publish findings to CODEX_GLM_EVAL.md",
+    "priority": 1,
+    "status": "queued",
+    "assigned_to": "Codex",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Blocks Claude: GLM 5.2 model_router.py update awaits Codex lane findings. See CODEX_TASKS.md CODEX-1."
+  },
+  {
+    "session_name": "codex-lane",
+    "task": "CODEX-2: Voice TTS per operative step \u2014 harness/tts.py + VOICE_ENABLED config + operative.py wiring",
+    "priority": 1,
+    "status": "queued",
+    "assigned_to": "Codex",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Reuse voice.py TTS path if possible. Never crash Jarvis on TTS failure. See CODEX_TASKS.md CODEX-2."
+  },
+  {
+    "session_name": "codex-lane",
+    "task": "CODEX-3: PyQt6 system tray panel \u2014 ui/tray.py, reads ORCHESTRATOR_STATUS.json every 5s",
+    "priority": 1,
+    "status": "queued",
+    "assigned_to": "Codex",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Status: green=idle, yellow=running, red=error. See CODEX_TASKS.md CODEX-3."
+  },
+  {
+    "session_name": "codex-lane",
+    "task": "CODEX-4: CLI UX improvements \u2014 rich formatting + /history command",
+    "priority": 2,
+    "status": "queued",
+    "assigned_to": "Codex",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Color-coded output, progress spinner, /history reads usage_log.jsonl. See CODEX_TASKS.md CODEX-4."
+  },
+  {
+    "session_name": "codex-lane",
+    "task": "CODEX-5: Plugin system scaffold \u2014 harness/plugins.py + plugins/pomodoro.py example",
+    "priority": 2,
+    "status": "queued",
+    "assigned_to": "Codex",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "plugins/ dir exists \u2014 check contents before writing. See CODEX_TASKS.md CODEX-5."
+  },
+  {
+    "session_name": "gemini-lane",
+    "task": "GEMINI-1: Full architecture review \u2014 entire codebase in 1M context, write GEMINI_ARCHITECTURE_REVIEW.md",
+    "priority": 1,
+    "status": "queued",
+    "assigned_to": "Gemini",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Cover: inconsistencies, dead code, missing error handling, security, perf, contract mismatches. See GEMINI_TASKS.md GEMINI-1."
+  },
+  {
+    "session_name": "gemini-lane",
+    "task": "GEMINI-2: Test coverage audit \u2014 cross-reference harness/*.py vs tests/, write GEMINI_TEST_GAPS.md + 10 missing tests",
+    "priority": 1,
+    "status": "queued",
+    "assigned_to": "Gemini",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Write tests in tests/test_gemini_coverage.py. No real Ollama/API calls in unit tests. See GEMINI_TASKS.md GEMINI-2."
+  },
+  {
+    "session_name": "gemini-lane",
+    "task": "GEMINI-3: Security review \u2014 scan entire codebase, write GEMINI_SECURITY_REVIEW.md, fix HIGH severity issues",
+    "priority": 2,
+    "status": "queued",
+    "assigned_to": "Gemini",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Focus: hardcoded secrets, shell=True, path traversal, unsafe deserialization, voice input \u2192 tool dispatch. See GEMINI_TASKS.md GEMINI-3."
+  },
+  {
+    "session_name": "gemini-lane",
+    "task": "GEMINI-4: Prompt quality analysis \u2014 analyze all self_eval.jsonl entries, write GEMINI_PROMPT_ANALYSIS.md",
+    "priority": 2,
+    "status": "queued",
+    "assigned_to": "Gemini",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-26T00:00:00Z",
+    "notes": "Use 1M context to read all eval entries at once. Identify low-score patterns, correlate with system prompt sections. See GEMINI_TASKS.md GEMINI-4."
   }
 ]
