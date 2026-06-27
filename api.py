@@ -88,11 +88,31 @@ import skill_monitor as _skill_monitor
 
 
 def route_stream(user_input: str) -> tuple:
-    """Thin wrapper that records every route_stream call to skill_monitor."""
+    """Thin wrapper that records every route_stream call to skill_monitor.
+
+    Adaptive routing: if a text-only route is demoted (consistently low quality
+    with ≥5 samples), the response stream is replaced with a direct LLM fallback.
+    Side-effect routes (Calendar, Gmail, Messages, Browser) are never bypassed.
+    """
     _t0 = time.monotonic()
     try:
         result = _route_stream_raw(user_input)
         skill = result[1] if isinstance(result, tuple) and len(result) > 1 else "chat"
+
+        # Adaptive routing: replace demoted safe-to-bypass routes with LLM fallback
+        try:
+            from harness import adaptive_router as _ar
+            _ar.notify_route_used(user_input, skill)
+            if _ar.should_fallback(skill):
+                logging.info(
+                    "[AdaptiveRouter] Route '%s' is demoted — using LLM fallback", skill
+                )
+                fallback_stream = _ar.build_fallback_stream(user_input, skill)
+                result = (fallback_stream, f"Fallback[{skill}]")
+                skill = result[1]
+        except Exception as _ar_exc:
+            logging.debug("[AdaptiveRouter] intercept failed: %s", _ar_exc)
+
         _skill_monitor.record_call(skill, success=True, latency_ms=(time.monotonic() - _t0) * 1000)
         return result
     except Exception as exc:
