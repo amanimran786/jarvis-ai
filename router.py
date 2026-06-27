@@ -4880,10 +4880,15 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
             if result:
                 yield " " + result["summary"]
-                if not result["ok"]:
+                if result["ok"]:
+                    from harness.notify import notify as _notify
+                    _notify("Jarvis — Task Complete", result["summary"][:100])
+                else:
                     failed = [s.description for s in result.get("steps", []) if not s.ok]
                     if failed:
                         yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
+                    from harness.notify import notify as _notify
+                    _notify("Jarvis — Task Failed", result["summary"][:100])
 
         return _operative_stream(), "Operative"
 
@@ -4892,6 +4897,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         task = params.get("task", user_input)
 
         def _code_task_stream():
+            from harness.notify import notify as _notify
             yield "On it. Writing code and running tests locally now."
             result = coder_workbench.fix_loop(task)
             if result["ok"]:
@@ -4901,11 +4907,13 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                     lines = result["output"].strip().splitlines()
                     summary = "\n".join(lines[-6:]) if len(lines) > 6 else result["output"].strip()
                     yield f"\n\nTest output:\n{summary}"
+                _notify("Jarvis — Code Task Complete", f"{files_list} — {result['iterations']} iteration(s)")
             else:
                 yield (
                     f" Still failing after {result['iterations']} iteration(s)."
                     f" Last output: {result.get('output', '')[-300:]}"
                 )
+                _notify("Jarvis — Code Task Failed", f"Still failing after {result['iterations']} iteration(s)")
 
         return _code_task_stream(), "Code Task"
 

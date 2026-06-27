@@ -126,22 +126,9 @@ def set_speak_callback(fn: Callable[[str], None]) -> None:
 # ── macOS notifications ────────────────────────────────────────────────────────
 
 def notify(title: str, body: str, subtitle: str = "") -> None:
-    """Send a macOS banner notification via osascript. Non-blocking."""
-    try:
-        subtitle_part = f'subtitle "{_osa_escape(subtitle)}" ' if subtitle else ""
-        script = (
-            f'display notification "{_osa_escape(body)}" '
-            f'with title "{_osa_escape(title)}" '
-            f'{subtitle_part}'
-            f'sound name "Ping"'
-        )
-        subprocess.Popen(
-            ["osascript", "-e", script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        logging.debug("[Watcher] macOS notification failed: %s", title, exc_info=True)
+    """Send a macOS banner notification. Delegates to harness.notify."""
+    from harness.notify import notify as _hnotify
+    _hnotify(title, body, subtitle=subtitle)
 
 
 def _osa_escape(text: str) -> str:
