@@ -291,3 +291,5 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:39:41] [orchestrator] codex: CODEX-1 GLM eval still running — no new [CODEX] commits
 [2026-06-27 00:39:41] [orchestrator] jarvis-self-eval: 23m idle — nudge queued round 39, unanswered
 [2026-06-27 00:39:41] [orchestrator] 4 ghosts purged; queue: {'blocked': 1, 'done': 58, 'in_progress': 1, 'queued': 26}
+
+[2026-06-27 00:40 UTC] [CODEX] Completed: PyQt6 system tray panel — b36448a (implementation harvested in 9a4f70b)
