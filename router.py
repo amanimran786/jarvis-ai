@@ -1082,6 +1082,9 @@ _fuzzy_contact_suggestions: list[str] = []
 _pending_resolved_address: str = ""  # pre-resolved address set alongside pending recipient
 _last_assistant_reply: str = ""
 _JARVIS_INTRO_SHORT = "Hi, this is Jarvis, Aman's assistant."
+_GOOGLE_REAUTH_MSG = (
+    "Google access needs re-authorization. Run: python3 google_services.py --reauth"
+)
 _JARVIS_INTRO_DETAILED = (
     "Hi, I’m Jarvis, Aman’s local-first AI assistant. I help him with coding, research, writing, planning, and Mac workflows, "
     "and I can draft messages or coordinate tasks when Aman explicitly confirms them. I do not act on private systems silently; "
@@ -2360,20 +2363,20 @@ def _dispatch_single_intent(query: str) -> str | None:
             return gs.get_todays_events()
         except Exception as exc:
             logging.warning("[Router] Calendar fetch failed: %s", exc)
-            return "Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."
+            return _GOOGLE_REAUTH_MSG
     if hint == "email" and _is_email_digest_query(query):
         try:
             import jarvis_agents as _ja
             return _ja.email_digest()
         except Exception as exc:
             logging.warning("[Router] Email digest failed: %s", exc)
-            return "Email is unavailable. You may need to re-authorize Google access."
+            return _GOOGLE_REAUTH_MSG
     if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
         except Exception as exc:
             logging.warning("[Router] Email read failed: %s", exc)
-            return "Email is unavailable. You may need to re-authorize Google access."
+            return _GOOGLE_REAUTH_MSG
     return None
 
 
