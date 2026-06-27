@@ -11,7 +11,7 @@
         "19c6936 (P7 circuit breaker tests + close item 9)",
         "1b796a8 (P8 operative streaming)"
       ],
-      "stall_note": "OFFLINE: signal unanswered 10m post-reset. Sessions not running, not rate-limited."
+      "stall_note": "OFFLINE 6h \u2014 prior RESUME_SIGNAL consumed but no output. Fresh signal written 00:02 UTC."
     },
     {
       "session_id": "jarvis-self-eval",
@@ -20,7 +20,7 @@
       "current_task": "LLM improvement notes pipeline \u2014 auto-trigger every 100 interactions + /reflect",
       "status": "stalled",
       "notes": "Cycle 7 committed (68d35df): corrective replanning wired into operative.py",
-      "stall_note": "OFFLINE: signal unanswered 10m post-reset. Sessions not running, not rate-limited."
+      "stall_note": "OFFLINE 6h \u2014 prior RESUME_SIGNAL consumed but no output. Fresh signal written 00:02 UTC."
     },
     {
       "session_id": "jarvis-local-llm",
@@ -67,6 +67,6 @@
       "status": "idle"
     }
   ],
-  "last_updated": "2026-06-26T20:01:37.232912+00:00",
-  "orchestrator_round": 31
+  "last_updated": "2026-06-27T00:03:25.304296+00:00",
+  "orchestrator_round": 32
 }
