@@ -857,7 +857,7 @@ def _reflect_command_reply() -> str:
 
 
 def _is_diagnose_command(lower: str) -> bool:
-    """Trigger: /diagnose or explicit worst-interactions phrases."""
+    """Trigger: /diagnose or health/failure phrases."""
     return lower.strip() in ("/diagnose", "diagnose") or any(
         phrase in lower for phrase in (
             "/diagnose",
@@ -871,16 +871,28 @@ def _is_diagnose_command(lower: str) -> bool:
             "show failures",
             "worst quality",
             "diagnose quality",
+            "system health",
+            "health check",
+            "jarvis health",
+            "subsystem status",
+            "is ollama running",
+            "is google auth",
+            "check subsystems",
         )
     )
 
 
 def _diagnose_command_reply() -> str:
     try:
-        from harness import self_eval_log
-        return self_eval_log.diagnose_report(n=50, worst_n=5)
+        from harness import health_check
+        return health_check.health_text(include_score_report=True)
     except Exception as exc:
-        return f"/diagnose unavailable: {exc}"
+        # Fall back to the old self-eval quality report
+        try:
+            from harness import self_eval_log
+            return self_eval_log.diagnose_report(n=50, worst_n=5)
+        except Exception:
+            return f"/diagnose unavailable: {exc}"
 
 
 def _is_optimize_command(lower: str) -> bool:
@@ -5407,6 +5419,38 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
                 ground_query=user_input,
             ), "File"
         return _s(raw), "File"
+
+    # ── File/folder watcher ───────────────────────────────────────────────────
+    if tool == "watch":
+        from harness import watcher as _watcher
+        action = params.get("action", decision.action).lower()
+
+        if action == "unwatch":
+            target = params.get("path", "") or _extract_url(user_input) or ""
+            if not target:
+                # "unwatch" with no path → stop all
+                _, path_str, _ = _parse_file_request(user_input)
+                target = path_str
+            if target:
+                return _s(_watcher.unwatch(target)), "Watcher"
+            n = _watcher.unwatch_all()
+            return _s(f"Stopped {n} active watch{'es' if n != 1 else ''}."), "Watcher"
+
+        if action in ("list", "status"):
+            paths = _watcher.list_watches()
+            if not paths:
+                return _s("No active watches."), "Watcher"
+            return _s("Watching:\n" + "\n".join(f"  • {p}" for p in paths)), "Watcher"
+
+        # watch action — extract path from command
+        _, path_str, _ = _parse_file_request(user_input)
+        if not path_str:
+            # try raw ~/... or /... pattern without extension
+            m = re.search(r"(~/[\w.\-/]+|/[\w.\-/]+)", user_input)
+            path_str = m.group(1) if m else ""
+        if not path_str:
+            return _s("Please specify a path to watch, e.g. /watch ~/Desktop/report.md"), "Watcher"
+        return _s(_watcher.watch(path_str)), "Watcher"
 
     # ── Chat fallback ─────────────────────────────────────────────────────────
     audit_log("route_decision", tool=tool or "chat", confidence=None)

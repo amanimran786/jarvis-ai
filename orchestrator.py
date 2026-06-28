@@ -190,6 +190,17 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Volume/brightness/system
     if re.search(r"\b(volume|mute|unmute|brightness|screenshot|lock screen|lock my screen)\b", lower):
         return ToolDecision("system", 0.99, "control")
+    # File/folder watching — before generic file ops
+    _is_watch_cmd = (
+        re.search(r"(?:^|[\s])/watch\b", lower)           # /watch [path]
+        or re.search(r"(?:^|\s)watch\s+(?:~/|/|\w.*\.)", lower)  # watch ~/path or watch file.ext
+        or re.search(r"\b(watch this|watch for changes|unwatch|stop watching|stop watch)\b", lower)
+        or lower.strip() in ("/watch", "/unwatch")
+    )
+    if _is_watch_cmd:
+        if re.search(r"\b(unwatch|stop watching|stop watch)\b", lower) or lower.strip() == "/unwatch":
+            return ToolDecision("watch", 0.99, "unwatch")
+        return ToolDecision("watch", 0.99, "watch")
     # File ops — must come before app so "open ~/foo.pdf" routes to file, not app
     _has_path = bool(re.search(r"~/|(?:\.pdf|\.txt|\.md|\.py|\.json|\.csv|\.log|\.docx|\.xlsx|\.sh)\b", lower))
     if _has_path:
