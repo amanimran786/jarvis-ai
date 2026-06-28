@@ -184,10 +184,11 @@
     "session_name": "jarvis-board",
     "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
     "priority": 3,
-    "status": "blocked",
+    "status": "queued",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "notes": " | UNBLOCKED round 41: CODEX-1 done. GLM 5.2 = subscription-blocked, do NOT set as default. See CODEX_GLM_EVAL.md."
   },
   {
     "session_name": "jarvis-self-eval",
@@ -850,10 +851,11 @@
     "session_name": "jarvis-self-eval",
     "task": "NUDGE: Resume Cycle 8 \u2014 /diagnose \u2192 AGENT_BOARD, /reflect \u2192 daily briefing. Last commit 18m ago.",
     "priority": 1,
-    "status": "queued",
+    "status": "done",
     "assigned_at": "2026-06-27T00:35:02.706425+00:00",
     "created_at": "2026-06-27T00:35:02.706425+00:00",
-    "notes": "NUDGE round 39 \u2014 self-eval idle 18m since 50c95bf. Expected: Cycle 8 next steps."
+    "notes": "NUDGE round 39 \u2014 self-eval idle 18m since 50c95bf. Expected: Cycle 8 next steps. | CLOSED round 41: self-eval resumed, shipped adaptive_router.py (38fb830).",
+    "completed_at": "2026-06-28T01:29:28.373604+00:00"
   },
   {
     "session_name": "jarvis-board",
@@ -864,5 +866,55 @@
     "completed_at": "2026-06-27T00:38:36Z",
     "created_at": "2026-06-27T00:35:00Z",
     "notes": "Committed bfd8f35 [CLAUDE] \u2014 4 tests were patching old tools.web_search symbol, making real network calls. Fixed to patch harness.web_search._ws.search."
+  },
+  {
+    "session_name": "codex",
+    "task": "CODEX-3: PyQt6 system tray status panel \u2014 green/yellow/red status, Jarvis launch, quit actions",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:40:00Z",
+    "completed_at": "2026-06-27T00:40:28Z",
+    "created_at": "2026-06-27T00:40:00Z",
+    "notes": "Committed b36448a \u2014 Committed b36448a [CODEX] + 533d7a0 [CODEX] \u2014 ui/tray.py + tests/test_tray.py. CODEX_TASKS.md marked \u2705."
+  },
+  {
+    "session_name": "jarvis-self-eval",
+    "task": "Adaptive routing \u2014 route quality tracking + demotion (harness/adaptive_router.py, 378 lines + 308-line tests)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:45:00Z",
+    "completed_at": "2026-06-28T01:10:00Z",
+    "created_at": "2026-06-27T00:45:00Z",
+    "notes": "Committed 38fb830 \u2014 Committed 38fb830 \u2014 adaptive_router.py tracks route quality, demotes underperforming routes. 716 lines total."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "[CLAUDE] conversation_context: sliding window with async LLM summarization",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:50:00Z",
+    "completed_at": "2026-06-28T01:15:00Z",
+    "created_at": "2026-06-27T00:50:00Z",
+    "notes": "Committed 34eb81c \u2014 Committed 34eb81c [CLAUDE] \u2014 conversation_context.py +49 lines: sliding window keeps recent turns, async summarization compresses old context via LLM."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "[CLAUDE] git+cancel: agentic git ops + /cancel for operative tasks wired into router (337 tests)",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T00:55:00Z",
+    "completed_at": "2026-06-28T01:20:00Z",
+    "created_at": "2026-06-27T00:55:00Z",
+    "notes": "Committed d7ca4b0 \u2014 Committed d7ca4b0 [CLAUDE] \u2014 router.py wires git_ops tool + /cancel command for operative tasks. 337 tests in test_git_ops_router.py."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "Canonical notify.py harness + wire at operative/code_task completion",
+    "priority": 1,
+    "status": "done",
+    "assigned_at": "2026-06-27T01:00:00Z",
+    "completed_at": "2026-06-28T01:25:00Z",
+    "created_at": "2026-06-27T01:00:00Z",
+    "notes": "Committed ee3653a \u2014 Committed ee3653a \u2014 harness/notify.py (53 lines), jarvis_watcher.py cleaned, router.py wired. Notifications fire on operative+code_task complete."
   }
 ]
