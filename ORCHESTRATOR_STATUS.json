@@ -4,68 +4,49 @@
     {
       "name": "jarvis-board",
       "status": "active",
-      "last_active": "2026-06-27T00:39:41.932637+00:00",
-      "current_task": "[CLAUDE] test mock patches fixed for harness.web_search. AGENT_BOARD 11+13 next.",
-      "orchestrator_note": "Last commit 9179a67 at 00:13 UTC. Active via commits; heartbeat not self-updating.",
-      "owner": "Claude (Cowork)",
-      "files_owned": [
-        "AGENT_BOARD.md",
-        "router.py"
-      ]
+      "last_active": "2026-06-28T01:29:28.373604+00:00",
+      "current_task": "[CLAUDE] git+cancel wired to router (d7ca4b0), context sliding window (34eb81c). AGENT_BOARD 11+13 next.",
+      "orchestrator_note": "7 commits since reset \u2014 d7ca4b0, 34eb81c, ee3653a and more. Hot streak continues.",
+      "owner": "Claude (Cowork)"
     },
     {
       "name": "jarvis-self-eval",
       "status": "active",
-      "last_active": "2026-06-27T00:21:01.771925+00:00",
-      "current_task": "50c95bf: prompt self-optimizer \u2014 analysis + /optimize command. Cycle 8 next.",
-      "orchestrator_note": "Last commit 50c95bf at 00:16 UTC. 18m idle \u2014 nudge queued round 39.",
-      "owner": "Claude (Cowork)",
-      "files_owned": [
-        "self_eval.py",
-        "self_improve.py",
-        "evals.py"
-      ]
+      "last_active": "2026-06-28T01:29:28.373604+00:00",
+      "current_task": "38fb830: adaptive routing \u2014 route quality tracking + demotion (716 lines shipped).",
+      "orchestrator_note": "Shipped adaptive_router.py (378 lines) + 308-line test suite. Resumed and productive.",
+      "owner": "Claude (Cowork)"
     },
     {
       "name": "jarvis-local-llm",
       "status": "idle",
       "last_active": "2026-06-26T03:13:56Z",
       "current_task": "P7 circuit breakers (pending \u2014 nudge queued round 35)",
-      "orchestrator_note": "Idle 1257m. Nudge task written round 35.",
-      "owner": "Codex",
-      "files_owned": [
-        "brains/brain_ollama.py",
-        "model_router.py",
-        "context_budget.py"
-      ]
+      "orchestrator_note": "Idle 22h+. Nudge unanswered.",
+      "owner": "Codex"
     },
     {
       "name": "jarvis-audit",
       "status": "idle",
       "last_active": "2026-06-25T21:16:01Z",
       "current_task": "run_id threading + audit.jsonl end-to-end (queued)",
-      "orchestrator_note": "Idle 1625m. No recent activity.",
-      "owner": "Codex",
-      "files_owned": [
-        "harness/audit.py",
-        "logs/",
-        "snapshots/"
-      ]
+      "orchestrator_note": "Idle 28h+. No activity.",
+      "owner": "Codex"
     },
     {
       "name": "codex",
       "status": "active",
-      "last_active": "2026-06-27T00:35:02.706425+00:00",
-      "current_task": "CODEX-1: GLM eval (running) | CODEX-2 DONE: TTS per operative step (1754e09)",
-      "notes": "External agent. File-based coordination. Never write RESUME_SIGNAL.json for Codex.",
+      "last_active": "2026-06-28T01:29:28.373604+00:00",
+      "current_task": "CODEX-1 \u2705 CODEX-2 \u2705 CODEX-3 \u2705 \u2014 all shipped. CODEX-4 next.",
+      "orchestrator_note": "3 tasks complete. GLM eval: subscription-blocked, must NOT become default. Tray panel shipped.",
       "owner": "Codex (OpenAI)",
       "files_owned": [
         "tests/test_glm52_readiness.py",
-        "CODEX_TASKS.md"
-      ],
-      "orchestrator_note": "First [CODEX] commits round 39. CODEX-2 shipped before CODEX-1."
+        "CODEX_TASKS.md",
+        "ui/tray.py"
+      ]
     }
   ],
-  "last_updated": "2026-06-27T00:39:41.932637+00:00",
-  "orchestrator_round": 40
+  "last_updated": "2026-06-28T01:29:28.373604+00:00",
+  "orchestrator_round": 41
 }

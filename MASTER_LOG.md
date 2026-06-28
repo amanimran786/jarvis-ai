@@ -293,3 +293,12 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-27 00:39:41] [orchestrator] 4 ghosts purged; queue: {'blocked': 1, 'done': 58, 'in_progress': 1, 'queued': 26}
 
 [2026-06-27 00:40 UTC] [CODEX] Completed: PyQt6 system tray panel — b36448a (implementation harvested in 9a4f70b)
+
+[2026-06-28 01:29:28] [orchestrator] ROUND 41 (SESSION RESET) — 6 commits harvested since round 40
+[2026-06-28 01:29:28] [orchestrator] b36448a [CODEX]: CODEX-3 — PyQt6 system tray panel (ui/tray.py + tests)
+[2026-06-28 01:29:28] [orchestrator] 38fb830: adaptive routing — harness/adaptive_router.py (378 lines) + 308-line tests (self-eval)
+[2026-06-28 01:29:28] [orchestrator] 34eb81c [CLAUDE]: conversation_context sliding window + async LLM summarization
+[2026-06-28 01:29:28] [orchestrator] d7ca4b0 [CLAUDE]: git+cancel wired to router + 337 tests
+[2026-06-28 01:29:28] [orchestrator] ee3653a: canonical notify.py harness wired at operative+code_task completion
+[2026-06-28 01:29:28] [orchestrator] CODEX-1 ✅ CODEX-2 ✅ CODEX-3 ✅ — Codex cleared 3 tasks. GLM 5.2: subscription-blocked, do NOT set as default.
+[2026-06-28 01:29:28] [orchestrator] GLM eval handoff item UNBLOCKED. Queue: {'done': 64, 'in_progress': 1, 'queued': 26}
