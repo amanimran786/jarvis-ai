@@ -108,7 +108,7 @@ class TaskSpec:
             raise ContractError("task requires a title/task and a goal/description")
 
         explicit_id = str(task.get("id") or "").strip()
-        legacy_adapter = not bool(explicit_id)
+        legacy_adapter = bool(task.get("legacy_adapter", not bool(explicit_id)))
         if explicit_id:
             task_id = explicit_id
         else:

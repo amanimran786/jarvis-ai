@@ -23,29 +23,32 @@
     "session_name": "jarvis-board",
     "task": "Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)",
     "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
+    "status": "in_progress",
+    "assigned_at": "2026-06-29T11:34:06.579266+00:00",
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "assigned_to": "jarvis-general-claude-legacyf3f405784bef"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Wire run_id threading through operative.py \u2192 execution_engine.py (R1 prereq, AGENT_BOARD item 12)",
     "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
+    "status": "in_progress",
+    "assigned_at": "2026-06-29T11:34:06.603499+00:00",
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "assigned_to": "jarvis-general-claude-legacy31e74ed95bf5"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Verify audit.jsonl end-to-end: confirm query_received+route_decision entries appear correctly after b4a0fa9",
     "priority": 1,
-    "status": "queued",
-    "assigned_at": null,
+    "status": "in_progress",
+    "assigned_at": "2026-06-29T11:34:06.628020+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T22:04:00Z",
-    "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires"
+    "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires",
+    "assigned_to": "jarvis-general-claude-legacyeca43250c16f"
   },
   {
     "session_name": "jarvis-local-llm",
@@ -916,5 +919,45 @@
     "completed_at": "2026-06-28T01:25:00Z",
     "created_at": "2026-06-27T01:00:00Z",
     "notes": "Committed ee3653a \u2014 Committed ee3653a \u2014 harness/notify.py (53 lines), jarvis_watcher.py cleaned, router.py wired. Notifications fire on operative+code_task complete."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "web-search-retry: Add retry/backoff to harness/web_search.py + 5-min result cache",
+    "priority": 1,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-29T00:00:00Z",
+    "notes": "Rate limit resets at 12:40am PT. Implement exponential backoff on DDGS rate-limit errors. Cache search results for 5 min (keyed on query) to avoid duplicate hits within a session."
+  },
+  {
+    "session_name": "jarvis-board",
+    "task": "summarizer: Build harness/summarizer.py + /summarize command using ornith-9b",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-29T00:00:00Z",
+    "notes": "harness/summarizer.py wraps ornith-9b for text summarization. Wire /summarize <text|url> command in router.py. Fall back to LOCAL_DEFAULT if ornith-9b unavailable."
+  },
+  {
+    "session_name": "jarvis-audit",
+    "task": "memory-persistence-test: Verify TF-IDF index saves and reloads across Jarvis restarts",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-29T00:00:00Z",
+    "notes": "Write tests/test_tfidf_persistence.py. Confirm index serialization survives process restart. Check semantic_memory.py save/load paths. Cover edge cases: empty index, corrupt file, missing file."
+  },
+  {
+    "session_name": "jarvis-local-llm",
+    "task": "ornith-integration-test: Verify ornith-9b is detected and used by coder_workbench after pull completes",
+    "priority": 2,
+    "status": "queued",
+    "assigned_at": null,
+    "completed_at": null,
+    "created_at": "2026-06-29T00:00:00Z",
+    "notes": "After `ollama pull ornith-9b` completes: confirm get_best_available() returns ornith-9b for code tasks, coder_workbench.fix_loop() routes to it, and at least one integration test passes against real Ollama."
   }
 ]

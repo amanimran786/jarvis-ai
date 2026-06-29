@@ -60,10 +60,14 @@ Build `harness/cowork_launcher.py`:
 - Script must be idempotent — safe to call every 5 minutes even when nothing is pending
 
 Wire as a launchd job on macOS:
-- Write `harness/com.jarvis.cowork_launcher.plist`
+- Write `scripts/com.jarvis.loop.plist` (canonical plist for the repo)
+- Deploy to `~/Library/LaunchAgents/com.jarvis.loop.plist` for activation
+- ProgramArguments: `/usr/bin/python3 /Users/truthseeker/jarvis-ai/harness/cowork_launcher.py`
 - Interval: 300 seconds
-- Log stdout/stderr to `logs/cowork_launcher.log`
-- Include install instructions in a docstring at the top of the plist
+- Log stdout → `logs/launchd.log`, stderr → `logs/launchd_error.log`
+- Create `LAUNCHD_SETUP.md` with install/uninstall instructions:
+  - Install: `launchctl load ~/Library/LaunchAgents/com.jarvis.loop.plist`
+  - Uninstall: `launchctl unload ~/Library/LaunchAgents/com.jarvis.loop.plist`
 
 Commit: `[CODEX] feat(harness): cowork_launcher + launchd plist for 5-min loop`
 
@@ -84,6 +88,7 @@ REPL prompt upgrades:
 - Add a spinner (`rich.progress` or `rich.status`) during long operations — wire into `operative.py`'s streaming callback
 
 Add `rich` to `requirements.txt` if not already present (check first).
+If not installed in the environment: `pip install rich`
 
 Commit: `[CODEX] feat(cli): /history command + Rich REPL chrome`
 
@@ -102,10 +107,10 @@ Plugin contract:
 - Each plugin exports `register(router)` where `router` is the Jarvis command router
 - `register` calls `router.add_command(name, handler, help_text)`
 
-Example plugin — `plugins/weather.py`:
-- Adds `/weather <city>` command
-- Fetches from `wttr.in/{city}?format=3` (no API key required)
-- Returns a one-line weather string
+Example plugin — `plugins/echo_plugin.py`:
+- Adds `/echo <text>` command
+- Returns the input text prefixed with `Echo: `
+- Demonstrates minimal register(router) contract with no external dependencies
 
 Wire into `main.py` startup — call `plugin_loader.load_all(router)` before the REPL loop.
 
