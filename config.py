@@ -218,6 +218,13 @@ LOCAL_PHI4_MINI    = os.getenv("LOCAL_PHI4_MINI", "phi4-mini")     # ollama pull
 # Devstral — Mistral's open coder (ollama pull devstral)
 LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
 
+# Ornith-1.0 — DeepReinforce agentic coding family (2026-06, SWE-bench verified 82.4)
+#   Self-scaffolding RL; beats devstral and qwen3.5-35b on Terminal-Bench 2.1 (64.4 vs 53.5).
+#   ollama pull maxwell1500/ornith-9b    (~5 GB,  fast agentic coder; post-trained on Gemma4)
+#   ollama pull maxwell1500/ornith-35b   (~20 GB, strongest open agentic coder available)
+LOCAL_ORNITH_9B   = os.getenv("LOCAL_ORNITH_9B",  "maxwell1500/ornith-9b")
+LOCAL_ORNITH_35B  = os.getenv("LOCAL_ORNITH_35B", "maxwell1500/ornith-35b")
+
 # Newer verified model candidates. These are not defaults; /model-fleet surfaces
 # them for explicit pull/eval/promotion only.
 LOCAL_GEMMA4_STRONG = os.getenv("LOCAL_GEMMA4_STRONG", "gemma4:31b")
