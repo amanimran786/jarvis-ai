@@ -884,13 +884,13 @@ def _is_diagnose_command(lower: str) -> bool:
 
 def _diagnose_command_reply() -> str:
     try:
-        from harness import health_check
-        return health_check.health_text(include_score_report=True)
+        from harness import diagnose
+        return diagnose.diagnose_text()
     except Exception as exc:
-        # Fall back to the old self-eval quality report
+        # Fall back to legacy health_check
         try:
-            from harness import self_eval_log
-            return self_eval_log.diagnose_report(n=50, worst_n=5)
+            from harness import health_check
+            return health_check.health_text(include_score_report=True)
         except Exception:
             return f"/diagnose unavailable: {exc}"
 

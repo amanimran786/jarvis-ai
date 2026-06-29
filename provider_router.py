@@ -20,6 +20,8 @@ from config import (
     PROVIDER_PRIORITY_OPUS,
     OLLAMA_CLOUD_ENABLED,
     OLLAMA_CLOUD_MODEL,
+    LOCAL_ORNITH_9B,
+    LOCAL_ORNITH_35B,
     provider_runtime_config,
 )
 
@@ -99,6 +101,33 @@ def _ollama_cloud_candidates() -> list[RouteCandidate]:
         local=False,
         label="Ollama Cloud",
     )]
+
+
+def _ollama_local_candidates(task: str = "auto") -> list[RouteCandidate]:
+    """Named Ornith-1.0 candidates for task-aware local routing.
+
+    These are additive hints: callers check availability via get_best_available
+    before actually using them.  Tasks:
+      "code"     → ornith-35b (strongest agentic coder; SWE-bench 82.4 verified)
+      "classify" → ornith-9b  (fast; matches glm-4.7-flash tier at coding tasks)
+      "auto"     → both, 35b first
+    """
+    candidates: list[RouteCandidate] = []
+    if task in {"code", "fix_loop", "auto"}:
+        candidates.append(RouteCandidate(
+            provider="ollama",
+            model=LOCAL_ORNITH_35B,
+            local=True,
+            label="Ornith-35B",
+        ))
+    if task in {"classify", "fast", "chat", "auto"}:
+        candidates.append(RouteCandidate(
+            provider="ollama",
+            model=LOCAL_ORNITH_9B,
+            local=True,
+            label="Ornith-9B",
+        ))
+    return candidates
 
 
 def _local_candidates(
