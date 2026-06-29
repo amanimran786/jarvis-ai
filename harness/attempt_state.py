@@ -25,6 +25,7 @@ class AttemptState(str, Enum):
 
 TERMINAL_STATES = frozenset(
     {
+        AttemptState.RETRY_PENDING,
         AttemptState.VERIFIED,
         AttemptState.BLOCKED,
         AttemptState.FAILED,
@@ -44,7 +45,7 @@ _ALLOWED_TRANSITIONS = {
     | _ACTIVE_FAILURE_TARGETS,
     AttemptState.VERIFYING: frozenset({AttemptState.VERIFIED, AttemptState.RETRY_PENDING})
     | _ACTIVE_FAILURE_TARGETS,
-    AttemptState.RETRY_PENDING: frozenset({AttemptState.DISPATCH_PENDING}) | _ACTIVE_FAILURE_TARGETS,
+    AttemptState.RETRY_PENDING: frozenset(),
     AttemptState.VERIFIED: frozenset(),
     AttemptState.BLOCKED: frozenset(),
     AttemptState.FAILED: frozenset(),
@@ -82,6 +83,7 @@ class TransitionRecord:
     from_state: AttemptState
     to_state: AttemptState
     reason: str = ""
+    next_attempt_number: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -92,6 +94,7 @@ class TransitionRecord:
             "from_state": self.from_state.value,
             "to_state": self.to_state.value,
             "reason": self.reason,
+            "next_attempt_number": self.next_attempt_number,
         }
 
     def to_json(self) -> str:
@@ -124,12 +127,27 @@ class AttemptLifecycle:
     def allowed_transitions(self) -> frozenset[AttemptState]:
         return _ALLOWED_TRANSITIONS[self._state]
 
-    def transition(self, to_state: AttemptState, *, reason: str = "") -> TransitionRecord:
+    def transition(
+        self,
+        to_state: AttemptState,
+        *,
+        reason: str = "",
+        next_attempt_number: int | None = None,
+    ) -> TransitionRecord:
         """Move to an allowed state and append its immutable transition record."""
         if not isinstance(to_state, AttemptState):
             raise TypeError("to_state must be an AttemptState")
         if not isinstance(reason, str):
             raise TypeError("reason must be a string")
+        if next_attempt_number is not None:
+            if isinstance(next_attempt_number, bool) or not isinstance(next_attempt_number, int):
+                raise TypeError("next_attempt_number must be an integer")
+            if next_attempt_number < 1:
+                raise AttemptStateError("next_attempt_number must be at least 1")
+            if to_state is not AttemptState.RETRY_PENDING:
+                raise AttemptStateError(
+                    "next_attempt_number is only valid for retry_pending transitions"
+                )
         if self.is_terminal:
             raise TerminalStateError(f"terminal state {self._state.value} is immutable")
         if to_state not in self.allowed_transitions:
@@ -145,6 +163,7 @@ class AttemptLifecycle:
             from_state=self._state,
             to_state=to_state,
             reason=reason,
+            next_attempt_number=next_attempt_number,
         )
         self._records.append(record)
         self._state = to_state
