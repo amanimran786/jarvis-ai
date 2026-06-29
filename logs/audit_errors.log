@@ -1,0 +1,1 @@
+2026-06-25T04:50:08.780172+00:00 audit_log('test_event') failed: RuntimeError: injected test failure

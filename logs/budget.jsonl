@@ -1,0 +1,6 @@
+{"ts": "2026-06-25T04:47:57.464508+00:00", "provider": "anthropic", "model": "claude-sonnet-4-6", "tokens_in": 1500, "tokens_out": 300, "session_id": "1d5d37fc-2b00-4033-b807-d0d910548475", "running_total_in": 1500}
+{"ts": "2026-06-25T04:47:57.464862+00:00", "provider": "ollama_cloud", "model": "llama3:8b", "tokens_in": 2000, "tokens_out": 500, "session_id": "1d5d37fc-2b00-4033-b807-d0d910548475", "running_total_in": 2000}
+{"ts": "2026-06-25T21:31:05.329528+00:00", "provider": "ollama_cloud", "model": "gemma4:31b", "tokens_in": 992, "tokens_out": 6, "session_id": "44881200-c658-4c60-8201-a5267fa6dc3e", "running_total_in": 992}
+{"ts": "2026-06-26T03:09:20.389459+00:00", "provider": "ollama_cloud", "model": "gemma4:31b", "tokens_in": 989, "tokens_out": 4, "session_id": "2c37584b-7d9a-4081-b063-fd5245a1190f", "running_total_in": 989}
+{"ts": "2026-06-26T17:50:41.338187+00:00", "provider": "ollama_cloud", "model": "gemma4:31b", "tokens_in": 991, "tokens_out": 4, "session_id": "d449bd0d-1dfb-47bb-ab10-81f4dd6f637b", "running_total_in": 991}
+{"ts": "2026-06-27T00:02:40.612131+00:00", "provider": "ollama_cloud", "model": "gemma4:31b", "tokens_in": 992, "tokens_out": 2, "session_id": "399d1d5e-40d3-431d-b216-87374cf8c082", "running_total_in": 992}

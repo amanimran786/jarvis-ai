@@ -1,0 +1,18 @@
+[
+  {
+    "id": "sem_career_arc_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["career", "identity", "background", "trust safety", "AI safety", "YouTube", "Meta", "TikTok", "Anthropic", "Google Play"],
+    "content": "Aman Imran is a Trust & Safety and AI Safety professional. Career arc: started at YouTube in 2018 doing child safety enforcement (CSAM). Then moved through Meta, TikTok, Google Play, and Anthropic. Not a specialist who stayed in one place — a systems operator who has seen enforcement, quality, and policy across every major platform. At Meta he built calibration programs and quality frameworks. At Anthropic he worked on AI Safety operations including jailbreak detection and coordinated abuse. Currently in active job search as of April 2026, with YouTube PEM (Age Appropriateness team) as the primary target.",
+    "privacy_tier": "public"
+  },
+  {
+    "id": "sem_career_stage_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["career stage", "seniority", "management", "individual contributor", "job search"],
+    "content": "Aman is a senior individual contributor and program lead transitioning toward management and strategic ownership. He operates at the level where he designs systems, not just executes them. He's not looking for a task-execution role — he wants ownership over a domain and the ability to build things that last. Current job search focus: roles where he can own a quality or safety program end-to-end, ideally at YouTube, Google, or similar platform-scale companies.",
+    "privacy_tier": "public"
+  }
+]
