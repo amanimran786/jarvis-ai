@@ -56,6 +56,7 @@ def test_attempt_states_are_stable_string_values():
         "failed",
     ]
     assert TERMINAL_STATES == {
+        AttemptState.RETRY_PENDING,
         AttemptState.VERIFIED,
         AttemptState.BLOCKED,
         AttemptState.FAILED,
@@ -144,15 +145,6 @@ def test_canonical_success_path_records_every_transition_in_order():
             ),
             {AttemptState.VERIFIED, AttemptState.RETRY_PENDING, AttemptState.BLOCKED, AttemptState.FAILED},
         ),
-        (
-            (
-                AttemptState.DISPATCH_PENDING,
-                AttemptState.HANDOFF_READY,
-                AttemptState.RUNNING,
-                AttemptState.RETRY_PENDING,
-            ),
-            {AttemptState.DISPATCH_PENDING, AttemptState.BLOCKED, AttemptState.FAILED},
-        ),
     ],
 )
 def test_each_active_state_exposes_only_its_canonical_transitions(prefix, expected):
@@ -176,19 +168,65 @@ def test_illegal_transition_is_rejected_without_changing_state_or_history(source
     assert lifecycle.records == original_records
 
 
-@pytest.mark.parametrize("retry_from", [2, 3, 4, 5])
-def test_retry_returns_through_dispatch_and_can_complete(retry_from):
+@pytest.mark.parametrize("retry_from", [1, 2, 3, 4, 5])
+def test_retry_pending_ends_the_current_attempt(retry_from):
     lifecycle = _lifecycle()
     _advance(lifecycle, *CANONICAL_PATH[:retry_from])
 
-    lifecycle.transition(AttemptState.RETRY_PENDING, reason="retryable failure")
-    lifecycle.transition(AttemptState.DISPATCH_PENDING)
-    _advance(lifecycle, *CANONICAL_PATH[1:])
+    retry = lifecycle.transition(AttemptState.RETRY_PENDING, reason="retryable failure")
 
-    assert lifecycle.state is AttemptState.VERIFIED
-    retry = lifecycle.records[retry_from]
+    assert lifecycle.state is AttemptState.RETRY_PENDING
+    assert lifecycle.is_terminal is True
     assert retry.to_state is AttemptState.RETRY_PENDING
     assert retry.reason == "retryable failure"
+    with pytest.raises(TerminalStateError, match="immutable"):
+        lifecycle.transition(AttemptState.DISPATCH_PENDING)
+
+
+def test_retry_handoff_can_reference_next_attempt_number_without_creating_its_identity():
+    lifecycle = _lifecycle()
+    _advance(lifecycle, *CANONICAL_PATH[:3])
+
+    retry = lifecycle.transition(
+        AttemptState.RETRY_PENDING,
+        reason="executor failed",
+        next_attempt_number=2,
+    )
+
+    assert retry.attempt_id == ATTEMPT_ID
+    assert retry.next_attempt_number == 2
+    assert retry.to_dict()["next_attempt_number"] == 2
+    assert not hasattr(retry, "next_attempt_id")
+    assert lifecycle.attempt_id == ATTEMPT_ID
+    assert lifecycle.state is AttemptState.RETRY_PENDING
+
+
+@pytest.mark.parametrize("invalid", [0, -1])
+def test_retry_handoff_rejects_non_positive_next_attempt_number(invalid):
+    lifecycle = _lifecycle()
+    _advance(lifecycle, *CANONICAL_PATH[:3])
+
+    with pytest.raises(AttemptStateError, match="at least 1"):
+        lifecycle.transition(AttemptState.RETRY_PENDING, next_attempt_number=invalid)
+
+
+@pytest.mark.parametrize("invalid", [True, 2.0, "2"])
+def test_retry_handoff_rejects_non_integer_next_attempt_number(invalid):
+    lifecycle = _lifecycle()
+    _advance(lifecycle, *CANONICAL_PATH[:3])
+
+    with pytest.raises(TypeError, match="integer"):
+        lifecycle.transition(AttemptState.RETRY_PENDING, next_attempt_number=invalid)
+
+
+def test_next_attempt_number_is_rejected_for_non_retry_transition():
+    lifecycle = _lifecycle()
+
+    with pytest.raises(AttemptStateError, match="only valid for retry_pending"):
+        lifecycle.transition(AttemptState.DISPATCH_PENDING, next_attempt_number=2)
+
+    assert lifecycle.state is AttemptState.QUEUED
+    assert lifecycle.records == ()
 
 
 @pytest.mark.parametrize("terminal", list(TERMINAL_STATES))
@@ -196,6 +234,9 @@ def test_terminal_states_are_immutable(terminal):
     lifecycle = _lifecycle()
     if terminal is AttemptState.VERIFIED:
         _advance(lifecycle, *CANONICAL_PATH)
+    elif terminal is AttemptState.RETRY_PENDING:
+        _advance(lifecycle, *CANONICAL_PATH[:3])
+        lifecycle.transition(terminal)
     else:
         lifecycle.transition(terminal)
     original_records = lifecycle.records
@@ -243,6 +284,7 @@ def test_transition_record_and_log_are_json_serializable_and_deterministic():
         "from_state": "queued",
         "to_state": "dispatch_pending",
         "reason": "worker requested",
+        "next_attempt_number": None,
     }
 
     assert record.to_dict() == expected

@@ -713,8 +713,9 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             base_ref = git("rev-parse", "HEAD")
             (worktree / "tracked.txt").write_text("done\n", encoding="utf-8")
 
-            source = "print('verified')"
-            command = f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
+            command = (
+                f"{shlex.quote(sys.executable)} -m compileall -q tracked.txt"
+            )
             task = _sample_task(
                 status="in_progress",
                 files_hint=["tracked.txt"],
