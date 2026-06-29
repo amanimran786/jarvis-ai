@@ -38,6 +38,12 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from harness.session_tracker import SessionTracker  # noqa: E402
+from harness.task_contract import (  # noqa: E402
+    AttemptRecord,
+    AttemptStore,
+    ContractError,
+    TaskSpec,
+)
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -51,6 +57,12 @@ logging.basicConfig(
 WORK_QUEUE_PATH   = _REPO_ROOT / "WORK_QUEUE.json"
 LAUNCH_QUEUE_PATH = _REPO_ROOT / "LAUNCH_QUEUE.json"
 MASTER_LOG_PATH   = _REPO_ROOT / "MASTER_LOG.md"
+ATTEMPT_LOG_PATH  = Path(
+    os.getenv(
+        "JARVIS_ORCHESTRATOR_ATTEMPT_LOG",
+        str(Path.home() / "Library" / "Application Support" / "Jarvis" / "orchestrator" / "attempts.jsonl"),
+    )
+)
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 
@@ -74,8 +86,16 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     }
     """
     now_str = _now()
-    summary = {"harvested": 0, "follow_ups": 0, "launched": 0, "active_now": 0, "dry_run": dry_run}
+    summary = {
+        "harvested": 0,
+        "follow_ups": 0,
+        "launched": 0,
+        "blocked": 0,
+        "active_now": 0,
+        "dry_run": dry_run,
+    }
     tracker = SessionTracker()
+    attempt_store = AttemptStore(ATTEMPT_LOG_PATH)
 
     _log_master(f"[orchestrator] loop start — max_concurrent={max_concurrent} dry_run={dry_run}")
 
@@ -116,48 +136,69 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             log.info("[Loop] No QUEUED tasks available")
             break
 
+        try:
+            spec = TaskSpec.from_queue_task(task)
+        except ContractError as exc:
+            _mark_task_blocked(task, f"invalid task contract: {exc}")
+            summary["blocked"] += 1
+            _log_master(f"[orchestrator] task blocked — invalid contract: {exc}")
+            continue
+
         # ── Step 4: Generate prompt ──────────────────────────────────────────
         repo_ctx = _build_repo_context()
         try:
             from harness.prompt_generator import generate_session_prompt
-            prompt = generate_session_prompt(task, repo_ctx)
+            prompt = generate_session_prompt(spec.to_dict(), repo_ctx)
         except Exception as exc:
-            log.error("[Loop] prompt_generator failed for %s: %s", task.get("id"), exc)
-            # Build minimal fallback inline so we don't block the launch
-            prompt = (
-                f"Implement task {task.get('id')}: {task.get('title')}\n\n"
-                f"{task.get('description', '')}\n\n"
-                f"Acceptance criteria: {task.get('acceptance_criteria', [])}"
-            )
+            log.error("[Loop] prompt_generator failed for %s: %s", spec.task_id, exc)
+            _mark_task_blocked(task, f"contract rendering failed: {exc}")
+            summary["blocked"] += 1
+            _log_master(f"[orchestrator] {spec.task_id} blocked — contract rendering failed")
+            continue
 
         # ── Step 5: Write launch record ──────────────────────────────────────
-        session_id = _session_id_for_task(task)
+        session_id = _session_id_for_task(spec.to_dict())
+        attempt = AttemptRecord.dispatched(spec, session_id)
         launch_record = {
-            "task_id":    task["id"],
+            "task_id":    spec.task_id,
             "session_id": session_id,
+            "attempt_id": attempt.attempt_id,
+            "contract_sha256": spec.contract_hash,
+            "task_spec":  spec.to_dict(),
             "prompt":     prompt,
             "queued_at":  now_str,
             "status":     "pending",       # Cowork companion sets to "fired" after start_task
-            "domain":     task.get("domain", "general"),
-            "assigned_ai": task.get("assigned_ai", "claude"),
+            "domain":     spec.domain,
+            "assigned_ai": spec.assigned_ai,
         }
 
         if dry_run:
             log.info("[Loop][DRY-RUN] Would launch session %s for task %s\nPrompt preview:\n%s",
-                     session_id, task["id"], prompt[:400])
+                     session_id, spec.task_id, prompt[:400])
         else:
+            try:
+                attempt_store.append(attempt)
+            except OSError as exc:
+                _mark_task_blocked(task, f"checkpoint write failed: {exc}")
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} blocked — checkpoint write failed: {exc}"
+                )
+                continue
             _write_launch_record(launch_record)
-            tracker.claim(task["id"], session_id)
-            _mark_task_in_progress(task["id"], session_id)
+            tracker.claim(spec.task_id, session_id)
+            _mark_task_in_progress(spec.task_id, session_id)
 
         summary["launched"] += 1
         launched_this_run  += 1
         _log_master(
             f"[orchestrator] {'[DRY-RUN] ' if dry_run else ''}"
-            f"launch queued: {session_id} → {task['id']} — {task.get('title')}"
+            f"launch queued: {session_id} → {spec.task_id} — {spec.title}"
         )
 
-    summary["active_now"] = tracker.active_count() + launched_this_run
+    summary["active_now"] = (
+        active_now + launched_this_run if dry_run else tracker.active_count()
+    )
     _log_master(
         f"[orchestrator] loop done — harvested={summary['harvested']} "
         f"launched={summary['launched']} follow_ups={summary['follow_ups']} "
@@ -191,7 +232,14 @@ def _save_queue(queue: list[dict[str, Any]]) -> None:
 
 
 def _find_task(task_id: str) -> dict | None:
-    return next((t for t in _load_queue() if t.get("id") == task_id), None)
+    return next((t for t in _load_queue() if _task_identity(t) == task_id), None)
+
+
+def _task_identity(task: dict[str, Any]) -> str:
+    try:
+        return TaskSpec.from_queue_task(task).task_id
+    except ContractError:
+        return str(task.get("id") or "")
 
 
 def _pick_next_queued() -> dict | None:
@@ -210,7 +258,7 @@ def _mark_task_done(task_id: str, result_summary: str) -> bool:
         return False
     queue = _load_queue()
     for task in queue:
-        if task.get("id") == task_id:
+        if _task_identity(task) == task_id:
             task["status"]         = "done"
             task["result_summary"] = result_summary
             task["completed_at"]   = _now()
@@ -222,10 +270,22 @@ def _mark_task_done(task_id: str, result_summary: str) -> bool:
 def _mark_task_in_progress(task_id: str, session_id: str) -> None:
     queue = _load_queue()
     for task in queue:
-        if task.get("id") == task_id:
+        if _task_identity(task) == task_id:
             task["status"]      = "in_progress"
             task["assigned_to"] = session_id
             task["assigned_at"] = _now()
+            break
+    _save_queue(queue)
+
+
+def _mark_task_blocked(task_to_block: dict[str, Any], reason: str) -> None:
+    queue = _load_queue()
+    identity = _task_identity(task_to_block)
+    for task in queue:
+        if task == task_to_block or (identity and _task_identity(task) == identity):
+            task["status"] = "blocked"
+            task["blocked_reason"] = reason
+            task["blocked_at"] = _now()
             break
     _save_queue(queue)
 

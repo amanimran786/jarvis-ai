@@ -104,7 +104,7 @@ class TestPromptGeneratorFallback(unittest.TestCase):
     def test_fallback_empty_criteria(self):
         task = _sample_task(acceptance_criteria=[])
         prompt = _generate_fallback(task, _sample_repo_context())
-        self.assertIn("not specified", prompt)
+        self.assertIn("Produce the requested artifact for loop inspection", prompt)
 
     def test_fallback_no_commits(self):
         ctx = _sample_repo_context(recent_commits=[])
@@ -168,16 +168,31 @@ class TestPromptGeneratorLLM(unittest.TestCase):
         """generate_session_prompt should never raise — fallback activates."""
         with patch("harness.prompt_generator._generate_via_llm",
                    side_effect=ConnectionRefusedError("ollama down")):
-            result = generate_session_prompt(_sample_task(), _sample_repo_context())
+            result = generate_session_prompt(
+                _sample_task(), _sample_repo_context(), use_llm=True
+            )
         self.assertIn("TASK-001", result)
         self.assertIn("Add rate limiting", result)
 
     def test_falls_back_when_llm_returns_empty(self):
         with patch("harness.prompt_generator._generate_via_llm",
                    side_effect=ValueError("LLM returned empty response")):
-            result = generate_session_prompt(_sample_task(), _sample_repo_context())
+            result = generate_session_prompt(
+                _sample_task(), _sample_repo_context(), use_llm=True
+            )
         self.assertIsInstance(result, str)
         self.assertTrue(len(result) > 50)
+
+    def test_default_renderer_does_not_call_prompt_writing_model(self):
+        with patch(
+            "harness.prompt_generator._generate_via_llm",
+            side_effect=AssertionError("loop must render its own contract"),
+        ):
+            result = generate_session_prompt(_sample_task(), _sample_repo_context())
+
+        self.assertIn("<task_contract>", result)
+        self.assertIn("Contract SHA-256", result)
+        self.assertIn("The loop, not this response", result)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,19 +336,21 @@ class TestSessionTracker(unittest.TestCase):
 
 class TestLaunchQueueRoundtrip(unittest.TestCase):
 
-    def _run_loop_isolated(self, tmp: Path, **loop_kwargs) -> dict:
+    def _run_loop_isolated(self, tmp: Path, *, seed_task: dict | None = None, **loop_kwargs) -> dict:
         """Run one loop iteration with all paths redirected to tmp."""
         import orchestrator_loop as ol
         orig_wq = ol.WORK_QUEUE_PATH
         orig_lq = ol.LAUNCH_QUEUE_PATH
         orig_ml = ol.MASTER_LOG_PATH
+        orig_attempts = ol.ATTEMPT_LOG_PATH
 
         ol.WORK_QUEUE_PATH   = tmp / "WORK_QUEUE.json"
         ol.LAUNCH_QUEUE_PATH = tmp / "LAUNCH_QUEUE.json"
         ol.MASTER_LOG_PATH   = tmp / "MASTER_LOG.md"
+        ol.ATTEMPT_LOG_PATH  = tmp / "attempts.jsonl"
 
         # Seed a queued task
-        task = _sample_task(status="queued", priority=1)
+        task = seed_task or _sample_task(status="queued", priority=1)
         ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
 
         # Patch SessionTracker to use tmp dir
@@ -353,6 +370,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         ol.WORK_QUEUE_PATH   = orig_wq
         ol.LAUNCH_QUEUE_PATH = orig_lq
         ol.MASTER_LOG_PATH   = orig_ml
+        ol.ATTEMPT_LOG_PATH  = orig_attempts
         ol.SessionTracker    = orig_tracker
 
         return result
@@ -404,6 +422,45 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             self.assertIn("session_id", lq[0])
             self.assertTrue(lq[0]["session_id"].startswith("jarvis-"))
 
+    def test_launch_record_contains_contract_and_checkpoint(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
+                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
+
+            launch = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())[0]
+            attempts = [json.loads(line) for line in (tmp / "attempts.jsonl").read_text().splitlines()]
+
+            self.assertEqual(launch["task_spec"]["id"], "TASK-001")
+            self.assertEqual(launch["contract_sha256"], attempts[0]["contract_sha256"])
+            self.assertEqual(launch["attempt_id"], attempts[0]["attempt_id"])
+            self.assertEqual(attempts[0]["phase"], "dispatch")
+
+    def test_legacy_queue_task_launches_through_compatibility_contract(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            legacy = {
+                "task": "Run focused regression tests",
+                "notes": "Capture the failing cases",
+                "status": "queued",
+                "priority": 1,
+                "session_name": "legacy-lane",
+            }
+            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
+                self._run_loop_isolated(
+                    tmp,
+                    seed_task=legacy,
+                    dry_run=False,
+                    max_concurrent=1,
+                )
+
+            launch = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())[0]
+            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
+
+            self.assertTrue(launch["task_id"].startswith("LEGACY-"))
+            self.assertTrue(launch["task_spec"]["legacy_adapter"])
+            self.assertEqual(queue[0]["status"], "in_progress")
+
     def test_no_duplicate_pending_entries(self):
         """Running the loop twice should not create duplicate pending records."""
         with tempfile.TemporaryDirectory() as d:
@@ -440,6 +497,48 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             tmp = Path(d)
             result = self._run_loop_isolated(tmp, dry_run=False, max_concurrent=0)
             self.assertEqual(result["launched"], 0)
+
+    def test_active_count_does_not_double_count_new_launches(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            result = self._run_loop_isolated(tmp, dry_run=False, max_concurrent=1)
+
+            self.assertEqual(result["launched"], 1)
+            self.assertEqual(result["active_now"], 1)
+
+    def test_contract_render_failure_blocks_instead_of_launching_fallback(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            with patch(
+                "harness.prompt_generator.generate_session_prompt",
+                side_effect=RuntimeError("renderer failed"),
+            ):
+                result = self._run_loop_isolated(
+                    tmp, dry_run=False, max_concurrent=1
+                )
+
+            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
+            self.assertEqual(result["launched"], 0)
+            self.assertEqual(result["blocked"], 1)
+            self.assertEqual(queue[0]["status"], "blocked")
+            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
+
+    def test_checkpoint_failure_blocks_before_launch(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            with patch(
+                "orchestrator_loop.AttemptStore.append",
+                side_effect=OSError("disk full"),
+            ):
+                result = self._run_loop_isolated(
+                    tmp, dry_run=False, max_concurrent=1
+                )
+
+            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
+            self.assertEqual(result["launched"], 0)
+            self.assertEqual(result["blocked"], 1)
+            self.assertEqual(queue[0]["status"], "blocked")
+            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
 
 
 if __name__ == "__main__":
