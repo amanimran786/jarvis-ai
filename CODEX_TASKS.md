@@ -47,20 +47,69 @@ Completed: added a standalone PyQt6 tray with live green/yellow/red status, Jarv
 - PyQt6 is already a dependency — check `requirements.txt` before adding anything
 - Commit: `[CODEX] feat(ui): PyQt6 system tray status panel`
 
-### CODEX-4: CLI UX improvements (MEDIUM)
-- Add rich-formatted output to `main.py` responses (use `rich` library — add to requirements.txt if missing)
-- Color-code output types: model responses (white), tool calls (cyan), errors (red), memory (dim)
-- Add a progress spinner during long operations (wire into `operative.py` streaming output)
-- Add `/history` command showing last 10 interactions with timestamps (read from `usage_log.jsonl`)
-- Commit: `[CODEX] feat(cli): rich formatting + /history command`
+### CODEX-5: Wire the autonomous loop scheduler (HIGH)
 
-### CODEX-5: Plugin system scaffold (MEDIUM)
-- Create `harness/plugins.py` — a simple plugin loader
-- Plugins live in `plugins/` directory (already exists — check its contents first)
-- Each plugin is a Python file with a `register(jarvis)` function
-- On startup, `main.py` auto-loads all plugins in `plugins/`
-- Write an example plugin: `plugins/pomodoro.py` — `/pomodoro` command that runs a 25min timer
-- Commit: `[CODEX] feat(plugins): plugin loader + pomodoro example`
+The loop harness is built (`orchestrator_loop.py`, `LAUNCH_QUEUE.json`). What's missing is the
+companion script that actually fires Cowork sessions and harvests completions.
+
+Build `harness/cowork_launcher.py`:
+- Read `LAUNCH_QUEUE.json`; for each entry with `status == "pending"`:
+  - Append to `PENDING_SESSIONS.json` with the full prompt and metadata
+  - Mark the entry `"fired"` and write back to `LAUNCH_QUEUE.json`
+- Call `orchestrator_loop.run_loop()` to harvest completions and enqueue new work
+- Script must be idempotent — safe to call every 5 minutes even when nothing is pending
+
+Wire as a launchd job on macOS:
+- Write `harness/com.jarvis.cowork_launcher.plist`
+- Interval: 300 seconds
+- Log stdout/stderr to `logs/cowork_launcher.log`
+- Include install instructions in a docstring at the top of the plist
+
+Commit: `[CODEX] feat(harness): cowork_launcher + launchd plist for 5-min loop`
+
+### CODEX-6: /history command with Rich CLI (MEDIUM)
+
+Build the `/history` command and upgrade the REPL's visual chrome using the `rich` library.
+
+`/history` command (in `main.py` or `harness/repl.py`):
+- Default: last 10 turns; accept optional `N` argument (`/history 20`)
+- Read turns from `usage_log.jsonl`
+- Each turn: timestamp (dim), role label (bold cyan for user / bold green for assistant), content truncated to 120 chars
+- Use `rich.table.Table` or `rich.panel.Panel` for layout
+
+REPL prompt upgrades:
+- Color the `Jarvis>` prompt (bold magenta)
+- Show budget status (tokens used / limit) in the right margin using `rich.live` or prompt suffix
+- Color-code response types: model output (white), tool calls (cyan), errors (red), memory ops (dim)
+- Add a spinner (`rich.progress` or `rich.status`) during long operations — wire into `operative.py`'s streaming callback
+
+Add `rich` to `requirements.txt` if not already present (check first).
+
+Commit: `[CODEX] feat(cli): /history command + Rich REPL chrome`
+
+### CODEX-7: Plugin system foundation (MEDIUM)
+
+Build a plugin loader in `harness/plugin_loader.py`. Check `plugins/` for any existing files first
+before writing anything — don't clobber.
+
+`harness/plugin_loader.py`:
+- `scan_plugins(plugins_dir: str) -> list[ModuleType]` — imports every `*.py` in `plugins/`
+- `load_all(router) -> int` — calls `plugin.register(router)` on each; returns count loaded
+- Failures in one plugin must not abort the others — catch, log, continue
+- Log each loaded plugin at INFO level
+
+Plugin contract:
+- Each plugin exports `register(router)` where `router` is the Jarvis command router
+- `register` calls `router.add_command(name, handler, help_text)`
+
+Example plugin — `plugins/weather.py`:
+- Adds `/weather <city>` command
+- Fetches from `wttr.in/{city}?format=3` (no API key required)
+- Returns a one-line weather string
+
+Wire into `main.py` startup — call `plugin_loader.load_all(router)` before the REPL loop.
+
+Commit: `[CODEX] feat(plugins): plugin_loader + weather example plugin`
 
 ## How to update this file when done
 Add ✅ next to the task name and write one line describing what you built.

@@ -88,7 +88,7 @@ class CheckOllamaTests(unittest.TestCase):
             r = _check_ollama()
         self.assertEqual(r.status, FAIL)
         self.assertIn("Unreachable", r.detail)
-        self.assertIn("fix", r.fix.lower())
+        self.assertIn("ollama", r.fix.lower())
 
     def test_long_model_list_truncated(self):
         models = [f"model{i}:latest" for i in range(6)]
