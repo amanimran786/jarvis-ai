@@ -13,7 +13,10 @@ Format of ACTIVE_SESSIONS.json:
       "claimed_at":    "2026-06-28T01:00:00+00:00",
       "last_updated":  "2026-06-28T01:05:00+00:00",
       "status":        "active",          // "active" | "completed"
-      "result_summary": null              // populated on complete()
+      "result_summary": null,             // agent report; never completion proof
+      "attempt_id": "attempt_...",
+      "contract_sha256": "...",
+      "completion_evidence": null         // populated on complete()
     },
     ...
   ]
@@ -22,7 +25,7 @@ Format of ACTIVE_SESSIONS.json:
 Public API:
     tracker = SessionTracker()
     tracker.claim(task_id, session_id)
-    tracker.complete(session_id, result_summary)
+    tracker.complete(session_id, result_summary, evidence={...})
     tracker.active_count() -> int
     tracker.get_stalled(timeout_minutes=30) -> list[dict]
     tracker.list_active() -> list[dict]
@@ -34,7 +37,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 log = logging.getLogger(__name__)
 
@@ -71,7 +74,14 @@ class SessionTracker:
 
     # ── public API ──────────────────────────────────────────────────────────
 
-    def claim(self, task_id: str, session_id: str) -> None:
+    def claim(
+        self,
+        task_id: str,
+        session_id: str,
+        *,
+        attempt_id: str = "",
+        contract_sha256: str = "",
+    ) -> None:
         """
         Register that *session_id* has picked up *task_id*.
 
@@ -88,6 +98,9 @@ class SessionTracker:
             existing["last_updated"] = now
             existing["status"]       = "active"
             existing["result_summary"] = None
+            existing["completion_evidence"] = None
+            existing["attempt_id"] = attempt_id
+            existing["contract_sha256"] = contract_sha256
         else:
             sessions.append({
                 "session_id":     session_id,
@@ -96,12 +109,21 @@ class SessionTracker:
                 "last_updated":   now,
                 "status":         "active",
                 "result_summary": None,
+                "completion_evidence": None,
+                "attempt_id":     attempt_id,
+                "contract_sha256": contract_sha256,
             })
 
         self._save(data)
         log.info("[SessionTracker] %s claimed %s", session_id, task_id)
 
-    def complete(self, session_id: str, result_summary: str) -> None:
+    def complete(
+        self,
+        session_id: str,
+        result_summary: str,
+        *,
+        evidence: Mapping[str, Any] | None = None,
+    ) -> None:
         """
         Mark *session_id* as completed with the given result summary.
 
@@ -117,6 +139,7 @@ class SessionTracker:
         entry["status"]         = "completed"
         entry["last_updated"]   = _now_iso()
         entry["result_summary"] = result_summary
+        entry["completion_evidence"] = dict(evidence or {})
         self._save(data)
         log.info("[SessionTracker] %s completed", session_id)
 
