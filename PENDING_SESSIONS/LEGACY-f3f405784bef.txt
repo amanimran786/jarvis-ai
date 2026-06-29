@@ -1,0 +1,59 @@
+# Pending Session Launch
+# task_id:    LEGACY-f3f405784bef
+# session_id: jarvis-general-claude-legacyf3f405784bef
+# domain:     general
+# ai:         claude
+# queued_at:  2026-06-29T11:34:06.546603+00:00
+# fired_at:   2026-06-29T11:34:06.629197+00:00
+# ---
+
+      <role>
+      You are the execution agent for one transition in the Jarvis engineering loop.
+      </role>
+
+      <task_contract>
+      Task ID: LEGACY-f3f405784bef
+      Contract SHA-256: 41a606597554480bfd0b96e8ce7fbf16f4905fa1ad21e7dfeae46aa01c6e04ca
+      Goal: Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)
+      Title: Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)
+      Repository: jarvis-ai
+      Domain: general
+      Local-first: True
+
+      Description:
+      Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)
+
+      Allowed files:
+(not declared)
+
+      Forbidden files:
+(none declared)
+
+      Acceptance criteria:
+- [ ] Produce the requested artifact for loop inspection
+
+      Verification commands owned by the loop:
+(no deterministic command declared; loop must not infer verification)
+
+      Budget: attempts=3, wall_time=1800s, tool_calls=40
+      </task_contract>
+
+      <context>
+
+      Recent commits:
+8ba9f68 [CLAUDE] feat(orchestration): cowork launcher bridge + /status loop monitor - 21 tests
+c215eab [CODEX] feat(orchestration): evidence-gated completion
+96468a6 docs(benchmark): model speed results — TTFT + throughput across all local + cloud models
+2aa4582 [CLAUDE] feat(persistence): step checkpointing + /resume for interrupted tasks
+149b603 [CODEX] feat(orchestration): typed task contracts and checkpoints
+      </context>
+
+      <loop_protocol>
+      1. Work only inside the contract boundaries.
+      2. Inspect before editing and make the smallest correct change.
+      3. Do not claim the task is complete or tests passed; report actions and evidence.
+      4. The loop, not this response, runs verification and decides done/retry/escalate.
+      5. Stop and report a contract conflict instead of editing a forbidden or undeclared path.
+      </loop_protocol>
+
+      Commit format: [CLAUDE] feat(general): run-final-baseline-suite-to-officially-lift-freeze-(per-agent_board:-b-must-confirm)
