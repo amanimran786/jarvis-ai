@@ -1,9 +1,9 @@
 """
 harness/prompt_generator.py — Generate structured session prompts from task specs.
 
-Uses qwen3:30b-a3b (LOCAL_REASONING) to synthesise a full coding-session prompt
-from a task spec + repo context.  Falls back to a pure-template prompt if Ollama
-is unreachable.
+Renders a deterministic agent packet from a task contract + repo context.  An
+optional legacy LLM path remains available for experiments, but orchestration
+uses the deterministic path so workflow policy cannot drift with model output.
 
 Public API:
     generate_session_prompt(task, repo_context) -> str
@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import textwrap
 from typing import Any
+
+from harness.task_contract import TaskSpec
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +78,12 @@ Generate the complete prompt now:
 
 # ── Core function ─────────────────────────────────────────────────────────────
 
-def generate_session_prompt(task: dict[str, Any], repo_context: dict[str, Any]) -> str:
+def generate_session_prompt(
+    task: dict[str, Any],
+    repo_context: dict[str, Any],
+    *,
+    use_llm: bool = False,
+) -> str:
     """
     Generate a complete session prompt for a task.
 
@@ -94,13 +101,15 @@ def generate_session_prompt(task: dict[str, Any], repo_context: dict[str, Any]) 
         }
 
     Returns:
-        Full prompt string.  Never raises — falls back to template on any error.
+        Full prompt string. The default is deterministic. ``use_llm=True`` is a
+        compatibility experiment and still falls back to the contract renderer.
     """
-    try:
-        return _generate_via_llm(task, repo_context)
-    except Exception as exc:
-        log.warning("[PromptGen] LLM unavailable (%s) — using fallback template", exc)
-        return _generate_fallback(task, repo_context)
+    if use_llm:
+        try:
+            return _generate_via_llm(task, repo_context)
+        except Exception as exc:
+            log.warning("[PromptGen] LLM unavailable (%s) — using contract renderer", exc)
+    return _generate_fallback(task, repo_context)
 
 
 # ── LLM path ─────────────────────────────────────────────────────────────────
@@ -137,7 +146,7 @@ def _generate_via_llm(task: dict[str, Any], repo_context: dict[str, Any]) -> str
 
 def _build_meta_prompt(task: dict[str, Any], repo_context: dict[str, Any]) -> str:
     """Render the meta-prompt template with task + repo data."""
-    files_hint = task.get("files_hint", [])
+    files_hint = task.get("allowed_files", task.get("files_hint", []))
     if isinstance(files_hint, list):
         files_hint = "\n".join(f"  • {f}" for f in files_hint) or "  (not specified)"
     else:
@@ -182,22 +191,18 @@ def _generate_fallback(task: dict[str, Any], repo_context: dict[str, Any]) -> st
     Build a structured prompt purely from the task spec — no LLM required.
     Used when Ollama is down or times out.
     """
-    task_id    = task.get("id", "TASK-???")
-    title      = task.get("title", "(untitled)")
-    description = task.get("description", "").strip()
-    domain     = task.get("domain", "harness")
+    spec = TaskSpec.from_queue_task(task)
 
-    files_hint = task.get("files_hint", [])
-    if isinstance(files_hint, list):
-        files_str = "\n".join(f"  - {f}" for f in files_hint) or "  (not specified)"
-    else:
-        files_str = str(files_hint)
-
-    criteria = task.get("acceptance_criteria", [])
-    if isinstance(criteria, list):
-        criteria_str = "\n".join(f"  - [ ] {c}" for c in criteria) or "  - [ ] (not specified)"
-    else:
-        criteria_str = f"  - [ ] {criteria}"
+    files_str = "\n".join(f"  - {f}" for f in spec.allowed_files) or "  (not declared)"
+    forbidden_str = "\n".join(f"  - {f}" for f in spec.forbidden_files) or "  (none declared)"
+    criteria_str = (
+        "\n".join(f"  - [ ] {criterion}" for criterion in spec.acceptance_criteria)
+        or "  - [ ] Produce the requested artifact for loop inspection"
+    )
+    verification_str = (
+        "\n".join(f"  - {command}" for command in spec.verification_commands)
+        or "  (no deterministic command declared; loop must not infer verification)"
+    )
 
     commits = repo_context.get("recent_commits", [])
     if isinstance(commits, list):
@@ -207,35 +212,50 @@ def _generate_fallback(task: dict[str, Any], repo_context: dict[str, Any]) -> st
 
     return textwrap.dedent(f"""\
         <role>
-        You are a senior Python engineer working on the Jarvis AI project. \
-Your mission is to implement {task_id}: {title}.
+        You are the execution agent for one transition in the Jarvis engineering loop.
         </role>
 
-        <context>
+        <task_contract>
+        Task ID: {spec.task_id}
+        Contract SHA-256: {spec.contract_hash}
+        Goal: {spec.goal}
+        Title: {spec.title}
         Repository: jarvis-ai
-        Domain: {domain}
+        Domain: {spec.domain}
+        Local-first: {bool(spec.constraints.get("local_first", True))}
+
+        Description:
+        {spec.description}
+
+        Allowed files:
+{files_str}
+
+        Forbidden files:
+{forbidden_str}
+
+        Acceptance criteria:
+{criteria_str}
+
+        Verification commands owned by the loop:
+{verification_str}
+
+        Budget: attempts={spec.budget.max_attempts}, wall_time={spec.budget.wall_time_seconds}s, \
+tool_calls={spec.budget.tool_calls}
+        </task_contract>
+
+        <context>
 
         Recent commits:
 {commits_str}
-
-        Task: {task_id} — {title}
-        {description}
-
-        Key files to read or modify:
-{files_str}
         </context>
 
-        <instructions>
-        1. Read and understand the files listed above before writing any code.
-        2. Implement the changes described in the task description.
-        3. Write or update tests to cover the new behaviour.
-        4. Run the relevant tests locally and confirm they pass.
-        5. Commit your changes using the format below.
-        </instructions>
+        <loop_protocol>
+        1. Work only inside the contract boundaries.
+        2. Inspect before editing and make the smallest correct change.
+        3. Do not claim the task is complete or tests passed; report actions and evidence.
+        4. The loop, not this response, runs verification and decides done/retry/escalate.
+        5. Stop and report a contract conflict instead of editing a forbidden or undeclared path.
+        </loop_protocol>
 
-        <acceptance>
-{criteria_str}
-        </acceptance>
-
-        Commit format: [CLAUDE] feat({domain}): {title.lower().replace(" ", "-")}
+        Commit format: [{spec.assigned_ai.upper()}] feat({spec.domain}): {spec.title.lower().replace(" ", "-")}
     """)

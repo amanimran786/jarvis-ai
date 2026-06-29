@@ -13,17 +13,31 @@ companion reads `LAUNCH_QUEUE.json` to fire sessions.
   "id": "TASK-042",
   "title": "Add rate limiting to web_fetch",
   "description": "harness/web_search.py calls fetch_page() with no retry logic. On 429 or transient network errors the whole search fails silently. Add exponential backoff (3 retries, base 1s) and surface the error clearly when all retries are exhausted.",
-  "files_hint": [
+  "allowed_files": [
     "harness/web_search.py",
     "harness/adaptive_router.py",
     "tests/test_web_search.py"
   ],
+  "forbidden_files": [".env", "config/credentials.json"],
   "acceptance_criteria": [
     "fetch_page retries 3× on 429 with exponential backoff",
     "on final failure raises WebFetchError (not swallows)",
     "all existing tests still pass",
     "new unit tests: mock 429 response × 3 → success on 4th; mock 429 × 4 → raises"
   ],
+  "verification_commands": [
+    "python -m pytest tests/test_web_search.py -q",
+    "python -m ruff check harness/web_search.py tests/test_web_search.py"
+  ],
+  "constraints": {
+    "local_first": true,
+    "network": false
+  },
+  "budget": {
+    "max_attempts": 3,
+    "wall_time_seconds": 1800,
+    "tool_calls": 40
+  },
   "domain": "harness",
   "assigned_ai": "claude",
   "priority": 1,
@@ -45,8 +59,12 @@ companion reads `LAUNCH_QUEUE.json` to fire sessions.
 | `id` | string | ✅ | Unique identifier. Format: `TASK-NNN` (zero-padded, e.g. `TASK-042`). |
 | `title` | string | ✅ | Short imperative phrase (≤ 60 chars). Used as the session heading. |
 | `description` | string | ✅ | Full description of what needs to be done. Include the *why*, the *what*, and any known edge cases. The more detail here, the better the generated prompt. |
-| `files_hint` | string[] | ✅ | Relative paths of files the agent should read first. Improves prompt relevance significantly. |
+| `allowed_files` | string[] | ✅ | Relative paths the execution agent may modify. Enforced by the loop contract. Legacy `files_hint` is accepted as an adapter only. |
+| `forbidden_files` | string[] | — | Relative paths that must never be modified, even if they appear in context. |
 | `acceptance_criteria` | string[] | ✅ | Concrete, verifiable conditions that define "done". Used verbatim in the generated prompt checklist. |
+| `verification_commands` | string[] | ✅ for code | Deterministic commands the loop runs and records. Agent claims do not satisfy this field. |
+| `constraints` | object | — | Machine-readable policy such as `local_first`, network access, packaging, or security review requirements. |
+| `budget` | object | — | Loop-owned `max_attempts`, `wall_time_seconds`, and `tool_calls` limits. |
 | `domain` | string | ✅ | Coarse area of the codebase. Used for session naming and prompt routing. Values: `harness`, `brains`, `ui`, `tests`, `infra`, `orchestration`, `general`. |
 | `assigned_ai` | string | ✅ | Which agent should pick this up. Values: `claude`, `codex`, `gemini`, `local`. |
 | `priority` | int | — | 1 = highest. Lower numbers run first. Default 99 if omitted. |
@@ -95,6 +113,9 @@ Written by `orchestrator_loop.py`; read and cleared by the Cowork scheduled task
   {
     "task_id":    "TASK-042",
     "session_id": "jarvis-harness-claude-task042",
+    "attempt_id": "attempt_9e7e5c...",
+    "contract_sha256": "...",
+    "task_spec":  {"...": "validated contract snapshot"},
     "prompt":     "...<full generated prompt>...",
     "queued_at":  "2026-06-28T01:00:00+00:00",
     "status":     "pending",
@@ -112,11 +133,19 @@ The Cowork companion:
 
 ---
 
-## Tips for good prompts
+## Contract authoring rules
 
-The `prompt_generator` uses `description`, `files_hint`, and `acceptance_criteria`
-to ask qwen3:30b-a3b to write the actual session prompt.  Quality degrades if:
+`harness.task_contract.TaskSpec` validates the queue row and
+`harness.prompt_generator` deterministically renders the agent packet. The model
+does not write or reinterpret the contract. A launch is blocked when the contract
+is invalid or its dispatch checkpoint cannot be persisted.
 
-- `description` is vague ("fix stuff" → bad; "fetch_page must retry on 429 using urllib.error.HTTPError, with jitter" → good)
-- `files_hint` is empty (the LLM can't reference specific code)
-- `acceptance_criteria` has no verifiable conditions ("works correctly" → bad; "raises WebFetchError after 3 failed retries" → good)
+- Write an observable goal, not implementation theater.
+- Declare allowed and forbidden paths; do not rely on "touch no other file" prose.
+- Pair every acceptance criterion with loop-owned verification evidence.
+- Set explicit budgets for expensive or risky work.
+- Treat the generated prompt as a view of the contract, never the source of truth.
+
+Every non-dry launch appends an `AttemptRecord` checkpoint to
+`~/Library/Application Support/Jarvis/orchestrator/attempts.jsonl` before the
+session is claimed.
