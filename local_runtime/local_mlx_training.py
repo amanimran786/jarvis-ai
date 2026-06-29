@@ -464,6 +464,7 @@ def run_sft(
             "--batch-size", str(batch_size),
             "--adapter-path", str(output_dir),
             "-c", str(lora_config_path),
+            "--grad-checkpoint",  # reduce Metal memory usage with minimal speed penalty
         ]
 
         if val_jsonl:
