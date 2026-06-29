@@ -1,0 +1,26 @@
+[
+  {
+    "id": "sem_priority_youtube_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["YouTube", "PEM", "interview", "age appropriateness", "job search", "April 2026"],
+    "content": "ACTIVE PRIORITY AS OF APRIL 2026: YouTube PEM (Product Excellence Manager) interview for the Age Appropriateness team. This is the primary job search target. Pack file at kb/career/packs/youtube_pem_2026.md. Key context: YouTube was Aman's first job in 2018 — child safety enforcement. This role would be a full-circle return with 8 years of cross-platform expertise added. Neal Mohan's 2026 priority areas include responsible AI integration and creator safety. Aman's unique angle: he has operated on this exact problem (age-appropriate content enforcement) from the inside, then from the outside (Meta, TikTok, Google Play, Anthropic). He can see it from both sides of every platform.",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_priority_jarvis_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["Jarvis", "personal AI OS", "project", "building", "harness", "Python", "Claude"],
+    "content": "ACTIVE PROJECT: Building Jarvis — a personal AI operating system layered on top of Claude/GPT/Gemini. Architecture: Python harness with router (domain-aware module selection), 5-layer memory (L0 identity → L4 private vault), interview packs loaded on-demand via context assembler. Key design principle: 'The harness is the product. The model is a dependency.' Benchmark is not raw model intelligence — benchmark is personalized utility and operational leverage over raw Claude. Status as of April 2026: harness built, architecture validated (9/9 smoke tests), needs API key to go live and memory seeding to deliver real value.",
+    "privacy_tier": "semi_private"
+  },
+  {
+    "id": "sem_priority_technical_001",
+    "created_at": "2026-04-06T00:00:00+00:00",
+    "use_count": 0,
+    "tags": ["technical skills", "SQL", "Python", "system design", "AI safety tooling", "learning"],
+    "content": "Technical consolidation priority: SQL (already strong, deepening production-level analytical patterns), Python (operational tooling and automation), system design (practicing for technical interviews and Jarvis architecture work), AI safety tooling (building real tools, not just knowing the concepts). Context: Aman is not a traditional software engineer — he is an operator who codes. His technical work is in service of operational outcomes. He needs to demonstrate technical credibility without pretending to be a pure engineer.",
+    "privacy_tier": "semi_private"
+  }
+]

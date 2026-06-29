@@ -194,6 +194,36 @@ def render_status(rows: list[dict[str, Any]]) -> str:
 
 # ── Harvest / abort ───────────────────────────────────────────────────────────
 
+def _harvest_review(worktree: Path) -> dict[str, str]:
+    """Collect the complete lane diff from its trunk fork point.
+
+    ADE agents may commit before harvest, so ``git diff HEAD`` is not evidence of
+    what the lane changed. The merge-base view includes committed and uncommitted
+    tracked work; status adds untracked files to the review packet.
+    """
+    base = _merge_base(worktree, _trunk_ref()) or "HEAD"
+    try:
+        diff = subprocess.run(
+            ["git", "diff", "--stat", base],
+            cwd=str(worktree), capture_output=True, text=True, timeout=30, shell=False,
+        )
+        status = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=all"],
+            cwd=str(worktree), capture_output=True, text=True, timeout=30, shell=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return {"base": base, "diff_stat": "", "status": "", "error": str(exc)}
+    error = "" if diff.returncode == 0 and status.returncode == 0 else (
+        diff.stderr.strip() or status.stderr.strip() or "git review failed"
+    )
+    return {
+        "base": base,
+        "diff_stat": diff.stdout.rstrip(),
+        "status": status.stdout.rstrip(),
+        "error": error,
+    }
+
+
 def harvest(lane: str, assume_yes: bool) -> int:
     worktree = _REPO_ROOT / ".worktrees" / lane
     state = _load_state()
@@ -201,8 +231,17 @@ def harvest(lane: str, assume_yes: bool) -> int:
     if entry and entry.get("worktree_path"):
         worktree = Path(entry["worktree_path"])
 
-    print(f"[orchestrate] Diff for lane {lane!r} (worktree {worktree}):\n")
-    subprocess.run(["git", "diff", "--stat", "HEAD"], cwd=str(worktree), shell=False)
+    review = _harvest_review(worktree)
+    print(
+        f"[orchestrate] Diff for lane {lane!r} "
+        f"(worktree {worktree}, base {review['base'][:12]}):\n"
+    )
+    print(review["diff_stat"] or "(no tracked diff)")
+    if review["status"]:
+        print(f"\nWorking-tree status:\n{review['status']}")
+    if review["error"]:
+        print(f"\n[orchestrate] Could not build complete review packet: {review['error']}")
+        return 1
     if not assume_yes:
         print(f"\n[orchestrate] Review above. To merge into main run: orchestrate harvest {lane} --yes")
         return 0

@@ -1,0 +1,60 @@
+[
+  {
+    "route": "TechAssist",
+    "count": 14,
+    "avg_quality": 0.782,
+    "avg_routing": 0.625,
+    "avg_relevance": 0.69,
+    "demoted": false,
+    "recent": [
+      0.657,
+      0.907,
+      0.657,
+      0.907,
+      0.657,
+      0.907,
+      0.657,
+      0.907,
+      0.657,
+      0.907,
+      0.657,
+      0.907,
+      0.657,
+      0.907
+    ]
+  },
+  {
+    "route": "claude-sonnet-4-6",
+    "count": 7,
+    "avg_quality": 0.688,
+    "avg_routing": 0.75,
+    "avg_relevance": 0.725,
+    "demoted": false,
+    "recent": [
+      0.688,
+      0.688,
+      0.688,
+      0.688,
+      0.688,
+      0.688,
+      0.688
+    ]
+  },
+  {
+    "route": "Calendar",
+    "count": 7,
+    "avg_quality": 0.795,
+    "avg_routing": 0.9,
+    "avg_relevance": 0.55,
+    "demoted": false,
+    "recent": [
+      0.795,
+      0.795,
+      0.795,
+      0.795,
+      0.795,
+      0.795,
+      0.795
+    ]
+  }
+]

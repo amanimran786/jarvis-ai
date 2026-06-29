@@ -1,3 +1,8 @@
 2026-06-24 14:58:35,670 [INFO] Task added — session=Jarvis AI - assess and continue priority=5 task=Test add-task CLI
 2026-06-24 15:02:10,296 [WARNING] Failed to read bad_test.json: Expecting property name enclosed in double quotes: line 1 column 2 (char 1)
 2026-06-24 15:02:13,135 [INFO] Task added — session=Jarvis native tool-loop & telemetry priority=2 task=Validate usage_tracker token accounting matches brain_ollama actual usage
+2026-06-24 21:41:12,912 [WARNING] [jarvis-board] STALL detected — last active 6h 37m ago, current_task=None
+2026-06-24 21:41:12,912 [WARNING] [jarvis-audit] STALL detected — last active 6h 37m ago, current_task=None
+2026-06-24 21:51:24,124 [INFO] [WATCHDOG] Rate limit reset (hourly). Stalled sessions: jarvis-board. Writing RESUME_SIGNAL.json.
+2026-06-24 21:51:24,125 [INFO] RESUME_SIGNAL.json written — sessions: ['jarvis-board']
+2026-06-24 21:51:24,126 [INFO] Purged stale RESUME_SIGNAL.json

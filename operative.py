@@ -15,9 +15,13 @@ Usage:
   result = run_task("research X and save a report", on_progress=callback)
 """
 
+import datetime
+import logging
 import threading
 import uuid
 from typing import Callable
+
+log = logging.getLogger(__name__)
 
 from brains.brain_claude import ask_claude
 from config import DEFAULT_MODE, HAIKU, LOCAL_DEFAULT, VOICE_ENABLED
@@ -102,6 +106,9 @@ def run_task(
         if pf.fired:
             _prog("Plan pre-checked", f"{pf.verdict}: {pf.summary}")
 
+    # Persist task as running so a crash leaves a resumable checkpoint.
+    _persist_task_start(run_id, task, steps)
+
     step_results: dict[int, str] = {}
 
     for step in steps:
@@ -113,6 +120,9 @@ def run_task(
         step.ok     = ok
         step.result = result
         step_results[step.number] = result
+
+        # Checkpoint immediately so a crash after this step is recoverable.
+        _checkpoint_step(run_id, step)
 
         preview = result[:120].replace("\n", " ")
         status  = "✓" if ok else "✗"

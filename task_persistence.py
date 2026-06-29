@@ -368,6 +368,65 @@ def update_task_status(task_id: str, status: str, *, result: str = "") -> bool:
         return False
 
 
+def checkpoint_step(
+    run_id: str,
+    step_number: int,
+    description: str,
+    tool: str,
+    ok: bool,
+    result: str,
+) -> bool:
+    """Append a step-completion event for a running task."""
+    import datetime as _dt
+    event = {
+        "task_id": run_id,
+        "type": "step_complete",
+        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "step_number": step_number,
+        "description": description,
+        "tool": tool,
+        "ok": ok,
+        "result": result[:500],
+    }
+    return append_event(event, event_index=step_number)
+
+
+def find_interrupted_tasks() -> "list[dict[str, Any]]":
+    """Return tasks still in 'running' status (i.e. the process died mid-task).
+
+    Each returned dict includes a 'step_events' key with completed step data.
+    """
+    if not _ensure_schema():
+        return []
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                rows = conn.execute(
+                    "SELECT id, payload_json FROM tasks WHERE status='running' "
+                    "ORDER BY created_at DESC LIMIT 10"
+                ).fetchall()
+                if not rows:
+                    return []
+                task_ids = [row["id"] for row in rows]
+                tasks = [json.loads(row["payload_json"]) for row in rows]
+                placeholders = ",".join("?" for _ in task_ids)
+                event_rows = conn.execute(
+                    f"SELECT task_id, payload_json FROM task_events "
+                    f"WHERE task_id IN ({placeholders}) AND event_type='step_complete' "
+                    f"ORDER BY task_id, event_index ASC",
+                    task_ids,
+                ).fetchall()
+                events_by_id: dict[str, list] = {tid: [] for tid in task_ids}
+                for erow in event_rows:
+                    events_by_id[erow["task_id"]].append(json.loads(erow["payload_json"]))
+                for task in tasks:
+                    task["step_events"] = events_by_id.get(task.get("id", ""), [])
+                return tasks
+    except Exception:
+        log.exception("find_interrupted_tasks failed")
+        return []
+
+
 def reset_for_tests() -> None:
     global _INITIALIZED
     with _LOCK:
