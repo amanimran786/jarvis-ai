@@ -102,12 +102,12 @@ def status_text(
     # ── 3. Launch queue pending ───────────────────────────────────────────────
     lines.append("")
     lines.append("### Launch Queue (LAUNCH_QUEUE.json)")
-    lq_pending, lq_fired = _launch_queue_counts(lq_path)
+    lq_pending, lq_ready = _launch_queue_counts(lq_path)
     if lq_pending is None:
         lines.append("  (file not found)")
     else:
         lines.append(f"  pending : {lq_pending}")
-        lines.append(f"  fired   : {lq_fired}")
+        lines.append(f"  handoff ready : {lq_ready}")
 
     # ── 4. Recent log ─────────────────────────────────────────────────────────
     lines.append("")
@@ -178,7 +178,7 @@ def _load_active_sessions(path: Path) -> list[dict[str, Any]] | None:
 
 
 def _launch_queue_counts(path: Path) -> tuple[int | None, int | None]:
-    """Return (pending_count, fired_count) from LAUNCH_QUEUE.json."""
+    """Return (pending_count, handoff_ready_count) from LAUNCH_QUEUE.json."""
     if not path.exists():
         return None, None
     try:
@@ -187,8 +187,13 @@ def _launch_queue_counts(path: Path) -> tuple[int | None, int | None]:
         if not isinstance(queue, list):
             return 0, 0
         pending = sum(1 for e in queue if isinstance(e, dict) and e.get("status") == "pending")
-        fired   = sum(1 for e in queue if isinstance(e, dict) and e.get("status") == "fired")
-        return pending, fired
+        ready = sum(
+            1
+            for entry in queue
+            if isinstance(entry, dict)
+            and entry.get("status") in {"handoff_ready", "fired"}
+        )
+        return pending, ready
     except Exception as exc:
         log.warning("[LoopMonitor] Could not read %s: %s", path, exc)
         return 0, 0

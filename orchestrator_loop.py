@@ -314,7 +314,7 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             "base_ref":   base_ref,
             "prompt":     prompt,
             "queued_at":  now_str,
-            "status":     "pending",       # Cowork companion sets to "fired" after start_task
+            "status":     "pending",       # companion materializes a durable handoff envelope
             "domain":     spec.domain,
             "assigned_ai": spec.assigned_ai,
         }

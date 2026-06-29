@@ -5,9 +5,9 @@ Reads LAUNCH_QUEUE.json and fires pending session launches.
 Called by a scheduled task every 5 minutes.
 
 Since start_task is a Cowork MCP tool that cannot be called from Python directly,
-this module writes each pending launch as a file in PENDING_SESSIONS/{task_id}.txt
-containing the full prompt.  A human or the Cowork scheduler reads these files and
-fires the actual sessions.
+this module writes each launch attempt as a self-contained JSON envelope in
+PENDING_SESSIONS/{attempt_id}.json. A human or the Cowork scheduler reads these
+files and fires the actual sessions.
 
 Public API:
     process_launch_queue(queue_path) -> list[dict]
@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -55,19 +56,24 @@ def process_launch_queue(queue_path: str | Path = LAUNCH_QUEUE_PATH) -> list[dic
     """
     Read the launch queue and process all pending entries.
 
-    For each entry with status="pending":
-      1. Log it to MASTER_LOG.md
-      2. Mark it status="fired", add fired_at timestamp
-      3. Write the prompt to PENDING_SESSIONS/{task_id}.txt for human/Cowork pickup
+    For each pending or previously failed entry:
+      1. Atomically materialize PENDING_SESSIONS/{attempt_id}.json.
+      2. Mark it handoff_ready only after the pickup artifact exists.
+      3. Record artifact failures as launch_error so the attempt remains retryable.
 
-    Returns the list of entries that were processed (state mutated in-place).
-    The queue file is updated atomically after all entries are processed.
+    Returns entries whose pickup artifact exists and ready state was persisted.
+    The queue file is updated atomically after all candidates are processed.
     """
     queue_path = Path(queue_path)
     queue      = _load_queue(queue_path)
 
     processed: list[dict] = []
-    pending    = [e for e in queue if e.get("status") == "pending"]
+    pending = [
+        entry
+        for entry in queue
+        if isinstance(entry, dict)
+        and entry.get("status") in {"pending", "launch_error"}
+    ]
 
     if not pending:
         log.info("[CoworkLauncher] No pending entries in launch queue.")
@@ -77,35 +83,49 @@ def process_launch_queue(queue_path: str | Path = LAUNCH_QUEUE_PATH) -> list[dic
     pending_dir = _resolve_pending_dir(queue_path)
     pending_dir.mkdir(parents=True, exist_ok=True)
 
-    now = _now()
-
     for entry in pending:
         task_id    = entry.get("task_id", "unknown")
         session_id = entry.get("session_id", "unknown")
         prompt     = entry.get("prompt", "")
-        domain     = entry.get("domain", "general")
-        ai         = entry.get("assigned_ai", "claude")
 
-        # 1. Log to MASTER_LOG.md
-        _log_master(
-            f"[cowork_launcher] firing session {session_id} for task {task_id} "
-            f"(domain={domain}, ai={ai})",
-            queue_path,
-        )
-        log.info("[CoworkLauncher] Processing task %s → session %s", task_id, session_id)
+        log.info("[CoworkLauncher] Materializing task %s -> session %s", task_id, session_id)
 
-        # 2. Mark as fired
-        entry["status"]   = "fired"
-        entry["fired_at"] = now
+        try:
+            prompt_file = pending_dir / _artifact_name(entry)
+            _write_prompt_file(prompt_file, entry, prompt)
+            if not prompt_file.is_file():
+                raise OSError(f"pickup artifact was not materialized: {prompt_file}")
+        except Exception as exc:
+            entry["status"] = "launch_error"
+            entry.pop("fired_at", None)
+            entry["launch_error"] = f"{type(exc).__name__}: {exc}"
+            entry["launch_error_at"] = _now()
+            log.error(
+                "[CoworkLauncher] Pickup artifact failed for attempt %s: %s",
+                entry.get("attempt_id", "unknown"),
+                exc,
+            )
+            continue
 
-        # 3. Write prompt file for Cowork/human pickup
-        prompt_file = pending_dir / f"{task_id}.txt"
-        _write_prompt_file(prompt_file, entry, prompt)
-
+        entry["status"] = "handoff_ready"
+        entry["handoff_ready_at"] = _now()
+        entry.pop("fired_at", None)
+        entry.pop("launch_error", None)
+        entry.pop("launch_error_at", None)
         processed.append(entry)
 
     # Persist the updated queue atomically
     _save_queue(queue_path, queue)
+
+    for entry in processed:
+        _log_master(
+            f"[cowork_launcher] pickup ready for session {entry.get('session_id', 'unknown')} "
+            f"task {entry.get('task_id', 'unknown')} attempt "
+            f"{entry.get('attempt_id', 'unknown')} "
+            f"(domain={entry.get('domain', 'general')}, "
+            f"ai={entry.get('assigned_ai', 'claude')})",
+            queue_path,
+        )
 
     log.info("[CoworkLauncher] Processed %d pending entries.", len(processed))
     return processed
@@ -118,7 +138,7 @@ def run() -> None:
     1. Calls orchestrator_loop.run_loop() to harvest completed sessions and
        queue new launch records into LAUNCH_QUEUE.json.
     2. Calls process_launch_queue() to materialise pending records as
-       PENDING_SESSIONS/*.txt files ready for Cowork pickup.
+       PENDING_SESSIONS/*.json envelopes ready for Cowork pickup.
     """
     log.info("[CoworkLauncher] run() started")
 
@@ -135,7 +155,7 @@ def run() -> None:
 
     # Step 2: fire pending entries
     processed = process_launch_queue()
-    log.info("[CoworkLauncher] run() done — fired %d sessions.", len(processed))
+    log.info("[CoworkLauncher] run() done — prepared %d handoffs.", len(processed))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -156,43 +176,87 @@ def _load_queue(path: Path) -> list[dict[str, Any]]:
 
 def _save_queue(path: Path, queue: list[dict[str, Any]]) -> None:
     """Atomically write the queue back to disk."""
-    tmp = str(path) + ".launcher.tmp"
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(queue, f, indent=2)
-        os.replace(tmp, str(path))
-    except Exception as exc:
-        log.error("[CoworkLauncher] Could not save %s: %s", path, exc)
+    _atomic_write_json(path, queue)
+
+
+def _artifact_name(entry: dict[str, Any]) -> str:
+    """Return a path-safe, attempt-specific artifact name."""
+    attempt_id = entry.get("attempt_id")
+    if not isinstance(attempt_id, str) or not attempt_id:
+        raise ValueError("launch record requires a non-empty attempt_id")
+    if attempt_id in {".", ".."} or Path(attempt_id).name != attempt_id:
+        raise ValueError(f"unsafe attempt_id: {attempt_id!r}")
+    return f"{attempt_id}.json"
+
+
+def _write_prompt_file(path: Path, entry: dict[str, Any], prompt: Any) -> None:
+    """Atomically materialize an immutable, self-contained pickup envelope."""
+    required_fields = (
+        "task_id",
+        "attempt_id",
+        "session_id",
+        "contract_sha256",
+        "task_spec",
+        "repo_path",
+        "base_ref",
+    )
+    missing = [field for field in required_fields if field not in entry]
+    if "prompt" not in entry:
+        missing.append("prompt")
+    if missing:
+        raise ValueError(f"launch record missing fields: {', '.join(missing)}")
+    if not isinstance(entry["task_spec"], dict):
+        raise ValueError("launch record task_spec must be an object")
+
+    expected = {
+        "schema_version": 1,
+        "task_id": entry["task_id"],
+        "attempt_id": entry["attempt_id"],
+        "session_id": entry["session_id"],
+        "contract_sha256": entry["contract_sha256"],
+        "task_spec": entry["task_spec"],
+        "prompt": prompt,
+        "repo_path": entry["repo_path"],
+        "base_ref": entry["base_ref"],
+        "queued_at": entry.get("queued_at"),
+        "domain": entry.get("domain"),
+        "assigned_ai": entry.get("assigned_ai"),
+    }
+
+    if path.exists():
         try:
-            os.remove(tmp)
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise OSError(f"existing pickup artifact is unreadable: {path}") from exc
+        if not isinstance(existing, dict) or any(
+            existing.get(key) != value for key, value in expected.items()
+        ):
+            raise OSError(f"existing pickup artifact conflicts with attempt: {path}")
+        log.debug("[CoworkLauncher] Reusing pickup artifact: %s", path)
+        return
+
+    envelope = dict(expected)
+    envelope["materialized_at"] = _now()
+    _atomic_write_json(path, envelope)
+    log.debug("[CoworkLauncher] Wrote pickup artifact: %s", path)
+
+
+def _atomic_write_json(path: Path, value: Any) -> None:
+    """Write JSON to a sibling temp file and atomically replace the target."""
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "x", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            tmp.unlink()
         except OSError:
             pass
-
-
-def _write_prompt_file(path: Path, entry: dict[str, Any], prompt: str) -> None:
-    """Write a self-contained prompt file that Cowork/human can pick up."""
-    task_id    = entry.get("task_id", "unknown")
-    session_id = entry.get("session_id", "unknown")
-    domain     = entry.get("domain", "general")
-    ai         = entry.get("assigned_ai", "claude")
-    queued_at  = entry.get("queued_at", "unknown")
-    fired_at   = entry.get("fired_at", _now())
-
-    header = (
-        f"# Pending Session Launch\n"
-        f"# task_id:    {task_id}\n"
-        f"# session_id: {session_id}\n"
-        f"# domain:     {domain}\n"
-        f"# ai:         {ai}\n"
-        f"# queued_at:  {queued_at}\n"
-        f"# fired_at:   {fired_at}\n"
-        f"# ---\n\n"
-    )
-    try:
-        path.write_text(header + prompt, encoding="utf-8")
-        log.debug("[CoworkLauncher] Wrote prompt file: %s", path)
-    except Exception as exc:
-        log.error("[CoworkLauncher] Failed to write %s: %s", path, exc)
+        raise
 
 
 def _resolve_pending_dir(queue_path: Path) -> Path:
