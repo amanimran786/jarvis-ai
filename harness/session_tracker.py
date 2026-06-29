@@ -152,6 +152,39 @@ class SessionTracker:
         self._save(data)
         log.info("[SessionTracker] %s completed", session_id)
 
+    def fail(
+        self,
+        session_id: str,
+        error: str,
+        *,
+        failure_class: str = "agent_error",
+    ) -> None:
+        """Record a terminal runtime failure for loop-owned retry routing."""
+        data = self._load()
+        entry = self._find(data["sessions"], session_id)
+        if entry is None:
+            log.warning("[SessionTracker] fail() called for unknown session %s", session_id)
+            return
+        entry["status"] = "completed"
+        entry["last_updated"] = _now_iso()
+        entry["result_summary"] = error
+        entry["completion_evidence"] = None
+        entry["runtime_failure_class"] = failure_class
+        self._save(data)
+
+    def remove(self, session_id: str) -> bool:
+        """Remove one stale or superseded session identity."""
+        data = self._load()
+        before = len(data["sessions"])
+        data["sessions"] = [
+            session for session in data["sessions"]
+            if session.get("session_id") != session_id
+        ]
+        if len(data["sessions"]) == before:
+            return False
+        self._save(data)
+        return True
+
     def active_count(self) -> int:
         """Return the number of sessions currently in status 'active'."""
         return len([s for s in self._load()["sessions"] if s.get("status") == "active"])

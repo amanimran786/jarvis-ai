@@ -134,7 +134,14 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
 
         claimed_evidence = session.get("completion_evidence") or {}
         evidence: dict[str, Any] = {}
-        if session.get("repo_path") and session.get("base_ref"):
+        runtime_failure = str(session.get("runtime_failure_class") or "")
+        if runtime_failure:
+            verdict = CompletionVerdict(
+                "rejected",
+                runtime_failure,
+                (summary_text or "runtime execution failed",),
+            )
+        elif session.get("repo_path") and session.get("base_ref"):
             try:
                 evidence = collect_completion_evidence(
                     spec,
@@ -151,7 +158,9 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             evidence = claimed_evidence
 
         stored_hash = str(session.get("contract_sha256") or "")
-        if stored_hash and stored_hash != spec.contract_hash:
+        if runtime_failure:
+            pass
+        elif stored_hash and stored_hash != spec.contract_hash:
             verdict = CompletionVerdict(
                 "rejected",
                 "contract_mismatch",
@@ -277,6 +286,16 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             summary["blocked"] += 1
             _log_master(f"[orchestrator] task blocked — invalid contract: {exc}")
             continue
+        if spec.legacy_adapter:
+            _mark_task_blocked(
+                task,
+                "autonomous execution requires an explicit typed task contract",
+            )
+            summary["blocked"] += 1
+            _log_master(
+                f"[orchestrator] {spec.task_id} blocked — legacy contract is not executable"
+            )
+            continue
 
         # ── Step 4: Generate prompt ──────────────────────────────────────────
         repo_ctx = _build_repo_context()
@@ -308,6 +327,7 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             "task_id":    spec.task_id,
             "session_id": session_id,
             "attempt_id": attempt.attempt_id,
+            "attempt_number": attempt_number,
             "contract_sha256": spec.contract_hash,
             "task_spec":  spec.to_dict(),
             "repo_path":  str(_REPO_ROOT),
