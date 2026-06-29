@@ -36,9 +36,30 @@ from harness.loop_monitor import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _pending_entry(task_id: str = "TASK-001", **overrides) -> dict:
+    attempt_id = overrides.pop("attempt_id", f"attempt-{task_id.lower()}")
+    task_spec = {
+        "id": task_id,
+        "title": f"Implement {task_id}",
+        "goal": f"Implement {task_id}",
+        "description": f"Implement {task_id}",
+        "allowed_files": ["harness/cowork_launcher.py"],
+        "forbidden_files": [],
+        "acceptance_criteria": ["The launcher is correct"],
+        "verification_commands": ["pytest -q"],
+        "constraints": {"local_first": True},
+        "budget": {"max_attempts": 3},
+        "domain": "harness",
+        "assigned_ai": "claude",
+        "legacy_adapter": False,
+    }
     base = {
         "task_id":     task_id,
         "session_id":  f"jarvis-harness-claude-{task_id.lower().replace('-', '')}",
+        "attempt_id":  attempt_id,
+        "contract_sha256": "a" * 64,
+        "task_spec":   task_spec,
+        "repo_path":   "/tmp/jarvis-ai",
+        "base_ref":    "abc123",
         "prompt":      f"<role>Implement {task_id}.</role>",
         "queued_at":   "2026-06-28T00:00:00+00:00",
         "status":      "pending",
@@ -47,6 +68,10 @@ def _pending_entry(task_id: str = "TASK-001", **overrides) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def _artifact_path(root: str | Path, entry: dict) -> Path:
+    return Path(root) / "PENDING_SESSIONS" / f"{entry['attempt_id']}.json"
 
 
 def _active_session(session_id: str = "s1", task_id: str = "TASK-001",
@@ -121,24 +146,25 @@ class TestProcessLaunchQueue(unittest.TestCase):
 
     # ── test 6 ────────────────────────────────────────────────────────────────
     def test_prompt_file_written_to_pending_sessions(self):
-        """A .txt file is created under PENDING_SESSIONS/ for each fired entry."""
+        """An attempt-specific envelope is created for each fired entry."""
         with tempfile.TemporaryDirectory() as d:
             queue_path = Path(d) / "LAUNCH_QUEUE.json"
-            queue_path.write_text(json.dumps([_pending_entry("TASK-007")]), encoding="utf-8")
+            entry = _pending_entry("TASK-007")
+            queue_path.write_text(json.dumps([entry]), encoding="utf-8")
             process_launch_queue(queue_path)
-            prompt_file = Path(d) / "PENDING_SESSIONS" / "TASK-007.txt"
+            prompt_file = _artifact_path(d, entry)
             self.assertTrue(prompt_file.exists(), f"Expected {prompt_file} to exist")
 
     # ── test 7 ────────────────────────────────────────────────────────────────
     def test_prompt_file_contains_prompt_text(self):
-        """The written .txt file includes the original prompt."""
+        """The written envelope includes the original prompt."""
         with tempfile.TemporaryDirectory() as d:
             queue_path = Path(d) / "LAUNCH_QUEUE.json"
             entry = _pending_entry("TASK-008", prompt="UNIQUE_PROMPT_CONTENT_XYZ")
             queue_path.write_text(json.dumps([entry]), encoding="utf-8")
             process_launch_queue(queue_path)
-            content = (Path(d) / "PENDING_SESSIONS" / "TASK-008.txt").read_text()
-        self.assertIn("UNIQUE_PROMPT_CONTENT_XYZ", content)
+            envelope = json.loads(_artifact_path(d, entry).read_text())
+        self.assertEqual(envelope["prompt"], "UNIQUE_PROMPT_CONTENT_XYZ")
 
     # ── test 8 ────────────────────────────────────────────────────────────────
     def test_non_pending_entries_are_skipped(self):
@@ -168,6 +194,121 @@ class TestProcessLaunchQueue(unittest.TestCase):
 
         self.assertEqual(on_disk[0]["status"], "fired")
         self.assertIn("fired_at", on_disk[0])
+
+    def test_envelope_contains_exact_launch_contract(self):
+        """Pickup artifacts carry all attempt and contract data without reconstruction."""
+        with tempfile.TemporaryDirectory() as d:
+            queue_path = Path(d) / "LAUNCH_QUEUE.json"
+            entry = _pending_entry("TASK-010")
+            queue_path.write_text(json.dumps([entry]), encoding="utf-8")
+
+            process_launch_queue(queue_path)
+
+            envelope = json.loads(_artifact_path(d, entry).read_text())
+
+        for field in (
+            "attempt_id",
+            "session_id",
+            "contract_sha256",
+            "task_spec",
+            "prompt",
+            "repo_path",
+            "base_ref",
+        ):
+            self.assertEqual(envelope[field], entry[field])
+
+    def test_artifact_write_failure_is_recorded_and_not_fired(self):
+        """A failed pickup write leaves the launch retryable instead of fired."""
+        with tempfile.TemporaryDirectory() as d:
+            queue_path = Path(d) / "LAUNCH_QUEUE.json"
+            entry = _pending_entry("TASK-011")
+            queue_path.write_text(json.dumps([entry]), encoding="utf-8")
+
+            with patch(
+                "harness.cowork_launcher._write_prompt_file",
+                side_effect=OSError("disk full"),
+            ):
+                result = process_launch_queue(queue_path)
+
+            on_disk = json.loads(queue_path.read_text())[0]
+
+        self.assertEqual(result, [])
+        self.assertEqual(on_disk["status"], "launch_error")
+        self.assertNotIn("fired_at", on_disk)
+        self.assertIn("disk full", on_disk["launch_error"])
+
+    def test_launch_error_retries_same_attempt_idempotently(self):
+        """A failed attempt becomes fired only after its artifact exists."""
+        with tempfile.TemporaryDirectory() as d:
+            queue_path = Path(d) / "LAUNCH_QUEUE.json"
+            entry = _pending_entry("TASK-012")
+            queue_path.write_text(json.dumps([entry]), encoding="utf-8")
+
+            with patch(
+                "harness.cowork_launcher._write_prompt_file",
+                side_effect=OSError("temporary failure"),
+            ):
+                process_launch_queue(queue_path)
+            result = process_launch_queue(queue_path)
+
+            on_disk = json.loads(queue_path.read_text())[0]
+            envelope = json.loads(_artifact_path(d, entry).read_text())
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(on_disk["status"], "fired")
+        self.assertNotIn("launch_error", on_disk)
+        self.assertEqual(envelope["attempt_id"], entry["attempt_id"])
+
+    def test_retry_attempts_for_same_task_get_distinct_envelopes(self):
+        """A later attempt cannot overwrite an earlier attempt's pickup artifact."""
+        with tempfile.TemporaryDirectory() as d:
+            queue_path = Path(d) / "LAUNCH_QUEUE.json"
+            first = _pending_entry(
+                "TASK-013",
+                attempt_id="attempt-first",
+                session_id="session-first",
+                prompt="first prompt",
+            )
+            second = _pending_entry(
+                "TASK-013",
+                attempt_id="attempt-second",
+                session_id="session-second",
+                prompt="second prompt",
+            )
+            queue_path.write_text(json.dumps([first, second]), encoding="utf-8")
+
+            result = process_launch_queue(queue_path)
+
+            first_envelope = json.loads(_artifact_path(d, first).read_text())
+            second_envelope = json.loads(_artifact_path(d, second).read_text())
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(first_envelope["prompt"], "first prompt")
+        self.assertEqual(second_envelope["prompt"], "second prompt")
+        self.assertNotEqual(_artifact_path(d, first), _artifact_path(d, second))
+
+    def test_queue_save_failure_propagates_and_retry_reuses_artifact(self):
+        """Queue persistence failure stays pending and does not rewrite the artifact."""
+        with tempfile.TemporaryDirectory() as d:
+            queue_path = Path(d) / "LAUNCH_QUEUE.json"
+            entry = _pending_entry("TASK-014")
+            queue_path.write_text(json.dumps([entry]), encoding="utf-8")
+
+            with patch(
+                "harness.cowork_launcher._save_queue",
+                side_effect=OSError("queue unavailable"),
+            ):
+                with self.assertRaisesRegex(OSError, "queue unavailable"):
+                    process_launch_queue(queue_path)
+
+            artifact = _artifact_path(d, entry)
+            before = artifact.read_bytes()
+            self.assertEqual(json.loads(queue_path.read_text())[0]["status"], "pending")
+
+            process_launch_queue(queue_path)
+
+            self.assertEqual(artifact.read_bytes(), before)
+            self.assertEqual(json.loads(queue_path.read_text())[0]["status"], "fired")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

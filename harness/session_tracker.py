@@ -81,6 +81,9 @@ class SessionTracker:
         *,
         attempt_id: str = "",
         contract_sha256: str = "",
+        attempt_number: int = 1,
+        repo_path: str = "",
+        base_ref: str = "",
     ) -> None:
         """
         Register that *session_id* has picked up *task_id*.
@@ -101,6 +104,9 @@ class SessionTracker:
             existing["completion_evidence"] = None
             existing["attempt_id"] = attempt_id
             existing["contract_sha256"] = contract_sha256
+            existing["attempt_number"] = attempt_number
+            existing["repo_path"] = repo_path
+            existing["base_ref"] = base_ref
         else:
             sessions.append({
                 "session_id":     session_id,
@@ -112,6 +118,9 @@ class SessionTracker:
                 "completion_evidence": None,
                 "attempt_id":     attempt_id,
                 "contract_sha256": contract_sha256,
+                "attempt_number": attempt_number,
+                "repo_path":      repo_path,
+                "base_ref":       base_ref,
             })
 
         self._save(data)

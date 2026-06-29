@@ -28,6 +28,7 @@ import datetime
 import json
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from harness.session_tracker import SessionTracker  # noqa: E402
+from harness.completion_verifier import (  # noqa: E402
+    CompletionEvidenceError,
+    collect_completion_evidence,
+)
+from harness.retry_policy import RetryAction, RetryDecision, decide_retry  # noqa: E402
 from harness.task_contract import (  # noqa: E402
     AttemptRecord,
     AttemptStore,
@@ -86,6 +92,7 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         "blocked":     int,   # launch-time contract/checkpoint failures
         "unverified":  int,   # completion claims missing loop evidence
         "rejected":    int,   # completion evidence failed a hard gate
+        "retried":     int,   # failed attempts returned to the executor queue
         "active_now":  int,   # sessions still running
         "dry_run":     bool,
     }
@@ -98,6 +105,7 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         "blocked": 0,
         "unverified": 0,
         "rejected": 0,
+        "retried": 0,
         "active_now": 0,
         "dry_run": dry_run,
     }
@@ -124,6 +132,24 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             summary["rejected"] += 1
             continue
 
+        claimed_evidence = session.get("completion_evidence") or {}
+        evidence: dict[str, Any] = {}
+        if session.get("repo_path") and session.get("base_ref"):
+            try:
+                evidence = collect_completion_evidence(
+                    spec,
+                    session["repo_path"],
+                    session["base_ref"],
+                )
+            except CompletionEvidenceError as exc:
+                _log_master(
+                    f"[orchestrator] evidence collection failed for {task_id}: {exc}"
+                )
+        else:
+            # Compatibility for sessions created before launch provenance was stored.
+            # Current launches always use loop-collected evidence above.
+            evidence = claimed_evidence
+
         stored_hash = str(session.get("contract_sha256") or "")
         if stored_hash and stored_hash != spec.contract_hash:
             verdict = CompletionVerdict(
@@ -132,17 +158,19 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                 ("task contract changed after dispatch",),
             )
         else:
-            verdict = evaluate_completion(spec, session.get("completion_evidence"))
+            verdict = evaluate_completion(spec, evidence)
 
         attempt_id = str(session.get("attempt_id") or f"untracked_{sid}")
+        attempt_number = int(session.get("attempt_number") or 1)
         completion_checkpoint = AttemptRecord.checkpoint(
             spec,
             sid,
             attempt_id,
             phase="completion_gate",
             status=verdict.status,
-            evidence=session.get("completion_evidence") or {},
+            evidence=evidence,
             failure_class=verdict.failure_class,
+            attempt_number=attempt_number,
         )
         try:
             attempt_store.append(completion_checkpoint)
@@ -159,18 +187,63 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             _log_master(f"[orchestrator] verified {sid} → task {task_id} DONE")
             log.info("[Loop] Harvested session %s (task %s)", sid, task_id)
         else:
-            queue_status = "unverified" if verdict.status == "unverified" else "blocked"
-            _mark_task_verification(
-                task_id,
-                queue_status,
+            remaining = evidence.get("remaining_budget", {}) if isinstance(evidence, dict) else {}
+            decision = decide_retry(
                 verdict.failure_class,
-                list(verdict.reasons),
-                session.get("completion_evidence") or {},
+                attempt_number,
+                spec.budget,
+                int(remaining.get("wall_time_seconds", spec.budget.wall_time_seconds)),
+                int(remaining.get("tool_calls", spec.budget.tool_calls)),
             )
-            summary["unverified" if queue_status == "unverified" else "rejected"] += 1
+            retry_checkpoint = AttemptRecord.checkpoint(
+                spec,
+                sid,
+                attempt_id,
+                phase="retry_policy",
+                status=decision.action.value,
+                evidence={
+                    "target": decision.target.value,
+                    "reason": decision.reason,
+                    "remaining_attempts": decision.remaining_attempts,
+                },
+                failure_class=decision.failure_class.value,
+                attempt_number=attempt_number,
+            )
+            try:
+                attempt_store.append(retry_checkpoint)
+            except OSError as exc:
+                _log_master(
+                    f"[orchestrator] retry checkpoint write failed for {task_id}: {exc}"
+                )
+            if decision.action is RetryAction.RETRY:
+                _mark_task_retry(task_id, decision)
+                queue_status = "queued"
+                summary["retried"] += 1
+            elif decision.action is RetryAction.ROUTE_TO_VERIFIER:
+                queue_status = "unverified"
+                _mark_task_verification(
+                    task_id,
+                    queue_status,
+                    verdict.failure_class,
+                    list(verdict.reasons),
+                    evidence,
+                    next_action=decision.action.value,
+                )
+                summary["unverified"] += 1
+            else:
+                queue_status = "blocked"
+                _mark_task_verification(
+                    task_id,
+                    queue_status,
+                    verdict.failure_class,
+                    list(verdict.reasons),
+                    evidence,
+                    next_action=decision.action.value,
+                )
+                summary["rejected"] += 1
             _log_master(
                 f"[orchestrator] {sid} → task {task_id} {queue_status.upper()} "
-                f"({verdict.failure_class})"
+                f"({verdict.failure_class}; {decision.action.value})"
             )
     tracker.purge_completed()
 
@@ -219,13 +292,26 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
 
         # ── Step 5: Write launch record ──────────────────────────────────────
         session_id = _session_id_for_task(spec.to_dict())
-        attempt = AttemptRecord.dispatched(spec, session_id)
+        attempt_number = int(task.get("attempt_number") or 1)
+        attempt = AttemptRecord.dispatched(
+            spec,
+            session_id,
+            attempt_number=attempt_number,
+        )
+        try:
+            base_ref = _git_head()
+        except RuntimeError as exc:
+            _mark_task_blocked(task, f"could not capture Git baseline: {exc}")
+            summary["blocked"] += 1
+            continue
         launch_record = {
             "task_id":    spec.task_id,
             "session_id": session_id,
             "attempt_id": attempt.attempt_id,
             "contract_sha256": spec.contract_hash,
             "task_spec":  spec.to_dict(),
+            "repo_path":  str(_REPO_ROOT),
+            "base_ref":   base_ref,
             "prompt":     prompt,
             "queued_at":  now_str,
             "status":     "pending",       # Cowork companion sets to "fired" after start_task
@@ -246,12 +332,38 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                     f"[orchestrator] {spec.task_id} blocked — checkpoint write failed: {exc}"
                 )
                 continue
-            _write_launch_record(launch_record)
+            if not _write_launch_record(launch_record):
+                delivery_failure = AttemptRecord.checkpoint(
+                    spec,
+                    session_id,
+                    attempt.attempt_id,
+                    phase="dispatch_delivery",
+                    status="failed",
+                    evidence={"target": str(LAUNCH_QUEUE_PATH)},
+                    failure_class="infrastructure_failure",
+                    attempt_number=attempt_number,
+                )
+                try:
+                    attempt_store.append(delivery_failure)
+                except OSError as exc:
+                    _log_master(
+                        f"[orchestrator] launch failure checkpoint write failed for "
+                        f"{spec.task_id}: {exc}"
+                    )
+                _mark_task_blocked(task, "launch queue delivery failed")
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} blocked — launch queue delivery failed"
+                )
+                continue
             tracker.claim(
                 spec.task_id,
                 session_id,
                 attempt_id=attempt.attempt_id,
                 contract_sha256=spec.contract_hash,
+                attempt_number=attempt_number,
+                repo_path=str(_REPO_ROOT),
+                base_ref=base_ref,
             )
             _mark_task_in_progress(spec.task_id, session_id)
 
@@ -350,6 +462,8 @@ def _mark_task_verification(
     failure_class: str,
     reasons: list[str],
     evidence: dict[str, Any],
+    *,
+    next_action: str = "",
 ) -> None:
     queue = _load_queue()
     for task in queue:
@@ -358,7 +472,22 @@ def _mark_task_verification(
             task["verification_failure_class"] = failure_class
             task["verification_reasons"] = reasons
             task["completion_evidence"] = evidence
+            task["next_action"] = next_action
             task["verified_at"] = _now()
+            break
+    _save_queue(queue)
+
+
+def _mark_task_retry(task_id: str, decision: RetryDecision) -> None:
+    queue = _load_queue()
+    for task in queue:
+        if _task_identity(task) == task_id:
+            task["status"] = "queued"
+            task["attempt_number"] = decision.attempt_number + 1
+            task["retry_failure_class"] = decision.failure_class.value
+            task["retry_reason"] = decision.reason
+            task["assigned_to"] = None
+            task["assigned_at"] = None
             break
     _save_queue(queue)
 
@@ -400,22 +529,28 @@ def _load_launch_queue() -> list[dict[str, Any]]:
         return []
 
 
-def _write_launch_record(record: dict[str, Any]) -> None:
-    """Append a launch record to LAUNCH_QUEUE.json (atomic write)."""
+def _write_launch_record(record: dict[str, Any]) -> bool:
+    """Append a launch record atomically and report whether it was persisted."""
     queue = _load_launch_queue()
     # Deduplicate by task_id+status=pending
     existing_ids = {r["task_id"] for r in queue if r.get("status") == "pending"}
     if record["task_id"] in existing_ids:
         log.debug("[Loop] task %s already pending in LAUNCH_QUEUE — skipping", record["task_id"])
-        return
+        return False
     queue.append(record)
     tmp = str(LAUNCH_QUEUE_PATH) + ".loop.tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(queue, f, indent=2)
         os.replace(tmp, str(LAUNCH_QUEUE_PATH))
+        return True
     except Exception as exc:
         log.error("[Loop] Could not write LAUNCH_QUEUE.json: %s", exc)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
 
 
 # ── Follow-up task generation ─────────────────────────────────────────────────
@@ -480,6 +615,20 @@ def _suggest_follow_ups(task: dict[str, Any], dry_run: bool = False) -> list[dic
 
 
 # ── Repo context helper ───────────────────────────────────────────────────────
+
+def _git_head() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        shell=False,
+    )
+    head = result.stdout.strip()
+    if result.returncode != 0 or not head:
+        raise RuntimeError(result.stderr.strip() or "git rev-parse HEAD failed")
+    return head
 
 def _build_repo_context() -> dict[str, Any]:
     """Gather lightweight repo context for prompt generation."""

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import datetime
 import json
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -402,6 +404,10 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         *,
         evidence: dict | None,
         contract_sha256: str | None = None,
+        attempt_number: int = 1,
+        task_override: dict | None = None,
+        repo_path: Path | None = None,
+        base_ref: str = "",
     ) -> tuple[dict, list[dict], list[dict]]:
         import orchestrator_loop as ol
 
@@ -417,7 +423,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         ol.MASTER_LOG_PATH = tmp / "MASTER_LOG.md"
         ol.ATTEMPT_LOG_PATH = tmp / "attempts.jsonl"
 
-        task = _sample_task(
+        task = task_override or _sample_task(
             status="in_progress",
             verification_commands=["python -m pytest tests/test_web_search.py -q"],
         )
@@ -434,6 +440,9 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             "session-a",
             attempt_id="attempt_123",
             contract_sha256=contract_sha256 or spec.contract_hash,
+            attempt_number=attempt_number,
+            repo_path=str(repo_path) if repo_path else "",
+            base_ref=base_ref,
         )
         tracker.complete("session-a", "agent says done", evidence=evidence)
         ol.SessionTracker = _TmpTracker
@@ -621,6 +630,28 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             self.assertEqual(queue[0]["status"], "blocked")
             self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
 
+    def test_launch_queue_write_failure_does_not_claim_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            with patch("orchestrator_loop._write_launch_record", return_value=False):
+                result = self._run_loop_isolated(
+                    tmp, dry_run=False, max_concurrent=1
+                )
+
+            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
+            sessions_path = tmp / "ACTIVE_SESSIONS.json"
+            attempts = [
+                json.loads(line)
+                for line in (tmp / "attempts.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(result["launched"], 0)
+            self.assertEqual(result["blocked"], 1)
+            self.assertEqual(result["active_now"], 0)
+            self.assertEqual(queue[0]["status"], "blocked")
+            self.assertFalse(sessions_path.exists())
+            self.assertEqual(attempts[-1]["phase"], "dispatch_delivery")
+            self.assertEqual(attempts[-1]["failure_class"], "infrastructure_failure")
+
     def test_agent_summary_without_loop_evidence_is_unverified(self):
         with tempfile.TemporaryDirectory() as d:
             result, queue, attempts = self._run_completed_isolated(
@@ -630,8 +661,10 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         self.assertEqual(result["harvested"], 0)
         self.assertEqual(result["unverified"], 1)
         self.assertEqual(queue[0]["status"], "unverified")
-        self.assertEqual(attempts[-1]["phase"], "completion_gate")
-        self.assertEqual(attempts[-1]["status"], "unverified")
+        self.assertEqual(attempts[-2]["phase"], "completion_gate")
+        self.assertEqual(attempts[-2]["status"], "unverified")
+        self.assertEqual(attempts[-1]["phase"], "retry_policy")
+        self.assertEqual(attempts[-1]["status"], "route_to_verifier")
 
     def test_loop_evidence_promotes_verified_task_to_done(self):
         evidence = {
@@ -654,7 +687,97 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         self.assertEqual(queue[0]["status"], "done")
         self.assertEqual(attempts[-1]["status"], "verified")
 
-    def test_failed_loop_verification_blocks_completion(self):
+    def test_harvest_collects_git_and_command_evidence_when_agent_supplies_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            worktree = tmp / "worktree"
+            worktree.mkdir()
+
+            def git(*args: str) -> str:
+                result = subprocess.run(
+                    ["git", *args],
+                    cwd=worktree,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    shell=False,
+                )
+                return result.stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.email", "test@example.com")
+            git("config", "user.name", "Loop Test")
+            (worktree / "tracked.txt").write_text("base\n", encoding="utf-8")
+            git("add", "tracked.txt")
+            git("commit", "-m", "base")
+            base_ref = git("rev-parse", "HEAD")
+            (worktree / "tracked.txt").write_text("done\n", encoding="utf-8")
+
+            source = "print('verified')"
+            command = f"{shlex.quote(sys.executable)} -c {shlex.quote(source)}"
+            task = _sample_task(
+                status="in_progress",
+                files_hint=["tracked.txt"],
+                verification_commands=[command],
+            )
+            result, queue, attempts = self._run_completed_isolated(
+                tmp,
+                evidence=None,
+                task_override=task,
+                repo_path=worktree,
+                base_ref=base_ref,
+            )
+
+        self.assertEqual(result["harvested"], 1)
+        self.assertEqual(queue[0]["status"], "done")
+        completion = attempts[-1]
+        self.assertEqual(completion["phase"], "completion_gate")
+        self.assertEqual(completion["status"], "verified")
+        self.assertEqual(completion["evidence"]["observer"], "loop")
+        self.assertEqual(completion["evidence"]["changed_files"], ["tracked.txt"])
+        self.assertEqual(completion["evidence"]["commands"][0]["exit_code"], 0)
+
+    def test_launch_provenance_replaces_agent_supplied_loop_evidence(self):
+        claimed_evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [
+                {
+                    "command": "python -m pytest tests/test_web_search.py -q",
+                    "exit_code": 0,
+                }
+            ],
+            "policy_findings": [],
+        }
+        observed_evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [
+                {
+                    "command": "python -m pytest tests/test_web_search.py -q",
+                    "exit_code": 1,
+                }
+            ],
+            "policy_findings": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            with patch(
+                "orchestrator_loop.collect_completion_evidence",
+                return_value=observed_evidence,
+            ):
+                result, queue, attempts = self._run_completed_isolated(
+                    Path(d),
+                    evidence=claimed_evidence,
+                    repo_path=Path(d),
+                    base_ref="base-ref",
+                )
+
+        self.assertEqual(result["harvested"], 0)
+        self.assertEqual(result["retried"], 1)
+        self.assertEqual(queue[0]["status"], "queued")
+        self.assertEqual(attempts[-2]["evidence"], observed_evidence)
+
+    def test_failed_loop_verification_queues_retry_within_budget(self):
         evidence = {
             "observer": "loop",
             "changed_files": ["harness/web_search.py"],
@@ -672,10 +795,36 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             )
 
         self.assertEqual(result["harvested"], 0)
+        self.assertEqual(result["retried"], 1)
+        self.assertEqual(queue[0]["status"], "queued")
+        self.assertEqual(queue[0]["retry_failure_class"], "test_failure")
+        self.assertEqual(queue[0]["attempt_number"], 2)
+        self.assertEqual(attempts[-1]["phase"], "retry_policy")
+        self.assertEqual(attempts[-1]["status"], "retry")
+        self.assertEqual(attempts[-1]["failure_class"], "test_failure")
+
+    def test_failed_loop_verification_escalates_when_attempt_budget_exhausted(self):
+        evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [
+                {
+                    "command": "python -m pytest tests/test_web_search.py -q",
+                    "exit_code": 1,
+                }
+            ],
+            "policy_findings": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            result, queue, attempts = self._run_completed_isolated(
+                Path(d), evidence=evidence, attempt_number=3
+            )
+
         self.assertEqual(result["rejected"], 1)
         self.assertEqual(queue[0]["status"], "blocked")
-        self.assertEqual(queue[0]["verification_failure_class"], "test_failure")
-        self.assertEqual(attempts[-1]["failure_class"], "test_failure")
+        self.assertEqual(queue[0]["next_action"], "escalate")
+        self.assertEqual(attempts[-2]["attempt_number"], 3)
+        self.assertEqual(attempts[-1]["attempt_number"], 3)
 
     def test_contract_change_after_dispatch_blocks_completion(self):
         evidence = {
@@ -693,7 +842,8 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
 
         self.assertEqual(result["rejected"], 1)
         self.assertEqual(queue[0]["verification_failure_class"], "contract_mismatch")
-        self.assertEqual(attempts[-1]["status"], "rejected")
+        self.assertEqual(attempts[-2]["status"], "rejected")
+        self.assertEqual(attempts[-1]["status"], "escalate")
 
 
 if __name__ == "__main__":

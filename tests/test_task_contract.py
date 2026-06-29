@@ -53,6 +53,18 @@ def test_legacy_task_gets_stable_compatibility_id():
     assert first.legacy_adapter is True
 
 
+def test_serialized_legacy_contract_preserves_identity_and_hash():
+    original = TaskSpec.from_queue_task(
+        {"task": "Run the focused regression suite", "notes": "Capture failures"}
+    )
+
+    reparsed = TaskSpec.from_queue_task(original.to_dict())
+
+    assert reparsed.task_id == original.task_id
+    assert reparsed.legacy_adapter is True
+    assert reparsed.contract_hash == original.contract_hash
+
+
 @pytest.mark.parametrize("unsafe", ["/tmp/file.py", "../secret", "src/../../secret"])
 def test_task_spec_rejects_paths_outside_worktree(unsafe):
     with pytest.raises(ContractError, match="unsafe path"):
