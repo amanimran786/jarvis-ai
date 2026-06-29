@@ -297,7 +297,7 @@ MLX_TRAINING_MODEL   = os.getenv("JARVIS_MLX_TRAINING_MODEL", LOCAL_QWEN3_MID)
 MLX_NUM_ITERS        = _env_int("JARVIS_MLX_NUM_ITERS", 100)
 MLX_LEARNING_RATE    = float(os.getenv("JARVIS_MLX_LEARNING_RATE", "1e-5"))
 MLX_LORA_RANK        = _env_int("JARVIS_MLX_LORA_RANK", 8)
-MLX_BATCH_SIZE       = _env_int("JARVIS_MLX_BATCH_SIZE", 4)
+MLX_BATCH_SIZE       = _env_int("JARVIS_MLX_BATCH_SIZE", 1)  # 2+ OOMs on Metal with Qwen3-8B-4bit; 1 is safe
 
 
 def provider_runtime_config() -> dict:

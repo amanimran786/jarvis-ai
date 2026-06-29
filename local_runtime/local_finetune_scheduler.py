@@ -833,8 +833,9 @@ class OvernightTrainer:
             model_tag,
             train_jsonl=pack_path,
             # Use config default (JARVIS_MLX_NUM_ITERS, default 100).
-            # 74 examples × batch_size 4 ≈ 18 steps/epoch → 100 iters ≈ 5.4 epochs.
-            # At ~18s/iter that's ~30 minutes — well within the 7-hour window.
+            # batch_size=1 to avoid Metal GPU OOM on Qwen3-8B-4bit; --grad-checkpoint also added.
+            # 100 iters at batch_size 1 ≈ 0.8 epochs for ~128 examples — consider raising
+            # JARVIS_MLX_NUM_ITERS to 300+ for more effective training.
             dry_run=False,
         )
 
