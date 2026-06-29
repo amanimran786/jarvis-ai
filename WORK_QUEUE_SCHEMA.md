@@ -82,7 +82,7 @@ companion reads `LAUNCH_QUEUE.json` to fire sessions.
 ```
 queued
   │
-  ▼ (orchestrator picks up, writes to LAUNCH_QUEUE, Cowork fires start_task)
+  ▼ (orchestrator picks up and writes a durable launch handoff)
 in_progress
   │
   ▼ (session reports completion through SessionTracker.complete())
@@ -129,11 +129,14 @@ Written by `orchestrator_loop.py`; read and cleared by the Cowork scheduled task
 ]
 ```
 
-The Cowork companion:
+The Cowork companion currently:
 1. Reads `LAUNCH_QUEUE.json`
-2. For each record with `status == "pending"`: calls `start_task(session_id, prompt)`
-3. Updates `status` to `"fired"` in the file
-4. On error: sets `status` to `"error"` with an `error` field
+2. Materializes an attempt-specific JSON envelope under `PENDING_SESSIONS/`
+3. Updates `status` to `"handoff_ready"` only after that artifact is durable
+4. On error: sets `status` to `"launch_error"` so the same attempt can retry
+
+`handoff_ready` does not mean an agent is running. Actual local execution is a
+separate transition owned by the `task_runtime` adapter.
 
 ---
 

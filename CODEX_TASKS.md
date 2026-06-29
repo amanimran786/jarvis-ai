@@ -47,7 +47,7 @@ Completed: added a standalone PyQt6 tray with live green/yellow/red status, Jarv
 - PyQt6 is already a dependency — check `requirements.txt` before adding anything
 - Commit: `[CODEX] feat(ui): PyQt6 system tray status panel`
 
-### CODEX-5: Wire the autonomous loop scheduler (HIGH)
+### CODEX-5: Wire the autonomous loop scheduler (HIGH — partial)
 
 The loop harness is built (`orchestrator_loop.py`, `LAUNCH_QUEUE.json`). What's missing is the
 companion script that actually fires Cowork sessions and harvests completions.
@@ -55,7 +55,7 @@ companion script that actually fires Cowork sessions and harvests completions.
 Build `harness/cowork_launcher.py`:
 - Read `LAUNCH_QUEUE.json`; for each entry with `status == "pending"`:
   - Append to `PENDING_SESSIONS.json` with the full prompt and metadata
-  - Mark the entry `"fired"` and write back to `LAUNCH_QUEUE.json`
+  - Mark the entry `"handoff_ready"` and write back to `LAUNCH_QUEUE.json`
 - Call `orchestrator_loop.run_loop()` to harvest completions and enqueue new work
 - Script must be idempotent — safe to call every 5 minutes even when nothing is pending
 
@@ -70,6 +70,11 @@ Wire as a launchd job on macOS:
   - Uninstall: `launchctl unload ~/Library/LaunchAgents/com.jarvis.loop.plist`
 
 Commit: `[CODEX] feat(harness): cowork_launcher + launchd plist for 5-min loop`
+
+Current truth: durable attempt-specific handoff envelopes and launchd scheduling
+exist. No Python process can call Cowork `start_task`; `handoff_ready` is therefore
+not a running session. The local `task_runtime` execution adapter is the remaining
+step before this task is complete.
 
 ### CODEX-6: /history command with Rich CLI (MEDIUM)
 

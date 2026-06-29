@@ -124,25 +124,25 @@ class TestProcessLaunchQueue(unittest.TestCase):
         self.assertEqual(result[0]["task_id"], "TASK-001")
 
     # ── test 4 ────────────────────────────────────────────────────────────────
-    def test_entry_status_set_to_fired(self):
-        """Processed entries must have status='fired'."""
+    def test_entry_status_set_to_handoff_ready(self):
+        """Materialized entries are ready for pickup, not claimed as running."""
         with tempfile.TemporaryDirectory() as d:
             queue_path = Path(d) / "LAUNCH_QUEUE.json"
             queue_path.write_text(json.dumps([_pending_entry()]), encoding="utf-8")
             result = process_launch_queue(queue_path)
 
-        self.assertEqual(result[0]["status"], "fired")
+        self.assertEqual(result[0]["status"], "handoff_ready")
 
     # ── test 5 ────────────────────────────────────────────────────────────────
-    def test_entry_gets_fired_at_timestamp(self):
-        """Processed entries must have a fired_at ISO timestamp."""
+    def test_entry_gets_handoff_ready_timestamp(self):
+        """Processed entries record when the handoff became durable."""
         with tempfile.TemporaryDirectory() as d:
             queue_path = Path(d) / "LAUNCH_QUEUE.json"
             queue_path.write_text(json.dumps([_pending_entry()]), encoding="utf-8")
             result = process_launch_queue(queue_path)
 
-        fired_at = result[0].get("fired_at", "")
-        self.assertTrue(fired_at.startswith("202"), f"fired_at looks wrong: {fired_at!r}")
+        ready_at = result[0].get("handoff_ready_at", "")
+        self.assertTrue(ready_at.startswith("202"), f"ready timestamp looks wrong: {ready_at!r}")
 
     # ── test 6 ────────────────────────────────────────────────────────────────
     def test_prompt_file_written_to_pending_sessions(self):
@@ -192,8 +192,8 @@ class TestProcessLaunchQueue(unittest.TestCase):
             process_launch_queue(queue_path)
             on_disk = json.loads(queue_path.read_text())
 
-        self.assertEqual(on_disk[0]["status"], "fired")
-        self.assertIn("fired_at", on_disk[0])
+        self.assertEqual(on_disk[0]["status"], "handoff_ready")
+        self.assertIn("handoff_ready_at", on_disk[0])
 
     def test_envelope_contains_exact_launch_contract(self):
         """Pickup artifacts carry all attempt and contract data without reconstruction."""
@@ -255,7 +255,7 @@ class TestProcessLaunchQueue(unittest.TestCase):
             envelope = json.loads(_artifact_path(d, entry).read_text())
 
         self.assertEqual(len(result), 1)
-        self.assertEqual(on_disk["status"], "fired")
+        self.assertEqual(on_disk["status"], "handoff_ready")
         self.assertNotIn("launch_error", on_disk)
         self.assertEqual(envelope["attempt_id"], entry["attempt_id"])
 
@@ -308,7 +308,9 @@ class TestProcessLaunchQueue(unittest.TestCase):
             process_launch_queue(queue_path)
 
             self.assertEqual(artifact.read_bytes(), before)
-            self.assertEqual(json.loads(queue_path.read_text())[0]["status"], "fired")
+            self.assertEqual(
+                json.loads(queue_path.read_text())[0]["status"], "handoff_ready"
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -507,17 +509,18 @@ class TestLoopMonitorHelpers(unittest.TestCase):
             result = _work_queue_counts(Path(d) / "nope.json")
         self.assertIsNone(result)
 
-    def test_launch_queue_counts_pending_and_fired(self):
+    def test_launch_queue_counts_pending_and_handoff_ready(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "LAUNCH_QUEUE.json"
             path.write_text(json.dumps([
                 {"status": "pending"},
                 {"status": "pending"},
+                {"status": "handoff_ready"},
                 {"status": "fired"},
             ]), encoding="utf-8")
-            pending, fired = _launch_queue_counts(path)
+            pending, ready = _launch_queue_counts(path)
         self.assertEqual(pending, 2)
-        self.assertEqual(fired, 1)
+        self.assertEqual(ready, 2)
 
 
 if __name__ == "__main__":
