@@ -47,7 +47,12 @@ Completed: added a standalone PyQt6 tray with live green/yellow/red status, Jarv
 - PyQt6 is already a dependency — check `requirements.txt` before adding anything
 - Commit: `[CODEX] feat(ui): PyQt6 system tray status panel`
 
-### CODEX-5: Wire the autonomous loop scheduler (HIGH — partial)
+### ✅ CODEX-5: Wire the autonomous loop scheduler (HIGH)
+
+Completed: connected durable handoffs to isolated local `task_runtime` execution,
+polling, approval states, timeout cancellation, completion harvesting, and
+classified retry failures. Retired three false active sessions and blocked
+untyped legacy rows from autonomous execution.
 
 The loop harness is built (`orchestrator_loop.py`, `LAUNCH_QUEUE.json`). What's missing is the
 companion script that actually fires Cowork sessions and harvests completions.
@@ -71,10 +76,9 @@ Wire as a launchd job on macOS:
 
 Commit: `[CODEX] feat(harness): cowork_launcher + launchd plist for 5-min loop`
 
-Current truth: durable attempt-specific handoff envelopes and launchd scheduling
-exist. No Python process can call Cowork `start_task`; `handoff_ready` is therefore
-not a running session. The local `task_runtime` execution adapter is the remaining
-step before this task is complete.
+Current truth: `handoff_ready` records are submitted through local `task_runtime`
+with isolated worktrees. The scheduler persists runtime correlation, polls across
+invocations, and only hands successful terminal work to the completion verifier.
 
 ### CODEX-6: /history command with Rich CLI (MEDIUM)
 

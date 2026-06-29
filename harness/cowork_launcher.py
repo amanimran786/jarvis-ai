@@ -142,7 +142,12 @@ def run() -> None:
     """
     log.info("[CoworkLauncher] run() started")
 
-    # Step 1: harvest completions and generate new launch records
+    from harness.runtime_launcher import process_runtime_queue
+
+    # Step 1: poll runtime work so terminal outcomes can be harvested.
+    process_runtime_queue(LAUNCH_QUEUE_PATH)
+
+    # Step 2: harvest completions and generate new launch records.
     try:
         from orchestrator_loop import run_loop  # noqa: PLC0415
         summary = run_loop()
@@ -153,9 +158,14 @@ def run() -> None:
     except Exception as exc:
         log.error("[CoworkLauncher] orchestrator_loop.run_loop() failed: %s", exc)
 
-    # Step 2: fire pending entries
+    # Step 3: materialize and submit newly queued handoffs.
     processed = process_launch_queue()
-    log.info("[CoworkLauncher] run() done — prepared %d handoffs.", len(processed))
+    runtime_changes = process_runtime_queue(LAUNCH_QUEUE_PATH)
+    log.info(
+        "[CoworkLauncher] run() done — prepared %d handoffs, runtime changes=%d.",
+        len(processed),
+        len(runtime_changes),
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

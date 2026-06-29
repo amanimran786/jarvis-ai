@@ -526,7 +526,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             self.assertEqual(launch["attempt_id"], attempts[0]["attempt_id"])
             self.assertEqual(attempts[0]["phase"], "dispatch")
 
-    def test_legacy_queue_task_launches_through_compatibility_contract(self):
+    def test_legacy_queue_task_is_blocked_from_autonomous_execution(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             legacy = {
@@ -544,12 +544,11 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
                     max_concurrent=1,
                 )
 
-            launch = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())[0]
             queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
 
-            self.assertTrue(launch["task_id"].startswith("LEGACY-"))
-            self.assertTrue(launch["task_spec"]["legacy_adapter"])
-            self.assertEqual(queue[0]["status"], "in_progress")
+            self.assertEqual(queue[0]["status"], "blocked")
+            self.assertIn("explicit typed task contract", queue[0]["blocked_reason"])
+            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
 
     def test_no_duplicate_pending_entries(self):
         """Running the loop twice should not create duplicate pending records."""
