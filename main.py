@@ -398,6 +398,24 @@ def _start_deferred_startup_tasks() -> None:
     ).start()
 
 
+def _announce_interrupted_tasks() -> None:
+    """Print a startup notice if any tasks were interrupted mid-run."""
+    try:
+        import task_persistence as _tp
+        interrupted = _tp.find_interrupted_tasks()
+        if not interrupted:
+            return
+        lines = [f"\n[Jarvis] {len(interrupted)} interrupted task(s) found — type /resume to continue:"]
+        for t in interrupted:
+            done = len(t.get("step_events", []))
+            total = t.get("steps_total", "?")
+            desc = t.get("task", t.get("id", "?"))[:70]
+            lines.append(f"  • {t['id']}  ({done}/{total} steps)  {desc}")
+        print("\n".join(lines) + "\n")
+    except Exception:
+        logging.debug("[Main] interrupted task check failed", exc_info=True)
+
+
 def _start_harness_heartbeat() -> None:
     """Beat ORCHESTRATOR_STATUS.json every 30 s via harness/loop.py."""
     import time
@@ -503,6 +521,7 @@ def _run():
     import task_runtime as _task_runtime
     _task_runtime.bootstrap()
     _start_harness_heartbeat()
+    _announce_interrupted_tasks()
 
     _start_deferred_startup_tasks()
 
