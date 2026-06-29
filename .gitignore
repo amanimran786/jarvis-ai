@@ -114,6 +114,17 @@ training/benchmarks.jsonl
 training/overnight_log.jsonl
 training/overnight_state.json
 
+# Runtime snapshots and training traces
+snapshots/
+training/execution_traces/
+logs/*.jsonl
+logs/*.log
+ACTIVE_SESSIONS.json
+LAUNCH_QUEUE.json
+ORCHESTRATOR_STATUS.json
+RESUME_SIGNAL.json
+evals/
+
 # Runtime SQLite databases
 *.db
 *.sqlite

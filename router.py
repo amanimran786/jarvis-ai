@@ -923,6 +923,32 @@ def _optimize_command_reply(raw_input: str) -> str:
         return f"/optimize unavailable: {exc}"
 
 
+def _is_status_command(lower: str) -> bool:
+    """Trigger: /status — autonomous loop status dashboard."""
+    stripped = lower.strip()
+    return stripped in ("/status", "loop status", "status") or any(
+        phrase in lower for phrase in (
+            "/status",
+            "loop status",
+            "orchestrator status",
+            "work queue status",
+            "task queue status",
+            "active sessions status",
+            "show loop status",
+            "show orchestrator",
+            "autonomous loop status",
+        )
+    )
+
+
+def _status_command_reply() -> str:
+    try:
+        from harness import loop_monitor
+        return loop_monitor.status_text()
+    except Exception as exc:
+        return f"/status unavailable: {exc}"
+
+
 def _is_task_command(lower: str) -> bool:
     """Trigger: /task <description> — run an operative task end-to-end."""
     stripped = lower.strip()
@@ -1020,6 +1046,93 @@ def _cancel_task_reply() -> str:
         _active_task_cancel.set()
         return "Cancelling — task will stop after the current step."
     return "No active task to cancel."
+
+
+# ── /resume command ─────────────────────────────────────────────────────────────
+
+def _is_resume_command(lower: str) -> bool:
+    """Trigger: /resume [run_id] — resume the most-recent interrupted task."""
+    stripped = lower.strip()
+    return stripped.startswith("/resume") or stripped in ("resume task", "resume last task")
+
+
+def _resume_command_stream(user_input: str):
+    """Stream progress while resuming an interrupted task."""
+    import queue as _queue
+    import task_persistence as _tp
+
+    # Parse optional run_id from input: "/resume run_abc123"
+    parts = user_input.strip().split(None, 1)
+    explicit_run_id = parts[1].strip() if len(parts) > 1 and parts[1].strip().startswith("run_") else ""
+
+    interrupted = _tp.find_interrupted_tasks()
+    if not interrupted:
+        yield "No interrupted tasks found — nothing to resume."
+        return
+
+    if explicit_run_id:
+        target = next((t for t in interrupted if t.get("id") == explicit_run_id), None)
+        if target is None:
+            yield f"No interrupted task with id {explicit_run_id!r}.\n\nInterrupted tasks:\n"
+            for t in interrupted:
+                done = len(t.get("step_events", []))
+                total = t.get("steps_total", "?")
+                yield f"  • {t['id']}  ({done}/{total} steps done)  — {t.get('task', '')[:60]}\n"
+            return
+    else:
+        target = interrupted[0]
+
+    run_id = target["id"]
+    task_desc = target.get("task", run_id)
+    done_count = len(target.get("step_events", []))
+    total = target.get("steps_total", "?")
+
+    yield f"Resuming: **{task_desc[:80]}**\n({done_count}/{total} steps already done)\n\n"
+
+    q: "_queue.Queue[tuple]" = _queue.Queue()
+
+    def _on_progress(msg: str, detail: str) -> None:
+        q.put(("progress", msg, detail))
+
+    def _worker() -> None:
+        try:
+            from operative import resume_task
+            result = resume_task(run_id, on_progress=_on_progress)
+            q.put(("done", result))
+        except Exception as exc:
+            q.put(("error", str(exc)))
+
+    import threading as _threading
+    t = _threading.Thread(target=_worker, daemon=True, name="Operative/resume")
+    t.start()
+
+    while True:
+        try:
+            item = q.get(timeout=0.5)
+        except _queue.Empty:
+            continue
+
+        kind = item[0]
+        if kind == "progress":
+            _, msg, detail = item
+            line = f"• {msg}"
+            if detail:
+                line += f": {detail[:120]}"
+            yield line + "\n"
+
+        elif kind == "done":
+            result = item[1]
+            steps = result.get("steps", [])
+            summary = result.get("summary", "")
+            ok = result.get("ok", False)
+            n_ok = sum(1 for s in steps if s.ok)
+            status = "Done" if ok else "Partial"
+            yield f"\n{status} ({n_ok}/{len(steps)} steps)\n\n{summary}"
+            break
+
+        elif kind == "error":
+            yield f"\nResume failed: {item[1]}"
+            break
 
 
 # ── Git operations ─────────────────────────────────────────────────────────────
@@ -3739,6 +3852,10 @@ def route_stream(user_input: str) -> tuple:
     if _is_cancel_task_command(lower):
         return _s(_cancel_task_reply()), "Operative"
 
+    # ── /resume command — resume an interrupted task ──────────────────────────
+    if _is_resume_command(lower):
+        return _resume_command_stream(user_input), "Operative"
+
     # ── /task command — run operative end-to-end ─────────────────────────────
     if _is_task_command(lower):
         task_desc = user_input.strip()[len("/task"):].strip()
@@ -3967,6 +4084,8 @@ def route_stream(user_input: str) -> tuple:
         return _s(_diagnose_command_reply()), "Self-Eval"
     if _is_optimize_command(lower):
         return _s(_optimize_command_reply(user_input)), "Self-Eval"
+    if _is_status_command(lower):
+        return _s(_status_command_reply()), "Loop-Status"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
     if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):

@@ -351,20 +351,19 @@ def _check_self_eval() -> CheckResult:
 
 # ── Runner ─────────────────────────────────────────────────────────────────────
 
-_CHECKS: list[tuple[str, Callable[[], CheckResult]]] = [
-    ("Ollama", _check_ollama),
-    ("Memory", _check_memory),
-    ("Audit log", _check_audit_log),
-    ("Google auth", _check_google_auth),
-    ("Budget log", _check_budget_log),
-    ("Self-eval", _check_self_eval),
-]
-
-
 def run_checks() -> HealthReport:
     """Run all subsystem checks and return a HealthReport. Never raises."""
+    # Build inside the function so patches to module-level names take effect.
+    _check_pairs = [
+        ("Ollama", _check_ollama),
+        ("Memory", _check_memory),
+        ("Audit log", _check_audit_log),
+        ("Google auth", _check_google_auth),
+        ("Budget log", _check_budget_log),
+        ("Self-eval", _check_self_eval),
+    ]
     results: list[CheckResult] = []
-    for _name, check_fn in _CHECKS:
+    for _name, check_fn in _check_pairs:
         try:
             results.append(check_fn())
         except Exception as exc:
