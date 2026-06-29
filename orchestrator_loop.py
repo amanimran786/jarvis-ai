@@ -41,8 +41,10 @@ from harness.session_tracker import SessionTracker  # noqa: E402
 from harness.task_contract import (  # noqa: E402
     AttemptRecord,
     AttemptStore,
+    CompletionVerdict,
     ContractError,
     TaskSpec,
+    evaluate_completion,
 )
 
 log = logging.getLogger(__name__)
@@ -81,6 +83,9 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         "harvested":   int,   # tasks marked done
         "follow_ups":  int,   # new tasks enqueued
         "launched":    int,   # launch records written
+        "blocked":     int,   # launch-time contract/checkpoint failures
+        "unverified":  int,   # completion claims missing loop evidence
+        "rejected":    int,   # completion evidence failed a hard gate
         "active_now":  int,   # sessions still running
         "dry_run":     bool,
     }
@@ -91,6 +96,8 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         "follow_ups": 0,
         "launched": 0,
         "blocked": 0,
+        "unverified": 0,
+        "rejected": 0,
         "active_now": 0,
         "dry_run": dry_run,
     }
@@ -106,11 +113,65 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         sid     = session["session_id"]
         task_id = session.get("task_id", "")
         summary_text = session.get("result_summary", "")
-        if _mark_task_done(task_id, summary_text):
+        task = _find_task(task_id)
+        if task is None:
+            _log_master(f"[orchestrator] completion ignored — task {task_id} not found")
+            continue
+        try:
+            spec = TaskSpec.from_queue_task(task)
+        except ContractError as exc:
+            _mark_task_verification(task_id, "blocked", "invalid_contract", [str(exc)], {})
+            summary["rejected"] += 1
+            continue
+
+        stored_hash = str(session.get("contract_sha256") or "")
+        if stored_hash and stored_hash != spec.contract_hash:
+            verdict = CompletionVerdict(
+                "rejected",
+                "contract_mismatch",
+                ("task contract changed after dispatch",),
+            )
+        else:
+            verdict = evaluate_completion(spec, session.get("completion_evidence"))
+
+        attempt_id = str(session.get("attempt_id") or f"untracked_{sid}")
+        completion_checkpoint = AttemptRecord.checkpoint(
+            spec,
+            sid,
+            attempt_id,
+            phase="completion_gate",
+            status=verdict.status,
+            evidence=session.get("completion_evidence") or {},
+            failure_class=verdict.failure_class,
+        )
+        try:
+            attempt_store.append(completion_checkpoint)
+        except OSError as exc:
+            verdict = CompletionVerdict(
+                "unverified",
+                "checkpoint_failure",
+                (f"completion checkpoint write failed: {exc}",),
+            )
+
+        if verdict.passed and _mark_task_done(task_id, summary_text):
             newly_done.append(session)
             summary["harvested"] += 1
-            _log_master(f"[orchestrator] harvested {sid} → task {task_id} DONE")
+            _log_master(f"[orchestrator] verified {sid} → task {task_id} DONE")
             log.info("[Loop] Harvested session %s (task %s)", sid, task_id)
+        else:
+            queue_status = "unverified" if verdict.status == "unverified" else "blocked"
+            _mark_task_verification(
+                task_id,
+                queue_status,
+                verdict.failure_class,
+                list(verdict.reasons),
+                session.get("completion_evidence") or {},
+            )
+            summary["unverified" if queue_status == "unverified" else "rejected"] += 1
+            _log_master(
+                f"[orchestrator] {sid} → task {task_id} {queue_status.upper()} "
+                f"({verdict.failure_class})"
+            )
     tracker.purge_completed()
 
     # ── Step 2: Suggest follow-up tasks for completed work ────────────────────
@@ -186,7 +247,12 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                 )
                 continue
             _write_launch_record(launch_record)
-            tracker.claim(spec.task_id, session_id)
+            tracker.claim(
+                spec.task_id,
+                session_id,
+                attempt_id=attempt.attempt_id,
+                contract_sha256=spec.contract_hash,
+            )
             _mark_task_in_progress(spec.task_id, session_id)
 
         summary["launched"] += 1
@@ -274,6 +340,25 @@ def _mark_task_in_progress(task_id: str, session_id: str) -> None:
             task["status"]      = "in_progress"
             task["assigned_to"] = session_id
             task["assigned_at"] = _now()
+            break
+    _save_queue(queue)
+
+
+def _mark_task_verification(
+    task_id: str,
+    status: str,
+    failure_class: str,
+    reasons: list[str],
+    evidence: dict[str, Any],
+) -> None:
+    queue = _load_queue()
+    for task in queue:
+        if _task_identity(task) == task_id:
+            task["status"] = status
+            task["verification_failure_class"] = failure_class
+            task["verification_reasons"] = reasons
+            task["completion_evidence"] = evidence
+            task["verified_at"] = _now()
             break
     _save_queue(queue)
 

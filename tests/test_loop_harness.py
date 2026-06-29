@@ -28,6 +28,7 @@ from harness.prompt_generator import (
     generate_session_prompt,
 )
 from harness.session_tracker import SessionTracker
+from harness.task_contract import TaskSpec
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -249,6 +250,26 @@ class TestSessionTracker(unittest.TestCase):
             t.complete("nonexistent-session", "done")   # should not raise
             self.assertEqual(t.active_count(), 1)       # real-session still active
 
+    def test_claim_and_complete_preserve_attempt_evidence(self):
+        with tempfile.TemporaryDirectory() as d:
+            t = self._tracker(Path(d))
+            t.claim(
+                "TASK-001",
+                "jarvis-board",
+                attempt_id="attempt_123",
+                contract_sha256="abc123",
+            )
+            evidence = {
+                "observer": "loop",
+                "commands": [{"command": "pytest -q", "exit_code": 0}],
+            }
+            t.complete("jarvis-board", "implemented", evidence=evidence)
+
+            completed = t.list_completed()[0]
+            self.assertEqual(completed["attempt_id"], "attempt_123")
+            self.assertEqual(completed["contract_sha256"], "abc123")
+            self.assertEqual(completed["completion_evidence"], evidence)
+
     # -- active_count --
 
     def test_active_count_zero_initial(self):
@@ -374,6 +395,66 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         ol.SessionTracker    = orig_tracker
 
         return result
+
+    def _run_completed_isolated(
+        self,
+        tmp: Path,
+        *,
+        evidence: dict | None,
+        contract_sha256: str | None = None,
+    ) -> tuple[dict, list[dict], list[dict]]:
+        import orchestrator_loop as ol
+
+        originals = (
+            ol.WORK_QUEUE_PATH,
+            ol.LAUNCH_QUEUE_PATH,
+            ol.MASTER_LOG_PATH,
+            ol.ATTEMPT_LOG_PATH,
+            ol.SessionTracker,
+        )
+        ol.WORK_QUEUE_PATH = tmp / "WORK_QUEUE.json"
+        ol.LAUNCH_QUEUE_PATH = tmp / "LAUNCH_QUEUE.json"
+        ol.MASTER_LOG_PATH = tmp / "MASTER_LOG.md"
+        ol.ATTEMPT_LOG_PATH = tmp / "attempts.jsonl"
+
+        task = _sample_task(
+            status="in_progress",
+            verification_commands=["python -m pytest tests/test_web_search.py -q"],
+        )
+        spec = TaskSpec.from_queue_task(task)
+        ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
+
+        class _TmpTracker(SessionTracker):
+            def __init__(self):
+                super().__init__(path=tmp / "ACTIVE_SESSIONS.json")
+
+        tracker = _TmpTracker()
+        tracker.claim(
+            spec.task_id,
+            "session-a",
+            attempt_id="attempt_123",
+            contract_sha256=contract_sha256 or spec.contract_hash,
+        )
+        tracker.complete("session-a", "agent says done", evidence=evidence)
+        ol.SessionTracker = _TmpTracker
+
+        try:
+            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
+                result = ol.run_loop(max_concurrent=0, dry_run=False)
+            queue = json.loads(ol.WORK_QUEUE_PATH.read_text())
+            attempts = [
+                json.loads(line)
+                for line in ol.ATTEMPT_LOG_PATH.read_text().splitlines()
+            ]
+            return result, queue, attempts
+        finally:
+            (
+                ol.WORK_QUEUE_PATH,
+                ol.LAUNCH_QUEUE_PATH,
+                ol.MASTER_LOG_PATH,
+                ol.ATTEMPT_LOG_PATH,
+                ol.SessionTracker,
+            ) = originals
 
     def test_dry_run_does_not_write_launch_queue(self):
         with tempfile.TemporaryDirectory() as d:
@@ -539,6 +620,80 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             self.assertEqual(result["blocked"], 1)
             self.assertEqual(queue[0]["status"], "blocked")
             self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
+
+    def test_agent_summary_without_loop_evidence_is_unverified(self):
+        with tempfile.TemporaryDirectory() as d:
+            result, queue, attempts = self._run_completed_isolated(
+                Path(d), evidence=None
+            )
+
+        self.assertEqual(result["harvested"], 0)
+        self.assertEqual(result["unverified"], 1)
+        self.assertEqual(queue[0]["status"], "unverified")
+        self.assertEqual(attempts[-1]["phase"], "completion_gate")
+        self.assertEqual(attempts[-1]["status"], "unverified")
+
+    def test_loop_evidence_promotes_verified_task_to_done(self):
+        evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [
+                {
+                    "command": "python -m pytest tests/test_web_search.py -q",
+                    "exit_code": 0,
+                }
+            ],
+            "policy_findings": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            result, queue, attempts = self._run_completed_isolated(
+                Path(d), evidence=evidence
+            )
+
+        self.assertEqual(result["harvested"], 1)
+        self.assertEqual(queue[0]["status"], "done")
+        self.assertEqual(attempts[-1]["status"], "verified")
+
+    def test_failed_loop_verification_blocks_completion(self):
+        evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [
+                {
+                    "command": "python -m pytest tests/test_web_search.py -q",
+                    "exit_code": 1,
+                }
+            ],
+            "policy_findings": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            result, queue, attempts = self._run_completed_isolated(
+                Path(d), evidence=evidence
+            )
+
+        self.assertEqual(result["harvested"], 0)
+        self.assertEqual(result["rejected"], 1)
+        self.assertEqual(queue[0]["status"], "blocked")
+        self.assertEqual(queue[0]["verification_failure_class"], "test_failure")
+        self.assertEqual(attempts[-1]["failure_class"], "test_failure")
+
+    def test_contract_change_after_dispatch_blocks_completion(self):
+        evidence = {
+            "observer": "loop",
+            "changed_files": ["harness/web_search.py"],
+            "commands": [],
+            "policy_findings": [],
+        }
+        with tempfile.TemporaryDirectory() as d:
+            result, queue, attempts = self._run_completed_isolated(
+                Path(d),
+                evidence=evidence,
+                contract_sha256="stale-contract-hash",
+            )
+
+        self.assertEqual(result["rejected"], 1)
+        self.assertEqual(queue[0]["verification_failure_class"], "contract_mismatch")
+        self.assertEqual(attempts[-1]["status"], "rejected")
 
 
 if __name__ == "__main__":

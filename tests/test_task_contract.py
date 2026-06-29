@@ -9,6 +9,7 @@ from harness.task_contract import (
     AttemptStore,
     ContractError,
     TaskSpec,
+    evaluate_completion,
 )
 
 
@@ -84,3 +85,69 @@ def test_attempt_store_persists_dispatch_checkpoint(tmp_path: Path):
     assert saved[0]["phase"] == "dispatch"
     assert saved[0]["contract_sha256"] == spec.contract_hash
     assert saved[0]["remaining_budget"]["tool_calls"] == 20
+
+
+def _evidence(**overrides):
+    evidence = {
+        "observer": "loop",
+        "changed_files": ["harness/web_search.py", "tests/test_web_search.py"],
+        "commands": [
+            {"command": "pytest tests/test_web_search.py -q", "exit_code": 0}
+        ],
+        "policy_findings": [],
+    }
+    evidence.update(overrides)
+    return evidence
+
+
+def test_completion_requires_loop_observed_evidence():
+    spec = TaskSpec.from_queue_task(_task())
+
+    verdict = evaluate_completion(spec, {"observer": "agent", "changed_files": []})
+
+    assert verdict.status == "unverified"
+    assert verdict.failure_class == "verification_missing"
+
+
+def test_completion_accepts_matching_scope_and_successful_commands():
+    spec = TaskSpec.from_queue_task(_task())
+
+    verdict = evaluate_completion(spec, _evidence())
+
+    assert verdict.passed is True
+    assert verdict.status == "verified"
+
+
+def test_completion_rejects_file_outside_allowed_scope():
+    spec = TaskSpec.from_queue_task(_task())
+
+    verdict = evaluate_completion(spec, _evidence(changed_files=["router.py"]))
+
+    assert verdict.status == "rejected"
+    assert verdict.failure_class == "scope_violation"
+
+
+def test_completion_rejects_failed_verification_command():
+    spec = TaskSpec.from_queue_task(_task())
+    evidence = _evidence(
+        commands=[
+            {"command": "pytest tests/test_web_search.py -q", "exit_code": 1}
+        ]
+    )
+
+    verdict = evaluate_completion(spec, evidence)
+
+    assert verdict.status == "rejected"
+    assert verdict.failure_class == "test_failure"
+
+
+def test_completion_rejects_unresolved_policy_findings():
+    spec = TaskSpec.from_queue_task(_task())
+
+    verdict = evaluate_completion(
+        spec,
+        _evidence(policy_findings=[{"id": "SEC-1", "status": "open"}]),
+    )
+
+    assert verdict.status == "rejected"
+    assert verdict.failure_class == "policy_failure"

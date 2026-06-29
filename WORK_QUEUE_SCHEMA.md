@@ -85,8 +85,11 @@ queued
   ▼ (orchestrator picks up, writes to LAUNCH_QUEUE, Cowork fires start_task)
 in_progress
   │
-  ▼ (session calls SessionTracker.complete())
-[harvested by orchestrator]
+  ▼ (session reports completion through SessionTracker.complete())
+completion gate
+  ├── missing loop evidence ──▶ unverified
+  ├── failed/scope/policy ────▶ blocked
+  └── verified evidence
   │
   ▼
 done
@@ -98,6 +101,7 @@ Possible statuses:
 |--------|---------|
 | `queued` | Waiting to be picked up by the orchestrator |
 | `in_progress` | A session has been launched for this task |
+| `unverified` | Agent reported completion, but loop-observed evidence is missing or incomplete. No follow-ups are generated. |
 | `done` | Completed and harvested |
 | `blocked` | Cannot proceed (dependency not met). Orchestrator skips blocked tasks. |
 | `cancelled` | Dropped intentionally. Stays in file for audit trail. |
@@ -149,3 +153,21 @@ is invalid or its dispatch checkpoint cannot be persisted.
 Every non-dry launch appends an `AttemptRecord` checkpoint to
 `~/Library/Application Support/Jarvis/orchestrator/attempts.jsonl` before the
 session is claimed.
+
+Completion uses the same attempt ID and requires an evidence envelope:
+
+```json
+{
+  "observer": "loop",
+  "changed_files": ["harness/web_search.py", "tests/test_web_search.py"],
+  "commands": [
+    {
+      "command": "python -m pytest tests/test_web_search.py -q",
+      "exit_code": 0
+    }
+  ],
+  "policy_findings": []
+}
+```
+
+`result_summary` remains useful context, but it cannot promote a task to `done`.

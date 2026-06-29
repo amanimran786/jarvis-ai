@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as _datetime
+import fnmatch
 import hashlib
 import json
 import uuid
@@ -170,6 +171,131 @@ class TaskSpec:
 
 
 @dataclass(frozen=True)
+class CompletionVerdict:
+    status: str
+    failure_class: str = ""
+    reasons: tuple[str, ...] = ()
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "verified"
+
+
+def _path_matches(path: str, patterns: tuple[str, ...]) -> bool:
+    return any(
+        path == pattern
+        or path.startswith(pattern.rstrip("/") + "/")
+        or fnmatch.fnmatch(path, pattern)
+        for pattern in patterns
+    )
+
+
+def evaluate_completion(
+    spec: TaskSpec,
+    evidence: Mapping[str, Any] | None,
+) -> CompletionVerdict:
+    """Judge loop-observed evidence without trusting the agent's summary."""
+    if not isinstance(evidence, Mapping) or evidence.get("observer") != "loop":
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            ("completion evidence was not produced by the loop",),
+        )
+
+    try:
+        changed_files = _relative_paths(evidence.get("changed_files"), "changed_files")
+    except ContractError as exc:
+        return CompletionVerdict("rejected", "scope_violation", (str(exc),))
+
+    forbidden = [path for path in changed_files if _path_matches(path, spec.forbidden_files)]
+    if forbidden:
+        return CompletionVerdict(
+            "rejected",
+            "scope_violation",
+            (f"forbidden files changed: {', '.join(forbidden)}",),
+        )
+
+    outside_scope = [
+        path
+        for path in changed_files
+        if spec.allowed_files and not _path_matches(path, spec.allowed_files)
+    ]
+    if outside_scope:
+        return CompletionVerdict(
+            "rejected",
+            "scope_violation",
+            (f"files changed outside contract: {', '.join(outside_scope)}",),
+        )
+    if spec.allowed_files and not changed_files:
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            ("contract declared editable files but no changed-file evidence was captured",),
+        )
+
+    command_results = evidence.get("commands", [])
+    if not isinstance(command_results, list):
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            ("command evidence must be a list",),
+        )
+    observed_commands = {
+        str(item.get("command", "")): item
+        for item in command_results
+        if isinstance(item, Mapping) and item.get("command")
+    }
+    missing_commands = [
+        command for command in spec.verification_commands if command not in observed_commands
+    ]
+    if missing_commands:
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            (f"verification commands not observed: {', '.join(missing_commands)}",),
+        )
+    failed_commands = [
+        command
+        for command in spec.verification_commands
+        if observed_commands[command].get("exit_code") != 0
+    ]
+    if failed_commands:
+        return CompletionVerdict(
+            "rejected",
+            "test_failure",
+            (f"verification commands failed: {', '.join(failed_commands)}",),
+        )
+
+    findings = evidence.get("policy_findings", [])
+    if not isinstance(findings, list):
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            ("policy findings evidence must be a list",),
+        )
+    unresolved = [
+        finding
+        for finding in findings
+        if not isinstance(finding, Mapping)
+        or str(finding.get("status", "open")).lower() not in {"resolved", "waived"}
+    ]
+    if unresolved:
+        return CompletionVerdict(
+            "rejected",
+            "policy_failure",
+            (f"{len(unresolved)} unresolved policy finding(s)",),
+        )
+
+    if not changed_files and not command_results and not evidence.get("artifact_reviewed"):
+        return CompletionVerdict(
+            "unverified",
+            "verification_missing",
+            ("no observable completion evidence was captured",),
+        )
+    return CompletionVerdict("verified")
+
+
+@dataclass(frozen=True)
 class AttemptRecord:
     attempt_id: str
     task_id: str
@@ -203,6 +329,34 @@ class AttemptRecord:
             attempt_number=attempt_number,
             agent=spec.assigned_ai,
             remaining_budget=spec.budget.to_dict(),
+        )
+
+    @classmethod
+    def checkpoint(
+        cls,
+        spec: TaskSpec,
+        session_id: str,
+        attempt_id: str,
+        *,
+        phase: str,
+        status: str,
+        evidence: Mapping[str, Any] | None = None,
+        failure_class: str = "",
+        attempt_number: int = 1,
+    ) -> "AttemptRecord":
+        return cls(
+            attempt_id=attempt_id,
+            task_id=spec.task_id,
+            session_id=session_id,
+            phase=phase,
+            status=status,
+            contract_sha256=spec.contract_hash,
+            created_at=_now(),
+            attempt_number=attempt_number,
+            agent=spec.assigned_ai,
+            remaining_budget=spec.budget.to_dict(),
+            evidence=dict(evidence or {}),
+            failure_class=failure_class,
         )
 
     def to_dict(self) -> dict[str, Any]:
