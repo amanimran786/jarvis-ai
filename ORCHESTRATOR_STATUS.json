@@ -54,6 +54,78 @@
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
+    },
+    {
+      "session_id": "8946169e-25a2-4308-8524-c1a2233d435a",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:02:36.882537+00:00",
+      "current_task": "/resume",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "dea9c3e8-3985-4cff-a364-67e770815887",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:07:27.619384+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "dad13acf-2f4c-4e36-8b6f-42bb2efd7ae6",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:06:21.113072+00:00",
+      "current_task": "what's on my screen",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "5c098fa1-15e1-4efa-b507-49d842481646",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:09:42.893753+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "d8bdacc2-8d46-45d0-9186-cf64b3db6991",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:09:07.506026+00:00",
+      "current_task": "/resume",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "ce2927f0-b2ea-42e0-8627-7b5f6e61e2f8",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:10:16.987632+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "752b5a13-7c81-4f6d-8dcb-f1fccccc4ccf",
+      "name": "jarvis",
+      "last_active": "2026-06-29T03:11:51.880459+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "f6eeb5a2-ae6c-4ace-941e-fd73e1aad85e",
+      "name": "jarvis",
+      "last_active": "2026-06-29T20:55:00.306668+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
     }
   ],
   "last_updated": "2026-06-28T01:29:28.373604+00:00",
