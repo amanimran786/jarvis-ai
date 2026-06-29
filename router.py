@@ -955,6 +955,16 @@ def _is_task_command(lower: str) -> bool:
     return stripped == "/task" or stripped.startswith("/task ")
 
 
+def _is_summarize_command(lower: str) -> bool:
+    """Trigger: /summarize (or /summarise) <text or file path> — local LLM summarization."""
+    stripped = lower.strip()
+    return (
+        stripped in ("/summarize", "/summarise")
+        or stripped.startswith("/summarize ")
+        or stripped.startswith("/summarise ")
+    )
+
+
 # Module-level cancel event — set by /cancel, consumed by _task_command_stream.
 _active_task_cancel: "threading.Event | None" = None
 
@@ -3860,6 +3870,24 @@ def route_stream(user_input: str) -> tuple:
     if _is_task_command(lower):
         task_desc = user_input.strip()[len("/task"):].strip()
         return _task_command_stream(task_desc), "Operative"
+
+    # ── /summarize command — local LLM / extractive summarization ─────────────
+    if _is_summarize_command(lower):
+        _sum_raw = user_input.strip()
+        # Strip both spellings of the command prefix
+        if _sum_raw.lower().startswith("/summarise"):
+            arg = _sum_raw[len("/summarise"):].strip()
+        else:
+            arg = _sum_raw[len("/summarize"):].strip()
+        if not arg:
+            return _s("Usage: /summarize <text or file path>"), "Summarize"
+        from harness import summarizer as _sumz
+        _sum_path = os.path.expanduser(arg)
+        if os.path.isfile(_sum_path):
+            result = _sumz.summarize_file(_sum_path)
+        else:
+            result = _sumz.summarize(arg)
+        return _s(result), "Summarize"
 
     # ── Git operations ────────────────────────────────────────────────────────
     if _is_git_commit_query(lower):
