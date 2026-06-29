@@ -6,7 +6,7 @@ import math
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, Union
 
 from harness.task_contract import TaskSpec
 
@@ -114,7 +114,11 @@ class RuntimeMissingOutcome:
     error: str
 
 
-RuntimeOutcome = RuntimePendingOutcome | RuntimeTerminalOutcome | RuntimeMissingOutcome
+RuntimeOutcome = Union[
+    RuntimePendingOutcome,
+    RuntimeTerminalOutcome,
+    RuntimeMissingOutcome,
+]
 
 
 _PENDING_STATUSES = {
