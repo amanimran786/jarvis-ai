@@ -71,9 +71,11 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
             stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
             self.assertEqual("".join(stream), "ok")
 
+        # smem.retrieve returns [] so smem_hits=[] → no semantic_hint (empty hint) and
+        # no per-hit "semantic:X" blocks. rank_context_blocks only emits non-empty content.
         self.assertEqual(
             [b["label"] for b in captured["blocks"]],
-            ["working_memory", "repeat_context", "vault", "graph", "semantic_hint", "semantic_memory", "mem0"],
+            ["working_memory", "repeat_context", "vault", "graph", "mem0"],
         )
         self.assertIn("SELECTED_CONTEXT", ask_local.call_args.kwargs["system_extra"])
         self.assertEqual(

@@ -64,6 +64,7 @@ import graph_context as _gctx
 import semantic_memory as _smem
 import memory as _mem
 import context_budget as _context_budget
+import context_assembler as _ctx_asm
 import provider_router
 import telemetry
 import jarvis_core_brain as _core_brain
@@ -1060,18 +1061,15 @@ def smart_stream(
 
     semantic_hint = _semantic_memory_hint(smem_hits)
     compiled_context = _context_budget.compile_context_blocks(
-        [
-            # working_memory: facts/prefs/projects from memory.json — highest priority,
-            # always relevant since it describes the user directly.
-            {"label": "working_memory", "content": working_mem_extra, "priority": 98, "max_chars": 2000},
-            {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
-            {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
-            {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
-            {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
-            {"label": "semantic_memory", "content": smem_ctx, "priority": 65, "max_chars": 1200},
-            # mem0 cross-session episodic memory goes last — most dynamic, lowest trust rank.
-            {"label": "mem0", "content": mem0_extra, "priority": 55, "max_chars": 600},
-        ],
+        _ctx_asm.rank_context_blocks(
+            working_mem=working_mem_extra,
+            repeat_ctx=repeat_extra,
+            vault_ctx=vault_extra,
+            graph_ctx=graph_extra,
+            semantic_hint=semantic_hint,
+            smem_hits=smem_hits,
+            mem0_ctx=mem0_extra,
+        ),
         base_text=system_extra,
         user_input=user_input,
         target_tokens=_context_budget.target_tokens_for(
@@ -1091,17 +1089,25 @@ def smart_stream(
             compiled_context.get("context_used_tokens", 0),
             compiled_context.get("context_budget_tokens", 1),
         )
-        if ctx_pressure == "compress":
-            logging.info("[ContextPressure] >75%% full — dropping episodic (mem0) block and recompiling")
+        if ctx_pressure in ("compress", "switch"):
+            _ctx_used = compiled_context.get("context_used_tokens", 0)
+            _ctx_budget = compiled_context.get("context_budget_tokens", 1) or 1
+            _pressure_float = _ctx_used / _ctx_budget
+            logging.info(
+                "[ContextPressure] %.0f%% full — recompiling with pressure-aware ranking",
+                _pressure_float * 100,
+            )
             compressed = _context_budget.compile_context_blocks(
-                [b for b in [
-                    {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
-                    {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
-                    {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
-                    {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
-                    {"label": "semantic_memory", "content": smem_ctx, "priority": 65, "max_chars": 1200},
-                    # mem0 dropped intentionally to reduce context pressure
-                ] if b["label"] != "mem0"],
+                _ctx_asm.rank_context_blocks(
+                    working_mem=working_mem_extra,
+                    repeat_ctx=repeat_extra,
+                    vault_ctx=vault_extra,
+                    graph_ctx=graph_extra,
+                    semantic_hint=semantic_hint,
+                    smem_hits=smem_hits,
+                    mem0_ctx=mem0_extra,
+                    pressure=_pressure_float,
+                ),
                 base_text=system_extra,
                 user_input=user_input,
                 target_tokens=_context_budget.target_tokens_for(tool, model=context_model, local=context_is_local),
@@ -1110,10 +1116,10 @@ def smart_stream(
             system_extra = (system_extra.split("\n\n")[0] if "\n\n" in system_extra else system_extra)
             if compressed["text"]:
                 system_extra = system_extra + ("\n\n" if system_extra else "") + compressed["text"]
-        elif ctx_pressure == "switch" and local_available and local_model:
-            logging.warning("[ContextPressure] >90%% full — forcing local model with larger context window")
-            prefer_local = True
-            local_only = True
+            if ctx_pressure == "switch" and local_available and local_model:
+                logging.warning("[ContextPressure] >90%% full — forcing local model with larger context window")
+                prefer_local = True
+                local_only = True
     except Exception as _ctx_exc:
         logging.debug("[ContextPressure] check failed: %s", _ctx_exc)
 
