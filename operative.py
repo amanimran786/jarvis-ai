@@ -31,6 +31,69 @@ from execution_engine import execute_step
 import preflect
 
 
+# ── Persistence helpers ────────────────────────────────────────────────────────
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _persist_task_start(run_id: str, task: str, steps: "list[Step]") -> None:
+    try:
+        import task_persistence as _tp
+        _tp.upsert_task({
+            "id": run_id,
+            "status": "running",
+            "task": task,
+            "created_at": _now_iso(),
+            "updated_at": _now_iso(),
+            "finished_at": "",
+            "steps_total": len(steps),
+            "steps_done": 0,
+            "plan": [
+                {"number": s.number, "description": s.description, "tool": s.tool, "params": s.params}
+                for s in steps
+            ],
+            "result": "",
+        })
+    except Exception:
+        log.debug("task_persistence unavailable — skipping checkpoint", exc_info=True)
+
+
+def _checkpoint_step(run_id: str, step: Step) -> None:
+    try:
+        import task_persistence as _tp
+        _tp.checkpoint_step(
+            run_id=run_id,
+            step_number=step.number,
+            description=step.description,
+            tool=step.tool,
+            ok=step.ok,
+            result=step.result,
+        )
+    except Exception:
+        log.debug("checkpoint_step failed", exc_info=True)
+
+
+def _persist_task_finish(run_id: str, task: str, steps: "list[Step]", summary: str, ok: bool) -> None:
+    try:
+        import task_persistence as _tp
+        completed = [s for s in steps if s.ok]
+        _tp.upsert_task({
+            "id": run_id,
+            "status": "succeeded" if ok else "failed",
+            "task": task,
+            "created_at": "",   # upsert preserves existing value when non-empty
+            "updated_at": _now_iso(),
+            "finished_at": _now_iso(),
+            "steps_total": len(steps),
+            "steps_done": len(completed),
+            "plan": [],          # already stored at start
+            "result": summary[:500],
+        })
+    except Exception:
+        log.debug("persist_task_finish failed", exc_info=True)
+
+
 def _summarize(prompt: str, system_extra: str = "") -> str:
     """Summarize task results. Uses local model unless in cloud-only mode."""
     if DEFAULT_MODE != "cloud":
@@ -173,6 +236,8 @@ def run_task(
         )
     summary = _summarize(summary_prompt, system_extra=system_extra)
 
+    task_ok = len(failed) == 0
+    _persist_task_finish(run_id, task, steps, summary, task_ok)
     _prog("Task complete", summary[:100])
 
     return {
@@ -180,7 +245,127 @@ def run_task(
         "steps":   steps,
         "summary": summary,
         "results": step_results,
-        "ok":      len(failed) == 0,
+        "ok":      task_ok,
+    }
+
+
+def resume_task(
+    run_id: str,
+    on_progress: Callable[[str, str], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict:
+    """Resume an interrupted task from its last checkpoint.
+
+    Loads the stored plan and completed steps from task_persistence, then
+    re-executes only the remaining steps.  Returns the same shape as run_task().
+    """
+    import task_persistence as _tp
+
+    interrupted = _tp.find_interrupted_tasks()
+    match = next((t for t in interrupted if t.get("id") == run_id), None)
+    if match is None:
+        return {
+            "task": run_id,
+            "steps": [],
+            "summary": f"No interrupted task found with run_id={run_id!r}.",
+            "results": {},
+            "ok": False,
+        }
+
+    task: str = match.get("task", "")
+    raw_plan: list = match.get("plan", [])
+    step_events: list = match.get("step_events", [])
+
+    # Reconstruct Step objects from stored plan.
+    steps = [
+        Step(
+            number=p["number"],
+            description=p["description"],
+            tool=p.get("tool", "chat"),
+            params=p.get("params", {}),
+        )
+        for p in raw_plan
+    ]
+
+    # Inject already-completed results so downstream $step_N_result refs resolve.
+    step_results: dict[int, str] = {}
+    done_numbers: set[int] = set()
+    for ev in step_events:
+        n = ev.get("step_number")
+        if n is not None:
+            step_results[n] = ev.get("result", "")
+            if ev.get("ok"):
+                done_numbers.add(n)
+            # Mark step objects that are already done.
+            for s in steps:
+                if s.number == n:
+                    s.ok = ev.get("ok", False)
+                    s.result = ev.get("result", "")
+
+    def _prog(msg: str, detail: str = "", *, announce_step: Step | None = None) -> None:
+        print(f"[Operative/resume] {msg}" + (f": {detail[:100]}" if detail else ""))
+        if on_progress:
+            on_progress(msg, detail)
+        if VOICE_ENABLED and announce_step is not None:
+            speak_step(announce_step.number, announce_step.description, ok=announce_step.ok)
+
+    already_done = len(done_numbers)
+    _prog(f"Resuming '{task[:60]}'", f"{already_done}/{len(steps)} steps already done")
+
+    # Mark task as running again so a second crash is also recoverable.
+    _persist_task_start(run_id, task, steps)
+
+    for step in steps:
+        if step.number in done_numbers:
+            _prog(f"  ✓ (skip) Step {step.number}: {step.description}")
+            continue
+        if cancel_event and cancel_event.is_set():
+            _prog("Task cancelled during resume")
+            break
+        _prog(f"Step {step.number}: {step.description}")
+        ok, result = execute_step(step, step_results, run_id=run_id)
+        step.ok = ok
+        step.result = result
+        step_results[step.number] = result
+        _checkpoint_step(run_id, step)
+
+        preview = result[:120].replace("\n", " ")
+        status = "✓" if ok else "✗"
+        _prog(f"  {status} {step.description}", preview, announce_step=step)
+
+        if not ok:
+            _prog(f"Step {step.number} failed — attempting recovery", result)
+            corrective = replan_after_failure(
+                task,
+                completed_steps=[s for s in steps if s.ok],
+                failed_step=step,
+                error=result,
+            )
+            if corrective:
+                steps.extend(corrective)
+                _persist_task_start(run_id, task, steps)
+
+    completed = [s for s in steps if s.ok]
+    failed = [s for s in steps if not s.ok]
+
+    summary_prompt = (
+        f"Summarize what was accomplished in this resumed task in 2-3 sentences.\n"
+        f"Task: {task}\n"
+        f"Steps completed: {[s.description for s in completed]}\n"
+        f"Final output preview: {step_results.get(max(step_results.keys(), default=0), '')[:500]}"
+    )
+    summary = _summarize(summary_prompt)
+
+    task_ok = len(failed) == 0
+    _persist_task_finish(run_id, task, steps, summary, task_ok)
+    _prog("Resume complete", summary[:100])
+
+    return {
+        "task": task,
+        "steps": steps,
+        "summary": summary,
+        "results": step_results,
+        "ok": task_ok,
     }
 
 

@@ -38,7 +38,7 @@ class TestIsTaskCommand:
 
 # ── Streaming generator ────────────────────────────────────────────────────────
 
-def _fake_run_task(task, on_progress=None):
+def _fake_run_task(task, on_progress=None, cancel_event=None):
     """Minimal run_task stub that fires two progress calls then returns."""
     if on_progress:
         on_progress("Planning task", task)
@@ -87,7 +87,7 @@ class TestTaskCommandStream:
         assert "Wrote a haiku and saved it." in combined
 
     def test_error_path_yields_failure_message(self):
-        def _bad_run(task, on_progress=None):
+        def _bad_run(task, on_progress=None, cancel_event=None):
             raise RuntimeError("local model unavailable")
 
         with patch("operative.run_task", side_effect=_bad_run):
@@ -96,7 +96,7 @@ class TestTaskCommandStream:
         assert "failed" in combined.lower() or "error" in combined.lower()
 
     def test_partial_result_when_steps_fail(self):
-        def _partial_run(task, on_progress=None):
+        def _partial_run(task, on_progress=None, cancel_event=None):
             ok_step = MagicMock(); ok_step.ok = True; ok_step.description = "step1"
             fail_step = MagicMock(); fail_step.ok = False; fail_step.description = "step2"
             return {
