@@ -80,7 +80,7 @@ Current truth: `handoff_ready` records are submitted through local `task_runtime
 with isolated worktrees. The scheduler persists runtime correlation, polls across
 invocations, and only hands successful terminal work to the completion verifier.
 
-### CODEX-6: /history command with Rich CLI (MEDIUM)
+### CODEX-6: /history command with Rich CLI (MEDIUM) ✅
 
 Build the `/history` command and upgrade the REPL's visual chrome using the `rich` library.
 
@@ -101,7 +101,7 @@ If not installed in the environment: `pip install rich`
 
 Commit: `[CODEX] feat(cli): /history command + Rich REPL chrome`
 
-### CODEX-7: Plugin system foundation (MEDIUM)
+### CODEX-7: Plugin system foundation (MEDIUM) ✅
 
 Build a plugin loader in `harness/plugin_loader.py`. Check `plugins/` for any existing files first
 before writing anything — don't clobber.
