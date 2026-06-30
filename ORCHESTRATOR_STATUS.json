@@ -126,6 +126,24 @@
       "completed_tasks": [],
       "next_task": null,
       "status": "active"
+    },
+    {
+      "session_id": "381b811a-0132-43c1-9a23-47e54ae4185a",
+      "name": "jarvis",
+      "last_active": "2026-06-29T23:53:56.004681+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
+    },
+    {
+      "session_id": "82346154-fddb-4f53-b742-629b97a3c006",
+      "name": "jarvis",
+      "last_active": "2026-06-29T23:55:49.214499+00:00",
+      "current_task": "/cancel",
+      "completed_tasks": [],
+      "next_task": null,
+      "status": "active"
     }
   ],
   "last_updated": "2026-06-28T01:29:28.373604+00:00",
