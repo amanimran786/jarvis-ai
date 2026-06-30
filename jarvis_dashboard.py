@@ -17,9 +17,9 @@ def _load(fname, default):
         return default
 
 def _badge(s):
-    colors = {"pending":"#f0c040","queued":"#f0c040","running":"#4fc3f7",
+    colors = {"pending":"#f0c040","queued":"#f0c040","in_progress":"#f0c040","running":"#4fc3f7",
               "active":"#4fc3f7","done":"#66bb6a","completed":"#66bb6a",
-              "failed":"#ef5350","stalled":"#ef5350","fired":"#ab47bc"}
+              "blocked":"#ef5350","failed":"#ef5350","stalled":"#ef5350","fired":"#ab47bc"}
     c = colors.get(str(s).lower(), "#888")
     return f"<span style='background:{c};color:#111;padding:2px 8px;border-radius:4px;font-size:.85em'>{s}</span>"
 
@@ -42,20 +42,20 @@ def _work_queue_table():
     if not tasks:
         return "<p style='color:#888'>No tasks in WORK_QUEUE.json</p>"
     rows = "".join(
-        f"<tr><td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{t.get('id','')}</td>"
-        f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{t.get('title','')}</td>"
+        f"<tr><td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.85em'>{t.get('session_name','')}</td>"
+        f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{t.get('task','')[:80]}</td>"
         f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{_badge(t.get('status',''))}</td>"
-        f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa'>{t.get('assigned_ai','')}</td>"
+        f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;text-align:center'>{t.get('priority','')}</td>"
         f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;font-size:.8em'>{str(t.get('created_at',''))[:16]}</td></tr>"
         for t in tasks
     )
     return (
         "<table style='width:100%;border-collapse:collapse'>"
         "<tr style='color:#4fc3f7'>"
-        "<th align='left' style='padding:7px 10px'>ID</th>"
-        "<th align='left' style='padding:7px 10px'>Title</th>"
+        "<th align='left' style='padding:7px 10px'>Session</th>"
+        "<th align='left' style='padding:7px 10px'>Task</th>"
         "<th align='left' style='padding:7px 10px'>Status</th>"
-        "<th align='left' style='padding:7px 10px'>AI</th>"
+        "<th align='left' style='padding:7px 10px'>Pri</th>"
         "<th align='left' style='padding:7px 10px'>Created</th></tr>"
         + rows + "</table>"
     )
@@ -108,9 +108,9 @@ def index():
     queue = _load("LAUNCH_QUEUE.json", [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(tasks)
-    pending = sum(1 for t in tasks if t.get("status") in ("pending","queued"))
-    done = sum(1 for t in tasks if t.get("status") in ("done","completed"))
-    failed = sum(1 for t in tasks if t.get("status") == "failed")
+    pending = sum(1 for t in tasks if t.get("status") == "in_progress")
+    done = sum(1 for t in tasks if t.get("status") == "done")
+    failed = sum(1 for t in tasks if t.get("status") == "blocked")
     active = sum(1 for s in sessions if s.get("status") == "active")
     fired = sum(1 for q in queue if q.get("status") == "fired")
 
@@ -128,9 +128,9 @@ def index():
 <p style='color:#888;margin-bottom:20px'>{now} &nbsp;·&nbsp; auto-refresh 30s</p>
 <div style='display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px'>
 {card("Total Tasks", total)}
-{card("Pending", pending, "#f0c040")}
+{card("In Progress", pending, "#f0c040")}
 {card("Done", done, "#66bb6a")}
-{card("Failed", failed, "#ef5350")}
+{card("Blocked", failed, "#ef5350")}
 {card("Active Sessions", active, "#4fc3f7")}
 {card("Fired", fired, "#ab47bc")}
 </div>
