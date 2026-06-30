@@ -54,144 +54,174 @@
     "session_name": "jarvis-local-llm",
     "task": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "Demoted: 2 rounds in_progress with no activity. Re-queue for next active session."
+    "notes": "Demoted: 2 rounds in_progress with no activity. Re-queue for next active session.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.421445+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Verify audit.jsonl captures memory_write + route_decision events end-to-end after e84263b+3af8ba4",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "Both memory wiring commits landed \u2014 needs smoke test to confirm events fire correctly"
+    "notes": "Both memory wiring commits landed \u2014 needs smoke test to confirm events fire correctly",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.422521+00:00"
   },
   {
     "session_name": "jarvis-board",
     "task": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.430227+00:00"
   },
   {
     "session_name": "jarvis-local-llm",
     "task": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.432440+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "eval_trace_score.py --trace-score surface: observe-only \u22652wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.433363+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Add usage summary tests for brain_ollama structured output path \u2014 scoped to tests/test_brain_ollama.py",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.434266+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Validate usage_tracker token accounting matches brain_ollama actual usage",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.435165+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
     "task": "Wire /score output to eval_trace_score.py surface \u2014 confirm scores appear in briefing",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T04:53:30.353381+00:00",
-    "notes": "Follow-on from commit 41c082b \u2014 scoring exists, now surface it"
+    "notes": "Follow-on from commit 41c082b \u2014 scoring exists, now surface it",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.436110+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Add audit_errors.log rotation + alert threshold \u2014 surface to dashboard if error count > N",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T04:53:30.353381+00:00",
-    "notes": "Follow-on from c0a8ec1 \u2014 errors now logged, but no rotation or alerting yet"
+    "notes": "Follow-on from c0a8ec1 \u2014 errors now logged, but no rotation or alerting yet",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.437019+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
     "task": "Wire /reflect output into daily briefing \u2014 surface reflection deltas at session start",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T04:58:37.805404+00:00",
-    "notes": "Follow-on from 02de25f \u2014 /reflect exists, now surface it automatically"
+    "notes": "Follow-on from 02de25f \u2014 /reflect exists, now surface it automatically",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.437936+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
     "task": "Capture cycle metrics: track routing_tag distribution across sessions, surface in /score report",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T21:20:15.631564+00:00",
-    "notes": "Follow-on from cycle 5 routing_tag wiring \u2014 now that tags are logged, aggregate them"
+    "notes": "Follow-on from cycle 5 routing_tag wiring \u2014 now that tags are logged, aggregate them",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.438873+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
     "task": "Wire /diagnose output into AGENT_BOARD \u2014 surface health issues as actionable items",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-25T21:24:17.011387+00:00",
-    "notes": "Follow-on from b555d4e \u2014 /diagnose exists, connect it to the board workflow"
+    "notes": "Follow-on from b555d4e \u2014 /diagnose exists, connect it to the board workflow",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.439793+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
     "task": "Evaluate PreFlect/G3 gate (JARVIS_PREFLECT=1, default-off) \u2014 decide post-R1 landing",
     "priority": 3,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.450980+00:00"
   },
   {
     "session_name": "jarvis-local-llm",
     "task": "Root-cause AGENT_BOARD item 9: Ollama memory-pressure path returning empty in security gate",
     "priority": 3,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
-    "created_at": "2026-06-24T00:00:00Z"
+    "created_at": "2026-06-24T00:00:00Z",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.451988+00:00"
   },
   {
     "session_name": "jarvis-board",
     "task": "GLM 5.2 eval handoff: await Codex lane findings before wiring any model-default changes",
     "priority": 3,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
-    "notes": " | UNBLOCKED round 41: CODEX-1 done. GLM 5.2 = subscription-blocked, do NOT set as default. See CODEX_GLM_EVAL.md."
+    "notes": " | UNBLOCKED round 41: CODEX-1 done. GLM 5.2 = subscription-blocked, do NOT set as default. See CODEX_GLM_EVAL.md.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.452952+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -515,11 +545,13 @@
     "session_name": "jarvis-local-llm",
     "task": "Implement circuit breakers for local model routing (P7) \u2014 jarvis-local-llm woke, reported P7 next",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T03:23:57.878284+00:00",
-    "notes": "jarvis-local-llm self-reported at round 15: 'P6 workspace_context done; checking P7 circuit breakers next'"
+    "notes": "jarvis-local-llm self-reported at round 15: 'P6 workspace_context done; checking P7 circuit breakers next'",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.445873+00:00"
   },
   {
     "session_name": "jarvis-board",
@@ -668,67 +700,79 @@
     "session_name": "codex-lane",
     "task": "CODEX-4: CLI UX improvements \u2014 rich formatting + /history command",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Codex",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Color-coded output, progress spinner, /history reads usage_log.jsonl. See CODEX_TASKS.md CODEX-4."
+    "notes": "Color-coded output, progress spinner, /history reads usage_log.jsonl. See CODEX_TASKS.md CODEX-4.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.440998+00:00"
   },
   {
     "session_name": "codex-lane",
     "task": "CODEX-5: Plugin system scaffold \u2014 harness/plugins.py + plugins/pomodoro.py example",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Codex",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "plugins/ dir exists \u2014 check contents before writing. See CODEX_TASKS.md CODEX-5."
+    "notes": "plugins/ dir exists \u2014 check contents before writing. See CODEX_TASKS.md CODEX-5.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.442229+00:00"
   },
   {
     "session_name": "gemini-lane",
     "task": "GEMINI-1: Full architecture review \u2014 entire codebase in 1M context, write GEMINI_ARCHITECTURE_REVIEW.md",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Gemini",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Cover: inconsistencies, dead code, missing error handling, security, perf, contract mismatches. See GEMINI_TASKS.md GEMINI-1."
+    "notes": "Cover: inconsistencies, dead code, missing error handling, security, perf, contract mismatches. See GEMINI_TASKS.md GEMINI-1.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.423809+00:00"
   },
   {
     "session_name": "gemini-lane",
     "task": "GEMINI-2: Test coverage audit \u2014 cross-reference harness/*.py vs tests/, write GEMINI_TEST_GAPS.md + 10 missing tests",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Gemini",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Write tests in tests/test_gemini_coverage.py. No real Ollama/API calls in unit tests. See GEMINI_TASKS.md GEMINI-2."
+    "notes": "Write tests in tests/test_gemini_coverage.py. No real Ollama/API calls in unit tests. See GEMINI_TASKS.md GEMINI-2.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.425068+00:00"
   },
   {
     "session_name": "gemini-lane",
     "task": "GEMINI-3: Security review \u2014 scan entire codebase, write GEMINI_SECURITY_REVIEW.md, fix HIGH severity issues",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Gemini",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Focus: hardcoded secrets, shell=True, path traversal, unsafe deserialization, voice input \u2192 tool dispatch. See GEMINI_TASKS.md GEMINI-3."
+    "notes": "Focus: hardcoded secrets, shell=True, path traversal, unsafe deserialization, voice input \u2192 tool dispatch. See GEMINI_TASKS.md GEMINI-3.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.443516+00:00"
   },
   {
     "session_name": "gemini-lane",
     "task": "GEMINI-4: Prompt quality analysis \u2014 analyze all self_eval.jsonl entries, write GEMINI_PROMPT_ANALYSIS.md",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_to": "Gemini",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-26T00:00:00Z",
-    "notes": "Use 1M context to read all eval entries at once. Identify low-score patterns, correlate with system prompt sections. See GEMINI_TASKS.md GEMINI-4."
+    "notes": "Use 1M context to read all eval entries at once. Identify low-score patterns, correlate with system prompt sections. See GEMINI_TASKS.md GEMINI-4.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.444743+00:00"
   },
   {
     "session_name": "jarvis-board",
@@ -804,11 +848,13 @@
     "session_name": "jarvis-local-llm",
     "task": "NUDGE \u2014 local-LLM lane idle 1252m (~21h). Resume: implement P7 circuit breakers, verify devstral/qwen3:30b routing",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-27T00:16:12.743700+00:00",
-    "notes": "NUDGE added round 35 \u2014 idle since ~03:13 UTC Jun 26. P7 circuit breakers still pending. Verify devstral/qwen3:30b production routing."
+    "notes": "NUDGE added round 35 \u2014 idle since ~03:13 UTC Jun 26. P7 circuit breakers still pending. Verify devstral/qwen3:30b production routing.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.426399+00:00"
   },
   {
     "session_name": "jarvis-self-eval",
@@ -924,40 +970,48 @@
     "session_name": "jarvis-board",
     "task": "web-search-retry: Add retry/backoff to harness/web_search.py + 5-min result cache",
     "priority": 1,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-29T00:00:00Z",
-    "notes": "Rate limit resets at 12:40am PT. Implement exponential backoff on DDGS rate-limit errors. Cache search results for 5 min (keyed on query) to avoid duplicate hits within a session."
+    "notes": "Rate limit resets at 12:40am PT. Implement exponential backoff on DDGS rate-limit errors. Cache search results for 5 min (keyed on query) to avoid duplicate hits within a session.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.428165+00:00"
   },
   {
     "session_name": "jarvis-board",
     "task": "summarizer: Build harness/summarizer.py + /summarize command using ornith-9b",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-29T00:00:00Z",
-    "notes": "harness/summarizer.py wraps ornith-9b for text summarization. Wire /summarize <text|url> command in router.py. Fall back to LOCAL_DEFAULT if ornith-9b unavailable."
+    "notes": "harness/summarizer.py wraps ornith-9b for text summarization. Wire /summarize <text|url> command in router.py. Fall back to LOCAL_DEFAULT if ornith-9b unavailable.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.447267+00:00"
   },
   {
     "session_name": "jarvis-audit",
     "task": "memory-persistence-test: Verify TF-IDF index saves and reloads across Jarvis restarts",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-29T00:00:00Z",
-    "notes": "Write tests/test_tfidf_persistence.py. Confirm index serialization survives process restart. Check semantic_memory.py save/load paths. Cover edge cases: empty index, corrupt file, missing file."
+    "notes": "Write tests/test_tfidf_persistence.py. Confirm index serialization survives process restart. Check semantic_memory.py save/load paths. Cover edge cases: empty index, corrupt file, missing file.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.448668+00:00"
   },
   {
     "session_name": "jarvis-local-llm",
     "task": "ornith-integration-test: Verify ornith-9b is detected and used by coder_workbench after pull completes",
     "priority": 2,
-    "status": "queued",
+    "status": "blocked",
     "assigned_at": null,
     "completed_at": null,
     "created_at": "2026-06-29T00:00:00Z",
-    "notes": "After `ollama pull ornith-9b` completes: confirm get_best_available() returns ornith-9b for code tasks, coder_workbench.fix_loop() routes to it, and at least one integration test passes against real Ollama."
+    "notes": "After `ollama pull ornith-9b` completes: confirm get_best_available() returns ornith-9b for code tasks, coder_workbench.fix_loop() routes to it, and at least one integration test passes against real Ollama.",
+    "blocked_reason": "autonomous execution requires an explicit typed task contract",
+    "blocked_at": "2026-06-29T23:54:19.450038+00:00"
   }
 ]

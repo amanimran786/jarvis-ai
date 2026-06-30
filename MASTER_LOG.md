@@ -752,3 +752,237 @@ Sessions write here via `session_orchestrator.py` whenever a task changes state,
 [2026-06-29 23:44 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
 [2026-06-29 23:44 UTC] [orchestrator] active sessions: 3/3
 [2026-06-29 23:44 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=3
+[2026-06-29 23:49 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-29 23:49 UTC] [orchestrator] active sessions: 3/3
+[2026-06-29 23:49 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=3
+[2026-06-29 23:54 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-29 23:54 UTC] [orchestrator] active sessions: 0/3
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-ef96f4f8da8f blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-535cc2788ffe blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-b2b290f7778d blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-236469571861 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-e4b32115ec41 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-ea69c57d4de9 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-97e4c99d7ae4 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-fc2c59a9f10c blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-87b1c6e311d2 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-9faecf31fd26 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-180010589d19 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-d4f088afddff blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-b4c3b4966a49 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-b542c9e0b689 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-5b695b5f0f8c blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-ee6d822676a2 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-18bac8db8fbe blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-0e660f6ac4cd blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-d6c45b6a6226 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-4faa300e76c4 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-b8b515f3c617 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-758ef3717c8a blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-deca3a70b0ba blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-c6b25d25b50b blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-59ecd648eefb blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-cdb109d66316 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] LEGACY-eb0609dd64c4 blocked — legacy contract is not executable
+[2026-06-29 23:54 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-29 23:55 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-29 23:55 UTC] [orchestrator] active sessions: 0/3
+[2026-06-29 23:55 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-29 23:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-29 23:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-29 23:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:26 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:26 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:26 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:31 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:31 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:31 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:36 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:36 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:36 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:41 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:41 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:41 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:46 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:46 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:46 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:51 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:51 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:51 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 00:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 00:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 00:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:26 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:26 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:26 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:31 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:31 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:31 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:36 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:36 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:36 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:41 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:41 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:41 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:46 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:46 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:46 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:51 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:51 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:51 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 01:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 01:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 01:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:26 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:26 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:26 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:31 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:31 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:31 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:36 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:36 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:36 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:41 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:41 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:41 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:46 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:46 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:46 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:51 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:51 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:51 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 02:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 02:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 02:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:26 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:26 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:26 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:31 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:31 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:31 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:36 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:36 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:36 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:41 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:41 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:41 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:46 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:46 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:46 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:51 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:51 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:51 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 03:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 03:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 03:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:26 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:26 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:26 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:31 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:31 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:31 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:36 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:36 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:36 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:41 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:41 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:41 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:46 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:46 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:46 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:51 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:51 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:51 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 04:56 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 04:56 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 04:56 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 05:01 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 05:01 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 05:01 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 05:06 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 05:06 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 05:06 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 05:11 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 05:11 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 05:11 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 05:16 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 05:16 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 05:16 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
+[2026-06-30 05:21 UTC] [orchestrator] loop start — max_concurrent=3 dry_run=False
+[2026-06-30 05:21 UTC] [orchestrator] active sessions: 0/3
+[2026-06-30 05:21 UTC] [orchestrator] loop done — harvested=0 launched=0 follow_ups=0 active=0
