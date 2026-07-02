@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 log = logging.getLogger("jarvis.execution_engine")
 from pathlib import Path
 
-from brains.brain_claude import ask_claude
-from config import DEFAULT_MODE, LOCAL_DEFAULT, SONNET
+from config import DEFAULT_MODE, LOCAL_DEFAULT
+from provider_priority import ask_with_priority
 import skills
 import tool_registry
 import runtime_state
@@ -290,7 +290,7 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
             return True, (_resp.message.content or "").strip()
         except Exception:
             log.debug("[ExecutionEngine] local chat fallback failed; trying cloud", exc_info=True)
-    return True, ask_claude(prompt, model=SONNET, system_extra=system_extra)
+    return True, ask_with_priority(prompt, tier="strong", system_extra=system_extra)
 
 
 def execute_step(step: TaskStep, step_results: dict[int, str], run_id: str = "") -> tuple[bool, str]:
