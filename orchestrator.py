@@ -145,6 +145,13 @@ def classify(user_input: str) -> ToolDecision:
             return _attach_skill(user_input, local_decision)
         return _attach_skill(user_input, _FALLBACK)
 
+    # Local-first: try the local structured classifier before spending a cloud
+    # call. Hard timeout so a slow local model never stalls the turn; on
+    # None/failure/timeout we fall through to Haiku below.
+    local_first = _classify_with_local_structured_timed(user_input, timeout=3.0)
+    if local_first:
+        return _attach_skill(user_input, local_first)
+
     # Full LLM classification
     _t0 = time.monotonic()
     try:
