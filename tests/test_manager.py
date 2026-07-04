@@ -119,7 +119,7 @@ def test_decompose_returns_agent_tasks():
          "priority": 6, "needs_security_review": True, "context": {}},
     ])
     with patch.object(manager_mod, "_decompose_via_llm", wraps=_decompose_via_llm):
-        with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+        with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
             tasks = _decompose_via_llm("Build an AI-powered API", "")
     assert len(tasks) == 2
     assert tasks[0].agent == "researcher"
@@ -132,13 +132,13 @@ def test_decompose_remaps_unknown_agent_to_researcher():
         {"title": "Task", "description": "Do it", "agent": "nonexistent_agent",
          "priority": 5, "needs_security_review": False, "context": {}},
     ])
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         tasks = _decompose_via_llm("goal", "")
     assert tasks[0].agent == "researcher"
 
 
 def test_decompose_falls_back_on_llm_error():
-    with patch("brains.brain_ollama.ask_local_structured", side_effect=RuntimeError("timeout")):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", side_effect=RuntimeError("timeout")):
         tasks = _decompose_via_llm("some goal", "")
     assert len(tasks) == 1
     assert tasks[0].agent == "researcher"
@@ -149,7 +149,7 @@ def test_decompose_strips_think_tags():
         {"title": "T", "description": "D", "agent": "researcher",
          "priority": 5, "needs_security_review": False, "context": {}},
     ])
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         tasks = _decompose_via_llm("goal", "")
     assert len(tasks) == 1
     assert tasks[0].title == "T"
@@ -157,7 +157,7 @@ def test_decompose_strips_think_tags():
 
 def test_decompose_falls_back_on_empty_tasks_array():
     raw = _good_llm_response([])  # empty tasks
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         tasks = _decompose_via_llm("goal", "")
     assert len(tasks) == 1   # fallback single task
 
@@ -269,7 +269,7 @@ def test_manager_run_returns_execution_plan():
     mock_resp.status_code = 202
     mock_resp.json.return_value = {"task_id": "t-1"}
 
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         with patch("httpx.post", return_value=mock_resp):
             with patch.object(mgr, "_get_memory_context", return_value=""):
                 with patch.object(mgr, "_record_to_memory"):
@@ -293,7 +293,7 @@ def test_manager_run_blocks_security_failed_task():
         findings=[], summary="Destructive command detected.",
     )
 
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         with patch("agents.security_reviewer.review", return_value=fail_verdict):
             with patch.object(mgr, "_get_memory_context", return_value=""):
                 with patch.object(mgr, "_record_to_memory"):
@@ -315,7 +315,7 @@ def test_manager_run_skips_security_gate_for_low_risk_agent():
     mock_resp.status_code = 202
     mock_resp.json.return_value = {"task_id": "t-2"}
 
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         with patch("httpx.post", return_value=mock_resp):
             with patch.object(mgr, "_get_memory_context", return_value=""):
                 with patch.object(mgr, "_record_to_memory"):
@@ -337,7 +337,7 @@ def test_manager_run_assigns_session_id_when_missing():
     mock_resp.status_code = 202
     mock_resp.json.return_value = {"task_id": "t-auto"}
 
-    with patch("brains.brain_ollama.ask_local_structured", return_value=raw):
+    with patch.object(_mock_brain_ollama, "ask_local_structured", return_value=raw):
         with patch("httpx.post", return_value=mock_resp):
             with patch.object(mgr, "_get_memory_context", return_value=""):
                 with patch.object(mgr, "_record_to_memory"):
