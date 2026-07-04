@@ -290,6 +290,11 @@ PROVIDER_PRIORITY_OPUS = _env_csv(
 DEFAULT_MODE = os.getenv("DEFAULT_MODE", "auto").strip().lower()
 MAX_CONVERSATION_TURNS = 8
 
+# Sliding window for active conversation history (user+assistant turn pairs).
+# conversation_context keeps the last N turns verbatim and compacts older
+# turns into a short summary before the next prompt is built.
+MAX_ACTIVE_TURNS = _env_int("JARVIS_MAX_ACTIVE_TURNS", 20)
+
 # ── MLX local training (Apple Silicon only) ──────────────────────────────────
 # mlx-tune: pip install mlx-tune (only on Apple Silicon Mac)
 MLX_TRAINING_ENABLED = _env_flag("JARVIS_MLX_TRAINING_ENABLED", True)

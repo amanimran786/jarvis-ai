@@ -282,7 +282,7 @@ _LOCAL_MODEL_CONTEXT_TOKENS = {
     "devstral": 32768,
     "phi4-mini": 4096,
     "phi4": 16384,
-    "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
+    "deepseek-r1:14b": 32768,  # capped via DEEPSEEK_CTX (default 32k, model supports 128k)
     "qwen3-coder:30b": 262144,
     "qwen3.6:35b": 262144,
 }
@@ -386,8 +386,9 @@ def _ollama_options_for_model(model: str) -> dict[str, int]:
         # Override via GLM_CTX env if you want a different value.
         options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "131072")))
     if "deepseek" in lower:
-        # Cap DeepSeek R1 to limit reasoning token explosion on Mac.
-        options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
+        # DeepSeek R1 supports 128K; 32K keeps reasoning-token explosion
+        # bounded on Mac while leaving real room for multi-turn context.
+        options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "32768"))
         options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
     if "qwen3" in lower:
         if any(tag in lower for tag in ("30b", "32b", "14b")):
