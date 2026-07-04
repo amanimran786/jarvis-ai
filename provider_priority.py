@@ -139,7 +139,11 @@ def ask_with_priority(
     tier: str = "cheap",
     system_extra: str = "",
     system: str | None = None,
+    _queued: bool = False,
 ) -> str:
+    # _queued: internal flag — True when this call is a drain-loop retry coming
+    # out of harness.request_queue. Prevents a failed retry from re-enqueueing
+    # itself forever.
     tier = (tier or "cheap").strip().lower()
     plans = {
         "cheap": [
@@ -204,6 +208,35 @@ def ask_with_priority(
                 )
             else:
                 print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
+
+    # All providers exhausted. Park the request until a circuit breaker closes
+    # instead of failing hard — enqueue() blocks until the drain loop retries
+    # this same call (with _queued=True so a second exhaustion raises).
+    if not _queued:
+        try:
+            from harness import request_queue
+        except Exception:
+            request_queue = None
+        if request_queue is not None and request_queue.QUEUE_ENABLED:
+            if request_queue.queue_depth() >= request_queue.QUEUE_MAX_DEPTH:
+                raise RuntimeError(
+                    "All providers exhausted and request queue is full — "
+                    "try again in a few minutes"
+                ) from last_error
+            try:
+                return request_queue.enqueue(
+                    ask_with_priority,
+                    prompt,
+                    tier,
+                    system_extra=system_extra,
+                    system=system,
+                    _queued=True,
+                )
+            except request_queue.QueueFullError:
+                raise RuntimeError(
+                    "All providers exhausted and request queue is full — "
+                    "try again in a few minutes"
+                ) from last_error
 
     if last_error is not None:
         raise last_error

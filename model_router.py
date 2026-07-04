@@ -866,6 +866,31 @@ def _cloud_token_budget_exhausted() -> bool:
     return False
 
 
+def _breaker_recovery_wait_seconds(plan, circuit_breaker_mod, cap: float = 60.0) -> float | None:
+    """Seconds until the soonest OPEN circuit breaker on this plan's cloud
+    providers recovers (transitions to HALF_OPEN), or None if no breaker will
+    recover within `cap` seconds. Used by the streaming path to decide whether
+    a wait-and-retry is worth it after all candidates fail."""
+    if circuit_breaker_mod is None:
+        return None
+    soonest: float | None = None
+    for candidate in plan.candidates:
+        if candidate.local:
+            continue
+        try:
+            state = circuit_breaker_mod.get_state(candidate.provider)
+        except Exception:
+            continue
+        if state.get("state") != circuit_breaker_mod.OPEN or not state.get("opened_at"):
+            continue
+        remaining = float(state["opened_at"]) + circuit_breaker_mod.OPEN_SECONDS - _time.time()
+        if remaining <= 0:
+            remaining = 0.0
+        if remaining <= cap and (soonest is None or remaining < soonest):
+            soonest = remaining
+    return soonest
+
+
 def _capture_cloud_stream(prompt, tier, candidate, raw_stream, source: str = "model_router_cloud_teacher"):
     """Thin shim around brains._teacher_capture.wrap_stream so callers in this
     module can keep their existing import surface."""
@@ -1285,59 +1310,75 @@ def smart_stream(
             _circuit_breaker = None
         last_error = None
         selected = None
-        for candidate in plan.candidates:
-            if _circuit_breaker is not None:
+        # Two passes at most: if every candidate fails on the first pass and a
+        # circuit breaker will recover within 60s, announce the wait, sleep,
+        # and retry the full plan once before giving up.
+        for _attempt in (0, 1):
+            for candidate in plan.candidates:
+                if _circuit_breaker is not None:
+                    try:
+                        if not _circuit_breaker.is_available(candidate.provider):
+                            logging.warning(
+                                "[ModelRouter] Skipping %s: circuit breaker OPEN", candidate.label
+                            )
+                            continue
+                    except Exception:
+                        logging.debug("[ModelRouter] circuit breaker check failed", exc_info=True)
                 try:
-                    if not _circuit_breaker.is_available(candidate.provider):
-                        logging.warning(
-                            "[ModelRouter] Skipping %s: circuit breaker OPEN", candidate.label
-                        )
-                        continue
-                except Exception:
-                    logging.debug("[ModelRouter] circuit breaker check failed", exc_info=True)
-            try:
-                selected = {
-                    "provider": candidate.provider,
-                    "model": candidate.model,
-                    "local": candidate.local,
-                    "label": candidate.label,
-                }
-                telemetry.log_route_decision(
-                    user_input=user_input,
-                    mode=plan.mode,
-                    tier=plan.tier,
-                    plan={"candidates": [c.__dict__ for c in plan.candidates]},
-                    selected=selected,
-                    reason=plan.reason,
-                )
-                # Wrap cloud streams so successful answers feed the local
-                # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
-                # tier in {strong, deep}).
-                raw_stream = _candidate_stream(candidate)
-                if candidate.local:
-                    yield from raw_stream
-                else:
-                    yield from _capture_cloud_stream(
-                        prompt=user_input,
+                    selected = {
+                        "provider": candidate.provider,
+                        "model": candidate.model,
+                        "local": candidate.local,
+                        "label": candidate.label,
+                    }
+                    telemetry.log_route_decision(
+                        user_input=user_input,
+                        mode=plan.mode,
                         tier=plan.tier,
-                        candidate=candidate,
-                        raw_stream=raw_stream,
+                        plan={"candidates": [c.__dict__ for c in plan.candidates]},
+                        selected=selected,
+                        reason=plan.reason,
                     )
-                if _circuit_breaker is not None:
-                    try:
-                        _circuit_breaker.record_success(candidate.provider)
-                    except Exception:
-                        logging.debug("[ModelRouter] circuit breaker record_success failed", exc_info=True)
-                return
-            except Exception as exc:
-                last_error = exc
-                logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
-                if _circuit_breaker is not None:
-                    try:
-                        if _circuit_breaker.is_rate_limit_error(exc):
-                            _circuit_breaker.record_failure(candidate.provider)
-                    except Exception:
-                        logging.debug("[ModelRouter] circuit breaker record_failure failed", exc_info=True)
+                    # Wrap cloud streams so successful answers feed the local
+                    # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
+                    # tier in {strong, deep}).
+                    raw_stream = _candidate_stream(candidate)
+                    if candidate.local:
+                        yield from raw_stream
+                    else:
+                        yield from _capture_cloud_stream(
+                            prompt=user_input,
+                            tier=plan.tier,
+                            candidate=candidate,
+                            raw_stream=raw_stream,
+                        )
+                    if _circuit_breaker is not None:
+                        try:
+                            _circuit_breaker.record_success(candidate.provider)
+                        except Exception:
+                            logging.debug("[ModelRouter] circuit breaker record_success failed", exc_info=True)
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
+                    if _circuit_breaker is not None:
+                        try:
+                            if _circuit_breaker.is_rate_limit_error(exc):
+                                _circuit_breaker.record_failure(candidate.provider)
+                        except Exception:
+                            logging.debug("[ModelRouter] circuit breaker record_failure failed", exc_info=True)
+            if _attempt == 0:
+                _wait = _breaker_recovery_wait_seconds(plan, _circuit_breaker)
+                if _wait is not None:
+                    _wait_display = max(1, int(_wait) + 1)
+                    logging.warning(
+                        "[ModelRouter] All candidates failed — breaker recovery in %ds, retrying plan once",
+                        _wait_display,
+                    )
+                    yield f"[Jarvis: all providers busy, retrying in {_wait_display}s...]"
+                    _time.sleep(_wait_display)
+                    continue
+            break
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
     try:
