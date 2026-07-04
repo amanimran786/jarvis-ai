@@ -246,7 +246,10 @@ def test_telemetry_failure_does_not_suppress_valid_answer():
 def test_explicit_num_ctx_caps_tool_loop_target():
     client = _FakeClient([_response("DeepSeek answer.")])
     records = []
-    with patch.object(brain_ollama, "_client", return_value=client), \
+    # Pin DEEPSEEK_CTX so the capping behaviour under test is independent of
+    # the runtime default (now 32768) and any .env override.
+    with patch.dict("os.environ", {"DEEPSEEK_CTX": "8192"}), \
+         patch.object(brain_ollama, "_client", return_value=client), \
          patch.object(brain_ollama, "get_best_available", return_value="deepseek-r1:14b"), \
          patch.object(brain_ollama, "_fits_local", return_value="deepseek-r1:14b"), \
          patch.object(brain_ollama.mem, "get_context", return_value=""), \

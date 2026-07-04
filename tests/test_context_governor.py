@@ -199,7 +199,13 @@ class OllamaPromptFitTests(unittest.TestCase):
         sent_text = brain_ollama._messages_text(captured["chat_kwargs"]["messages"])
         self.assertNotIn("OLD_CONTEXT_MARKER", sent_text)
         self.assertIn("CURRENT_REQUEST_MARKER", sent_text)
-        target_for.assert_called_once_with("chat", model="glm-4.7-flash", local=True)
+        # target_tokens_for is consulted for both the conversation capper and
+        # the explicit num_ctx option sent to Ollama; every call must be for
+        # the chat lane of this local model.
+        self.assertGreaterEqual(target_for.call_count, 1)
+        for call_item in target_for.call_args_list:
+            self.assertEqual(call_item.args, ("chat",))
+            self.assertEqual(call_item.kwargs, {"model": "glm-4.7-flash", "local": True})
         conversation_budget = recorded["kwargs"]["metadata"]["conversation_budget"]
         self.assertGreaterEqual(conversation_budget["dropped_message_count"], 1)
         self.assertGreater(conversation_budget["dropped_message_tokens"], 0)
