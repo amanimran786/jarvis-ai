@@ -68,6 +68,11 @@ os.environ.setdefault(
     os.path.join(_tempfile.mkdtemp(prefix="jarvis_test_taskdb_"), "jarvis_tasks.sqlite3"),
 )
 
+# Tests mock the Ollama client directly; the fail-fast liveness probe would
+# otherwise hit the real network (and fail on runners without Ollama).
+# Liveness tests re-enable it per-test via monkeypatch.delenv.
+os.environ.setdefault("JARVIS_OLLAMA_LIVENESS_DISABLED", "1")
+
 _EARLY_IMPORTS = [
     "tools",               # must be first: prevents test_backend_engineer from seeing _real_tools=None
     "brains.brain_apple_foundation",

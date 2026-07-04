@@ -43,6 +43,61 @@ except Exception:
     httpx = None
 
 
+class OllamaUnavailableError(ConnectionError):
+    """Raised when the Ollama server fails its liveness check.
+
+    Raising immediately (instead of waiting out a long request timeout) lets
+    model_router._execute_plan_stream fall through to the next candidate fast."""
+
+
+# ── Ollama liveness cache ─────────────────────────────────────────────────────
+# If Ollama dies mid-session, a routing attempt would otherwise block for the
+# full request timeout (up to 600s) before failover. A cached 2s GET /api/tags
+# probe makes the local lane fail fast so cloud fallback fires instantly.
+
+_ollama_liveness = {"ok": True, "checked_at": 0.0}
+_liveness_lock = threading.Lock()
+LIVENESS_TTL = float(os.getenv("OLLAMA_LIVENESS_TTL_SECONDS", "30"))  # seconds
+
+
+def _ollama_base_url() -> str:
+    host = os.getenv("OLLAMA_HOST", "").strip() or "http://127.0.0.1:11434"
+    if "://" not in host:
+        host = f"http://{host}"
+    return host.rstrip("/")
+
+
+def _check_ollama_liveness() -> bool:
+    """GET /api/tags with a 2s timeout. Result cached for LIVENESS_TTL seconds."""
+    if os.getenv("JARVIS_OLLAMA_LIVENESS_DISABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True  # test suites mock the Ollama client and must not probe the network
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    if host.startswith("unix://"):
+        return True  # HTTP probe not applicable to unix sockets; let the client surface errors
+    now = time.time()
+    with _liveness_lock:
+        if now - _ollama_liveness["checked_at"] < LIVENESS_TTL:
+            return _ollama_liveness["ok"]
+    url = f"{_ollama_base_url()}/api/tags"
+    try:
+        if httpx is not None:
+            ok = httpx.get(url, timeout=2.0).status_code == 200
+        else:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=2) as response:
+                ok = response.status == 200
+    except Exception:
+        ok = False
+    with _liveness_lock:
+        was_ok = _ollama_liveness["ok"]
+        _ollama_liveness.update({"ok": ok, "checked_at": time.time()})
+    if not ok:
+        log.warning("Ollama liveness check failed — marking local unavailable")
+    elif not was_ok:
+        log.info("Ollama recovered — resuming local routing")
+    return ok
+
+
 # DeepSeek R1:14b reasons heavily before first token — 600s default, overridable via env
 _OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 _OLLAMA_VISION_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_VISION_TIMEOUT_SECONDS", "30"))
@@ -492,6 +547,10 @@ def ask_local_structured(
     raise_on_error: bool = True,
 ) -> str:
     """Return one non-streamed local response constrained by an Ollama JSON schema."""
+    if not _check_ollama_liveness():
+        if raise_on_error:
+            raise OllamaUnavailableError("Ollama is not responding (liveness check failed)")
+        return ""
     prompt_for_fit = f"{system}\n\n{user_input}" if system else user_input
     model = _fits_local(prompt_for_fit, model)
     model = get_best_available(model)
@@ -597,6 +656,12 @@ def ask_local_stream(
     include_memory: bool = True,
 ):
     """Stream a response from a local Ollama model."""
+    # Fail fast when Ollama is down — don't wait out the request timeout.
+    if not _check_ollama_liveness():
+        if raise_on_error:
+            raise OllamaUnavailableError("Ollama is not responding (liveness check failed)")
+        yield "I wasn't able to complete that one. The local model engine isn't responding right now."
+        return
     # Inject chain-of-thought boost only for task/question inputs, not casual conversation.
     # Casual statements lack a question mark and don't contain task/technical keywords — injecting
     # the reasoning prompt on those makes small models respond with "please clarify the question."
@@ -1040,6 +1105,9 @@ def ask_local_with_tools(
 
     Falls back to plain ask_local_stream when no callable tools are requested.
     """
+    if not _check_ollama_liveness():
+        yield "The local tool agent could not complete this request. The local model engine isn't responding right now."
+        return
     requested_tool_names = [t for t in (tools or []) if t in _AGENT_TOOL_SCHEMAS]
     tool_names = list(requested_tool_names)
     if not _network_agent_tools_enabled():
