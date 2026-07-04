@@ -106,6 +106,7 @@ def index():
     raw_sessions = _load("ACTIVE_SESSIONS.json", {})
     sessions = _sessions_list(raw_sessions)
     queue = _load("LAUNCH_QUEUE.json", [])
+    orchestrator = _load("ORCHESTRATOR_STATUS.json", {})
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total = len(tasks)
     pending = sum(1 for t in tasks if t.get("status") == "in_progress")
@@ -113,6 +114,7 @@ def index():
     failed = sum(1 for t in tasks if t.get("status") == "blocked")
     active = sum(1 for s in sessions if s.get("status") == "active")
     fired = sum(1 for q in queue if q.get("status") == "fired")
+    queued = orchestrator.get("queue_depth", 0) if isinstance(orchestrator, dict) else 0
 
     def card(label, val, color="#4fc3f7"):
         return (f"<div style='background:#1e1e1e;border:1px solid #333;border-radius:8px;"
@@ -131,6 +133,7 @@ def index():
 {card("In Progress", pending, "#f0c040")}
 {card("Done", done, "#66bb6a")}
 {card("Blocked", failed, "#ef5350")}
+{card("Queued", queued, "#f0c040")}
 {card("Active Sessions", active, "#4fc3f7")}
 {card("Fired", fired, "#ab47bc")}
 </div>
