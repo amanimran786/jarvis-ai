@@ -119,6 +119,7 @@ snapshots/
 training/execution_traces/
 logs/*.jsonl
 logs/*.log
+logs/circuit_breaker.json
 ACTIVE_SESSIONS.json
 LAUNCH_QUEUE.json
 ORCHESTRATOR_STATUS.json

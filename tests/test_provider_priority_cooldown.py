@@ -9,9 +9,16 @@ import provider_priority as pp
 
 
 @pytest.fixture(autouse=True)
-def _clean_cooldowns():
+def _clean_cooldowns(tmp_path, monkeypatch):
+    # Isolate the persistent circuit breaker so these tests never touch the
+    # real logs/circuit_breaker.json or ORCHESTRATOR_STATUS.json.
+    monkeypatch.setenv("JARVIS_CIRCUIT_BREAKER_PATH", str(tmp_path / "circuit_breaker.json"))
+    monkeypatch.setenv("JARVIS_ORCHESTRATOR_STATUS_PATH", str(tmp_path / "ORCHESTRATOR_STATUS.json"))
+    from harness import circuit_breaker
+    circuit_breaker.reset()
     pp._provider_cooldowns.clear()
     yield
+    circuit_breaker.reset()
     pp._provider_cooldowns.clear()
 
 

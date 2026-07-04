@@ -1279,9 +1279,22 @@ def smart_stream(
         raise RuntimeError(f"Unknown provider candidate: {candidate.provider}")
 
     def _execute_plan_stream():
+        try:
+            from harness import circuit_breaker as _circuit_breaker
+        except Exception:
+            _circuit_breaker = None
         last_error = None
         selected = None
         for candidate in plan.candidates:
+            if _circuit_breaker is not None:
+                try:
+                    if not _circuit_breaker.is_available(candidate.provider):
+                        logging.warning(
+                            "[ModelRouter] Skipping %s: circuit breaker OPEN", candidate.label
+                        )
+                        continue
+                except Exception:
+                    logging.debug("[ModelRouter] circuit breaker check failed", exc_info=True)
             try:
                 selected = {
                     "provider": candidate.provider,
@@ -1310,10 +1323,21 @@ def smart_stream(
                         candidate=candidate,
                         raw_stream=raw_stream,
                     )
+                if _circuit_breaker is not None:
+                    try:
+                        _circuit_breaker.record_success(candidate.provider)
+                    except Exception:
+                        logging.debug("[ModelRouter] circuit breaker record_success failed", exc_info=True)
                 return
             except Exception as exc:
                 last_error = exc
                 logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
+                if _circuit_breaker is not None:
+                    try:
+                        if _circuit_breaker.is_rate_limit_error(exc):
+                            _circuit_breaker.record_failure(candidate.provider)
+                    except Exception:
+                        logging.debug("[ModelRouter] circuit breaker record_failure failed", exc_info=True)
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
     try:
