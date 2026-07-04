@@ -1,4 +1,7 @@
 import logging
+import os
+import threading
+import time
 from config import (
     FREE_FIRST_ENABLED,
     GEMINI_FLASH,
@@ -12,6 +15,48 @@ from config import (
     SONNET,
 )
 from brains import _teacher_capture
+
+
+# ── Rate-limit cooldown ───────────────────────────────────────────────────────
+# When a cloud provider returns a rate-limit/quota error, skip it for a window
+# instead of re-hammering it on every request (which burns quota and adds a
+# failed round-trip of latency before the fallback fires).
+
+_provider_cooldowns: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "quota",
+    "overloaded",
+    "too many requests",
+    "resource_exhausted",
+)
+
+
+def _cooldown_seconds() -> float:
+    try:
+        return float(os.getenv("JARVIS_PROVIDER_COOLDOWN_SECONDS", "120"))
+    except ValueError:
+        return 120.0
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    haystack = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in haystack for marker in _RATE_LIMIT_MARKERS)
+
+
+def _in_cooldown(provider: str) -> bool:
+    with _cooldown_lock:
+        return time.monotonic() < _provider_cooldowns.get(provider, 0.0)
+
+
+def _start_cooldown(provider: str) -> None:
+    with _cooldown_lock:
+        _provider_cooldowns[provider] = time.monotonic() + _cooldown_seconds()
 
 
 def _local_model_for_tier(tier: str) -> str:
@@ -96,6 +141,9 @@ def ask_with_priority(
                 raise
 
     for provider_name, runner in plans.get(tier, plans["cheap"]):
+        if _in_cooldown(provider_name):
+            print(f"[ProviderPriority] skipping {provider_name} for tier {tier}: rate-limit cooldown")
+            continue
         try:
             answer = runner()
             # Best-effort teacher capture: high-tier cloud answers can train the
@@ -114,8 +162,15 @@ def ask_with_priority(
             return answer
         except Exception as exc:
             last_error = exc
-            print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
+            if _is_rate_limit_error(exc):
+                _start_cooldown(provider_name)
+                print(
+                    f"[ProviderPriority] {provider_name} rate-limited — "
+                    f"cooling down for {_cooldown_seconds():.0f}s: {exc}"
+                )
+            else:
+                print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
 
     if last_error is not None:
         raise last_error
-    raise RuntimeError("No provider plan available.")
+    raise RuntimeError("No provider plan available (all providers failed or in rate-limit cooldown).")

@@ -502,15 +502,19 @@ def ask_local_structured(
     messages.append({"role": "user", "content": user_input})
 
     try:
+        options = _ollama_options_for_model(model)
+        options.setdefault(
+            "num_ctx",
+            int(context_budget.target_tokens_for("chat", model=model, local=True)),
+        )
+        options["temperature"] = 0
+        options["num_predict"] = int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256"))
         response = _structured_client().chat(
             model=model,
             messages=messages,
             stream=False,
             format=schema,
-            options={
-                "temperature": 0,
-                "num_predict": int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256")),
-            },
+            options=options,
         )
         content = (response.message.content or "").strip()
         prompt_eval_count = getattr(response, "prompt_eval_count", None)
@@ -645,12 +649,19 @@ def ask_local_stream(
     eval_count = None
     try:
         options = _ollama_options_for_model(model)
+        # Always send an explicit num_ctx. Without it, models not covered by
+        # _ollama_options_for_model run at the Ollama server default (~4K) and
+        # silently truncate prompts the budget capper sized for 24-96K.
+        options.setdefault(
+            "num_ctx",
+            int(context_budget.target_tokens_for("chat", model=model, local=True)),
+        )
 
         stream = _client().chat(
             model=model,
             messages=messages,
             stream=True,
-            options=options if options else None,
+            options=options,
         )
         raw_buffer = ""
         in_think = False  # track local reasoning blocks
