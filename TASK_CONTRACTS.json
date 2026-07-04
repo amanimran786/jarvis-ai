@@ -1,0 +1,115 @@
+[
+  {
+    "task_id": "jarvis-audit-eval-trace-score-observe",
+    "task_type": "analysis",
+    "description": "eval_trace_score.py --trace-score surface: observe-only >=2wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
+    "contract_version": "1.0",
+    "inputs": [
+      {"name": "self_eval_log", "type": "file_path", "required": true, "description": "Eval trace log to score", "default": "logs/self_eval.jsonl"},
+      {"name": "min_runs", "type": "int", "required": false, "description": "Minimum runs before the surface is considered observable", "default": "50"}
+    ],
+    "outputs": [
+      {"name": "trace_score_summary", "type": "json", "path_template": "logs/{task_id}_summary.json", "description": "Observed trace-score distribution; observe-only, no ratchet changes"}
+    ],
+    "side_effects": ["writes_files", "subprocess"],
+    "requires_capabilities": ["filesystem", "python"],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python eval_trace_score.py --trace-score",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 3000,
+    "max_duration_seconds": 300,
+    "preconditions": ["logs/self_eval.jsonl exists and has >=50 entries"],
+    "postconditions": ["summary JSON written", "no ratchet or config files modified"]
+  },
+  {
+    "task_id": "jarvis-audit-memory-events-verify",
+    "task_type": "analysis",
+    "description": "Verify audit.jsonl captures memory_write + route_decision events end-to-end after e84263b+3af8ba4",
+    "contract_version": "1.0",
+    "inputs": [
+      {"name": "audit_log", "type": "file_path", "required": true, "description": "Audit trail to inspect", "default": "logs/audit.jsonl"}
+    ],
+    "outputs": [
+      {"name": "verification_report", "type": "file", "path_template": "logs/{task_id}_report.md", "description": "Which event types fired, sample entries, and pass/fail verdict per wiring commit"}
+    ],
+    "side_effects": ["writes_files", "subprocess"],
+    "requires_capabilities": ["filesystem", "python", "ollama"],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_memory_audit_events.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 4000,
+    "max_duration_seconds": 300,
+    "preconditions": ["commits e84263b and 3af8ba4 are in git history", "logs/audit.jsonl exists"],
+    "postconditions": ["report lists memory_write and route_decision samples", "verdict recorded for both event types"]
+  },
+  {
+    "task_id": "jarvis-board-session-orchestrator-runbook",
+    "task_type": "file_op",
+    "description": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
+    "contract_version": "1.0",
+    "inputs": [
+      {"name": "session_orchestrator", "type": "file_path", "required": true, "description": "Module to document", "default": "session_orchestrator.py"}
+    ],
+    "outputs": [
+      {"name": "runbook", "type": "file", "path_template": "ORCHESTRATOR_RUNBOOK.md", "description": "Dev-workflow runbook: commands, dashboard usage, coordination protocol"}
+    ],
+    "side_effects": ["writes_files"],
+    "requires_capabilities": ["filesystem"],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 5000,
+    "max_duration_seconds": 600,
+    "preconditions": ["session_orchestrator.py exists", "ORCHESTRATOR_RUNBOOK.md exists or is creatable"],
+    "postconditions": ["ORCHESTRATOR_RUNBOOK.md documents session_orchestrator.py commands", "no code files modified"]
+  },
+  {
+    "task_id": "jarvis-local-llm-cross-session-memory",
+    "task_type": "code",
+    "description": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
+    "contract_version": "1.0",
+    "inputs": [
+      {"name": "vault_root", "type": "file_path", "required": true, "description": "Obsidian vault directory receiving shared memory notes", "default": "vault"}
+    ],
+    "outputs": [
+      {"name": "shared_memory_writer", "type": "file", "path_template": "harness/shared_memory.py", "description": "Module that persists cross-session memory entries into the vault"},
+      {"name": "tests", "type": "file", "path_template": "tests/test_shared_memory.py", "description": "Round-trip and concurrency tests for shared memory writes"}
+    ],
+    "side_effects": ["writes_files", "modifies_state"],
+    "requires_capabilities": ["filesystem", "python"],
+    "reversible": true,
+    "requires_approval": true,
+    "entry_point": "python -m pytest tests/test_shared_memory.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 8000,
+    "max_duration_seconds": 900,
+    "preconditions": ["vault/ directory exists", ".claude/skills/jarvis-vault.md rules reviewed", "human approval logged in approved_tasks.json"],
+    "postconditions": ["shared memory entries readable by a second session", "vault schema rules preserved", "tests pass"]
+  },
+  {
+    "task_id": "jarvis-local-llm-routing-verify",
+    "task_type": "analysis",
+    "description": "Verify devstral/qwen3:30b routing in production — confirm specialist model wins are stable under load",
+    "contract_version": "1.0",
+    "inputs": [
+      {"name": "usage_log", "type": "file_path", "required": false, "description": "Routing decision log slice to analyze", "default": "usage_log.jsonl"},
+      {"name": "sample_queries", "type": "int", "required": false, "description": "Number of representative queries per class", "default": "10"}
+    ],
+    "outputs": [
+      {"name": "routing_report", "type": "file", "path_template": "logs/{task_id}_report.md", "description": "Observed model per query class, latency under load, and stability verdict"}
+    ],
+    "side_effects": ["writes_files", "subprocess"],
+    "requires_capabilities": ["ollama", "filesystem", "python"],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_agent_local_routing.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 6000,
+    "max_duration_seconds": 600,
+    "preconditions": ["Ollama reachable at localhost:11434", "devstral and qwen3:30b-a3b present in ollama list"],
+    "postconditions": ["routing report written", "no model defaults changed in config.py"]
+  }
+]
