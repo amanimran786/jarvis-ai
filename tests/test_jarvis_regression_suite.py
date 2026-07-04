@@ -4624,7 +4624,7 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
             "report": "Detailed report text.",
         }
         with patch(
-            "research.ask_claude",
+            "research.ask_with_priority",
             return_value="Use retries, idempotency, and dead-letter handling.",
         ) as ask_mock:
             text = research.format_for_voice(result)
