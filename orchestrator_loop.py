@@ -49,8 +49,12 @@ from harness.task_contract import (  # noqa: E402
     AttemptStore,
     CompletionVerdict,
     ContractError,
+    TaskContract,
     TaskSpec,
+    approval_logged,
+    contract_for_task,
     evaluate_completion,
+    validate_contract,
 )
 
 log = logging.getLogger(__name__)
@@ -287,15 +291,47 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             _log_master(f"[orchestrator] task blocked — invalid contract: {exc}")
             continue
         if spec.legacy_adapter:
-            _mark_task_blocked(
-                task,
-                "autonomous execution requires an explicit typed task contract",
-            )
-            summary["blocked"] += 1
+            # Typed task contract gate (CODEX-8): a legacy queue entry may only
+            # execute autonomously if an explicit TaskContract covers it.
+            contract = _resolve_typed_contract(task, spec)
+            if contract is None:
+                _mark_task_blocked(
+                    task,
+                    "autonomous execution requires an explicit typed task contract",
+                )
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} blocked — legacy contract is not executable"
+                )
+                continue
+            is_valid, contract_errors = validate_contract(contract)
+            if not is_valid:
+                _mark_task_blocked(
+                    task,
+                    f"typed task contract invalid: {'; '.join(contract_errors)}",
+                )
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} blocked — typed contract "
+                    f"{contract.task_id} invalid: {'; '.join(contract_errors)}"
+                )
+                continue
+            if contract.requires_approval and not approval_logged(contract.task_id):
+                _mark_task_awaiting_approval(task)
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} awaiting approval — contract "
+                    f"{contract.task_id} requires human sign-off"
+                )
+                continue
+            _mark_task_contract_validated(task, contract)
             _log_master(
-                f"[orchestrator] {spec.task_id} blocked — legacy contract is not executable"
+                f"[orchestrator] {spec.task_id} typed contract {contract.task_id} "
+                f"v{contract.contract_version} validated — dispatching"
             )
-            continue
+            # Rebuild the spec as contract-backed so the runtime launcher's
+            # legacy_adapter check (harness/runtime_launcher.py) accepts it.
+            spec = TaskSpec.from_queue_task({**spec.to_dict(), "legacy_adapter": False})
 
         # ── Step 4: Generate prompt ──────────────────────────────────────────
         repo_ctx = _build_repo_context()
@@ -520,6 +556,43 @@ def _mark_task_blocked(task_to_block: dict[str, Any], reason: str) -> None:
             task["status"] = "blocked"
             task["blocked_reason"] = reason
             task["blocked_at"] = _now()
+            break
+    _save_queue(queue)
+
+
+def _resolve_typed_contract(task: dict[str, Any], spec: TaskSpec) -> TaskContract | None:
+    """Find the TaskContract covering a queue entry.
+
+    Lookup order: explicit contract_id stamp → derived spec identity →
+    session_name (only usable while a lane has a single contracted task).
+    """
+    for key in (task.get("contract_id"), spec.task_id, task.get("session_name")):
+        if key:
+            contract = contract_for_task(str(key))
+            if contract is not None:
+                return contract
+    return None
+
+
+def _mark_task_awaiting_approval(task_to_mark: dict[str, Any]) -> None:
+    queue = _load_queue()
+    identity = _task_identity(task_to_mark)
+    for task in queue:
+        if task == task_to_mark or (identity and _task_identity(task) == identity):
+            task["status"] = "awaiting_approval"
+            task["blocked_reason"] = "requires human approval before execution"
+            task["blocked_at"] = _now()
+            break
+    _save_queue(queue)
+
+
+def _mark_task_contract_validated(task_to_mark: dict[str, Any], contract: TaskContract) -> None:
+    queue = _load_queue()
+    identity = _task_identity(task_to_mark)
+    for task in queue:
+        if task == task_to_mark or (identity and _task_identity(task) == identity):
+            task["contract_validated_at"] = _now()
+            task["contract_version"] = contract.contract_version
             break
     _save_queue(queue)
 
