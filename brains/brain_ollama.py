@@ -1663,12 +1663,19 @@ def ask_ollama_cloud_stream(
     ]
 
     try:
+        from brains import _retry
         client = OpenAI(base_url=OLLAMA_CLOUD_BASE_URL, api_key=api_key)
-        stream = client.chat.completions.create(
-            model=resolved_model,
-            messages=messages,
-            stream=True,
-            timeout=60,
+        # Rate-limit backoff around the request open only (429 raises before
+        # the first token). After max retries the error propagates so
+        # _execute_plan_stream falls through to the next candidate.
+        stream = _retry.call_with_backoff(
+            lambda: client.chat.completions.create(
+                model=resolved_model,
+                messages=messages,
+                stream=True,
+                timeout=60,
+            ),
+            provider="ollama_cloud",
         )
 
         full_text = []
