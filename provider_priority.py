@@ -59,6 +59,36 @@ def _start_cooldown(provider: str) -> None:
         _provider_cooldowns[provider] = time.monotonic() + _cooldown_seconds()
 
 
+def _record_provider_failure(provider: str) -> None:
+    """Rate-limit failure: short in-memory cooldown + persistent circuit breaker."""
+    _start_cooldown(provider)
+    try:
+        from harness import circuit_breaker
+
+        circuit_breaker.record_failure(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker record_failure failed", exc_info=True)
+
+
+def _record_provider_success(provider: str) -> None:
+    try:
+        from harness import circuit_breaker
+
+        circuit_breaker.record_success(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker record_success failed", exc_info=True)
+
+
+def _circuit_open(provider: str) -> bool:
+    try:
+        from harness import circuit_breaker
+
+        return not circuit_breaker.is_available(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker is_available failed", exc_info=True)
+        return False
+
+
 def _local_model_for_tier(tier: str) -> str:
     return LOCAL_REASONING if tier in {"strong", "deep"} else LOCAL_DEFAULT
 
@@ -144,8 +174,12 @@ def ask_with_priority(
         if _in_cooldown(provider_name):
             print(f"[ProviderPriority] skipping {provider_name} for tier {tier}: rate-limit cooldown")
             continue
+        if _circuit_open(provider_name):
+            print(f"[ProviderPriority] skipping {provider_name} for tier {tier}: circuit breaker OPEN")
+            continue
         try:
             answer = runner()
+            _record_provider_success(provider_name)
             # Best-effort teacher capture: high-tier cloud answers can train the
             # local open-source model. No-op unless JARVIS_TEACHER_CAPTURE=1.
             try:
@@ -163,7 +197,7 @@ def ask_with_priority(
         except Exception as exc:
             last_error = exc
             if _is_rate_limit_error(exc):
-                _start_cooldown(provider_name)
+                _record_provider_failure(provider_name)
                 print(
                     f"[ProviderPriority] {provider_name} rate-limited — "
                     f"cooling down for {_cooldown_seconds():.0f}s: {exc}"
