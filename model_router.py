@@ -1232,6 +1232,15 @@ def smart_stream(
         # Soft limit → warning already logged inside budget.check().
         # Hard limit → raise so _execute_plan_stream falls through to next candidate (local).
         if not candidate.local:
+            # Global hourly cap across all cloud providers (JARVIS_CLOUD_TOKENS_PER_HOUR).
+            # Checked per candidate so it fires in every mode — not just the
+            # auto-mode plan gate above, which only covers explicit-cloud routes.
+            if _cloud_token_budget_exhausted():
+                raise RuntimeError(
+                    f"[Budget] cloud hourly token budget exhausted "
+                    f"(JARVIS_CLOUD_TOKENS_PER_HOUR) — skipping {candidate.provider}, "
+                    f"falling through to local"
+                )
             try:
                 from harness import budget as _budget
                 bcheck = _budget.check(candidate.provider)
@@ -1422,6 +1431,14 @@ def format_with_mini(
         last_error = None
         for candidate in plan.candidates:
             try:
+                # Same global hourly cloud cap as smart_stream's candidate gate:
+                # raise inside the try so the loop falls through to the next
+                # (local) candidate instead of spending cloud tokens.
+                if not candidate.local and _cloud_token_budget_exhausted():
+                    raise RuntimeError(
+                        f"[Budget] cloud hourly token budget exhausted "
+                        f"(JARVIS_CLOUD_TOKENS_PER_HOUR) — skipping {candidate.provider}"
+                    )
                 if candidate.provider == "ollama":
                     yield from ask_local_stream(
                         prompt,

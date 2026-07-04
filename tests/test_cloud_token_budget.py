@@ -105,6 +105,76 @@ class BudgetRoutingTests(unittest.TestCase):
         self.assertTrue(kwargs["explicit_cloud"])
 
 
+class GlobalBudgetCandidateGateTests(unittest.TestCase):
+    """The global hourly cap must gate every cloud candidate at execution time,
+    not just the auto-mode explicit-cloud plan gate. Usage here (2k tokens) is
+    far below the per-provider 100k/hr hard limit in harness/budget.py, so only
+    the JARVIS_CLOUD_TOKENS_PER_HOUR check can cause the cloud skip."""
+
+    def test_exhausted_global_budget_skips_cloud_candidate_and_uses_local(self):
+        rows = [{"local": False, "total_tokens": 2_000}]
+        cloud = provider_router.RouteCandidate(
+            provider="openai", model="gpt-4o-mini", local=False, label="GPT-mini",
+        )
+        local = provider_router.RouteCandidate(
+            provider="ollama", model="jarvis-local", local=True, label="Local",
+        )
+        plan = provider_router.RoutePlan(
+            mode="auto", tier="mini", candidates=(cloud, local), reason="test",
+        )
+
+        cloud_called = []
+
+        def fake_cloud_stream(*args, **kwargs):
+            cloud_called.append(True)
+            yield "cloud"
+
+        def fake_local_stream(*args, **kwargs):
+            yield "local-ok"
+
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"}), \
+             patch.object(usage_tracker, "entries", return_value=rows), \
+             patch.object(model_router, "_current_mode", "auto"), \
+             patch.object(model_router, "_is_mobile_web_active", return_value=False), \
+             patch.object(model_router, "forced_model_status", return_value={"active": False}), \
+             patch.object(model_router, "_has_local", return_value=True), \
+             patch.object(model_router, "_best_local", return_value="jarvis-local"), \
+             patch.object(model_router.provider_router, "build_plan", return_value=plan), \
+             patch.object(model_router, "ask_stream", side_effect=fake_cloud_stream), \
+             patch.object(model_router, "ask_local_stream", side_effect=fake_local_stream):
+            stream, label = model_router.smart_stream("hello there friend", tool="chat")
+            output = "".join(stream)
+
+        self.assertEqual(cloud_called, [])
+        self.assertIn("local-ok", output)
+
+    def test_under_global_budget_cloud_candidate_still_runs(self):
+        rows = [{"local": False, "total_tokens": 100}]
+        cloud = provider_router.RouteCandidate(
+            provider="openai", model="gpt-4o-mini", local=False, label="GPT-mini",
+        )
+        plan = provider_router.RoutePlan(
+            mode="auto", tier="mini", candidates=(cloud,), reason="test",
+        )
+
+        def fake_cloud_stream(*args, **kwargs):
+            yield "cloud-ok"
+
+        with patch.dict("os.environ", {"JARVIS_CLOUD_TOKENS_PER_HOUR": "1000"}), \
+             patch.object(usage_tracker, "entries", return_value=rows), \
+             patch.object(model_router, "_current_mode", "auto"), \
+             patch.object(model_router, "_is_mobile_web_active", return_value=False), \
+             patch.object(model_router, "forced_model_status", return_value={"active": False}), \
+             patch.object(model_router, "_has_local", return_value=True), \
+             patch.object(model_router, "_best_local", return_value="jarvis-local"), \
+             patch.object(model_router.provider_router, "build_plan", return_value=plan), \
+             patch.object(model_router, "ask_stream", side_effect=fake_cloud_stream):
+            stream, label = model_router.smart_stream("hello there friend", tool="chat")
+            output = "".join(stream)
+
+        self.assertIn("cloud-ok", output)
+
+
 class SemaphoreClampTests(unittest.TestCase):
     """JARVIS_MAX_CONCURRENT_TASKS hardening: 0 wedges the semaphore (silent
     DoS) and garbage must not crash module import."""
