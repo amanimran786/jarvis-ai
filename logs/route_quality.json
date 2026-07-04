@@ -1,13 +1,1 @@
-[
-  {
-    "route": "TechAssist",
-    "count": 1,
-    "avg_quality": 0.907,
-    "avg_routing": 0.9,
-    "avg_relevance": 0.83,
-    "demoted": false,
-    "recent": [
-      0.907
-    ]
-  }
-]
+[]
