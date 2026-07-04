@@ -21,14 +21,15 @@ import urllib.error
 import html
 from ddgs import DDGS
 from brains.brain_claude import ask_claude
-from config import SONNET, HAIKU
+from config import SONNET
+from provider_priority import ask_with_priority
 import skills
 
 
 # ── Query generation ──────────────────────────────────────────────────────────
 
 def _generate_queries(topic: str) -> list[str]:
-    """Use Haiku to generate diverse search queries for better coverage."""
+    """Generate diverse search queries (local-first via provider priority chain)."""
     system_extra, _ = skills.build_system_extra(topic, skill_id="research_synthesis", tool="deep_research")
     prompt = (
         f"Generate 4 diverse search queries to thoroughly research: {topic}\n"
@@ -36,7 +37,7 @@ def _generate_queries(topic: str) -> list[str]:
         f"Return ONLY a JSON array of strings, nothing else."
     )
     try:
-        raw = ask_claude(prompt, model=HAIKU, system_extra=system_extra)
+        raw = ask_with_priority(prompt, tier="cheap", system_extra=system_extra)
         raw = raw.strip()
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:-1])
@@ -227,4 +228,4 @@ def format_for_voice(result: dict) -> str:
             f"Summarize this research report in 2-3 spoken sentences. "
             f"No markdown, no bullets — natural spoken language:\n\n{result['report'][:2000]}"
         )
-    return ask_claude(prompt, model=HAIKU, system_extra=system_extra or None)
+    return ask_with_priority(prompt, tier="cheap", system_extra=system_extra)
