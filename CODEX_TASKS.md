@@ -125,6 +125,85 @@ Wire into `main.py` startup — call `plugin_loader.load_all(router)` before the
 
 Commit: `[CODEX] feat(plugins): plugin_loader + weather example plugin`
 
+### CODEX-8: Write task contracts for all 27 blocked tasks (HIGH)
+
+The typed task contract system is live: `harness/task_contract.py` defines `TaskContract`,
+`validate_contract`, `load_contracts`, `save_contracts`, `contract_for_task`. Contracts live
+in `TASK_CONTRACTS.json` (5 samples already written). The orchestrator gate in
+`orchestrator_loop.py` unblocks a legacy task only when a valid contract covers it.
+
+- Read `WORK_QUEUE.json` — every entry with `status == "blocked"` and
+  `blocked_reason == "autonomous execution requires an explicit typed task contract"`
+- Skip the 5 tasks that already have a `contract_id` field — their contracts exist
+- For each remaining task, write a `TaskContract` (see `harness/task_contract.py` for the
+  schema: task_id, task_type, description, inputs, outputs, side_effects,
+  requires_capabilities, reversible, requires_approval, entry_point, preconditions,
+  postconditions)
+- Use a unique slug task_id like `<session_name>-<short-slug>` (session_name alone is NOT
+  unique) and stamp the matching WORK_QUEUE entry with `"contract_id": "<that slug>"`
+- Anything touching vault/, config defaults, git push, or messaging gets
+  `requires_approval: true` plus non-empty preconditions
+- Append all contracts to `TASK_CONTRACTS.json` (keep it a JSON list, sorted by task_id —
+  or just use `save_contracts()` which sorts for you)
+- Verify: `python3 -c "from harness.task_contract import load_contracts, validate_contract; cs = load_contracts(); errs = {k: validate_contract(c)[1] for k, c in cs.items() if not validate_contract(c)[0]}; print(len(cs), 'contracts'); assert not errs, errs"`
+- Run `python -m pytest tests/test_task_contract.py -q` — must stay green
+- Commit: `[CODEX] feat(contracts): task contracts for all blocked WORK_QUEUE entries`
+
+### CODEX-9: /contracts CLI command (MEDIUM)
+
+Add a `/contracts` command to the REPL (in `main.py` or `harness/repl.py` — check where
+`/history` from CODEX-6 landed and follow that pattern).
+
+- `/contracts` — list all contracts in `TASK_CONTRACTS.json`: task_id, task_type,
+  requires_approval, and validation status (VALID / error count)
+- `/contracts <task_id>` — show full contract details (inputs, outputs, side_effects,
+  capabilities, pre/postconditions)
+- `/contracts validate` — run `validate_contract()` on every contract and report all errors
+- Use `rich.table.Table` for output (rich is already installed; see the CODEX-6 chrome)
+- Import from `harness.task_contract`: `load_contracts`, `validate_contract`
+- Commit: `[CODEX] feat(cli): /contracts command for task contract management`
+
+### CODEX-10: Capability discovery (MEDIUM)
+
+Build `harness/capability_checker.py` so the orchestrator can verify a contract's
+`requires_capabilities` before dispatch.
+
+- `check_capability(cap: Capability) -> bool` for each member of
+  `harness.task_contract.Capability`:
+  - OLLAMA: GET `http://localhost:11434/api/tags` with 3s timeout
+  - FILESYSTEM: working_directory is readable and writable (`os.access`)
+  - INTERNET: HEAD `https://api.openai.com` with 3s timeout
+  - GIT: `subprocess.run(["git", "--version"], shell=False, timeout=5)`
+  - PYTHON: `subprocess.run(["python3", "--version"], shell=False, timeout=5)`
+  - VOICE: `sounddevice.query_devices()` succeeds (import inside the function; missing
+    module = False, never a crash)
+  - CALENDAR / IMESSAGE / SCREEN: return False with a logged "not yet probeable" note
+- `check_contract_capabilities(contract: TaskContract) -> dict[str, bool]` — capability
+  name → available
+- Wire into `orchestrator_loop.py` right after the contract-validation gate: call it and
+  `_log_master()` any missing capabilities (log-only for now, do not block)
+- All subprocess calls: list args, `shell=False`, explicit timeout
+- Tests in `tests/test_capability_checker.py` — mock subprocess/HTTP, no real network
+- Commit: `[CODEX] feat(harness): capability_checker for pre-execution validation`
+
+### CODEX-11: Contract approval workflow (LOW)
+
+The gate half already exists: `orchestrator_loop.py` sends `requires_approval=True` tasks
+to `status = "awaiting_approval"` unless `harness.task_contract.approval_logged(task_id)`
+finds a record in `approved_tasks.json`. Build the human half.
+
+- `approved_tasks.json` (repo root): JSON list of
+  `{"task_id": ..., "approved_at": <ISO-8601 UTC>, "approved_by": <user>}`
+- `/approve <task_id>` REPL command — validates the task_id exists in
+  `TASK_CONTRACTS.json` (via `contract_for_task`), then appends an approval record
+  (atomic write, dedupe on task_id)
+- `/pending-approval` REPL command — lists WORK_QUEUE entries with
+  `status == "awaiting_approval"` plus contracted tasks with `requires_approval=True`
+  and no approval record
+- Add `approved_tasks.json` handling tests to `tests/test_task_contract.py` or a new
+  `tests/test_approval_workflow.py`
+- Commit: `[CODEX] feat(contracts): human approval workflow for sensitive tasks`
+
 ## How to update this file when done
 Add ✅ next to the task name and write one line describing what you built.
 Append to `MASTER_LOG.md`:
