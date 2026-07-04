@@ -94,10 +94,19 @@ def ask_claude_stream(
     _attempt = 0
     while True:
         try:
+            # cache_control enables Anthropic prompt caching: the system block
+            # (persona + memory + grounding, ~1-4K tokens) is cached for ~5min,
+            # so consecutive turns re-read it at ~10% of the input token cost.
             with _client.messages.stream(
                 model=model,
                 max_tokens=2048,
-                system=effective_system,
+                system=[
+                    {
+                        "type": "text",
+                        "text": effective_system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
                 messages=messages
             ) as stream:
                 buffer = ""
