@@ -14,9 +14,8 @@ from collections import deque
 from datetime import datetime, timedelta
 
 import memory as mem
+from config import MAX_ACTIVE_TURNS
 
-
-MAX_ACTIVE_TURNS = 20
 SESSION_TIMEOUT_MINUTES = 20
 _COMPACT_SUMMARY_MAX = 1200  # max chars for accumulated past_context summary
 TOPIC_OVERLAP_THRESHOLD = 0.12
