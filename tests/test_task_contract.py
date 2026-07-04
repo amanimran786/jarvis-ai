@@ -7,9 +7,19 @@ import pytest
 from harness.task_contract import (
     AttemptRecord,
     AttemptStore,
+    Capability,
     ContractError,
+    OutputSpec,
+    SideEffect,
+    TaskContract,
     TaskSpec,
+    TaskType,
+    approval_logged,
+    contract_for_task,
     evaluate_completion,
+    load_contracts,
+    save_contracts,
+    validate_contract,
 )
 
 
@@ -163,3 +173,106 @@ def test_completion_rejects_unresolved_policy_findings():
 
     assert verdict.status == "rejected"
     assert verdict.failure_class == "policy_failure"
+
+
+# ── Typed TaskContract (CODEX-8) ──────────────────────────────────────────────
+
+
+def _contract(**overrides) -> TaskContract:
+    contract = TaskContract(
+        task_id="jarvis-audit-memory-events-verify",
+        task_type=TaskType.ANALYSIS,
+        description="Verify audit.jsonl captures memory_write events end-to-end",
+        outputs=[
+            OutputSpec(
+                name="verification_report",
+                type="file",
+                path_template="logs/{task_id}_report.md",
+            )
+        ],
+        side_effects=[SideEffect.WRITES_FILES, SideEffect.SUBPROCESS],
+        requires_capabilities=[Capability.FILESYSTEM, Capability.PYTHON],
+        preconditions=["logs/audit.jsonl exists"],
+        postconditions=["report written"],
+    )
+    for key, value in overrides.items():
+        setattr(contract, key, value)
+    return contract
+
+
+def test_validate_contract_passes_for_valid_contract():
+    is_valid, errors = validate_contract(_contract())
+
+    assert is_valid is True
+    assert errors == []
+
+
+def test_validate_contract_rejects_empty_task_id():
+    is_valid, errors = validate_contract(_contract(task_id="  "))
+
+    assert is_valid is False
+    assert any("task_id" in error for error in errors)
+
+
+def test_validate_contract_requires_outputs_when_writing_files():
+    is_valid, errors = validate_contract(_contract(outputs=[]))
+
+    assert is_valid is False
+    assert any("writes_files" in error for error in errors)
+
+
+def test_validate_contract_requires_preconditions_for_approval_gated_tasks():
+    is_valid, errors = validate_contract(
+        _contract(requires_approval=True, preconditions=[])
+    )
+
+    assert is_valid is False
+    assert any("requires_approval" in error for error in errors)
+
+
+def test_contracts_save_load_round_trip(tmp_path: Path):
+    path = tmp_path / "TASK_CONTRACTS.json"
+    original = _contract()
+
+    save_contracts({original.task_id: original}, path)
+    loaded = load_contracts(path)
+
+    assert set(loaded) == {original.task_id}
+    reloaded = loaded[original.task_id]
+    assert reloaded.task_type is TaskType.ANALYSIS
+    assert reloaded.side_effects == [SideEffect.WRITES_FILES, SideEffect.SUBPROCESS]
+    assert reloaded.requires_capabilities == [Capability.FILESYSTEM, Capability.PYTHON]
+    assert reloaded.outputs[0].path_template == "logs/{task_id}_report.md"
+    assert reloaded.to_dict() == original.to_dict()
+
+
+def test_contract_for_task_returns_none_for_unknown_task(tmp_path: Path):
+    path = tmp_path / "TASK_CONTRACTS.json"
+    save_contracts({"known-task": _contract(task_id="known-task")}, path)
+
+    assert contract_for_task("unknown-task", path) is None
+    assert contract_for_task("known-task", path) is not None
+    assert contract_for_task("", path) is None
+
+
+def test_load_contracts_skips_invalid_entries(tmp_path: Path):
+    path = tmp_path / "TASK_CONTRACTS.json"
+    path.write_text(
+        '[{"task_id": "bad-type", "task_type": "not-a-type", "description": "x"}]',
+        encoding="utf-8",
+    )
+
+    assert load_contracts(path) == {}
+
+
+def test_approval_logged_reads_approved_tasks_file(tmp_path: Path):
+    path = tmp_path / "approved_tasks.json"
+    path.write_text(
+        '[{"task_id": "jarvis-local-llm-cross-session-memory",'
+        ' "approved_at": "2026-07-04T00:00:00+00:00", "approved_by": "aman"}]',
+        encoding="utf-8",
+    )
+
+    assert approval_logged("jarvis-local-llm-cross-session-memory", path) is True
+    assert approval_logged("some-other-task", path) is False
+    assert approval_logged("anything", tmp_path / "missing.json") is False

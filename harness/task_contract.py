@@ -1,4 +1,18 @@
-"""Typed contracts and durable checkpoints for orchestration loops."""
+"""Typed contracts and durable checkpoints for orchestration loops.
+
+Two contract layers live here:
+
+1. TaskSpec / AttemptRecord — the dispatch-time execution contract used by
+   orchestrator_loop.py and harness/runtime_launcher.py (scope, budget,
+   verification evidence).
+
+2. TaskContract — the machine-readable safety contract (CODEX-8).  Every task
+   in WORK_QUEUE.json must have a TaskContract in TASK_CONTRACTS.json before
+   the orchestrator will execute it without human approval.  It declares what
+   a task needs (inputs, capabilities), what it produces (outputs), what side
+   effects it has, and what safety checks must pass before autonomous
+   execution.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +20,12 @@ import datetime as _datetime
 import fnmatch
 import hashlib
 import json
+import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 
 class ContractError(ValueError):
@@ -396,3 +412,251 @@ class AttemptStore:
                 if line.strip():
                     records.append(json.loads(line))
         return records
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Typed Task Contract (CODEX-8) — machine-readable specification for
+# autonomous task execution.  Every task in WORK_QUEUE.json must have a
+# contract before the orchestrator will execute it without human approval.
+# ══════════════════════════════════════════════════════════════════════════════
+
+_log = logging.getLogger(__name__)
+
+_HARNESS_REPO_ROOT = Path(__file__).resolve().parent.parent
+TASK_CONTRACTS_PATH = _HARNESS_REPO_ROOT / "TASK_CONTRACTS.json"
+APPROVED_TASKS_PATH = _HARNESS_REPO_ROOT / "approved_tasks.json"
+
+
+class TaskType(str, Enum):
+    CODE = "code"           # writes/modifies code
+    RESEARCH = "research"   # reads/analyzes, no mutations
+    FILE_OP = "file_op"     # creates/modifies files
+    API_CALL = "api_call"   # calls external APIs
+    ANALYSIS = "analysis"   # data analysis, no mutations
+    VOICE = "voice"         # voice/audio related
+    SYSTEM = "system"       # system config, launchd, etc.
+    PLANNING = "planning"   # produces plans, no execution
+
+
+class SideEffect(str, Enum):
+    WRITES_FILES = "writes_files"
+    MODIFIES_GIT = "modifies_git"
+    NETWORK_REQUESTS = "network_requests"
+    SUBPROCESS = "subprocess"
+    MODIFIES_CONFIG = "modifies_config"
+    SENDS_MESSAGES = "sends_messages"
+    MODIFIES_STATE = "modifies_state"   # in-memory state changes
+
+
+class Capability(str, Enum):
+    OLLAMA = "ollama"           # local LLM
+    FILESYSTEM = "filesystem"   # read/write files
+    INTERNET = "internet"       # outbound HTTP
+    GIT = "git"                 # git operations
+    PYTHON = "python"           # python subprocess
+    VOICE = "voice"             # microphone/speaker
+    CALENDAR = "calendar"       # calendar access
+    IMESSAGE = "imessage"       # messaging
+    SCREEN = "screen"           # screen capture/control
+
+
+@dataclass
+class InputSpec:
+    name: str
+    type: str               # "str", "int", "file_path", "json", etc.
+    required: bool = True
+    description: str = ""
+    default: Optional[str] = None
+
+
+@dataclass
+class OutputSpec:
+    name: str
+    type: str               # "file", "json", "str", "commit_hash", etc.
+    path_template: str = ""  # e.g. "logs/{task_id}_result.json"
+    description: str = ""
+
+
+@dataclass
+class TaskContract:
+    # Identity
+    task_id: str                    # matches contract_id/session_name in WORK_QUEUE
+    task_type: TaskType
+    description: str
+    contract_version: str = "1.0"
+
+    # I/O
+    inputs: list[InputSpec] = field(default_factory=list)
+    outputs: list[OutputSpec] = field(default_factory=list)
+
+    # Safety
+    side_effects: list[SideEffect] = field(default_factory=list)
+    requires_capabilities: list[Capability] = field(default_factory=list)
+    reversible: bool = True
+    requires_approval: bool = False  # True = must have human sign-off
+
+    # Execution
+    entry_point: str = ""           # script or function to call
+    working_directory: str = "/Users/truthseeker/jarvis-ai"
+    estimated_tokens: int = 2000
+    max_duration_seconds: int = 300
+
+    # Validation
+    preconditions: list[str] = field(default_factory=list)   # must be true before run
+    postconditions: list[str] = field(default_factory=list)  # verified after run
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["task_type"] = str(
+            self.task_type.value if isinstance(self.task_type, TaskType) else self.task_type
+        )
+        data["side_effects"] = [
+            str(e.value if isinstance(e, SideEffect) else e) for e in self.side_effects
+        ]
+        data["requires_capabilities"] = [
+            str(c.value if isinstance(c, Capability) else c)
+            for c in self.requires_capabilities
+        ]
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "TaskContract":
+        if not isinstance(data, Mapping):
+            raise ContractError("contract entry must be an object")
+        try:
+            task_type = TaskType(str(data.get("task_type", "")))
+        except ValueError as exc:
+            raise ContractError(f"unknown task_type: {data.get('task_type')!r}") from exc
+        try:
+            side_effects = [SideEffect(str(e)) for e in data.get("side_effects", [])]
+        except ValueError as exc:
+            raise ContractError(f"unknown side_effect in {data.get('side_effects')!r}") from exc
+        try:
+            capabilities = [Capability(str(c)) for c in data.get("requires_capabilities", [])]
+        except ValueError as exc:
+            raise ContractError(
+                f"unknown capability in {data.get('requires_capabilities')!r}"
+            ) from exc
+        return cls(
+            task_id=str(data.get("task_id", "")),
+            task_type=task_type,
+            description=str(data.get("description", "")),
+            contract_version=str(data.get("contract_version", "1.0")),
+            inputs=[InputSpec(**dict(i)) for i in data.get("inputs", [])],
+            outputs=[OutputSpec(**dict(o)) for o in data.get("outputs", [])],
+            side_effects=side_effects,
+            requires_capabilities=capabilities,
+            reversible=bool(data.get("reversible", True)),
+            requires_approval=bool(data.get("requires_approval", False)),
+            entry_point=str(data.get("entry_point", "")),
+            working_directory=str(
+                data.get("working_directory", "/Users/truthseeker/jarvis-ai")
+            ),
+            estimated_tokens=int(data.get("estimated_tokens", 2000)),
+            max_duration_seconds=int(data.get("max_duration_seconds", 300)),
+            preconditions=[str(p) for p in data.get("preconditions", [])],
+            postconditions=[str(p) for p in data.get("postconditions", [])],
+        )
+
+
+def validate_contract(contract: TaskContract) -> tuple[bool, list[str]]:
+    """Validate a TaskContract. Returns (is_valid, list_of_errors)."""
+    errors: list[str] = []
+    if not str(contract.task_id or "").strip():
+        errors.append("task_id must not be empty")
+    try:
+        TaskType(contract.task_type)
+    except ValueError:
+        errors.append(f"task_type is not a valid TaskType: {contract.task_type!r}")
+    try:
+        effects = {SideEffect(e) for e in contract.side_effects}
+    except ValueError as exc:
+        effects = set()
+        errors.append(f"side_effects contains an unknown value: {exc}")
+    if SideEffect.WRITES_FILES in effects and not contract.outputs:
+        errors.append("side_effects includes writes_files but outputs is empty")
+    if contract.requires_approval and not contract.preconditions:
+        errors.append("requires_approval=True but preconditions is empty")
+    return (not errors, errors)
+
+
+def load_contracts(path: Path = TASK_CONTRACTS_PATH) -> dict[str, TaskContract]:
+    """Load TASK_CONTRACTS.json. Returns dict keyed by task_id.
+
+    Corrupt or unparseable entries are skipped with a warning so one bad
+    contract never blocks the rest of the fleet.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        _log.warning("[TaskContract] Could not read %s: %s", path, exc)
+        return {}
+    if not isinstance(data, list):
+        _log.warning("[TaskContract] %s is not a JSON list — ignoring", path)
+        return {}
+    contracts: dict[str, TaskContract] = {}
+    for entry in data:
+        try:
+            contract = TaskContract.from_dict(entry)
+        except (ContractError, TypeError, ValueError) as exc:
+            _log.warning("[TaskContract] Skipping invalid contract entry: %s", exc)
+            continue
+        if contract.task_id:
+            contracts[contract.task_id] = contract
+    return contracts
+
+
+def save_contracts(
+    contracts: dict[str, TaskContract], path: Path = TASK_CONTRACTS_PATH
+) -> None:
+    """Atomically save contracts to TASK_CONTRACTS.json (sorted by task_id)."""
+    path = Path(path)
+    payload = [contracts[key].to_dict() for key in sorted(contracts)]
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def contract_for_task(
+    task_id: str, path: Path = TASK_CONTRACTS_PATH
+) -> Optional[TaskContract]:
+    """Convenience lookup: return the TaskContract for task_id, or None."""
+    if not task_id:
+        return None
+    return load_contracts(path).get(task_id)
+
+
+def approval_logged(task_id: str, path: Path = APPROVED_TASKS_PATH) -> bool:
+    """True if a human approval for task_id exists in approved_tasks.json.
+
+    approved_tasks.json is a list of {"task_id": ..., "approved_at": ...,
+    "approved_by": ...} records (written by the /approve command, CODEX-11).
+    """
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        _log.warning("[TaskContract] Could not read %s: %s", path, exc)
+        return False
+    if not isinstance(data, list):
+        return False
+    return any(
+        isinstance(entry, Mapping) and entry.get("task_id") == task_id
+        for entry in data
+    )
