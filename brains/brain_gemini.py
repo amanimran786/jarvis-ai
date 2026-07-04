@@ -4,6 +4,7 @@ from config import GEMINI_API_KEY, GEMINI_FLASH, SYSTEM_PROMPT
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
+from brains import _retry
 
 try:
     from google import genai
@@ -84,10 +85,16 @@ def ask_gemini_stream(
             effective_system += "\n\n" + system_extra
         messages = [{"role": "user", "content": user_input}]
 
-    response = client.models.generate_content(
-        model=model,
-        contents=_to_contents(messages),
-        config={"system_instruction": effective_system},
+    # Rate-limit backoff (2s/4s/8s, max 3 retries). generate_content is
+    # non-streaming, so retrying the whole call is safe — nothing has been
+    # yielded yet. After max retries the error propagates for provider failover.
+    response = _retry.call_with_backoff(
+        lambda: client.models.generate_content(
+            model=model,
+            contents=_to_contents(messages),
+            config={"system_instruction": effective_system},
+        ),
+        provider="gemini",
     )
 
     full_reply = _strip_markdown(getattr(response, "text", "") or "")
