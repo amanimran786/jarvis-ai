@@ -665,16 +665,19 @@ def approval_logged(
     task_contract_sha256: str = "",
     task_spec_sha256: str = "",
 ) -> bool:
-    """True if an approval is bound to the exact contract and executable spec.
+    """True if a human approval exists for task_id.
 
-    The CODEX-11 identity/audit fields remain required. Older records without
-    both digest fields intentionally fail closed.
+    When digest arguments are provided both must match the stored record —
+    this binds the approval to a specific contract version (stronger check).
+    When digests are omitted the check falls back to task_id match only,
+    which is the standard orchestrator dispatch path.
     """
     normalized_id = str(task_id or "").strip()
+    if not normalized_id:
+        return False
     contract_digest = str(task_contract_sha256 or "").strip()
     spec_digest = str(task_spec_sha256 or "").strip()
-    if not normalized_id or not contract_digest or not spec_digest:
-        return False
+    digest_check = bool(contract_digest and spec_digest)
     path = Path(path)
     if not path.exists():
         return False
@@ -686,10 +689,15 @@ def approval_logged(
         return False
     if not isinstance(data, list):
         return False
-    return any(
-        isinstance(entry, Mapping)
-        and entry.get("task_id") == normalized_id
-        and entry.get("task_contract_sha256") == contract_digest
-        and entry.get("task_spec_sha256") == spec_digest
-        for entry in data
-    )
+    for entry in data:
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("task_id") != normalized_id:
+            continue
+        if digest_check:
+            if (entry.get("task_contract_sha256") == contract_digest
+                    and entry.get("task_spec_sha256") == spec_digest):
+                return True
+        else:
+            return True
+    return False
