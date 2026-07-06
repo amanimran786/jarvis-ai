@@ -20,8 +20,6 @@ import urllib.request
 import urllib.error
 import html
 from ddgs import DDGS
-from brains.brain_claude import ask_claude
-from config import SONNET
 from provider_priority import ask_with_priority
 import skills
 
@@ -92,7 +90,7 @@ def _fetch_page(url: str, max_chars: int = 4000) -> str:
 # ── Synthesis ─────────────────────────────────────────────────────────────────
 
 def _synthesize(topic: str, sources: list[dict]) -> str:
-    """Use Sonnet to synthesize all sources into a structured report."""
+    """Synthesize all sources into a structured report (local-first via priority chain)."""
     system_extra, _ = skills.build_system_extra(topic, skill_id="research_synthesis", tool="deep_research")
     source_block = ""
     for i, src in enumerate(sources):
@@ -116,7 +114,7 @@ Report requirements:
 
 Do not invent facts not supported by the sources."""
 
-    return ask_claude(prompt, model=SONNET, system_extra=system_extra)
+    return ask_with_priority(prompt, tier="strong", system_extra=system_extra)
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
