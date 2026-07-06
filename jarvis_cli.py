@@ -81,6 +81,18 @@ except Exception:
     Table = None
     Text = None
 
+from harness.approval_workflow import (
+    ApprovalWorkflowError,
+    list_pending_approvals,
+    record_approval,
+    requeue_approved_task,
+)
+from harness.task_contract import (
+    contract_for_task,
+    load_contracts,
+    validate_contract,
+)
+
 
 _CONSOLE_STATE = {"effort": "high", "pending_shell": ""}
 _OWNS_DAEMON = False
@@ -97,6 +109,8 @@ _SLASH_COMMANDS = (
     "/effort",
     "/agents",
     "/tasks",
+    "/contracts",
+    "/pending-approval",
     "/task",
     "/code",
     "/task-status",
@@ -477,6 +491,43 @@ def approve_task(task_id: str) -> int:
     return 0
 
 
+def _approve_contract_task(task_id: str) -> int:
+    try:
+        record, created = record_approval(task_id)
+        requeued = requeue_approved_task(task_id)
+    except (ApprovalWorkflowError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    state = "Approved" if created else "Already approved"
+    print(
+        f"{state}: {record['task_id']} by {record['approved_by']} "
+        f"at {record['approved_at']}"
+        + ("; queued for execution" if requeued else "")
+    )
+    return 0
+
+
+def _print_pending_approvals() -> int:
+    try:
+        pending = list_pending_approvals()
+    except ApprovalWorkflowError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if not pending:
+        print("No pending contract approvals.")
+        return 0
+    print("Pending Contract Approvals")
+    for item in pending:
+        state = (
+            "approved; awaiting orchestrator"
+            if item["approval_logged"]
+            else item["status"]
+        )
+        description = f" - {item['description']}" if item["description"] else ""
+        print(f"{item['task_id']}: {state}{description}")
+    return 0
+
+
 def deny_task(task_id: str) -> int:
     task_id = (task_id or "").strip()
     if not task_id:
@@ -664,6 +715,79 @@ def _print_tasks(status: str = "") -> None:
         autonomy = task.get("autonomy") or ""
         autonomy_text = f" {autonomy}" if autonomy else ""
         print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{autonomy_text}{confidence_text}{approval}")
+
+
+def _print_contracts(args: str = "", *, console=None) -> int:
+    if not Table or not Console:
+        print("Error: Rich is required for /contracts.", file=sys.stderr)
+        return 1
+
+    target = console or _RICH_CONSOLE or Console()
+    contracts = load_contracts()
+    selector = (args or "").strip()
+
+    if selector == "validate":
+        table = Table(title="Contract Validation", box=box.SIMPLE_HEAVY if box else None)
+        table.add_column("Task ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Error")
+        error_count = 0
+        for task_id in sorted(contracts):
+            valid, errors = validate_contract(contracts[task_id])
+            if valid:
+                table.add_row(task_id, "VALID", "-")
+                continue
+            error_count += len(errors)
+            for index, error in enumerate(errors):
+                table.add_row(
+                    task_id if index == 0 else "",
+                    "INVALID" if index == 0 else "",
+                    error,
+                )
+        table.caption = f"{len(contracts)} contract(s), {error_count} error(s)"
+        target.print(table)
+        return 1 if error_count else 0
+
+    if selector:
+        contract = contracts.get(selector)
+        if contract is None:
+            table = Table(title="Contract Lookup", box=box.SIMPLE_HEAVY if box else None)
+            table.add_column("Status")
+            table.add_column("Message")
+            table.add_row("NOT FOUND", f"No contract found for task_id: {selector}")
+            target.print(table)
+            return 1
+
+        table = Table(title=f"Contract: {selector}", box=box.SIMPLE_HEAVY if box else None)
+        table.add_column("Field", style="cyan", no_wrap=True)
+        table.add_column("Value", overflow="fold")
+        for field_name, value in contract.to_dict().items():
+            rendered = (
+                json.dumps(value, indent=2, ensure_ascii=True)
+                if isinstance(value, (list, dict))
+                else str(value)
+            )
+            table.add_row(field_name, rendered)
+        target.print(table)
+        return 0
+
+    table = Table(title="Task Contracts", box=box.SIMPLE_HEAVY if box else None)
+    table.add_column("Task ID", style="cyan")
+    table.add_column("Type")
+    table.add_column("Approval")
+    table.add_column("Validation")
+    for task_id in sorted(contracts):
+        contract = contracts[task_id]
+        valid, errors = validate_contract(contract)
+        task_type = getattr(contract.task_type, "value", str(contract.task_type))
+        table.add_row(
+            task_id,
+            task_type,
+            "YES" if contract.requires_approval else "NO",
+            "VALID" if valid else f"{len(errors)} error(s)",
+        )
+    target.print(table)
+    return 0
 
 
 def _print_memory() -> None:
@@ -1280,12 +1404,14 @@ def _console_help() -> str:
             "  /effort [level]       Show or set effort: low | medium | high | xhigh",
             "  /agents               List managed agents",
             "  /tasks [status]       List tasks, optionally filtered by lifecycle state",
+            "  /contracts [id]       List, inspect, or validate task contracts",
+            "  /pending-approval     List contract tasks awaiting human approval",
             "  /task <prompt>        Run a managed task",
             "  /code <prompt>        Run an isolated coding task",
             "  /task-status <id>     Show one task payload",
             "  /watch <task_id>      Stream an existing task until completion",
             "  /cancel <task_id>     Request cancellation for a task",
-            "  /approve <task_id>    Approve a managed task waiting for approval",
+            "  /approve <task_id>    Approve a contract task, or a managed task if uncontracted",
             "  /deny <task_id>       Deny a managed task waiting for approval",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
@@ -1763,6 +1889,8 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command == "approve":
         if args:
+            if contract_for_task(args) is not None:
+                return _approve_contract_task(args)
             return approve_task(args)
         return _approve_pending_shell_command()
     if command == "deny":
@@ -1804,6 +1932,10 @@ def _handle_console_command(line: str) -> int | None:
     if command == "tasks":
         _print_tasks(args)
         return 0
+    if command == "contracts":
+        return _print_contracts(args)
+    if command == "pending-approval":
+        return _print_pending_approvals()
     if command in {"context-budget", "tokens"}:
         _print_context_budget()
         return 0

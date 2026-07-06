@@ -2,9 +2,11 @@ import unittest
 from unittest.mock import patch
 import os
 import sys
+import types
 
 sys.modules.pop("mem0_layer", None)
 import mem0_layer
+from local_runtime.local_mem0 import install_qdrant_search_compat
 
 
 class Mem0LayerTests(unittest.TestCase):
@@ -45,6 +47,24 @@ class Mem0LayerTests(unittest.TestCase):
         self.assertFalse(status["available"])
         self.assertFalse(status["fastembed_available"])
         self.assertEqual(status["search_mode"], "semantic_only")
+
+    def test_get_instance_installs_qdrant_search_compatibility(self):
+        memory = object()
+        mem0_module = types.ModuleType("mem0")
+        mem0_module.Memory = type(
+            "_Memory",
+            (),
+            {"from_config": staticmethod(lambda config: memory)},
+        )
+
+        with patch.dict(sys.modules, {"mem0": mem0_module}), \
+             patch("mem0_layer._acquire_qdrant_lock", return_value=True), \
+             patch("mem0_layer.install_qdrant_search_compat") as install_compat:
+            instance = mem0_layer._get_instance()
+
+        self.assertIs(instance, memory)
+        install_compat.assert_called_once_with(memory)
+        self.assertTrue(mem0_layer._available)
 
     def test_search_uses_filters_for_current_mem0_api(self):
         calls = []
@@ -137,6 +157,73 @@ class Mem0LayerTests(unittest.TestCase):
 
         self.assertEqual(calls, ["client", "memory"])
         self.assertIsNone(mem0_layer._memory_instance)
+
+    def test_qdrant_search_compat_forwards_to_query_points(self):
+        calls = []
+        points = [object()]
+
+        class _Client:
+            def query_points(self, **kwargs):
+                calls.append(kwargs)
+                return type("_Response", (), {"points": points})()
+
+        client = _Client()
+        memory = type(
+            "_Memory",
+            (),
+            {"vector_store": type("_VectorStore", (), {"client": client})()},
+        )()
+
+        installed = install_qdrant_search_compat(memory)
+        results = client.search(
+            collection_name="jarvis",
+            query_vector=[0.1, 0.2],
+            query_filter="user-filter",
+            limit=3,
+        )
+
+        self.assertTrue(installed)
+        self.assertIs(results, points)
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "collection_name": "jarvis",
+                    "query": [0.1, 0.2],
+                    "using": None,
+                    "query_filter": "user-filter",
+                    "search_params": None,
+                    "limit": 3,
+                    "offset": None,
+                    "with_payload": True,
+                    "with_vectors": False,
+                    "score_threshold": None,
+                    "consistency": None,
+                    "shard_key_selector": None,
+                    "timeout": None,
+                }
+            ],
+        )
+
+    def test_qdrant_search_compat_preserves_existing_search(self):
+        def original_search(self):
+            return None
+
+        client = type(
+            "_Client",
+            (),
+            {"search": original_search, "query_points": lambda self: None},
+        )()
+        memory = type(
+            "_Memory",
+            (),
+            {"vector_store": type("_VectorStore", (), {"client": client})()},
+        )()
+
+        installed = install_qdrant_search_compat(memory)
+
+        self.assertFalse(installed)
+        self.assertIs(client.search.__func__, original_search)
 
 
 if __name__ == "__main__":

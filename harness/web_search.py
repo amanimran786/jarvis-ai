@@ -54,8 +54,8 @@ _CACHE_TTL    = 300       # 5-minute in-memory cache TTL (seconds)
 
 # ── In-memory query cache ─────────────────────────────────────────────────────
 
-# Maps normalised query → (results_list, monotonic_timestamp)
-_query_cache: dict[str, tuple[list[dict[str, Any]], float]] = {}
+# Maps (normalised query, max results) → (results_list, monotonic_timestamp)
+_query_cache: dict[tuple[str, int], tuple[list[dict[str, Any]], float]] = {}
 _cache_lock  = threading.Lock()
 
 
@@ -64,9 +64,9 @@ def _normalize_query(query: str) -> str:
     return " ".join(query.strip().lower().split())
 
 
-def _cache_get(query: str) -> list[dict[str, Any]] | None:
+def _cache_get(query: str, max_results: int) -> list[dict[str, Any]] | None:
     """Return cached results for *query* if still fresh, else None."""
-    key = _normalize_query(query)
+    key = (_normalize_query(query), max_results)
     with _cache_lock:
         entry = _query_cache.get(key)
         if entry is None:
@@ -78,9 +78,9 @@ def _cache_get(query: str) -> list[dict[str, Any]] | None:
         return results
 
 
-def _cache_set(query: str, results: list[dict[str, Any]]) -> None:
+def _cache_set(query: str, max_results: int, results: list[dict[str, Any]]) -> None:
     """Store results in cache and prune stale entries opportunistically."""
-    key = _normalize_query(query)
+    key = (_normalize_query(query), max_results)
     now = time.monotonic()
     with _cache_lock:
         _query_cache[key] = (results, now)
@@ -173,7 +173,7 @@ def _ddgs_search(query: str, max_results: int) -> list[dict[str, Any]]:
 
 def search(query: str, max_results: int = 5, summarise: bool = True) -> str:
     """Search DuckDuckGo and return results, optionally summarised by local LLM."""
-    cached = _cache_get(query)
+    cached = _cache_get(query, max_results)
     if cached is not None:
         results = cached
     else:
@@ -185,7 +185,7 @@ def search(query: str, max_results: int = 5, summarise: bool = True) -> str:
         except Exception as exc:
             log.warning("[WebSearch] DDGS search failed: %s", exc)
             return f"Search failed: {exc}"
-        _cache_set(query, results)
+        _cache_set(query, max_results, results)
 
     if not results:
         return "I couldn't find anything on that."
@@ -205,7 +205,7 @@ def search(query: str, max_results: int = 5, summarise: bool = True) -> str:
 
 def search_and_fetch(query: str, max_results: int = 5) -> str:
     """Search + fetch top result, then summarise combined context locally."""
-    cached = _cache_get(query)
+    cached = _cache_get(query, max_results)
     if cached is not None:
         results = cached
     else:
@@ -217,7 +217,7 @@ def search_and_fetch(query: str, max_results: int = 5) -> str:
         except Exception as exc:
             log.warning("[WebSearch] DDGS search failed: %s", exc)
             return f"Search failed: {exc}"
-        _cache_set(query, results)
+        _cache_set(query, max_results, results)
 
     if not results:
         return "I couldn't find anything on that."

@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import urllib.error
 
+import pytest
+
 from harness import web_search as ws
 
 
@@ -32,6 +34,15 @@ def _mock_urlopen(content: bytes):
     resp.__enter__ = MagicMock(return_value=resp)
     resp.__exit__ = MagicMock(return_value=False)
     return resp
+
+
+@pytest.fixture(autouse=True)
+def _isolate_query_cache():
+    with ws._cache_lock:
+        ws._query_cache.clear()
+    yield
+    with ws._cache_lock:
+        ws._query_cache.clear()
 
 
 # ── search() ─────────────────────────────────────────────────────────────────
@@ -81,6 +92,18 @@ class TestSearch:
         with patch("harness.web_search.DDGS", return_value=_mock_ddgs(_ddg_results(3))) as mock_cls:
             ws.search("query", max_results=7, summarise=False)
         mock_cls.return_value.text.assert_called_once_with("query", max_results=7)
+
+    def test_cache_separates_different_max_results(self):
+        with patch(
+            "harness.web_search.DDGS",
+            side_effect=[_mock_ddgs(_ddg_results(1)), _mock_ddgs(_ddg_results(3))],
+        ) as mock_cls:
+            first = ws.search("same query", max_results=1, summarise=False)
+            second = ws.search("same query", max_results=3, summarise=False)
+
+        assert mock_cls.call_count == 2
+        assert "[2]" not in first
+        assert "[3]" in second
 
 
 # ── fetch_page() ─────────────────────────────────────────────────────────────

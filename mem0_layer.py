@@ -52,6 +52,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from local_runtime.local_mem0 import install_qdrant_search_compat
+
 try:
     from harness.audit import audit_log as _audit_log
 except Exception:
@@ -187,6 +189,7 @@ def _get_instance() -> Any | None:
         try:
             from mem0 import Memory
             _memory_instance = Memory.from_config(_build_config())
+            install_qdrant_search_compat(_memory_instance)
             _available = True
             _last_error = ""
         except Exception as e:
