@@ -5810,7 +5810,7 @@ class WebSearchSummaryTests(unittest.TestCase):
 
     def test_web_search_routes_to_search_label(self):
         """'search the web for AI news' should hit the Search label."""
-        with patch("tools.web_search", return_value="AI is advancing rapidly.") as mock_search:
+        with patch("harness.web_search.search", return_value="AI is advancing rapidly.") as mock_search:
             stream, label = router.route_stream("search the web for AI news")
             self._consume(stream)
         self.assertEqual(label, "Search")

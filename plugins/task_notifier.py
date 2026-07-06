@@ -1,10 +1,16 @@
 """task_notifier plugin — logs task completions/failures to JSONL."""
-import json, sys
+import json
+import logging
+import sys
 from datetime import datetime
+from html import escape
 from pathlib import Path
 from typing import Dict, Any
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from plugins.base import JarvisPlugin
+
+log = logging.getLogger(__name__)
 
 class TaskNotifierPlugin(JarvisPlugin):
     name = "task_notifier"
@@ -30,11 +36,12 @@ class TaskNotifierPlugin(JarvisPlugin):
             lines = self._log.read_text().splitlines()[-10:]
             events = [json.loads(l) for l in lines if l.strip()]
             rows = "".join(
-                f"<tr><td style=\'color:#888;font-size:0.78em\'>{e[\'ts\'][:16]}</td>"
-                f"<td style=\'color:#66bb6a\'>completed</td>"
-                f"<td style=\'color:#ccc\'>{str(e.get(\'title\',\'?\'))[:45]}</td></tr>"
+                f"<tr><td style='color:#888;font-size:0.78em'>{escape(str(e['ts'])[:16])}</td>"
+                f"<td style='color:#66bb6a'>{escape(str(e.get('event', '?')))}</td>"
+                f"<td style='color:#ccc'>{escape(str(e.get('title', '?'))[:45])}</td></tr>"
                 for e in reversed(events))
-            return (f"<div><p style=\'color:#4fc3f7;margin:4px 0\'>Task Log (last {len(events)})</p>"
-                    f"<table style=\'width:100%;font-size:0.82em\'>{rows}</table></div>")
-        except:
-            return "<div style=\'color:#888\'>TaskNotifier: no events yet</div>"
+            return (f"<div><p style='color:#4fc3f7;margin:4px 0'>Task Log (last {len(events)})</p>"
+                    f"<table style='width:100%;font-size:0.82em'>{rows}</table></div>")
+        except Exception:
+            log.debug("Task notifier dashboard rendering failed", exc_info=True)
+            return "<div style='color:#888'>TaskNotifier: no events yet</div>"

@@ -65,6 +65,7 @@ _VOICE_DEVICE_SKIP = [
 ]
 _VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
 _MIC_OPEN_RETRY_SECONDS = 5.0
+_MIC_OPEN_TIMEOUT_SECONDS = 5.0
 _MIC_DEVICE_RETRY_SECONDS = 60.0
 _MIC_SKIP_LOGGED: set[str] = set()
 _MIC_RECENT_FAILURES: dict[str, float] = {}
@@ -72,6 +73,7 @@ _MIC_OPEN_LOCK = threading.Lock()
 _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
 _active_mic_label = ""
+_mic_open_worker: threading.Thread | None = None
 
 
 @contextmanager
@@ -320,6 +322,74 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
     return candidates
 
 
+def _close_cancelled_microphone_source(microphone, source) -> None:
+    try:
+        microphone.__exit__(None, None, None)
+        return
+    except Exception:
+        logging.debug("[Voice] timed-out microphone __exit__ failed", exc_info=True)
+
+    try:
+        stream = getattr(source, "stream", None)
+        if stream is not None:
+            stream.close()
+        audio = getattr(source, "audio", None)
+        if audio is not None:
+            audio.terminate()
+    except Exception:
+        logging.debug("[Voice] timed-out mic cleanup failed", exc_info=True)
+
+
+def _enter_microphone_with_timeout(label: str, microphone):
+    """Bound a native CoreAudio open without starting overlapping AUHAL calls."""
+    global _mic_open_worker
+
+    if _mic_open_worker is not None and _mic_open_worker.is_alive():
+        raise RuntimeError("Previous microphone open is still blocked in CoreAudio")
+
+    completed = threading.Event()
+    state_lock = threading.Lock()
+    state = {"cancelled": False, "source": None, "error": None}
+
+    def _open_target() -> None:
+        source = None
+        try:
+            source = microphone.__enter__()
+            with state_lock:
+                if not state["cancelled"]:
+                    state["source"] = source
+                    source = None
+        except Exception as exc:
+            with state_lock:
+                state["error"] = exc
+        finally:
+            if source is not None:
+                _close_cancelled_microphone_source(microphone, source)
+            completed.set()
+
+    worker = threading.Thread(target=_open_target, name="jarvis-mic-open", daemon=True)
+    _mic_open_worker = worker
+    with _suppress_native_audio_stderr():
+        worker.start()
+        finished = completed.wait(timeout=_MIC_OPEN_TIMEOUT_SECONDS)
+
+    if not finished:
+        with state_lock:
+            state["cancelled"] = True
+            late_source = state["source"]
+            state["source"] = None
+        if late_source is not None:
+            _close_cancelled_microphone_source(microphone, late_source)
+        raise TimeoutError(
+            f"{label} microphone open timed out after {_MIC_OPEN_TIMEOUT_SECONDS:.1f}s"
+        )
+
+    _mic_open_worker = None
+    if state["error"] is not None:
+        raise state["error"]
+    return state["source"]
+
+
 @contextmanager
 def _open_microphone_source():
     """Open a live microphone stream, skipping candidates that fail to provide one."""
@@ -336,8 +406,7 @@ def _open_microphone_source():
                 continue
             source = None
             try:
-                with _suppress_native_audio_stderr():
-                    source = microphone.__enter__()
+                source = _enter_microphone_with_timeout(label, microphone)
                 if getattr(source, "stream", None) is None:
                     raise RuntimeError(f"{label} opened without a live input stream")
                 _debug_log(f"[Mic] Using input device: {label}")
@@ -388,6 +457,8 @@ def _open_microphone_source():
                         source.stream = None
                 except Exception:
                     logging.debug("[Voice] mic stream cleanup failed for %s", label, exc_info=True)
+                if isinstance(exc, TimeoutError):
+                    break
 
         detail = str(last_error) if last_error is not None else "No microphone devices are available."
         _mic_last_failure_detail = detail

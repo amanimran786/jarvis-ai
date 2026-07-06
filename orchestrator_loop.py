@@ -44,6 +44,7 @@ from harness.completion_verifier import (  # noqa: E402
     collect_completion_evidence,
 )
 from harness.retry_policy import RetryAction, RetryDecision, decide_retry  # noqa: E402
+from harness.capability_checker import check_contract_capabilities  # noqa: E402
 from harness.task_contract import (  # noqa: E402
     AttemptRecord,
     AttemptStore,
@@ -316,6 +317,15 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                     f"{contract.task_id} invalid: {'; '.join(contract_errors)}"
                 )
                 continue
+            capability_results = check_contract_capabilities(contract)
+            missing_capabilities = [
+                name for name, available in capability_results.items() if not available
+            ]
+            if missing_capabilities:
+                _log_master(
+                    f"[orchestrator] {spec.task_id} missing capabilities (log-only): "
+                    f"{', '.join(missing_capabilities)}"
+                )
             if contract.requires_approval and not approval_logged(contract.task_id):
                 _mark_task_awaiting_approval(task)
                 summary["blocked"] += 1

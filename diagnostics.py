@@ -1,80 +1,156 @@
 #!/usr/bin/env python3
 """Jarvis diagnostics: blocked tasks + WorldView/FINNHUB config check."""
-import json, pathlib, os
 
-BASE = pathlib.Path.home() / "jarvis-ai"
+from __future__ import annotations
 
-# ── 1. Blocked tasks ─────────────────────────────────────────────────
-print("=" * 60)
-print("BLOCKED TASKS")
-print("=" * 60)
-try:
-    tasks = json.loads((BASE / "WORK_QUEUE.json").read_text())
-    blocked = [t for t in tasks if str(t.get("status","")).lower() == "blocked"]
-    print(f"Total tasks: {len(tasks)}   Blocked: {len(blocked)}")
-    print()
-    for t in blocked[:20]:
-        print(f"  [{t.get('id','?')}] {t.get('title','?')[:60]}")
-        if t.get("blocked_reason") or t.get("reason"):
-            print(f"       Reason: {t.get('blocked_reason') or t.get('reason')}")
-        if t.get("depends_on"):
-            print(f"       Depends on: {t.get('depends_on')}")
-    if len(blocked) > 20:
-        print(f"  ... and {len(blocked)-20} more")
-except Exception as e:
-    print(f"Could not read WORK_QUEUE.json: {e}")
+import argparse
+import json
+import os
+import sys
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import TextIO
 
-# ── 2. WorldView / FINNHUB config ────────────────────────────────────
-print()
-print("=" * 60)
-print("WORLDVIEW / FINNHUB CONFIG")
-print("=" * 60)
 
-# Check common config locations
-config_files = [
-    BASE / "config.py",
-    BASE / ".env",
-    BASE / "WorldView" / ".env",
-    BASE / "WorldView" / "config.py",
-    pathlib.Path.home() / "WorldView" / ".env",
-    pathlib.Path.home() / "WorldView" / "config.py",
-    pathlib.Path.home() / ".env",
-]
-worldview_dirs = [
-    BASE / "WorldView",
-    pathlib.Path.home() / "WorldView",
-]
+Output = Callable[[str], None]
 
-for d in worldview_dirs:
-    if d.exists():
-        print(f"Found WorldView dir: {d}")
-        files = list(d.iterdir())[:15]
-        for f in files:
-            print(f"  {f.name}")
-        print()
 
-# Check for FINNHUB in any config
-for cfg in config_files:
-    if cfg.exists():
-        content = cfg.read_text()
-        if "FINNHUB" in content.upper() or "finnhub" in content.lower():
-            print(f"FINNHUB found in: {cfg}")
-            for line in content.splitlines():
-                if "finnhub" in line.lower() or "FINNHUB" in line:
-                    print(f"  {line.strip()}")
+def resolve_repo_root() -> Path:
+    """Resolve the repository containing this diagnostics script."""
+    return Path(__file__).resolve().parent
+
+
+def _blocked_task_label(task: Mapping[str, object]) -> tuple[str, str]:
+    task_id = str(task.get("id") or task.get("session_name") or "?")
+    title = str(task.get("title") or task.get("task") or "?")
+    return task_id, title
+
+
+def print_blocked_tasks(base: Path, *, output: Output = print) -> None:
+    output("=" * 60)
+    output("BLOCKED TASKS")
+    output("=" * 60)
+    try:
+        tasks = json.loads((base / "WORK_QUEUE.json").read_text(encoding="utf-8"))
+        blocked = [
+            task
+            for task in tasks
+            if str(task.get("status", "")).lower() == "blocked"
+        ]
+        output(f"Total tasks: {len(tasks)}   Blocked: {len(blocked)}")
+        output("")
+        for task in blocked[:20]:
+            task_id, title = _blocked_task_label(task)
+            output(f"  [{task_id}] {title[:60]}")
+            reason = task.get("blocked_reason") or task.get("reason")
+            if reason:
+                output(f"       Reason: {reason}")
+            if task.get("depends_on"):
+                output(f"       Depends on: {task['depends_on']}")
+        if len(blocked) > 20:
+            output(f"  ... and {len(blocked) - 20} more")
+    except (OSError, TypeError, ValueError) as exc:
+        output(f"Could not read WORK_QUEUE.json: {exc}")
+
+
+def _read_config(path: Path, *, output: Output) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        output(f"Could not read config {path}: {exc}")
+        return None
+
+
+def print_worldview_config(
+    base: Path,
+    *,
+    home: Path | None = None,
+    environ: Mapping[str, str] | None = None,
+    output: Output = print,
+) -> None:
+    home = Path.home() if home is None else home
+    environ = os.environ if environ is None else environ
+
+    output("")
+    output("=" * 60)
+    output("WORLDVIEW / FINNHUB CONFIG")
+    output("=" * 60)
+
+    config_files = [
+        base / "config.py",
+        base / ".env",
+        base / "WorldView" / ".env",
+        base / "WorldView" / "config.py",
+        home / "WorldView" / ".env",
+        home / "WorldView" / "config.py",
+        home / ".env",
+    ]
+    worldview_dirs = [base / "WorldView", home / "WorldView"]
+
+    for directory in worldview_dirs:
+        if directory.exists():
+            output(f"Found WorldView dir: {directory}")
+            for path in list(directory.iterdir())[:15]:
+                output(f"  {path.name}")
+            output("")
+
+    for config_file in config_files:
+        if not config_file.exists():
+            continue
+        content = _read_config(config_file, output=output)
+        if content is None:
+            continue
+        if "finnhub" in content.lower():
+            output(f"FINNHUB found in: {config_file}")
         else:
-            print(f"Config exists (no FINNHUB): {cfg}")
+            output(f"Config exists (no FINNHUB): {config_file}")
 
-# Check env vars
-key = os.environ.get("FINNHUB_API_KEY", "")
-print(f"\nFINNHUB_API_KEY in environment: {'SET (' + key[:8] + '...)' if key else 'NOT SET'}")
+    key_is_set = bool(environ.get("FINNHUB_API_KEY", ""))
+    output("")
+    output(f"FINNHUB_API_KEY in environment: {'SET' if key_is_set else 'NOT SET'}")
 
-# Check for .env files anywhere in jarvis-ai
-print("\nSearching for .env files in jarvis-ai...")
-for p in BASE.rglob(".env"):
-    print(f"  Found: {p}")
-    content = p.read_text()
-    if "FINNHUB" in content.upper():
-        print("    -> Contains FINNHUB key")
+    output("")
+    output("Searching for .env files in jarvis-ai...")
+    for path in base.rglob(".env"):
+        output(f"  Found: {path}")
+        content = _read_config(path, output=output)
+        if content is not None and "finnhub" in content.lower():
+            output("    -> Contains FINNHUB configuration")
 
-input("\nPress Enter to close...")
+
+def run_diagnostics(base: Path) -> None:
+    print_blocked_tasks(base)
+    print_worldview_config(base)
+
+
+def pause_if_requested(
+    requested: bool,
+    *,
+    stdin: TextIO | None = None,
+) -> None:
+    stream = sys.stdin if stdin is None else stdin
+    if not requested or not stream.isatty():
+        return
+    try:
+        input("\nPress Enter to close...")
+    except (EOFError, OSError):
+        pass
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pause",
+        action="store_true",
+        help="wait for Enter before closing when standard input is a TTY",
+    )
+    args = parser.parse_args(argv)
+
+    base = resolve_repo_root()
+    run_diagnostics(base)
+    pause_if_requested(args.pause)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

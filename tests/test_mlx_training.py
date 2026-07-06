@@ -217,18 +217,32 @@ def test_convert_to_mlx_format_supports_prompt_completion_packs():
         assert ok is True
         assert path == str(output_dir)
 
-        split_counts = {}
+        split_records = {}
         for split_name in ("train", "valid", "test"):
             split_path = output_dir / f"{split_name}.jsonl"
             lines = split_path.read_text(encoding="utf-8").strip().splitlines()
-            split_counts[split_name] = len(lines)
             assert lines
-            loaded = json.loads(lines[0])
-            assert [message["role"] for message in loaded["messages"]] == ["user", "assistant"]
-            assert loaded["messages"][0]["content"].startswith("User: task")
-            assert loaded["messages"][1]["content"].startswith("response")
+            split_records[split_name] = [json.loads(line) for line in lines]
+            assert len(lines) >= local_mlx_training.config.MLX_BATCH_SIZE
+            for loaded in split_records[split_name]:
+                assert [message["role"] for message in loaded["messages"]] == ["user", "assistant"]
+                assert loaded["messages"][0]["content"].startswith("User: task")
+                assert loaded["messages"][1]["content"].startswith("response")
 
-        assert split_counts == {"train": 22, "valid": 4, "test": 4}
+        assert len(split_records["valid"]) == len(split_records["test"])
+
+        split_prompts = {
+            split_name: {
+                loaded["messages"][0]["content"]
+                for loaded in loaded_records
+            }
+            for split_name, loaded_records in split_records.items()
+        }
+        expected_prompts = {record["prompt"].strip() for record in records}
+        assert set().union(*split_prompts.values()) == expected_prompts
+        assert split_prompts["train"].isdisjoint(split_prompts["valid"])
+        assert split_prompts["train"].isdisjoint(split_prompts["test"])
+        assert split_prompts["valid"].isdisjoint(split_prompts["test"])
 
 
 def test_convert_to_mlx_format_rejects_empty_pack():

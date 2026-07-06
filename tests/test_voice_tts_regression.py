@@ -1,5 +1,6 @@
 import unittest
 import os
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -23,6 +24,7 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         voice._mic_failure_cooldown_until = 0.0
         voice._mic_last_failure_detail = ""
         voice._MIC_RECENT_FAILURES.clear()
+        voice._mic_open_worker = None
 
     def test_speak_prefers_local_tts_before_paid_fallbacks(self):
         with patch("voice.call_privacy.should_suppress_audio", return_value=False), \
@@ -239,6 +241,48 @@ class VoiceTtsRegressionTests(unittest.TestCase):
                 self.assertIsNotNone(source.stream)
 
         self.assertEqual(calls, ["enter", "exit"])
+
+    def test_open_microphone_source_times_out_without_opening_next_candidate(self):
+        release_open = threading.Event()
+        opened = []
+
+        class _BlockingMic:
+            def __enter__(self):
+                opened.append("blocking")
+                release_open.wait()
+                return SimpleNamespace(
+                    stream=SimpleNamespace(close=lambda: None),
+                    audio=SimpleNamespace(terminate=lambda: None),
+                )
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        class _NextMic:
+            def __enter__(self):
+                opened.append("next")
+                return SimpleNamespace(stream=object(), audio=object())
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        try:
+            with patch(
+                "voice._microphone_candidates",
+                return_value=[("Blocking Mic", _BlockingMic()), ("Next Mic", _NextMic())],
+            ), patch("voice._MIC_OPEN_TIMEOUT_SECONDS", 0.01):
+                with self.assertRaisesRegex(RuntimeError, "timed out"):
+                    with voice._open_microphone_source():
+                        pass
+
+            self.assertEqual(opened, ["blocking"])
+            self.assertIsNotNone(voice._mic_open_worker)
+            self.assertTrue(voice._mic_open_worker.is_alive())
+        finally:
+            release_open.set()
+            worker = voice._mic_open_worker
+            if worker is not None:
+                worker.join(timeout=1.0)
 
     def test_native_audio_suppression_covers_stdout_and_stderr(self):
         with TemporaryDirectory() as tmp:
