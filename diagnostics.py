@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -13,6 +14,12 @@ from typing import TextIO
 
 
 Output = Callable[[str], None]
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def terminal_safe(value: object) -> str:
+    """Strip terminal control characters from untrusted diagnostic fields."""
+    return _TERMINAL_CONTROL_RE.sub("", str(value)).replace("\x1b", "")
 
 
 def resolve_repo_root() -> Path:
@@ -21,8 +28,8 @@ def resolve_repo_root() -> Path:
 
 
 def _blocked_task_label(task: Mapping[str, object]) -> tuple[str, str]:
-    task_id = str(task.get("id") or task.get("session_name") or "?")
-    title = str(task.get("title") or task.get("task") or "?")
+    task_id = terminal_safe(task.get("id") or task.get("session_name") or "?")
+    title = terminal_safe(task.get("title") or task.get("task") or "?")
     return task_id, title
 
 
@@ -44,9 +51,9 @@ def print_blocked_tasks(base: Path, *, output: Output = print) -> None:
             output(f"  [{task_id}] {title[:60]}")
             reason = task.get("blocked_reason") or task.get("reason")
             if reason:
-                output(f"       Reason: {reason}")
+                output(f"       Reason: {terminal_safe(reason)}")
             if task.get("depends_on"):
-                output(f"       Depends on: {task['depends_on']}")
+                output(f"       Depends on: {terminal_safe(task['depends_on'])}")
         if len(blocked) > 20:
             output(f"  ... and {len(blocked) - 20} more")
     except (OSError, TypeError, ValueError) as exc:

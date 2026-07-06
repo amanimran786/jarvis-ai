@@ -4,6 +4,7 @@ import pytest
 from rich.console import Console
 from rich.table import Table
 
+import jarvis_cli
 from harness.repl_history import (
     DEFAULT_HISTORY_LIMIT,
     HistoryTurn,
@@ -184,3 +185,25 @@ def test_history_table_does_not_render_unrecognized_metadata(tmp_path):
 
     assert "safe visible content" in rendered
     assert "hidden-metadata-value" not in rendered
+
+
+def test_history_command_dispatches_with_optional_limit():
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        rendered = []
+        monkeypatch.setattr(
+            jarvis_cli,
+            "_print_history",
+            lambda args="": rendered.append(args) or 0,
+        )
+
+        result = jarvis_cli._handle_console_command("/history 20")
+
+    assert result == 0
+    assert rendered == ["20"]
+
+
+def test_print_history_rejects_invalid_limit(capsys):
+    result = jarvis_cli._print_history("zero")
+
+    assert result == 1
+    assert "positive integer" in capsys.readouterr().err

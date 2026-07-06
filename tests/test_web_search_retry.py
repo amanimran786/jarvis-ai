@@ -230,8 +230,8 @@ class TestCache:
              patch("harness.web_search.time.sleep"), \
              patch("harness.web_search._log_retry"):
             ws.search("fail-cache")
-        norm = ws._normalize_query("fail-cache")
-        assert norm not in ws._query_cache
+        key = (ws._normalize_query("fail-cache"), 5)
+        assert key not in ws._query_cache
 
 
 # ── 5. Audit logging ──────────────────────────────────────────────────────────

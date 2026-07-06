@@ -263,3 +263,20 @@ def test_pending_approval_command_dispatches_locally() -> None:
 
     assert result == 0
     print_pending.assert_called_once_with()
+
+
+def test_pending_approval_output_strips_terminal_controls(capsys) -> None:
+    pending = [
+        {
+            "task_id": "safe-id\x1b[2J",
+            "status": "awaiting_approval",
+            "description": "review\x1b]0;spoof\x07 now",
+            "approval_logged": False,
+        }
+    ]
+    with patch.object(jarvis_cli, "list_pending_approvals", return_value=pending):
+        result = jarvis_cli._print_pending_approvals()
+
+    rendered = capsys.readouterr().out
+    assert result == 0
+    assert "\x1b" not in rendered
