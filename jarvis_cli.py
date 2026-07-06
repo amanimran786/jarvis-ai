@@ -49,6 +49,7 @@ import re
 import urllib.request
 import urllib.error
 import urllib.parse
+from pathlib import Path
 
 try:
     import readline  # noqa: F401
@@ -88,14 +89,23 @@ from harness.approval_workflow import (
     requeue_approved_task,
 )
 from harness.task_contract import (
+    TASK_CONTRACTS_PATH,
+    ContractError,
+    TaskContract,
     contract_for_task,
     load_contracts,
     validate_contract,
 )
+from harness.repl_history import history_table, parse_history_limit
 
 
 _CONSOLE_STATE = {"effort": "high", "pending_shell": ""}
 _OWNS_DAEMON = False
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _terminal_safe(value: object) -> str:
+    return _TERMINAL_CONTROL_RE.sub("", str(value)).replace("\x1b", "")
 _DAEMON_CLEANUP_REGISTERED = False
 _RICH_CONSOLE = Console() if Console else None
 
@@ -110,6 +120,7 @@ _SLASH_COMMANDS = (
     "/agents",
     "/tasks",
     "/contracts",
+    "/history",
     "/pending-approval",
     "/task",
     "/code",
@@ -524,7 +535,10 @@ def _print_pending_approvals() -> int:
             else item["status"]
         )
         description = f" - {item['description']}" if item["description"] else ""
-        print(f"{item['task_id']}: {state}{description}")
+        print(
+            f"{_terminal_safe(item['task_id'])}: {_terminal_safe(state)}"
+            f"{_terminal_safe(description)}"
+        )
     return 0
 
 
@@ -717,6 +731,29 @@ def _print_tasks(status: str = "") -> None:
         print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{autonomy_text}{confidence_text}{approval}")
 
 
+def _strict_contract_validation(path: Path) -> list[tuple[str, list[str]]]:
+    """Validate every raw contract entry without silently dropping bad rows."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [("<file>", [str(exc)])]
+    if not isinstance(payload, list):
+        return [("<file>", ["TASK_CONTRACTS.json must contain a JSON list"])]
+
+    results: list[tuple[str, list[str]]] = []
+    for index, entry in enumerate(payload):
+        fallback_id = f"entry[{index}]"
+        if isinstance(entry, dict) and entry.get("task_id"):
+            fallback_id = str(entry["task_id"])
+        try:
+            contract = TaskContract.from_dict(entry)
+            _, errors = validate_contract(contract)
+        except (ContractError, TypeError, ValueError) as exc:
+            errors = [str(exc)]
+        results.append((fallback_id, errors))
+    return results
+
+
 def _print_contracts(args: str = "", *, console=None) -> int:
     if not Table or not Console:
         print("Error: Rich is required for /contracts.", file=sys.stderr)
@@ -732,9 +769,9 @@ def _print_contracts(args: str = "", *, console=None) -> int:
         table.add_column("Status")
         table.add_column("Error")
         error_count = 0
-        for task_id in sorted(contracts):
-            valid, errors = validate_contract(contracts[task_id])
-            if valid:
+        validation_rows = _strict_contract_validation(Path(TASK_CONTRACTS_PATH))
+        for task_id, errors in validation_rows:
+            if not errors:
                 table.add_row(task_id, "VALID", "-")
                 continue
             error_count += len(errors)
@@ -744,7 +781,7 @@ def _print_contracts(args: str = "", *, console=None) -> int:
                     "INVALID" if index == 0 else "",
                     error,
                 )
-        table.caption = f"{len(contracts)} contract(s), {error_count} error(s)"
+        table.caption = f"{len(validation_rows)} contract(s), {error_count} error(s)"
         target.print(table)
         return 1 if error_count else 0
 
@@ -787,6 +824,20 @@ def _print_contracts(args: str = "", *, console=None) -> int:
             "VALID" if valid else f"{len(errors)} error(s)",
         )
     target.print(table)
+    return 0
+
+
+def _print_history(args: str = "", *, console=None) -> int:
+    if not Console:
+        print("Error: Rich is required for /history.", file=sys.stderr)
+        return 1
+    try:
+        limit = parse_history_limit(args)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    target = console or _RICH_CONSOLE or Console()
+    target.print(history_table(limit=limit))
     return 0
 
 
@@ -1405,6 +1456,7 @@ def _console_help() -> str:
             "  /agents               List managed agents",
             "  /tasks [status]       List tasks, optionally filtered by lifecycle state",
             "  /contracts [id]       List, inspect, or validate task contracts",
+            "  /history [N]          Show the last N conversation turns (default 10)",
             "  /pending-approval     List contract tasks awaiting human approval",
             "  /task <prompt>        Run a managed task",
             "  /code <prompt>        Run an isolated coding task",
@@ -1934,6 +1986,8 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command == "contracts":
         return _print_contracts(args)
+    if command == "history":
+        return _print_history(args)
     if command == "pending-approval":
         return _print_pending_approvals()
     if command in {"context-budget", "tokens"}:

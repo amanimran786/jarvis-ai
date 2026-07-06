@@ -36,6 +36,13 @@ def _now() -> str:
     return _datetime.datetime.now(_datetime.timezone.utc).isoformat()
 
 
+def _canonical_sha256(value: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _strings(value: Any, field_name: str) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -178,12 +185,20 @@ class TaskSpec:
             "legacy_adapter": self.legacy_adapter,
         }
 
+    def for_dispatch(self) -> "TaskSpec":
+        """Return the normalized executable form after typed authorization."""
+        if not self.legacy_adapter:
+            return self
+        return TaskSpec.from_queue_task({**self.to_dict(), "legacy_adapter": False})
+
+    @property
+    def task_spec_hash(self) -> str:
+        return _canonical_sha256(self.to_dict())
+
     @property
     def contract_hash(self) -> str:
-        encoded = json.dumps(
-            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
-        ).encode("utf-8")
-        return hashlib.sha256(encoded).hexdigest()
+        """Backward-compatible name for the dispatch TaskSpec digest."""
+        return self.task_spec_hash
 
 
 @dataclass(frozen=True)
@@ -519,6 +534,10 @@ class TaskContract:
         ]
         return data
 
+    @property
+    def contract_hash(self) -> str:
+        return _canonical_sha256(self.to_dict())
+
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "TaskContract":
         if not isinstance(data, Mapping):
@@ -639,12 +658,23 @@ def contract_for_task(
     return load_contracts(path).get(task_id)
 
 
-def approval_logged(task_id: str, path: Path = APPROVED_TASKS_PATH) -> bool:
-    """True if a human approval for task_id exists in approved_tasks.json.
+def approval_logged(
+    task_id: str,
+    path: Path = APPROVED_TASKS_PATH,
+    *,
+    task_contract_sha256: str = "",
+    task_spec_sha256: str = "",
+) -> bool:
+    """True if an approval is bound to the exact contract and executable spec.
 
-    approved_tasks.json is a list of {"task_id": ..., "approved_at": ...,
-    "approved_by": ...} records (written by the /approve command, CODEX-11).
+    The CODEX-11 identity/audit fields remain required. Older records without
+    both digest fields intentionally fail closed.
     """
+    normalized_id = str(task_id or "").strip()
+    contract_digest = str(task_contract_sha256 or "").strip()
+    spec_digest = str(task_spec_sha256 or "").strip()
+    if not normalized_id or not contract_digest or not spec_digest:
+        return False
     path = Path(path)
     if not path.exists():
         return False
@@ -657,6 +687,9 @@ def approval_logged(task_id: str, path: Path = APPROVED_TASKS_PATH) -> bool:
     if not isinstance(data, list):
         return False
     return any(
-        isinstance(entry, Mapping) and entry.get("task_id") == task_id
+        isinstance(entry, Mapping)
+        and entry.get("task_id") == normalized_id
+        and entry.get("task_contract_sha256") == contract_digest
+        and entry.get("task_spec_sha256") == spec_digest
         for entry in data
     )

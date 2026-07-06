@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import StringIO
+import json
 from unittest.mock import patch
 
 from rich.console import Console
@@ -86,14 +87,12 @@ def test_contracts_detail_shows_full_contract_fields() -> None:
 
 def test_contracts_validate_reports_every_error_and_fails() -> None:
     console, output = _console()
-    contracts = {"CODEX-bad": _contract(task_id="CODEX-bad")}
 
     with (
-        patch.object(jarvis_cli, "load_contracts", return_value=contracts),
         patch.object(
             jarvis_cli,
-            "validate_contract",
-            return_value=(False, ["missing output", "missing precondition"]),
+            "_strict_contract_validation",
+            return_value=[("CODEX-bad", ["missing output", "missing precondition"])],
         ),
     ):
         result = jarvis_cli._print_contracts("validate", console=console)
@@ -104,6 +103,25 @@ def test_contracts_validate_reports_every_error_and_fails() -> None:
     assert "missing output" in rendered
     assert "missing precondition" in rendered
     assert "1 contract(s), 2 error(s)" in rendered
+
+
+def test_contracts_validate_reports_malformed_raw_entry(tmp_path) -> None:
+    console, output = _console()
+    path = tmp_path / "TASK_CONTRACTS.json"
+    path.write_text(
+        json.dumps(
+            [{"task_id": "bad-type", "task_type": "unknown", "description": "x"}]
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(jarvis_cli, "TASK_CONTRACTS_PATH", path):
+        result = jarvis_cli._print_contracts("validate", console=console)
+
+    rendered = output.getvalue()
+    assert result == 1
+    assert "bad-type" in rendered
+    assert "unknown task_type" in rendered
 
 
 def test_contracts_unknown_task_id_returns_not_found() -> None:

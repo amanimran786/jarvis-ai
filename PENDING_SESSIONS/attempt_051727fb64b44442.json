@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": "LEGACY-97e4c99d7ae4",
+  "attempt_id": "attempt_051727fb64b44442",
+  "session_id": "jarvis-general-claude-legacy97e4c99d7ae4",
+  "contract_sha256": "d08f8ff815d9a1b48f9f7896e92947aa46d5f20784bd9a61fb0e25864ece8ebf",
+  "task_spec": {
+    "id": "LEGACY-97e4c99d7ae4",
+    "title": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
+    "goal": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
+    "description": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
+    "allowed_files": [],
+    "forbidden_files": [],
+    "acceptance_criteria": [],
+    "verification_commands": [],
+    "constraints": {
+      "local_first": true
+    },
+    "budget": {
+      "max_attempts": 3,
+      "wall_time_seconds": 1800,
+      "tool_calls": 40
+    },
+    "domain": "general",
+    "assigned_ai": "claude",
+    "legacy_adapter": false
+  },
+  "prompt": "      <role>\n      You are the execution agent for one transition in the Jarvis engineering loop.\n      </role>\n\n      <task_contract>\n      Task ID: LEGACY-97e4c99d7ae4\n      Contract SHA-256: d08f8ff815d9a1b48f9f7896e92947aa46d5f20784bd9a61fb0e25864ece8ebf\n      Goal: Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md\n      Title: Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md\n      Repository: jarvis-ai\n      Domain: general\n      Local-first: True\n\n      Description:\n      Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md\n\n      Allowed files:\n(not declared)\n\n      Forbidden files:\n(none declared)\n\n      Acceptance criteria:\n- [ ] Produce the requested artifact for loop inspection\n\n      Verification commands owned by the loop:\n(no deterministic command declared; loop must not infer verification)\n\n      Budget: attempts=3, wall_time=1800s, tool_calls=40\n      </task_contract>\n\n      <context>\n\n      Recent commits:\nb752736 [CODEX] feat: capability checker, approval workflow, diagnostics CLI, and test coverage\nf23388b [JARVIS] fix(research): route synthesis through priority chain — last unconditional cloud call removed\n20932cc [CODEX] docs: session briefing doc for Codex onboarding\n3b3f506 [JARVIS] docs(contracts): CODEX-8..11 parallel contract workstream specs\n419ee4a [JARVIS] feat(contracts): typed contract gate in orchestrator_loop dispatch\n      </context>\n\n      <loop_protocol>\n      1. Work only inside the contract boundaries.\n      2. Inspect before editing and make the smallest correct change.\n      3. Do not claim the task is complete or tests passed; report actions and evidence.\n      4. The loop, not this response, runs verification and decides done/retry/escalate.\n      5. Stop and report a contract conflict instead of editing a forbidden or undeclared path.\n      </loop_protocol>\n\n      Commit format: [CLAUDE] feat(general): wire-session_orchestrator.py-into-dev-workflow-—-document-in-orchestrator_runbook.md\n",
+  "repo_path": "/Users/truthseeker/jarvis-ai",
+  "base_ref": "b752736127fc4db0dab2c2ddbcc68b2282d3e4f7",
+  "queued_at": "2026-07-06T04:08:49.645638+00:00",
+  "domain": "general",
+  "assigned_ai": "claude",
+  "materialized_at": "2026-07-06T04:08:49.776476+00:00"
+}
