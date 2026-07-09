@@ -173,6 +173,109 @@ def _lcs_len(a: list[str], b: list[str]) -> int:
     return prev[-1]
 
 
+# ── Aggregate trace-score report (--trace-score) ─────────────────────────────
+
+def _bar(value: float, width: int = 20) -> str:
+    """ASCII progress bar for a 0–1 float."""
+    filled = round(value * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+def aggregate_trace_score(last_n: int | None = None) -> dict[str, Any]:
+    """
+    Compute aggregate statistics across all run_id-tagged traces.
+
+    Returns a summary dict. OBSERVE ONLY — no ratchet wiring.
+    """
+    runs = list_runs()
+    if not runs:
+        return {"total_runs": 0, "runs": {}}
+
+    run_ids = sorted(runs.keys())
+    if last_n is not None:
+        run_ids = run_ids[-last_n:]
+
+    cards = {}
+    for rid in run_ids:
+        cards[rid] = score_run(rid)
+
+    eff_scores = [
+        c["step_efficiency"]["score"]
+        for c in cards.values()
+        if c["step_efficiency"]["score"] is not None
+    ]
+    avg_eff = round(sum(eff_scores) / len(eff_scores), 3) if eff_scores else None
+
+    total_steps = sum(c["steps"] for c in cards.values())
+    total_failed = sum(
+        c["step_efficiency"].get("failed", 0) for c in cards.values()
+    )
+    total_retries = sum(
+        c["step_efficiency"].get("retries", 0) for c in cards.values()
+    )
+    total_ms = sum(c["latency"]["total_ms"] for c in cards.values())
+
+    return {
+        "total_runs": len(cards),
+        "total_steps": total_steps,
+        "total_failed_steps": total_failed,
+        "total_retried_steps": total_retries,
+        "avg_step_efficiency": avg_eff,
+        "total_elapsed_ms": total_ms,
+        "observation_note": (
+            "OBSERVE ONLY — not wired to release ratchet. "
+            "Min window before ratchet wiring: 2 weeks / 50 runs (AGENT_BOARD #13)."
+        ),
+        "runs": cards,
+    }
+
+
+def print_trace_score(last_n: int | None = None) -> None:
+    """Print a human-readable aggregate trace-score report."""
+    report = aggregate_trace_score(last_n=last_n)
+    sep = "─" * 58
+
+    print(f"\n{'═' * 58}")
+    print("  Jarvis Execution Trace Scores  [observe-only, AGENT_BOARD #13]")
+    print(f"{'═' * 58}")
+
+    if report["total_runs"] == 0:
+        print(f"  No run_id-tagged traces found in:\n  {TRACE_DIR}")
+        print("  Run an operative task first, then re-check.")
+        print(f"{'═' * 58}\n")
+        return
+
+    total = report["total_runs"]
+    steps = report["total_steps"]
+    failed = report["total_failed_steps"]
+    retried = report["total_retried_steps"]
+    avg_eff = report["avg_step_efficiency"]
+    step_sr = 1.0 - (failed / steps) if steps else 1.0
+
+    print(f"\n  Runs observed  : {total}")
+    print(f"  Total steps    : {steps}  (✗ {failed} failed, ↻ {retried} retried)")
+    if avg_eff is not None:
+        print(f"  Avg efficiency : {_bar(avg_eff)} {avg_eff:.1%}")
+    print(f"  Step success   : {_bar(step_sr)} {step_sr:.1%}")
+    print(f"  Total time     : {report['total_elapsed_ms']:,} ms")
+
+    # Per-run summary
+    print(f"\n  {'Per-Run Scores':}")
+    print(sep)
+    for rid, card in report["runs"].items():
+        eff = card["step_efficiency"]
+        e_score = eff.get("score")
+        e_str = f"{_bar(e_score, 12)} {e_score:.2f}" if e_score is not None else "  n/a      "
+        n_steps = card["steps"]
+        n_fail = eff.get("failed", 0)
+        icon = "✓" if n_fail == 0 else "✗"
+        ms = card["latency"]["total_ms"]
+        print(f"  {icon} {rid:20s}  {e_str}  {n_steps:2d} steps  {ms:5d}ms")
+
+    print(f"\n  ⚠  {report['observation_note']}")
+    print(f"{'═' * 58}\n")
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────────
 
 def _main(argv: list[str]) -> int:
@@ -180,11 +283,20 @@ def _main(argv: list[str]) -> int:
 
     parser = argparse.ArgumentParser(prog="eval_trace_score",
                                      description="Deterministic trace scorer (R1, observe-only).")
-    parser.add_argument("run_id", nargs="?", help="run_id to score")
+    parser.add_argument("run_id", nargs="?", help="run_id to score (omit for list/aggregate)")
     parser.add_argument("--list", action="store_true", help="list available run_ids")
+    parser.add_argument("--trace-score", action="store_true",
+                        help="print aggregate trace-score report across all runs (AGENT_BOARD #13)")
+    parser.add_argument("--last", type=int, default=None, metavar="N",
+                        help="limit --trace-score to last N runs")
     parser.add_argument("--expected", default="", help="comma-separated expected tools")
     parser.add_argument("--min-steps", type=int, default=None)
     args = parser.parse_args(argv)
+
+    # --trace-score: aggregate report across all runs
+    if args.trace_score:
+        print_trace_score(last_n=args.last)
+        return 0
 
     if args.list or not args.run_id:
         runs = list_runs()
