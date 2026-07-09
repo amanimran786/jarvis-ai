@@ -88,9 +88,28 @@ _SESSION_ERROR_COUNT = 0
 _SESSION_SNAPSHOT_DIR: Path | None = None
 _lock = threading.Lock()
 
+# Thread-local task run_id — set by operative.py at task start so all
+# audit_log() calls within the task thread carry the task's run_id.
+_run_id_ctx: threading.local = threading.local()
+
 
 def session_id() -> str:
     return _SESSION_ID
+
+
+def set_run_id(run_id: str) -> None:
+    """Set the task-level run_id for the current thread.
+
+    All subsequent audit_log() calls on this thread will include
+    run_id in the record until the thread ends or set_run_id("") clears it.
+    Call with an empty string to clear.
+    """
+    _run_id_ctx.run_id = str(run_id or "")
+
+
+def get_run_id() -> str:
+    """Return the current thread's task run_id, or '' if none is set."""
+    return getattr(_run_id_ctx, "run_id", "")
 
 
 # ── Log rotation ───────────────────────────────────────────────────────────────
@@ -187,6 +206,9 @@ def _audit_log_impl(event_type: str, **kwargs: Any) -> None:
         "session_id": _SESSION_ID,
         "event_type": event_type,
     }
+    _rid = get_run_id()
+    if _rid:
+        record["run_id"] = _rid
     # Pull well-known fields to the top level; rest go into payload
     top_level = {"model_used", "tokens_in", "tokens_out", "success", "error", "latency_ms"}
     payload = {}

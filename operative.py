@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 from brains.brain_claude import ask_claude
 from config import DEFAULT_MODE, HAIKU, LOCAL_DEFAULT, VOICE_ENABLED
 from harness.tts import speak_step
+from harness.audit import set_run_id
 from task_planner import TaskStep as Step, plan_task, replan_after_failure
 from execution_engine import execute_step
 import preflect
@@ -158,6 +159,7 @@ def run_task(
             )
 
     run_id = f"run_{uuid.uuid4().hex[:12]}"
+    set_run_id(run_id)   # thread-local: all audit_log() calls in this thread carry run_id
 
     _prog("Planning task", task)
     steps = plan_task(task)
@@ -239,6 +241,7 @@ def run_task(
     task_ok = len(failed) == 0
     _persist_task_finish(run_id, task, steps, summary, task_ok)
     _prog("Task complete", summary[:100])
+    set_run_id("")  # clear thread-local so a reused thread doesn't leak run_id
 
     return {
         "task":    task,
