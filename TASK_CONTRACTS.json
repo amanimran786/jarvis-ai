@@ -1,26 +1,414 @@
 [
   {
+    "task_id": "codex-lane-history-rich-cli",
+    "task_type": "code",
+    "description": "Add the missing /history command over usage_log.jsonl and complete the requested Rich CLI presentation without changing runtime routing.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "usage_log",
+        "type": "file_path",
+        "required": false,
+        "description": "Read-only interaction history source",
+        "default": "usage_log.jsonl"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "cli_history",
+        "type": "file",
+        "path_template": "jarvis_cli.py",
+        "description": "Rich /history command with bounded output"
+      },
+      {
+        "name": "cli_history_tests",
+        "type": "file",
+        "path_template": "tests/test_jarvis_cli_history.py",
+        "description": "Hermetic command and formatting coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_jarvis_cli_history.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 6000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "rich remains an installed dependency",
+      "usage_log.jsonl is treated as read-only and may be absent"
+    ],
+    "postconditions": [
+      "/history defaults to 10 entries and accepts a bounded count",
+      "tests use temporary history data",
+      "no model or routing defaults changed"
+    ]
+  },
+  {
+    "task_id": "gemini-lane-architecture-review",
+    "task_type": "file_op",
+    "description": "Review the current repository architecture and write an evidence-backed report without modifying implementation files.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "repository",
+        "type": "directory_path",
+        "required": true,
+        "description": "Current Jarvis checkout",
+        "default": "."
+      }
+    ],
+    "outputs": [
+      {
+        "name": "architecture_review",
+        "type": "file",
+        "path_template": "GEMINI_ARCHITECTURE_REVIEW.md",
+        "description": "Prioritized architecture findings with file references"
+      }
+    ],
+    "side_effects": [
+      "writes_files"
+    ],
+    "requires_capabilities": [
+      "filesystem"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 12000,
+    "max_duration_seconds": 1800,
+    "preconditions": [
+      "review uses the current HEAD and worktree state",
+      "implementation files remain read-only"
+    ],
+    "postconditions": [
+      "report separates confirmed defects from recommendations",
+      "every material finding cites repository evidence",
+      "only GEMINI_ARCHITECTURE_REVIEW.md is modified"
+    ]
+  },
+  {
+    "task_id": "gemini-lane-prompt-quality-analysis",
+    "task_type": "analysis",
+    "description": "Analyze self-evaluation records for prompt-quality patterns and write recommendations without editing prompts or configuration.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "self_eval_log",
+        "type": "file_path",
+        "required": true,
+        "description": "Self-evaluation records to analyze",
+        "default": "logs/self_eval.jsonl"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "prompt_analysis",
+        "type": "file",
+        "path_template": "GEMINI_PROMPT_ANALYSIS.md",
+        "description": "Evidence-backed low-score pattern and prompt-section analysis"
+      }
+    ],
+    "side_effects": [
+      "writes_files"
+    ],
+    "requires_capabilities": [
+      "filesystem"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 10000,
+    "max_duration_seconds": 1200,
+    "preconditions": [
+      "logs/self_eval.jsonl exists",
+      "records are analyzed locally",
+      "prompt and config files remain read-only"
+    ],
+    "postconditions": [
+      "report quantifies sample size and scoring limitations",
+      "recommendations are proposals only",
+      "only GEMINI_PROMPT_ANALYSIS.md is modified"
+    ]
+  },
+  {
+    "task_id": "gemini-lane-security-review",
+    "task_type": "code",
+    "description": "Review repository security, report findings, and apply only explicitly approved HIGH-severity fixes within a recorded file scope.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "repository",
+        "type": "directory_path",
+        "required": true,
+        "description": "Current Jarvis checkout",
+        "default": "."
+      }
+    ],
+    "outputs": [
+      {
+        "name": "security_review",
+        "type": "file",
+        "path_template": "GEMINI_SECURITY_REVIEW.md",
+        "description": "Severity-ranked findings with redacted evidence"
+      },
+      {
+        "name": "approved_fixes",
+        "type": "file_set",
+        "path_template": "",
+        "description": "Only HIGH-severity fixes within the approved scope"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess",
+      "modifies_config"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": true,
+    "entry_point": "python -m pytest tests/ -x -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 16000,
+    "max_duration_seconds": 2400,
+    "preconditions": [
+      "human approval logged in approved_tasks.json",
+      "approved HIGH-severity fix files are recorded before edits",
+      "secrets and credentials are never copied into the report"
+    ],
+    "postconditions": [
+      "all findings include severity and evidence",
+      "only approved HIGH-severity fixes are applied",
+      "full test suite passes or failures are reported without unrelated fixes"
+    ]
+  },
+  {
+    "task_id": "gemini-lane-test-coverage-audit",
+    "task_type": "code",
+    "description": "Audit harness test coverage, document concrete gaps, and add ten hermetic tests without real network or Ollama calls.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "harness_modules",
+        "type": "glob",
+        "required": true,
+        "description": "Harness modules to cross-reference",
+        "default": "harness/*.py"
+      },
+      {
+        "name": "tests",
+        "type": "directory_path",
+        "required": true,
+        "description": "Existing test suite",
+        "default": "tests"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "test_gap_report",
+        "type": "file",
+        "path_template": "GEMINI_TEST_GAPS.md",
+        "description": "Coverage gaps tied to modules and behaviors"
+      },
+      {
+        "name": "coverage_tests",
+        "type": "file",
+        "path_template": "tests/test_gemini_coverage.py",
+        "description": "Ten focused missing tests"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_gemini_coverage.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 12000,
+    "max_duration_seconds": 1200,
+    "preconditions": [
+      "tests mock all network, cloud API, and Ollama calls",
+      "existing tests are read before adding overlap"
+    ],
+    "postconditions": [
+      "GEMINI_TEST_GAPS.md maps each test to a concrete gap",
+      "exactly ten focused tests are added",
+      "no production code is modified"
+    ]
+  },
+  {
+    "task_id": "jarvis-audit-brain-ollama-usage-summary-tests",
+    "task_type": "code",
+    "description": "Add focused tests for usage records emitted by the brain_ollama structured-output path.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "brain_ollama",
+        "type": "file_path",
+        "required": true,
+        "description": "Structured-output implementation under test",
+        "default": "brains/brain_ollama.py"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "usage_summary_tests",
+        "type": "file",
+        "path_template": "tests/test_brain_ollama.py",
+        "description": "Hermetic structured-output usage tests"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_brain_ollama.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 4000,
+    "max_duration_seconds": 300,
+    "preconditions": [
+      "tests mock the Ollama client and usage log",
+      "test scope does not overlap tests/test_task_contract.py"
+    ],
+    "postconditions": [
+      "provider counts and estimated-token fallback are asserted",
+      "no real model or network call occurs",
+      "focused tests pass"
+    ]
+  },
+  {
+    "task_id": "jarvis-audit-error-log-rotation-alert",
+    "task_type": "code",
+    "description": "Add bounded audit_errors.log rotation and a configurable alert surface for excessive audit failures.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "audit_error_log",
+        "type": "file_path",
+        "required": false,
+        "description": "Runtime audit failure log",
+        "default": "logs/audit_errors.log"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "audit_rotation",
+        "type": "file",
+        "path_template": "harness/audit.py",
+        "description": "Bounded rotation and threshold calculation"
+      },
+      {
+        "name": "dashboard_alert",
+        "type": "file",
+        "path_template": "api.py",
+        "description": "Authenticated dashboard state exposes the aggregate threshold breach"
+      },
+      {
+        "name": "audit_alert_tests",
+        "type": "file",
+        "path_template": "tests/test_audit_error_rotation.py",
+        "description": "Rotation and threshold regression coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_audit_error_rotation.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 7000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "rotation tests use temporary files",
+      "existing audit logging remains fail-safe and non-throwing",
+      "dashboard output remains auth-gated and exposes counts only"
+    ],
+    "postconditions": [
+      "audit_errors.log growth is bounded",
+      "dashboard state reports the threshold breach without exposing log contents",
+      "focused tests pass"
+    ]
+  },
+  {
     "task_id": "jarvis-audit-eval-trace-score-observe",
     "task_type": "analysis",
     "description": "eval_trace_score.py --trace-score surface: observe-only >=2wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
     "contract_version": "1.0",
     "inputs": [
-      {"name": "self_eval_log", "type": "file_path", "required": true, "description": "Eval trace log to score", "default": "logs/self_eval.jsonl"},
-      {"name": "min_runs", "type": "int", "required": false, "description": "Minimum runs before the surface is considered observable", "default": "50"}
+      {
+        "name": "self_eval_log",
+        "type": "file_path",
+        "required": true,
+        "description": "Eval trace log to score",
+        "default": "logs/self_eval.jsonl"
+      },
+      {
+        "name": "min_runs",
+        "type": "int",
+        "required": false,
+        "description": "Minimum runs before the surface is considered observable",
+        "default": "50"
+      }
     ],
     "outputs": [
-      {"name": "trace_score_summary", "type": "json", "path_template": "logs/{task_id}_summary.json", "description": "Observed trace-score distribution; observe-only, no ratchet changes"}
+      {
+        "name": "trace_score_summary",
+        "type": "json",
+        "path_template": "logs/{task_id}_summary.json",
+        "description": "Observed trace-score distribution; observe-only, no ratchet changes"
+      }
     ],
-    "side_effects": ["writes_files", "subprocess"],
-    "requires_capabilities": ["filesystem", "python"],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
     "reversible": true,
     "requires_approval": false,
-    "entry_point": "python eval_trace_score.py --trace-score",
+    "entry_point": "",
     "working_directory": "/Users/truthseeker/jarvis-ai",
     "estimated_tokens": 3000,
     "max_duration_seconds": 300,
-    "preconditions": ["logs/self_eval.jsonl exists and has >=50 entries"],
-    "postconditions": ["summary JSON written", "no ratchet or config files modified"]
+    "preconditions": [
+      "logs/self_eval.jsonl exists and has >=50 entries",
+      "self-eval observations span at least 14 consecutive days"
+    ],
+    "postconditions": [
+      "summary JSON written",
+      "no ratchet or config files modified"
+    ]
   },
   {
     "task_id": "jarvis-audit-memory-events-verify",
@@ -28,43 +416,378 @@
     "description": "Verify audit.jsonl captures memory_write + route_decision events end-to-end after e84263b+3af8ba4",
     "contract_version": "1.0",
     "inputs": [
-      {"name": "audit_log", "type": "file_path", "required": true, "description": "Audit trail to inspect", "default": "logs/audit.jsonl"}
+      {
+        "name": "audit_log",
+        "type": "file_path",
+        "required": true,
+        "description": "Audit trail to inspect",
+        "default": "logs/audit.jsonl"
+      }
     ],
     "outputs": [
-      {"name": "verification_report", "type": "file", "path_template": "logs/{task_id}_report.md", "description": "Which event types fired, sample entries, and pass/fail verdict per wiring commit"}
+      {
+        "name": "verification_report",
+        "type": "file",
+        "path_template": "logs/{task_id}_report.md",
+        "description": "Which event types fired, sample entries, and pass/fail verdict per wiring commit"
+      }
     ],
-    "side_effects": ["writes_files", "subprocess"],
-    "requires_capabilities": ["filesystem", "python", "ollama"],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python",
+      "ollama"
+    ],
     "reversible": true,
     "requires_approval": false,
     "entry_point": "python -m pytest tests/test_memory_audit_events.py -q",
     "working_directory": "/Users/truthseeker/jarvis-ai",
     "estimated_tokens": 4000,
     "max_duration_seconds": 300,
-    "preconditions": ["commits e84263b and 3af8ba4 are in git history", "logs/audit.jsonl exists"],
-    "postconditions": ["report lists memory_write and route_decision samples", "verdict recorded for both event types"]
+    "preconditions": [
+      "commits e84263b and 3af8ba4 are in git history",
+      "logs/audit.jsonl exists"
+    ],
+    "postconditions": [
+      "report lists memory_write and route_decision samples",
+      "verdict recorded for both event types"
+    ]
+  },
+  {
+    "task_id": "jarvis-audit-usage-token-accounting-verify",
+    "task_type": "analysis",
+    "description": "Validate usage_tracker token fields against controlled brain_ollama response counts without cloud calls.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "brain_ollama",
+        "type": "file_path",
+        "required": true,
+        "description": "Ollama usage emission path",
+        "default": "brains/brain_ollama.py"
+      },
+      {
+        "name": "usage_tracker",
+        "type": "file_path",
+        "required": true,
+        "description": "Usage aggregation implementation",
+        "default": "usage_tracker.py"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "accounting_report",
+        "type": "file",
+        "path_template": "logs/{task_id}_report.md",
+        "description": "Observed prompt, completion, total, and estimated-token comparisons"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_brain_ollama_tool_context.py tests/test_local_num_ctx.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 4000,
+    "max_duration_seconds": 300,
+    "preconditions": [
+      "validation remains local-only",
+      "usage data is written to a temporary or isolated log",
+      "no production usage history is modified"
+    ],
+    "postconditions": [
+      "report distinguishes provider counts from estimates",
+      "partial-count behavior is verified",
+      "no cloud request occurs"
+    ]
+  },
+  {
+    "task_id": "jarvis-audit-verify-audit-jsonl",
+    "task_type": "code",
+    "description": "Verify audit.jsonl end-to-end: confirm query_received and route_decision log entries appear correctly after commit b4a0fa9. Steps: (1) read audit.jsonl and check for presence of query_received and route_decision event types, (2) if not present, trace through router.py and model_router.py to find why events are not written, (3) fix the wiring if broken, (4) write a regression test. Do NOT add new audit event types \u2014 only verify/fix the two existing ones.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "audit_log",
+        "type": "file_path",
+        "required": false,
+        "description": "audit.jsonl \u2014 runtime audit log",
+        "default": "logs/audit.jsonl"
+      },
+      {
+        "name": "router",
+        "type": "file_path",
+        "required": true,
+        "description": "router.py \u2014 intent routing layer",
+        "default": "router.py"
+      },
+      {
+        "name": "model_router",
+        "type": "file_path",
+        "required": true,
+        "description": "model_router.py \u2014 model selection layer",
+        "default": "model_router.py"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "audit_verification_result",
+        "type": "file",
+        "path_template": "logs/audit_verification.md",
+        "description": "Evidence log: events found/missing, fix applied or not needed"
+      },
+      {
+        "name": "regression_test",
+        "type": "file_set",
+        "path_template": "tests/",
+        "description": "Test confirming audit events are written on request routing"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/ -q -k 'audit' --timeout=30",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 10000,
+    "max_duration_seconds": 1800,
+    "preconditions": [
+      "router.py and model_router.py are readable",
+      "commit b4a0fa9 is in the history"
+    ],
+    "postconditions": [
+      "query_received and route_decision events are verified present (or fix applied and verified)",
+      "regression test passes",
+      "no new audit event types added"
+    ]
+  },
+  {
+    "task_id": "jarvis-audit-wire-run-id-threading",
+    "task_type": "code",
+    "description": "Wire run_id threading through operative.py \u2192 execution_engine.py (AGENT_BOARD item 12, R1 prereq). Every audit event written via audit.jsonl needs a run_id field so audit rows can be grouped by session. Specifically: (1) operative.py must generate/accept a run_id at session start, (2) pass it through to execution_engine calls, (3) execution_engine must include run_id in all audit.jsonl entries it writes. Write or update tests to confirm run_id propagates end-to-end.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "operative",
+        "type": "file_path",
+        "required": true,
+        "description": "operative.py \u2014 session orchestration layer",
+        "default": "operative.py"
+      },
+      {
+        "name": "execution_engine",
+        "type": "file_path",
+        "required": true,
+        "description": "execution_engine.py \u2014 tool execution and audit writes",
+        "default": "execution_engine.py"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "operative_updated",
+        "type": "file",
+        "path_template": "operative.py",
+        "description": "run_id generated and threaded through"
+      },
+      {
+        "name": "execution_engine_updated",
+        "type": "file",
+        "path_template": "execution_engine.py",
+        "description": "run_id included in all audit entries"
+      },
+      {
+        "name": "tests",
+        "type": "file_set",
+        "path_template": "tests/",
+        "description": "Tests verifying run_id propagation"
+      }
+    ],
+    "side_effects": [
+      "writes_files"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/ -q -k 'run_id' --timeout=30",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 14000,
+    "max_duration_seconds": 2400,
+    "preconditions": [
+      "operative.py and execution_engine.py are readable",
+      "no unrelated changes staged"
+    ],
+    "postconditions": [
+      "run_id is present in all audit.jsonl entries written by execution_engine",
+      "test_run_id_threading passes (or equivalent test)",
+      "existing audit tests continue to pass"
+    ]
+  },
+  {
+    "task_id": "jarvis-board-agent-board-items-11-13",
+    "task_type": "code",
+    "description": "Resolve AGENT_BOARD items 11 and 13. Item 11: JARVIS_RUN_GOLDEN_CASES=1 in .env causes 8m+ of live model calls every full suite run \u2014 investigate the .env line, propose removal (opt-in per-run), and open an approval request. Item 13: build eval_trace_score.py standalone --trace-score CLI surface (observe-only for \u22652 weeks / \u226550 runs before any ratchet wiring). Commit eval_trace_score.py and update AGENT_BOARD marking items 11 and 13 done.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "agent_board",
+        "type": "file_path",
+        "required": true,
+        "description": "AGENT_BOARD.md \u2014 source of truth for item status",
+        "default": "AGENT_BOARD.md"
+      },
+      {
+        "name": "env_file",
+        "type": "file_path",
+        "required": false,
+        "description": ".env file to inspect JARVIS_RUN_GOLDEN_CASES setting",
+        "default": ".env"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "eval_trace_score",
+        "type": "file",
+        "path_template": "eval_trace_score.py",
+        "description": "Standalone observe-only trace-score CLI (item 13)"
+      },
+      {
+        "name": "agent_board_updated",
+        "type": "file",
+        "path_template": "AGENT_BOARD.md",
+        "description": "Items 11 and 13 closed in action tracker"
+      }
+    ],
+    "side_effects": [
+      "writes_files"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": true,
+    "entry_point": "python eval_trace_score.py --help",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 12000,
+    "max_duration_seconds": 1800,
+    "preconditions": [
+      "AGENT_BOARD.md is readable",
+      "human approval logged before editing .env (item 11)",
+      "eval_trace_score.py does NOT wire ratchet \u2014 observe-only"
+    ],
+    "postconditions": [
+      "eval_trace_score.py --trace-score runs without error",
+      "AGENT_BOARD items 11 and 13 marked done",
+      ".env change for item 11 only applied after approval"
+    ]
+  },
+  {
+    "task_id": "jarvis-board-run-baseline-lift-freeze",
+    "task_type": "code",
+    "description": "Run the final baseline test suite on the current committed tree to officially lift the code freeze. Per AGENT_BOARD: freeze exit gate is met, B must run final baseline and mark freeze lifted. Run: python -m pytest tests/ -q --timeout=60 --ignore=tests/test_email_reply_reminder.py --ignore=tests/test_git_ops_router.py (exclude PyQt6/infra-dependent tests). Record pass/fail counts, classify any failures. Update AGENT_BOARD with baseline result and FREEZE STATUS: LIFTED if no new regressions.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "repository",
+        "type": "directory_path",
+        "required": true,
+        "description": "Current Jarvis checkout on committed tree",
+        "default": "."
+      }
+    ],
+    "outputs": [
+      {
+        "name": "agent_board_updated",
+        "type": "file",
+        "path_template": "AGENT_BOARD.md",
+        "description": "Final baseline result and freeze status recorded"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/ -q --timeout=60 --ignore=tests/test_email_reply_reminder.py --ignore=tests/test_git_ops_router.py",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 8000,
+    "max_duration_seconds": 1800,
+    "preconditions": [
+      "working tree is on a committed state (no dirty changes)",
+      "AGENT_BOARD freeze exit gate items are all checked done"
+    ],
+    "postconditions": [
+      "test run completes and results are recorded in AGENT_BOARD",
+      "freeze status updated: LIFTED if no new regressions, EXTENDED with reasons if regressions found",
+      "any failures are classified (known flake vs new regression)"
+    ]
   },
   {
     "task_id": "jarvis-board-session-orchestrator-runbook",
     "task_type": "file_op",
-    "description": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
+    "description": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
     "contract_version": "1.0",
     "inputs": [
-      {"name": "session_orchestrator", "type": "file_path", "required": true, "description": "Module to document", "default": "session_orchestrator.py"}
+      {
+        "name": "session_orchestrator",
+        "type": "file_path",
+        "required": true,
+        "description": "Module to document",
+        "default": "session_orchestrator.py"
+      }
     ],
     "outputs": [
-      {"name": "runbook", "type": "file", "path_template": "ORCHESTRATOR_RUNBOOK.md", "description": "Dev-workflow runbook: commands, dashboard usage, coordination protocol"}
+      {
+        "name": "runbook",
+        "type": "file",
+        "path_template": "ORCHESTRATOR_RUNBOOK.md",
+        "description": "Dev-workflow runbook: commands, dashboard usage, coordination protocol"
+      }
     ],
-    "side_effects": ["writes_files"],
-    "requires_capabilities": ["filesystem"],
+    "side_effects": [
+      "writes_files"
+    ],
+    "requires_capabilities": [
+      "filesystem"
+    ],
     "reversible": true,
     "requires_approval": false,
     "entry_point": "",
     "working_directory": "/Users/truthseeker/jarvis-ai",
     "estimated_tokens": 5000,
     "max_duration_seconds": 600,
-    "preconditions": ["session_orchestrator.py exists", "ORCHESTRATOR_RUNBOOK.md exists or is creatable"],
-    "postconditions": ["ORCHESTRATOR_RUNBOOK.md documents session_orchestrator.py commands", "no code files modified"]
+    "preconditions": [
+      "session_orchestrator.py exists",
+      "ORCHESTRATOR_RUNBOOK.md exists or is creatable"
+    ],
+    "postconditions": [
+      "ORCHESTRATOR_RUNBOOK.md documents session_orchestrator.py commands",
+      "no code files modified"
+    ]
   },
   {
     "task_id": "jarvis-local-llm-cross-session-memory",
@@ -72,44 +795,391 @@
     "description": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
     "contract_version": "1.0",
     "inputs": [
-      {"name": "vault_root", "type": "file_path", "required": true, "description": "Obsidian vault directory receiving shared memory notes", "default": "vault"}
+      {
+        "name": "vault_root",
+        "type": "file_path",
+        "required": true,
+        "description": "Obsidian vault directory receiving shared memory notes",
+        "default": "vault"
+      }
     ],
     "outputs": [
-      {"name": "shared_memory_writer", "type": "file", "path_template": "harness/shared_memory.py", "description": "Module that persists cross-session memory entries into the vault"},
-      {"name": "tests", "type": "file", "path_template": "tests/test_shared_memory.py", "description": "Round-trip and concurrency tests for shared memory writes"}
+      {
+        "name": "shared_memory_writer",
+        "type": "file",
+        "path_template": "harness/shared_memory.py",
+        "description": "Module that persists cross-session memory entries into the vault"
+      },
+      {
+        "name": "tests",
+        "type": "file",
+        "path_template": "tests/test_shared_memory.py",
+        "description": "Round-trip and concurrency tests for shared memory writes"
+      }
     ],
-    "side_effects": ["writes_files", "modifies_state"],
-    "requires_capabilities": ["filesystem", "python"],
+    "side_effects": [
+      "writes_files",
+      "modifies_state"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
     "reversible": true,
     "requires_approval": true,
     "entry_point": "python -m pytest tests/test_shared_memory.py -q",
     "working_directory": "/Users/truthseeker/jarvis-ai",
     "estimated_tokens": 8000,
     "max_duration_seconds": 900,
-    "preconditions": ["vault/ directory exists", ".claude/skills/jarvis-vault.md rules reviewed", "human approval logged in approved_tasks.json"],
-    "postconditions": ["shared memory entries readable by a second session", "vault schema rules preserved", "tests pass"]
+    "preconditions": [
+      "vault/ directory exists",
+      ".claude/skills/jarvis-vault.md rules reviewed",
+      "human approval logged in approved_tasks.json"
+    ],
+    "postconditions": [
+      "shared memory entries readable by a second session",
+      "vault schema rules preserved",
+      "tests pass"
+    ]
+  },
+  {
+    "task_id": "jarvis-local-llm-ornith-coder-integration",
+    "task_type": "code",
+    "description": "Verify and, only with approval, align code-task routing so the installed Ornith 9B model is selected by coder_workbench with an integration test.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "ornith_model",
+        "type": "str",
+        "required": true,
+        "description": "Exact installed Ollama model identifier",
+        "default": "maxwell1500/ornith-9b:Q4_K_M"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "coder_routing",
+        "type": "file",
+        "path_template": "coder_workbench.py",
+        "description": "Approved Ornith routing alignment"
+      },
+      {
+        "name": "model_config",
+        "type": "file",
+        "path_template": "config.py",
+        "description": "Approved exact model identifier, if needed"
+      },
+      {
+        "name": "ornith_test",
+        "type": "file",
+        "path_template": "tests/test_ornith_integration.py",
+        "description": "Selection and local integration coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess",
+      "modifies_config"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": true,
+    "entry_point": "python -m pytest tests/test_ornith_integration.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 6000,
+    "max_duration_seconds": 900,
+    "preconditions": [
+      "human approval logged in approved_tasks.json",
+      "exact Ornith model is present in ollama list",
+      "current config and coder routing defaults are recorded before edits",
+      "no cloud fallback is introduced"
+    ],
+    "postconditions": [
+      "code tasks select the approved local Ornith identifier",
+      "fallback remains local-first",
+      "integration test passes against local Ollama"
+    ]
   },
   {
     "task_id": "jarvis-local-llm-routing-verify",
     "task_type": "analysis",
-    "description": "Verify devstral/qwen3:30b routing in production — confirm specialist model wins are stable under load",
+    "description": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
     "contract_version": "1.0",
     "inputs": [
-      {"name": "usage_log", "type": "file_path", "required": false, "description": "Routing decision log slice to analyze", "default": "usage_log.jsonl"},
-      {"name": "sample_queries", "type": "int", "required": false, "description": "Number of representative queries per class", "default": "10"}
+      {
+        "name": "usage_log",
+        "type": "file_path",
+        "required": false,
+        "description": "Routing decision log slice to analyze",
+        "default": "usage_log.jsonl"
+      },
+      {
+        "name": "sample_queries",
+        "type": "int",
+        "required": false,
+        "description": "Number of representative queries per class",
+        "default": "10"
+      }
     ],
     "outputs": [
-      {"name": "routing_report", "type": "file", "path_template": "logs/{task_id}_report.md", "description": "Observed model per query class, latency under load, and stability verdict"}
+      {
+        "name": "routing_report",
+        "type": "file",
+        "path_template": "logs/{task_id}_report.md",
+        "description": "Observed model per query class, latency under load, and stability verdict"
+      }
     ],
-    "side_effects": ["writes_files", "subprocess"],
-    "requires_capabilities": ["ollama", "filesystem", "python"],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
     "reversible": true,
     "requires_approval": false,
     "entry_point": "python -m pytest tests/test_agent_local_routing.py -q",
     "working_directory": "/Users/truthseeker/jarvis-ai",
     "estimated_tokens": 6000,
     "max_duration_seconds": 600,
-    "preconditions": ["Ollama reachable at localhost:11434", "devstral and qwen3:30b-a3b present in ollama list"],
-    "postconditions": ["routing report written", "no model defaults changed in config.py"]
+    "preconditions": [
+      "Ollama reachable at localhost:11434",
+      "devstral and qwen3:30b-a3b present in ollama list"
+    ],
+    "postconditions": [
+      "routing report written",
+      "no model defaults changed in config.py"
+    ]
+  },
+  {
+    "task_id": "jarvis-self-eval-diagnose-agent-board",
+    "task_type": "code",
+    "description": "Convert confirmed /diagnose health failures into deduplicated actionable AGENT_BOARD items without rewriting unrelated coordination state.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "diagnostic_output",
+        "type": "str",
+        "required": true,
+        "description": "Current /diagnose output",
+        "default": null
+      },
+      {
+        "name": "agent_board",
+        "type": "file_path",
+        "required": true,
+        "description": "Coordination board to update",
+        "default": "AGENT_BOARD.md"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "board_items",
+        "type": "file",
+        "path_template": "AGENT_BOARD.md",
+        "description": "Deduplicated health findings with evidence and ownership"
+      },
+      {
+        "name": "diagnose_board_tests",
+        "type": "file",
+        "path_template": "tests/test_health_check.py",
+        "description": "Board-update deduplication and severity coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": true,
+    "entry_point": "python -m pytest tests/test_health_check.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 6000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "human approval logged in approved_tasks.json",
+      "AGENT_BOARD.md is read immediately before editing",
+      "only confirmed WARN or FAIL diagnostics create items"
+    ],
+    "postconditions": [
+      "existing board items are preserved",
+      "duplicate findings are not added",
+      "new items include evidence, severity, and an owner"
+    ]
+  },
+  {
+    "task_id": "jarvis-self-eval-reflection-daily-briefing",
+    "task_type": "code",
+    "description": "Surface the latest reflection delta in the daily session-start briefing without triggering a new reflection or vault write.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "reflection_history",
+        "type": "file_path",
+        "required": false,
+        "description": "Existing reflection snapshots",
+        "default": "evals/reflection_history.jsonl"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "briefing_reflection",
+        "type": "file",
+        "path_template": "briefing.py",
+        "description": "Read-only reflection delta section"
+      },
+      {
+        "name": "briefing_tests",
+        "type": "file",
+        "path_template": "tests/test_email_digest_briefing.py",
+        "description": "Missing, malformed, and valid reflection history coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_email_digest_briefing.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 5000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "briefing reads existing reflection data only",
+      "missing or malformed history remains non-fatal",
+      "vault files are not modified"
+    ],
+    "postconditions": [
+      "briefing shows a concise latest delta when available",
+      "no reflection run is triggered at startup",
+      "focused tests pass"
+    ]
+  },
+  {
+    "task_id": "jarvis-self-eval-routing-tag-score-report",
+    "task_type": "code",
+    "description": "Aggregate routing_tag distribution across scored sessions and include counts and quality by route in /score.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "self_eval_log",
+        "type": "file_path",
+        "required": false,
+        "description": "Scored response records",
+        "default": "logs/self_eval.jsonl"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "route_score_report",
+        "type": "file",
+        "path_template": "harness/self_eval_log.py",
+        "description": "Bounded routing-tag distribution in /score"
+      },
+      {
+        "name": "route_score_tests",
+        "type": "file",
+        "path_template": "tests/test_self_eval_log.py",
+        "description": "Aggregation, unknown-tag, and empty-log coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_self_eval_log.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 5000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "aggregation reads local self-eval records only",
+      "missing tags are grouped as unknown",
+      "raw prompts and responses are not exposed"
+    ],
+    "postconditions": [
+      "/score reports bounded route counts and averages",
+      "empty logs remain non-fatal",
+      "focused tests pass"
+    ]
+  },
+  {
+    "task_id": "jarvis-self-eval-score-trace-briefing",
+    "task_type": "code",
+    "description": "Connect observe-only trace scores to the /score surface and daily briefing without enabling a quality ratchet.",
+    "contract_version": "1.0",
+    "inputs": [
+      {
+        "name": "trace_log",
+        "type": "file_path",
+        "required": false,
+        "description": "Existing agent trace records",
+        "default": "logs/agent_trace.jsonl"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "score_surface",
+        "type": "file",
+        "path_template": "harness/self_eval_log.py",
+        "description": "Observe-only trace score summary in /score"
+      },
+      {
+        "name": "briefing_surface",
+        "type": "file",
+        "path_template": "briefing.py",
+        "description": "Concise trace score briefing line"
+      },
+      {
+        "name": "trace_surface_tests",
+        "type": "file",
+        "path_template": "tests/test_eval_trace_score.py",
+        "description": "Surface and no-ratchet regression coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_eval_trace_score.py tests/test_self_eval_log.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 7000,
+    "max_duration_seconds": 600,
+    "preconditions": [
+      "trace scoring remains observe-only",
+      "missing trace data is handled without failure",
+      "no ratchet or config default is changed"
+    ],
+    "postconditions": [
+      "/score and briefing expose the same bounded trace summary",
+      "no automatic gate or threshold is enabled",
+      "focused tests pass"
+    ]
   }
 ]

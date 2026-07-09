@@ -3,11 +3,14 @@
     "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 11, 13 still open \u2014 item 9 CLOSED)",
     "priority": 1,
-    "status": "blocked",
+    "status": "awaiting_approval",
     "assigned_at": "2026-06-25T21:28:06.332061+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
-    "notes": "Sweep committed (9da8797). Pivot gate open. Items: 9=Ollama memory-pressure in security gate, 11=?, 13=eval_trace_score surface (observe-only) | AGENT_BOARD item 9 CLOSED round 23 (Ollama memory-pressure security gate). Items 11, 13 remain. | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage"
+    "notes": "Sweep committed (9da8797). Pivot gate open. Items: 9=Ollama memory-pressure in security gate, 11=?, 13=eval_trace_score surface (observe-only) | AGENT_BOARD item 9 CLOSED round 23 (Ollama memory-pressure security gate). Items 11, 13 remain. | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage | contract wired 2026-07-09: jarvis-board-agent-board-items-11-13",
+    "contract_id": "jarvis-board-agent-board-items-11-13",
+    "blocked_reason": "requires human approval before execution",
+    "blocked_at": "2026-07-09T07:30:20.125536+00:00"
   },
   {
     "session_name": "jarvis-board",
@@ -23,34 +26,42 @@
     "session_name": "jarvis-board",
     "task": "Run final baseline suite to officially lift freeze (per AGENT_BOARD: B must confirm)",
     "priority": 1,
-    "status": "blocked",
+    "status": "queued",
     "assigned_at": "2026-06-29T11:34:06.579266+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
     "assigned_to": "jarvis-general-claude-legacyf3f405784bef",
-    "notes": " | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage"
+    "notes": " | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage | contract wired 2026-07-09: jarvis-board-run-baseline-lift-freeze",
+    "contract_id": "jarvis-board-run-baseline-lift-freeze",
+    "blocked_reason": "",
+    "contract_validated_at": "2026-07-09T07:30:20.194098+00:00",
+    "contract_version": "1.0"
   },
   {
     "session_name": "jarvis-audit",
     "task": "Wire run_id threading through operative.py \u2192 execution_engine.py (R1 prereq, AGENT_BOARD item 12)",
     "priority": 1,
-    "status": "blocked",
+    "status": "queued",
     "assigned_at": "2026-06-29T11:34:06.603499+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
     "assigned_to": "jarvis-general-claude-legacy31e74ed95bf5",
-    "notes": " | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage"
+    "notes": " | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage | contract wired 2026-07-09: jarvis-audit-wire-run-id-threading",
+    "contract_id": "jarvis-audit-wire-run-id-threading",
+    "blocked_reason": ""
   },
   {
     "session_name": "jarvis-audit",
     "task": "Verify audit.jsonl end-to-end: confirm query_received+route_decision entries appear correctly after b4a0fa9",
     "priority": 1,
-    "status": "blocked",
+    "status": "queued",
     "assigned_at": "2026-06-29T11:34:06.628020+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T22:04:00Z",
-    "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage",
-    "assigned_to": "jarvis-general-claude-legacyeca43250c16f"
+    "notes": "Follow-on from commit b4a0fa9 \u2014 validate the wiring actually fires | auto-reset 2026-07-06: session gone, no contract \u2014 needs CODEX-8 coverage | contract wired 2026-07-09: jarvis-audit-verify-audit-jsonl",
+    "assigned_to": "jarvis-general-claude-legacyeca43250c16f",
+    "contract_id": "jarvis-audit-verify-audit-jsonl",
+    "blocked_reason": ""
   },
   {
     "session_name": "jarvis-local-llm",
