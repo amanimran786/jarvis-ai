@@ -230,6 +230,33 @@ class SessionTracker:
             entry["last_updated"] = _now_iso()
             self._save(data)
 
+    def expire_stalled(self, timeout_minutes: int = 90) -> list[dict[str, Any]]:
+        """
+        Mark stalled active sessions as 'stalled' and return the list.
+
+        Sessions not updated within *timeout_minutes* are presumed dead —
+        either no Cowork session ever opened them (LEGACY handoff-ready
+        entries) or the agent crashed without calling complete().
+
+        Caller should requeue their corresponding WORK_QUEUE tasks.
+        """
+        stalled = self.get_stalled(timeout_minutes=timeout_minutes)
+        if not stalled:
+            return []
+        data = self._load()
+        now = _now_iso()
+        stalled_ids = {s["session_id"] for s in stalled}
+        for session in data["sessions"]:
+            if session.get("session_id") in stalled_ids:
+                session["status"] = "stalled"
+                session["last_updated"] = now
+                session["stall_reason"] = (
+                    f"no activity for {timeout_minutes}+ minutes — auto-expired"
+                )
+        self._save(data)
+        log.info("[SessionTracker] expired %d stalled sessions", len(stalled))
+        return stalled
+
     def purge_completed(self) -> int:
         """Remove all completed entries. Returns count removed."""
         data = self._load()
