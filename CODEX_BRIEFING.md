@@ -1,7 +1,7 @@
 # Jarvis AI — Codex Session Briefing
 
 > Read this at the start of every session. It is the ground truth for project state,
-> conventions, and your current task queue. Check `CODEX_TASKS.md` for task details.
+> conventions, and your current task queue.
 
 ---
 
@@ -19,7 +19,7 @@ The guiding principle: **local-first, always on, never blocked by rate limits**.
 
 ---
 
-## Project State (as of this session)
+## Project State (as of 2026-07-09)
 
 ### Infrastructure — completed
 | Area | Status | Notes |
@@ -31,27 +31,26 @@ The guiding principle: **local-first, always on, never blocked by rate limits**.
 | Ollama liveness | ✅ Done | `brains/brain_ollama.py` — 2s check, 30s cache |
 | Request queuing | ✅ Done | `harness/request_queue.py` — 60s wait, depth-10 cap |
 | Typed task contracts | ✅ Done | `harness/task_contract.py` — gate in `orchestrator_loop.py` |
+| Capability checker | ✅ Done | `harness/capability_checker.py` — runtime probes before dispatch |
+| Approval workflow | ✅ Done | `harness/approval_workflow.py` — record_approval / list_pending |
+| Stale-session expiry | ✅ Done | `orchestrator_loop._expire_stalled_sessions()` — 90min timeout, step 0 of every iteration |
 | Dashboard | ✅ Done | `jarvis_dashboard.py` — port 7842, shows queue/provider health |
 | Plugin system | ✅ Done | `harness/plugin_loader.py` + `plugins/` |
 | History CLI | ✅ Done | `/history` command with Rich tables |
+| Cloud bypass | ✅ Done | `research.py` last unconditional cloud call routed to `ask_with_priority` |
 
 ### WORK_QUEUE state
 ```
 Total tasks: 95
-  done:              74
-  queued:            12   ← ready to dispatch, need contracts first
-  in_progress:        4
-  awaiting_approval:  4   ← need /approve <task_id> before dispatch
-  blocked:            1   ← still needs a contract written
+  done:     74
+  queued:   21   ← all have typed contracts, ready to dispatch
+  blocked:   0   ← clean! all tasks are contractable
 ```
 
-### Open Codex tasks (your queue)
-See `CODEX_TASKS.md` for full specs. Priority order:
-
-1. **CODEX-8 (HIGH)** — Write typed contracts for all queued/blocked tasks in WORK_QUEUE.json
-2. **CODEX-9 (MEDIUM)** — `/contracts` REPL command (list, detail, validate)
-3. **CODEX-10 (MEDIUM)** — `harness/capability_checker.py` — verify capabilities before task runs
-4. **CODEX-11 (LOW)** — `/approve` and `/pending-approval` CLI for human sign-off workflow
+### No more stale-session lockouts
+The orchestrator loop now auto-expires sessions at step 0 of every iteration.
+Sessions silent for 90+ minutes are marked `stalled` and their queue tasks requeued.
+You will never need to manually reset `ACTIVE_SESSIONS.json`.
 
 ---
 
@@ -78,30 +77,20 @@ Always run `python3 -m py_compile <file>` after editing Python files.
 
 ### Testing
 ```bash
-# Run all tests
+# Core harness tests (always run these)
+python -m pytest tests/test_orchestrate.py tests/test_task_contract.py \
+  tests/test_circuit_breaker.py tests/test_approval_workflow.py \
+  tests/test_session_tracker.py -q --timeout=30
+
+# Expected: 70 passed
+
+# Full suite (some collection errors expected — PyQt6, network, env-gated tests)
 python -m pytest tests/ -q --timeout=30 --continue-on-collection-errors 2>&1 | tail -20
-
-# Run specific test file
-python -m pytest tests/test_task_contract.py -v --timeout=30
-
-# Expected baseline: ~3100 passing, ~38-64 pre-existing failures (PyQt6, datetime.UTC, network)
-# Your changes should add 0 new failures
 ```
 
 ### Git lock workaround (FUSE mount issue)
-If you see `fatal: Unable to create '.git/index.lock': File exists`:
-```bash
-mv .git/index.lock .git/index.lock.old
-# If HEAD.lock also exists:
-mv .git/HEAD.lock .git/HEAD.lock.old
-```
-
-### Update CODEX_TASKS.md when done
-Add ✅ next to the task name and one sentence describing what you built.
-Append to `MASTER_LOG.md`:
-```
-[2026-07-XX HH:MM UTC] [CODEX] Completed: <task name> — <commit hash>
-```
+If you see `fatal: Unable to create '.git/index.lock': File exists`, use the plumbing
+commit path (see `CODEX_TASKS.md` or ask the parent session). Do NOT use `rm` on lock files.
 
 ---
 
@@ -128,6 +117,9 @@ orchestrator_loop.py          — Main 5-min loop, reads WORK_QUEUE.json
 harness/cowork_launcher.py    — Fires sessions from LAUNCH_QUEUE.json
 harness/runtime_launcher.py   — Executes contracted tasks
 harness/task_contract.py      — TaskContract schema + gate logic
+harness/session_tracker.py    — ACTIVE_SESSIONS.json management + expire_stalled()
+harness/capability_checker.py — Probes capabilities before dispatch
+harness/approval_workflow.py  — record_approval(), list_pending_approvals()
 ```
 
 ### LLM infrastructure
@@ -145,9 +137,9 @@ provider_priority.py          — ask_with_priority() — the safe non-streaming
 ### State files (read/write carefully)
 ```
 WORK_QUEUE.json               — Task queue. Statuses: queued/in_progress/done/blocked/awaiting_approval
-TASK_CONTRACTS.json           — Typed contracts for autonomous tasks
+TASK_CONTRACTS.json           — Typed contracts for autonomous tasks (22 contracts)
 ORCHESTRATOR_STATUS.json      — Live orchestrator state, provider health, queue depth
-ACTIVE_SESSIONS.json          — Currently running sessions
+ACTIVE_SESSIONS.json          — Currently running sessions (auto-expired after 90min)
 LAUNCH_QUEUE.json             — Sessions queued for launch
 approved_tasks.json           — Human-approved tasks for requires_approval=True contracts
 logs/circuit_breaker.json     — Persisted circuit breaker state
@@ -161,42 +153,60 @@ config.py            — Source of truth for all defaults. Change here, not inli
 
 ---
 
-## How Contracts Work (CODEX-8 context)
+## How Contracts Work
 
 A **TaskContract** is required before the orchestrator will execute a task autonomously.
 
 ```python
-from harness.task_contract import TaskContract, TaskType, SideEffect, Capability, InputSpec, OutputSpec
+from harness.task_contract import (
+    TaskContract, load_contracts, save_contracts, validate_contract
+)
 
+# Load existing contracts
+contracts = load_contracts()
+
+# Build a new one
 contract = TaskContract(
     task_id="my-task-slug",          # must match contract_id in WORK_QUEUE entry
-    task_type=TaskType.ANALYSIS,
+    task_type="code",                # "code" | "file_op" | "analysis" | "test"
     description="What this task does in one sentence",
-    inputs=[InputSpec(name="source_file", type="file_path", required=True)],
-    outputs=[OutputSpec(name="report", type="file", path_template="logs/report.json")],
-    side_effects=[SideEffect.WRITES_FILES],
-    requires_capabilities=[Capability.FILESYSTEM, Capability.OLLAMA],
+    contract_version="1.0",
+    inputs=[{"name": "source_file", "type": "file_path", "required": True,
+             "description": "...", "default": ""}],
+    outputs=[{"name": "report", "type": "file", "path_template": "logs/report.json",
+              "description": "..."}],
+    side_effects=["writes_files"],           # "writes_files" | "subprocess" | "network" | "modifies_config"
+    requires_capabilities=["filesystem", "python"],  # only valid Capability enum values
     reversible=True,
     requires_approval=False,
+    entry_point="python -m pytest tests/ -q",
+    working_directory="/Users/truthseeker/jarvis-ai",
     estimated_tokens=3000,
     max_duration_seconds=120,
     preconditions=["source_file exists"],
     postconditions=["logs/report.json exists and is valid JSON"],
 )
+contracts[contract.task_id] = contract
+save_contracts(contracts)
 ```
 
+**Valid `requires_capabilities` values:**
+`ollama`, `filesystem`, `internet`, `git`, `python`, `voice`, `calendar`, `imessage`, `screen`
+
+Note: `subprocess` is a `side_effect`, NOT a capability. Using it in `requires_capabilities` will
+cause the loader to silently skip the entire contract entry.
+
 **To unblock a queued task:**
-1. Write its contract in `TASK_CONTRACTS.json` (use `load_contracts`/`save_contracts`)
+1. Write its contract in `TASK_CONTRACTS.json`
 2. Add `contract_id` field to the WORK_QUEUE entry matching your contract's `task_id`
-3. Set the entry's `status` to `"queued"` (if it was `"blocked"`)
-4. The orchestrator gate validates the contract on next loop and dispatches
+3. Set the entry's `status` to `"queued"`
+4. The orchestrator validates and dispatches on next loop iteration
 
 **Validate all contracts:**
 ```bash
 python3 -c "
 from harness.task_contract import load_contracts, validate_contract
-from pathlib import Path
-contracts = load_contracts(Path('TASK_CONTRACTS.json'))
+contracts = load_contracts()
 errors = 0
 for tid, c in contracts.items():
     ok, errs = validate_contract(c)
@@ -255,12 +265,11 @@ grep -n "SECRET\|API_KEY\|TOKEN" <file>.py | grep -v "os.getenv\|config\."
 
 ```
 Branch: improve/local-artifact-and-dashboard
-~20 commits ahead of origin
+~22 commits ahead of origin
 ```
 
-All infrastructure work this session is on this branch. Codex work goes on the same branch unless you're building something that could conflict with ongoing orchestrator changes — in that case create `codex/<task-name>`.
+All infrastructure work lives on this branch.
 
 ---
 
-*Last updated: 2026-07-02 | Maintained by: Jarvis AI session tooling*
-*If this file is stale, check `git log --oneline -5` and `SESSION_SUMMARY.md` for latest state.*
+*Last updated: 2026-07-09 | Maintained by: Jarvis AI session tooling*
