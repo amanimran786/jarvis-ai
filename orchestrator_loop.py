@@ -119,6 +119,13 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
 
     _log_master(f"[orchestrator] loop start — max_concurrent={max_concurrent} dry_run={dry_run}")
 
+    # ── Step 0: Auto-expire stalled sessions ──────────────────────────────────
+    # LEGACY handoff-ready sessions can get stuck as status=active when no
+    # Cowork session opens them, holding all concurrent slots indefinitely.
+    # Expire any session silent for more than 90 minutes and requeue its task.
+    if not dry_run:
+        _expire_stalled_sessions(tracker, timeout_minutes=90)
+
     # ── Step 1: Harvest completed sessions ────────────────────────────────────
     completed = tracker.list_completed()
     newly_done: list[dict] = []
@@ -449,6 +456,56 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         f"active={summary['active_now']}"
     )
     return summary
+
+
+# ── Stale-session expiry ──────────────────────────────────────────────────────
+
+def _expire_stalled_sessions(tracker: SessionTracker, timeout_minutes: int = 90) -> int:
+    """
+    Auto-expire sessions that have been 'active' with no updates for too long.
+
+    LEGACY handoff-ready sessions get stuck as status=active when no Cowork
+    session opens them, permanently consuming concurrent slots.  This runs at
+    the top of every loop iteration so the blockage is self-healing.
+
+    Returns the number of sessions expired.
+    """
+    stalled = tracker.expire_stalled(timeout_minutes=timeout_minutes)
+    if not stalled:
+        return 0
+
+    # Requeue any WORK_QUEUE tasks that were in_progress for these sessions
+    queue = _load_queue()
+    stalled_session_ids = {s["session_id"] for s in stalled}
+    requeued: list[str] = []
+    for task in queue:
+        if (
+            task.get("status") == "in_progress"
+            and task.get("assigned_to") in stalled_session_ids
+        ):
+            task["status"] = "queued"
+            task["assigned_to"] = None
+            task["assigned_at"] = None
+            notes = str(task.get("notes") or "")
+            task["notes"] = (
+                notes
+                + f" | auto-requeued {_now()[:10]}: session stalled (>{timeout_minutes}min)"
+            )
+            requeued.append(str(task.get("id") or task.get("session_name") or "?"))
+
+    if requeued:
+        _save_queue(queue)
+
+    _log_master(
+        f"[orchestrator] auto-expired {len(stalled)} stalled session(s)"
+        + (f" — requeued: {', '.join(requeued)}" if requeued else " (no in_progress tasks)")
+    )
+    log.info(
+        "[Loop] Auto-expired %d stalled session(s); requeued tasks: %s",
+        len(stalled),
+        requeued or "none",
+    )
+    return len(stalled)
 
 
 # ── WORK_QUEUE helpers ────────────────────────────────────────────────────────
