@@ -3,7 +3,7 @@
     "session_name": "jarvis-board",
     "task": "Review and close open AGENT_BOARD items (items 11, 13 still open \u2014 item 9 CLOSED)",
     "priority": 1,
-    "status": "awaiting_approval",
+    "status": "queued",
     "assigned_at": "2026-06-25T21:28:06.332061+00:00",
     "completed_at": null,
     "created_at": "2026-06-24T00:00:00Z",
