@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jarvis.dashboard</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/truthseeker/jarvis-ai/jarvis_dashboard.py</string>
+    </array>
+
+    <!-- Start on login and restart immediately if it exits -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/truthseeker/jarvis-ai/logs/dashboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/truthseeker/jarvis-ai/logs/dashboard_error.log</string>
+
+    <!-- Give it a working directory so relative paths resolve -->
+    <key>WorkingDirectory</key>
+    <string>/Users/truthseeker/jarvis-ai</string>
+</dict>
+</plist>
