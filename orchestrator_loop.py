@@ -30,6 +30,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,49 @@ _FOLLOWUP_TIMEOUT       = 60   # seconds
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+# ── Ops dashboard ──────────────────────────────────────────────────────────────
+
+_DASHBOARD_THREAD: threading.Thread | None = None
+_DASHBOARD_LOCK   = threading.Lock()
+
+
+def _ensure_dashboard_running(port: int = 7842) -> None:
+    """Start jarvis_dashboard on *port* in a daemon thread (one per process).
+
+    Safe to call every loop iteration — re-entrancy is guarded by
+    ``_DASHBOARD_LOCK`` and the ``is_alive()`` check.  If the dashboard
+    module or uvicorn is unavailable the failure is logged and swallowed so
+    the orchestrator loop continues normally.
+    """
+    global _DASHBOARD_THREAD
+    with _DASHBOARD_LOCK:
+        if _DASHBOARD_THREAD is not None and _DASHBOARD_THREAD.is_alive():
+            return  # already running
+
+        def _run() -> None:
+            try:
+                import uvicorn
+                from jarvis_dashboard import app as _dash_app
+                uvicorn.run(
+                    _dash_app,
+                    host="0.0.0.0",
+                    port=port,
+                    log_level="warning",
+                    access_log=False,
+                )
+            except OSError as exc:
+                # Port already in use — another process is running the dashboard.
+                log.info("[dashboard] port %d already in use (%s) — skipping", port, exc)
+            except Exception as exc:
+                log.warning("[dashboard] failed to start: %s", exc)
+
+        _DASHBOARD_THREAD = threading.Thread(
+            target=_run, name="JarvisDashboard", daemon=True
+        )
+        _DASHBOARD_THREAD.start()
+        log.info("[dashboard] started at http://localhost:%d", port)
+
+
 def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     """
     Execute one iteration of the orchestration loop.
@@ -116,6 +160,9 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     }
     tracker = SessionTracker()
     attempt_store = AttemptStore(ATTEMPT_LOG_PATH)
+
+    # Start the ops dashboard (idempotent — skipped if already running).
+    _ensure_dashboard_running()
 
     _log_master(f"[orchestrator] loop start — max_concurrent={max_concurrent} dry_run={dry_run}")
 
