@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import uvicorn
 
 import runtime_state
+from harness.audit import get_audit_error_count
 from harness.state_lock import queue_state_lock
 
 BASE = Path(__file__).parent
@@ -367,6 +368,10 @@ def index():
     active  = sum(1 for s in sessions if s.get("status") == "active")
     stalled = sum(1 for s in sessions if s.get("status") == "stalled")
     fired   = sum(1 for q in queue if q.get("status") == "fired")
+    try:
+        audit_errors_24h = get_audit_error_count()
+    except Exception:
+        audit_errors_24h = 0
 
     def card(label, val, color="#4fc3f7"):
         return (f"<div style='background:#1e1e1e;border:1px solid #333;border-radius:8px;"
@@ -395,6 +400,7 @@ def index():
   {card("Active", active, "#4fc3f7" if active else "#888")}
   {card("Stalled", stalled, "#ef5350" if stalled else "#888")}
   {card("Fired", fired, "#ab47bc" if fired else "#888")}
+  {card("Audit Errors (24h)", audit_errors_24h, "#ef5350" if audit_errors_24h else "#888")}
 </div>
 
 {_action_bar()}
