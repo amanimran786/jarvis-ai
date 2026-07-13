@@ -32,7 +32,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # ── Bootstrap: ensure repo root is on sys.path ────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parent
@@ -46,6 +46,8 @@ from harness.completion_verifier import (  # noqa: E402
 )
 from harness.retry_policy import RetryAction, RetryDecision, decide_retry  # noqa: E402
 from harness.capability_checker import check_contract_capabilities  # noqa: E402
+from harness.approval_workflow import consume_approval, restore_approval  # noqa: E402
+from harness.state_lock import queue_state_lock  # noqa: E402
 from harness.task_contract import (  # noqa: E402
     AttemptRecord,
     AttemptStore,
@@ -56,6 +58,8 @@ from harness.task_contract import (  # noqa: E402
     approval_logged,
     contract_for_task,
     evaluate_completion,
+    normalized_task_spec_digest,
+    task_contract_digest,
     validate_contract,
 )
 
@@ -111,7 +115,7 @@ def _ensure_dashboard_running(port: int = 7842) -> None:
                 from jarvis_dashboard import app as _dash_app
                 uvicorn.run(
                     _dash_app,
-                    host="0.0.0.0",
+                    host="127.0.0.1",
                     port=port,
                     log_level="warning",
                     access_log=False,
@@ -126,10 +130,33 @@ def _ensure_dashboard_running(port: int = 7842) -> None:
             target=_run, name="JarvisDashboard", daemon=True
         )
         _DASHBOARD_THREAD.start()
-        log.info("[dashboard] started at http://localhost:%d", port)
+        if sys.stdout.isatty():
+            try:
+                import webbrowser
+                from jarvis_dashboard import dashboard_bootstrap_url
+
+                webbrowser.open(dashboard_bootstrap_url("127.0.0.1", port))
+            except Exception as exc:
+                log.debug("[dashboard] could not open authenticated browser: %s", exc)
+        log.info(
+            "[dashboard] started on loopback port %d; run jarvis_dashboard.py "
+            "to authenticate an existing server",
+            port,
+        )
 
 
 def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
+    global _LOG_BUFFER
+    with queue_state_lock(WORK_QUEUE_PATH):
+        try:
+            return _run_loop(max_concurrent=max_concurrent, dry_run=dry_run)
+        finally:
+            if _LOG_BUFFER is not None:
+                buffered, _LOG_BUFFER = _LOG_BUFFER, None
+                _write_master_lines(buffered)
+
+
+def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     """
     Execute one iteration of the orchestration loop.
 
@@ -160,6 +187,10 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     }
     tracker = SessionTracker()
     attempt_store = AttemptStore(ATTEMPT_LOG_PATH)
+
+    # Buffer this iteration's MASTER_LOG lines; an idle loop is discarded below.
+    global _LOG_BUFFER
+    _LOG_BUFFER = []
 
     # Start the ops dashboard (idempotent — skipped if already running).
     _ensure_dashboard_running()
@@ -345,57 +376,73 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             summary["blocked"] += 1
             _log_master(f"[orchestrator] task blocked — invalid contract: {exc}")
             continue
-        if spec.legacy_adapter:
-            # Typed task contract gate (CODEX-8): a legacy queue entry may only
-            # execute autonomously if an explicit TaskContract covers it.
-            contract = _resolve_typed_contract(task, spec)
-            if contract is None:
-                _mark_task_blocked(
-                    task,
-                    "autonomous execution requires an explicit typed task contract",
-                )
-                summary["blocked"] += 1
-                _log_master(
-                    f"[orchestrator] {spec.task_id} blocked — legacy contract is not executable"
-                )
-                continue
-            is_valid, contract_errors = validate_contract(contract)
-            if not is_valid:
-                _mark_task_blocked(
-                    task,
-                    f"typed task contract invalid: {'; '.join(contract_errors)}",
-                )
-                summary["blocked"] += 1
-                _log_master(
-                    f"[orchestrator] {spec.task_id} blocked — typed contract "
-                    f"{contract.task_id} invalid: {'; '.join(contract_errors)}"
-                )
-                continue
-            capability_results = check_contract_capabilities(contract)
-            missing_capabilities = [
-                name for name, available in capability_results.items() if not available
-            ]
-            if missing_capabilities:
-                _log_master(
-                    f"[orchestrator] {spec.task_id} missing capabilities (log-only): "
-                    f"{', '.join(missing_capabilities)}"
-                )
-            if contract.requires_approval and not approval_logged(contract.task_id):
-                _mark_task_awaiting_approval(task)
-                summary["blocked"] += 1
-                _log_master(
-                    f"[orchestrator] {spec.task_id} awaiting approval — contract "
-                    f"{contract.task_id} requires human sign-off"
-                )
-                continue
-            _mark_task_contract_validated(task, contract)
-            _log_master(
-                f"[orchestrator] {spec.task_id} typed contract {contract.task_id} "
-                f"v{contract.contract_version} validated — dispatching"
+        # Every autonomous queue row must resolve a valid typed TaskContract.
+        # Explicit TaskSpec IDs are execution metadata, not authorization.
+        contract = _resolve_typed_contract(task, spec)
+        if contract is None:
+            _mark_task_blocked(
+                task,
+                "autonomous execution requires an explicit typed task contract",
             )
-            # Rebuild the spec as contract-backed so the runtime launcher's
-            # legacy_adapter check (harness/runtime_launcher.py) accepts it.
-            spec = TaskSpec.from_queue_task({**spec.to_dict(), "legacy_adapter": False})
+            summary["blocked"] += 1
+            _log_master(
+                f"[orchestrator] {spec.task_id} blocked — typed contract is missing"
+            )
+            continue
+        is_valid, contract_errors = validate_contract(contract)
+        if not is_valid:
+            _mark_task_blocked(
+                task,
+                f"typed task contract invalid: {'; '.join(contract_errors)}",
+            )
+            summary["blocked"] += 1
+            _log_master(
+                f"[orchestrator] {spec.task_id} blocked — typed contract "
+                f"{contract.task_id} invalid: {'; '.join(contract_errors)}"
+            )
+            continue
+
+        spec = spec.for_dispatch()
+        contract_digest = task_contract_digest(contract)
+        spec_digest = normalized_task_spec_digest(spec)
+        if contract.task_spec_sha256 != spec_digest:
+            _mark_task_blocked(
+                task,
+                "typed task contract does not match the executable task specification",
+            )
+            summary["blocked"] += 1
+            _log_master(
+                f"[orchestrator] {spec.task_id} blocked — typed contract "
+                f"{contract.task_id} is bound to a different task specification"
+            )
+            continue
+        if contract.requires_approval and not approval_logged(
+            contract.task_id,
+            task_contract_sha256=contract_digest,
+            task_spec_sha256=spec_digest,
+        ):
+            _mark_task_awaiting_approval(task)
+            summary["blocked"] += 1
+            _log_master(
+                f"[orchestrator] {spec.task_id} awaiting digest-bound approval — "
+                f"contract {contract.task_id}"
+            )
+            continue
+
+        capability_results = check_contract_capabilities(contract)
+        missing_capabilities = [
+            name for name, available in capability_results.items() if not available
+        ]
+        if missing_capabilities:
+            _log_master(
+                f"[orchestrator] {spec.task_id} missing capabilities (log-only): "
+                f"{', '.join(missing_capabilities)}"
+            )
+        _mark_task_contract_validated(task, contract)
+        _log_master(
+            f"[orchestrator] {spec.task_id} typed contract {contract.task_id} "
+            f"v{contract.contract_version} validated — dispatching"
+        )
 
         # ── Step 4: Generate prompt ──────────────────────────────────────────
         repo_ctx = _build_repo_context()
@@ -443,16 +490,42 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
             log.info("[Loop][DRY-RUN] Would launch session %s for task %s\nPrompt preview:\n%s",
                      session_id, spec.task_id, prompt[:400])
         else:
+            consumed_approval = None
+            if contract.requires_approval:
+                consumed_approval = consume_approval(
+                    contract.task_id,
+                    task_contract_sha256=contract_digest,
+                    task_spec_sha256=spec_digest,
+                )
+                if consumed_approval is None:
+                    _mark_task_awaiting_approval(task)
+                    summary["blocked"] += 1
+                    _log_master(
+                        f"[orchestrator] {spec.task_id} approval was already consumed; "
+                        "launch cancelled"
+                    )
+                    continue
             try:
                 attempt_store.append(attempt)
             except OSError as exc:
+                _restore_launch_approval(consumed_approval, spec.task_id)
                 _mark_task_blocked(task, f"checkpoint write failed: {exc}")
                 summary["blocked"] += 1
                 _log_master(
                     f"[orchestrator] {spec.task_id} blocked — checkpoint write failed: {exc}"
                 )
                 continue
-            if not _write_launch_record(launch_record):
+            launch_result = _write_launch_record(launch_record)
+            if launch_result == "duplicate":
+                _mark_task_blocked(task, "launch queue already has a pending record")
+                summary["blocked"] += 1
+                _log_master(
+                    f"[orchestrator] {spec.task_id} blocked — launch already pending; "
+                    "approval remains consumed"
+                )
+                continue
+            if launch_result == "failed":
+                _restore_launch_approval(consumed_approval, spec.task_id)
                 delivery_failure = AttemptRecord.checkpoint(
                     spec,
                     session_id,
@@ -502,6 +575,19 @@ def run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         f"launched={summary['launched']} follow_ups={summary['follow_ups']} "
         f"active={summary['active_now']}"
     )
+
+    # Flush the buffer only when the iteration did meaningful work; a purely
+    # idle poll (all counters zero) is dropped so the log stops growing on every
+    # scheduled run.  active_now is excluded — a steady-state active session is
+    # not new activity worth re-logging.
+    buffered, _LOG_BUFFER = _LOG_BUFFER or [], None
+    did_work = any(
+        summary[k]
+        for k in ("harvested", "follow_ups", "launched", "blocked",
+                  "unverified", "rejected", "retried")
+    )
+    if did_work:
+        _write_master_lines(buffered)
     return summary
 
 
@@ -736,28 +822,30 @@ def _load_launch_queue() -> list[dict[str, Any]]:
         return []
 
 
-def _write_launch_record(record: dict[str, Any]) -> bool:
-    """Append a launch record atomically and report whether it was persisted."""
+def _write_launch_record(
+    record: dict[str, Any],
+) -> Literal["written", "duplicate", "failed"]:
+    """Append a launch record and distinguish deduplication from I/O failure."""
     queue = _load_launch_queue()
     # Deduplicate by task_id+status=pending
     existing_ids = {r["task_id"] for r in queue if r.get("status") == "pending"}
     if record["task_id"] in existing_ids:
         log.debug("[Loop] task %s already pending in LAUNCH_QUEUE — skipping", record["task_id"])
-        return False
+        return "duplicate"
     queue.append(record)
     tmp = str(LAUNCH_QUEUE_PATH) + ".loop.tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(queue, f, indent=2)
         os.replace(tmp, str(LAUNCH_QUEUE_PATH))
-        return True
+        return "written"
     except Exception as exc:
         log.error("[Loop] Could not write LAUNCH_QUEUE.json: %s", exc)
         try:
             os.remove(tmp)
         except OSError:
             pass
-        return False
+        return "failed"
 
 
 # ── Follow-up task generation ─────────────────────────────────────────────────
@@ -908,14 +996,51 @@ def _new_task_id() -> str:
     return f"TASK-{next_num:03d}"
 
 
+# When a run_loop iteration is in progress we buffer its log lines instead of
+# writing them immediately.  An idle iteration (no work harvested/launched/etc.)
+# is discarded at flush time so the launchd job stops appending ~3 lines to
+# MASTER_LOG.md every few minutes — the churn that kept the git tree dirty and
+# bloated the log to hundreds of KB.  Buffering is off outside run_loop, so any
+# other caller writes through immediately as before.
+_LOG_BUFFER: list[str] | None = None
+
+
 def _log_master(message: str) -> None:
-    """Append a timestamped line to MASTER_LOG.md."""
+    """Append a timestamped line to MASTER_LOG.md (buffered inside run_loop)."""
     line = f"[{datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC] {message}\n"
+    if _LOG_BUFFER is not None:
+        _LOG_BUFFER.append(line)
+        return
+    _write_master_lines([line])
+
+
+def _write_master_lines(lines: list[str]) -> None:
+    if not lines:
+        return
     try:
         with open(MASTER_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(line)
+            f.writelines(lines)
     except Exception as exc:
         log.debug("[Loop] Could not write MASTER_LOG.md: %s", exc)
+
+
+def _restore_launch_approval(
+    approval_record: dict[str, Any] | None, task_id: str
+) -> None:
+    """Return a consumed approval when dispatch did not become durable."""
+    if approval_record is None:
+        return
+    try:
+        restored = restore_approval(approval_record)
+    except Exception as exc:
+        _log_master(
+            f"[orchestrator] CRITICAL: could not restore approval for {task_id}: {exc}"
+        )
+        return
+    if not restored:
+        _log_master(
+            f"[orchestrator] approval for {task_id} was already restored"
+        )
 
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────

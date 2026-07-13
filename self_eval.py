@@ -540,7 +540,7 @@ def jarvis_reflection(hours: int = 24 * 7 * 2) -> str:
         lines.append("")
 
     lines.append("### Next Reflection")
-    lines.append(f"Run `self_eval.jarvis_reflection()` again after 50+ new interactions.")
+    lines.append("Run `self_eval.jarvis_reflection()` again after 50+ new interactions.")
 
     return "\n".join(lines)
 

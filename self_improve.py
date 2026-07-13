@@ -75,35 +75,60 @@ IMPROVABLE_FILES = {
 # ── Backup system ─────────────────────────────────────────────────────────────
 
 def _backup(filename: str) -> str:
-    """Create a timestamped backup of a file before modifying it."""
-    os.makedirs(BACKUP_DIR, exist_ok=True)
+    """Create a timestamped backup of a file before modifying it.
+
+    Backups mirror the source tree under BACKUP_DIR so nested targets such as
+    ``local_runtime/local_stt.py`` are backed up correctly instead of raising
+    FileNotFoundError on a missing subdirectory.
+    """
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     src = os.path.join(BASE_DIR, filename)
     dst = os.path.join(BACKUP_DIR, f"{filename}.{ts}.bak")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy2(src, dst)
     return dst
 
 
 def list_backups(filename: str = None) -> list[str]:
-    """List all backups, optionally filtered by filename."""
+    """List all backups (BACKUP_DIR-relative), optionally filtered by filename."""
     if not os.path.exists(BACKUP_DIR):
         return []
-    files = os.listdir(BACKUP_DIR)
+    files = [
+        os.path.relpath(os.path.join(root, name), BACKUP_DIR)
+        for root, _dirs, names in os.walk(BACKUP_DIR)
+        for name in names
+    ]
     if filename:
         files = [f for f in files if f.startswith(filename)]
     return sorted(files, reverse=True)
 
 
-def restore_backup(backup_name: str) -> str:
-    """Restore a file from backup."""
+def _original_from_backup_name(backup_name: str) -> str:
+    """Recover the original repo-relative path from a ``<path>.<ts>.bak`` name."""
+    parts = backup_name.rsplit(".", 2)  # ["<path>.<ext>", "<ts>", "bak"]
+    return parts[0] if len(parts) == 3 and parts[2] == "bak" else backup_name
+
+
+def _restore_backup(backup_name: str) -> str:
+    """Restore a file from backup. Returns the restored path; raises on failure."""
     src = os.path.join(BACKUP_DIR, backup_name)
     if not os.path.exists(src):
-        return f"Backup not found: {backup_name}"
-    # Extract original filename (everything before the timestamp)
-    parts = backup_name.rsplit(".", 3)
-    original = parts[0] + "." + parts[1] if len(parts) >= 3 else backup_name
+        raise FileNotFoundError(f"Backup not found: {backup_name}")
+    original = _original_from_backup_name(backup_name)
     dst = os.path.join(BASE_DIR, original)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     shutil.copy2(src, dst)
+    return original
+
+
+def restore_backup(backup_name: str) -> str:
+    """Restore a file from backup (user-facing; returns a status message)."""
+    try:
+        original = _restore_backup(backup_name)
+    except FileNotFoundError as exc:
+        return str(exc)
+    except OSError as exc:
+        return f"Restore failed for {backup_name}: {exc}"
     return f"Restored {original} from {backup_name}."
 
 
@@ -604,13 +629,31 @@ def _parity_commands(filename: str) -> list[tuple[str, list[str]]]:
 def _run_validation(filename: str) -> dict:
     results = []
     for name, command in _validation_commands(filename) + _parity_commands(filename):
-        proc = subprocess.run(
-            command,
-            cwd=BASE_DIR,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=BASE_DIR,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A patch that hangs on import (top-level blocking code) must count
+            # as a hard validation failure so the change is auto-reverted, not
+            # left live because the exception escaped.
+            results.append({
+                "name": name,
+                "ok": False,
+                "output": f"validation command timed out after 30s: {exc}",
+            })
+            break
+        except OSError as exc:
+            results.append({
+                "name": name,
+                "ok": False,
+                "output": f"validation command failed to run: {exc}",
+            })
+            break
         output = (proc.stdout + proc.stderr).strip()
         results.append({
             "name": name,
@@ -722,6 +765,22 @@ def prepare_improvement(instruction: str = None, filename: str = None) -> dict:
     }
 
 
+def _revert_after_failure(backup_rel: str, backup_path: str) -> str:
+    """Restore the backup, verifying it actually succeeded.
+
+    Returns a human-readable note. On failure it does NOT silently claim the
+    change was reverted — it tells the operator to restore manually so a broken
+    file is never left live under the impression it was rolled back.
+    """
+    try:
+        _restore_backup(backup_rel)
+        return "Change auto-reverted."
+    except Exception as exc:  # noqa: BLE001 — surface, do not swallow
+        msg = f"REVERT FAILED — restore manually from {backup_path}: {exc}"
+        logging.exception("[Self-Improve] %s", msg)
+        return msg
+
+
 def apply_pending_improvement(pending: dict) -> dict:
     """
     Phase 2 of the self-improvement pipeline — only called after user approval.
@@ -744,28 +803,38 @@ def apply_pending_improvement(pending: dict) -> dict:
             "instruction": instruction,
         }
 
-    validation = _run_validation(filename)
+    backup_rel = os.path.relpath(backup_path, BACKUP_DIR)
+
+    # Any failure past this point — a failed check OR an exception inside
+    # validation itself — must revert the live file. Previously an unhandled
+    # exception (e.g. a hung import hitting the 30s timeout) escaped and left
+    # broken code on disk that the next restart would boot into.
+    try:
+        validation = _run_validation(filename)
+    except Exception as exc:  # noqa: BLE001 — never leave a bad patch live
+        validation = {"ok": False, "summary": f"validation crashed: {exc}", "checks": []}
+
     if not validation["ok"]:
-        restore_backup(os.path.basename(backup_path))
+        revert_note = _revert_after_failure(backup_rel, backup_path)
         evals.log_failure(
             issue=f"Self-improve validation failed for {filename}.",
             expected="Generated change should compile and pass smoke validation.",
             response=validation["summary"],
             source="self_improve_validation",
         )
-        _audit_log("reflection_run", file=filename, instruction=instruction[:200], success=False, error=f"validation failed + auto-reverted: {validation['summary'][:120]}")
+        _audit_log("reflection_run", file=filename, instruction=instruction[:200], success=False, error=f"validation failed — {revert_note[:120]}")
         return {
-            "error": f"Applied change failed validation and was auto-reverted: {validation['summary']}",
+            "error": f"Applied change failed validation: {validation['summary']}. {revert_note}",
             "file": filename,
             "instruction": instruction,
-            "backup": os.path.basename(backup_path),
+            "backup": backup_rel,
             "validation": validation,
             "evidence_ids": evidence_bundle.get("failure_ids", []) if evidence_bundle else [],
         }
 
     result = {
         "file": filename,
-        "backup": os.path.basename(backup_path),
+        "backup": backup_rel,
         "diff": diff,
         "instruction": instruction,
         "lines_changed": diff.count("\n+") + diff.count("\n-"),
