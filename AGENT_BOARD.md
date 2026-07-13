@@ -35,6 +35,8 @@ New-commit verification (B, 00:40): personal-data scan of `7f7f01b..5682b0c` dif
 - ✅ regression suite 437/437 confirmed clean post-fix.
 - ⏳ **B must now run final baseline** on committed tree to officially lift freeze.
 
+Baseline suite: 13 failed / 3374 passed / 3 skipped — 2026-07-13 (HEAD `60b3efd`; all 13 failures are live Ollama network-call timeouts hitting the 30s harness ceiling, confirmed via isolated repro, not code regressions; 0 collection errors, 0 logic failures)
+
 One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`); B to run final baseline and lift freeze.**
 
 | 17 | Silent-failure sweep: bare `except:pass` → `logging.debug` across production modules | Antigravity | ✅ **DONE** `9da8797` (2026-06-25) — 87 sites fixed across 39 files. Remainders `api.py:7666`, `router.py:4470` re-checked 2026-06-27 — both already have `log.debug(..., exc_info=True)`, no bare-pass remains. | — |
