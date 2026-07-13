@@ -87,22 +87,38 @@ def _sessions_table():
     )
 
 def _log_tail():
+    # Try MASTER_LOG.md first (plain text lines), then audit.jsonl as fallback
+    md_path = BASE / "MASTER_LOG.md"
     try:
-        lines = (BASE / "logs" / "MASTER_LOG.jsonl").read_text().splitlines()[-20:]
+        lines = md_path.read_text().splitlines()[-25:]
+        out = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            c = "#ef5350" if "ERROR" in line or "FAIL" in line.upper() else \
+                "#f0c040" if "WARNING" in line or "WARN" in line else "#ccc"
+            out.append(f'<span style="color:{c}">{line}</span>')
+        return "<br>".join(out) or "(empty)"
+    except Exception:
+        pass
+
+    # Fallback: logs/audit.jsonl
+    try:
+        lines = (BASE / "logs" / "audit.jsonl").read_text().splitlines()[-20:]
         out = []
         for line in lines:
             try:
                 obj = json.loads(line)
-                ts = obj.get("timestamp", obj.get("ts",""))[:19]
-                lvl = obj.get("level","INFO")
-                msg = obj.get("message", obj.get("msg", line))
-                c = "#ef5350" if lvl=="ERROR" else "#f0c040" if lvl=="WARNING" else "#ccc"
-                out.append(f'<span style="color:#555">{ts}</span> <span style="color:{c}">[{lvl}]</span> {msg}')
+                ts = str(obj.get("ts", obj.get("timestamp", "")))[:19]
+                evt = obj.get("event_type", obj.get("event", ""))
+                payload = json.dumps(obj.get("payload", {}), ensure_ascii=False)[:80]
+                out.append(f'<span style="color:#555">{ts}</span> <span style="color:#4fc3f7">{evt}</span> {payload}')
             except Exception:
                 out.append(line)
         return "<br>".join(out) or "(empty)"
     except Exception as e:
-        return f"(log not found: {e})"
+        return f"(no log found: {e})"
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -118,7 +134,7 @@ def index():
     failed = sum(1 for t in tasks if t.get("status") == "blocked")
     active = sum(1 for s in sessions if s.get("status") == "active")
     fired = sum(1 for q in queue if q.get("status") == "fired")
-    queued = orchestrator.get("queue_depth", 0) if isinstance(orchestrator, dict) else 0
+    queued = sum(1 for t in tasks if t.get("status") == "queued")
 
     def card(label, val, color="#4fc3f7"):
         return (f"<div style='background:#1e1e1e;border:1px solid #333;border-radius:8px;"
