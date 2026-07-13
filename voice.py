@@ -73,6 +73,8 @@ _MIC_DEVICE_RETRY_SECONDS = 60.0
 _MIC_SKIP_LOGGED: set[str] = set()
 _MIC_RECENT_FAILURES: dict[str, float] = {}
 _MIC_OPEN_LOCK = threading.Lock()
+# PyAudio microphone lifecycle calls can crash when run concurrently.
+_PYAUDIO_MIC_LOCK = threading.Lock()
 _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
 _active_mic_label = ""
@@ -139,7 +141,12 @@ def _get_microphone() -> sr.Microphone:
     candidates = _microphone_candidates()
     if candidates:
         return candidates[0][1]
-    return sr.Microphone()
+    if not _PYAUDIO_MIC_LOCK.acquire(blocking=False):
+        raise RuntimeError("Microphone device probe is busy")
+    try:
+        return sr.Microphone()
+    finally:
+        _PYAUDIO_MIC_LOCK.release()
 
 
 def _voice_device_skip_reason(name: str) -> str:
@@ -235,7 +242,21 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 
     This ensures the Default input device is only used when nothing better exists,
     rather than always winning by being inserted first.
+
+    Raises RuntimeError instead of waiting when another lifecycle call is active.
     """
+    if _mic_open_worker is not None and _mic_open_worker.is_alive():
+        raise RuntimeError("Microphone device probe unavailable while an open is still running")
+    if not _PYAUDIO_MIC_LOCK.acquire(blocking=False):
+        raise RuntimeError("Microphone device probe is busy")
+    try:
+        return _microphone_candidates_locked()
+    finally:
+        _PYAUDIO_MIC_LOCK.release()
+
+
+def _microphone_candidates_locked() -> list[tuple[str, sr.Microphone]]:
+    """Build microphone candidates while the caller owns _PYAUDIO_MIC_LOCK."""
     candidates: list[tuple[str, sr.Microphone]] = []
     seen: set[int | None] = set()
 
@@ -326,21 +347,22 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 
 
 def _close_cancelled_microphone_source(microphone, source) -> None:
-    try:
-        microphone.__exit__(None, None, None)
-        return
-    except Exception:
-        logging.debug("[Voice] timed-out microphone __exit__ failed", exc_info=True)
+    with _PYAUDIO_MIC_LOCK:
+        try:
+            microphone.__exit__(None, None, None)
+            return
+        except Exception:
+            logging.debug("[Voice] timed-out microphone __exit__ failed", exc_info=True)
 
-    try:
-        stream = getattr(source, "stream", None)
-        if stream is not None:
-            stream.close()
-        audio = getattr(source, "audio", None)
-        if audio is not None:
-            audio.terminate()
-    except Exception:
-        logging.debug("[Voice] timed-out mic cleanup failed", exc_info=True)
+        try:
+            stream = getattr(source, "stream", None)
+            if stream is not None:
+                stream.close()
+            audio = getattr(source, "audio", None)
+            if audio is not None:
+                audio.terminate()
+        except Exception:
+            logging.debug("[Voice] timed-out mic cleanup failed", exc_info=True)
 
 
 def _enter_microphone_with_timeout(label: str, microphone):
@@ -357,7 +379,8 @@ def _enter_microphone_with_timeout(label: str, microphone):
     def _open_target() -> None:
         source = None
         try:
-            source = microphone.__enter__()
+            with _PYAUDIO_MIC_LOCK:
+                source = microphone.__enter__()
             with state_lock:
                 if not state["cancelled"]:
                     state["source"] = source
@@ -403,6 +426,8 @@ def _open_microphone_source():
         if now < _mic_failure_cooldown_until:
             detail = _mic_last_failure_detail or "microphone retry cooldown active"
             raise RuntimeError(f"Microphone retry cooldown active. {detail}")
+        if _mic_open_worker is not None and _mic_open_worker.is_alive():
+            raise RuntimeError("Previous microphone open is still blocked in CoreAudio")
 
         for label, microphone in _microphone_candidates():
             if _recent_mic_failure_active(label):
@@ -443,7 +468,8 @@ def _open_microphone_source():
                 finally:
                     global _mic_level
                     _mic_level = 0.0
-                    microphone.__exit__(None, None, None)
+                    with _PYAUDIO_MIC_LOCK:
+                        microphone.__exit__(None, None, None)
                 return
             except Exception as exc:
                 last_error = exc
@@ -451,13 +477,14 @@ def _open_microphone_source():
                 _debug_log(f"[Mic] Failed to open {label}: {exc}")
                 try:
                     if source is not None:
-                        stream = getattr(source, "stream", None)
-                        audio = getattr(source, "audio", None)
-                        if stream is not None:
-                            stream.close()
-                        if audio is not None:
-                            audio.terminate()
-                        source.stream = None
+                        with _PYAUDIO_MIC_LOCK:
+                            stream = getattr(source, "stream", None)
+                            audio = getattr(source, "audio", None)
+                            if stream is not None:
+                                stream.close()
+                            if audio is not None:
+                                audio.terminate()
+                            source.stream = None
                 except Exception:
                     logging.debug("[Voice] mic stream cleanup failed for %s", label, exc_info=True)
                 if isinstance(exc, TimeoutError):
@@ -521,10 +548,11 @@ def _capture_audio_window(source, *, duration: float, reason: str, endpoint: boo
         _debug_log(f"[Mic] Stream freeze detected for {reason}! PyAudio read blocked for > {timeout:.1f}s.")
         # Try to force terminate PyAudio / close stream to clean up
         try:
-            if getattr(source, "stream", None) is not None:
-                source.stream.close()
-            if getattr(source, "audio", None) is not None:
-                source.audio.terminate()
+            with _PYAUDIO_MIC_LOCK:
+                if getattr(source, "stream", None) is not None:
+                    source.stream.close()
+                if getattr(source, "audio", None) is not None:
+                    source.audio.terminate()
         except Exception:
             logging.debug("[Voice] silent failure in record_target", exc_info=True)
         raise RuntimeError(f"Audio stream frozen or dead during record for {reason}")

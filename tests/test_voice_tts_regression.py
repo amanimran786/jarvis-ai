@@ -295,6 +295,47 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         self.assertEqual(calls, ["enter", "exit"])
 
+    def test_open_microphone_source_serializes_normal_close(self):
+        source_ready = threading.Event()
+        allow_exit = threading.Event()
+        close_called = threading.Event()
+        errors = []
+
+        class _GoodMic:
+            def __enter__(self):
+                return SimpleNamespace(stream=object(), audio=object())
+
+            def __exit__(self, exc_type, exc, tb):
+                close_called.set()
+
+        def _use_microphone():
+            try:
+                with patch("voice._microphone_candidates", return_value=[("Good Mic", _GoodMic())]):
+                    with voice._open_microphone_source():
+                        source_ready.set()
+                        allow_exit.wait()
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=_use_microphone)
+        lock_acquired = False
+        thread.start()
+        try:
+            self.assertTrue(source_ready.wait(timeout=1.0))
+            lock_acquired = voice._PYAUDIO_MIC_LOCK.acquire(timeout=1.0)
+            self.assertTrue(lock_acquired)
+            allow_exit.set()
+            self.assertFalse(close_called.wait(timeout=0.05))
+        finally:
+            allow_exit.set()
+            if lock_acquired:
+                voice._PYAUDIO_MIC_LOCK.release()
+            thread.join(timeout=1.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(close_called.is_set())
+
     def test_open_microphone_source_times_out_without_opening_next_candidate(self):
         release_open = threading.Event()
         opened = []
@@ -331,11 +372,187 @@ class VoiceTtsRegressionTests(unittest.TestCase):
             self.assertEqual(opened, ["blocking"])
             self.assertIsNotNone(voice._mic_open_worker)
             self.assertTrue(voice._mic_open_worker.is_alive())
+
+            voice._mic_failure_cooldown_until = 0.0
+            with patch(
+                "voice._microphone_candidates",
+                side_effect=AssertionError("should not enumerate while open worker is blocked"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Previous microphone open"):
+                    with voice._open_microphone_source():
+                        pass
         finally:
             release_open.set()
             worker = voice._mic_open_worker
             if worker is not None:
                 worker.join(timeout=1.0)
+
+    def test_microphone_enumeration_fails_fast_for_timed_out_open_worker(self):
+        open_started = threading.Event()
+        release_open = threading.Event()
+        enumeration_attempted = threading.Event()
+        enumeration_called = threading.Event()
+        enumeration_done = threading.Event()
+        enumeration_errors = []
+        enumeration_thread = None
+
+        class _BlockingMic:
+            def __enter__(self):
+                open_started.set()
+                release_open.wait()
+                return SimpleNamespace(stream=object(), audio=object())
+
+            def __exit__(self, exc_type, exc, tb):
+                return None
+
+        class _FakeMicrophone:
+            def __init__(self, device_index=None):
+                self.device_index = device_index
+
+            @staticmethod
+            def list_microphone_names():
+                enumeration_called.set()
+                return []
+
+        def _enumerate_microphones():
+            enumeration_attempted.set()
+            try:
+                voice._microphone_candidates()
+            except Exception as exc:
+                enumeration_errors.append(exc)
+            finally:
+                enumeration_done.set()
+
+        try:
+            with patch("voice._MIC_OPEN_TIMEOUT_SECONDS", 0.01):
+                with self.assertRaises(TimeoutError):
+                    voice._enter_microphone_with_timeout("Blocking Mic", _BlockingMic())
+
+            self.assertTrue(open_started.is_set())
+            worker = voice._mic_open_worker
+            self.assertIsNotNone(worker)
+            self.assertTrue(worker.is_alive())
+
+            with patch("voice.sr.Microphone", _FakeMicrophone), \
+                 patch("voice._input_capable_device_indexes", return_value=set()), \
+                 patch("voice._default_input_device_info", return_value=None):
+                enumeration_thread = threading.Thread(target=_enumerate_microphones)
+                enumeration_thread.start()
+                self.assertTrue(enumeration_attempted.wait(timeout=1.0))
+                self.assertTrue(enumeration_done.wait(timeout=0.2))
+                self.assertFalse(enumeration_called.is_set())
+                self.assertEqual(len(enumeration_errors), 1)
+                self.assertRegex(str(enumeration_errors[0]), "open is still running")
+                self.assertTrue(worker.is_alive())
+
+                release_open.set()
+                worker.join(timeout=1.0)
+                enumeration_thread.join(timeout=1.0)
+
+            self.assertFalse(worker.is_alive())
+            self.assertFalse(enumeration_thread.is_alive())
+        finally:
+            release_open.set()
+            worker = voice._mic_open_worker
+            if worker is not None:
+                worker.join(timeout=1.0)
+            if enumeration_thread is not None:
+                enumeration_thread.join(timeout=1.0)
+
+    def test_microphone_enumeration_fails_fast_when_lifecycle_lock_is_busy(self):
+        enumeration_called = threading.Event()
+        enumeration_done = threading.Event()
+        enumeration_errors = []
+
+        class _FakeMicrophone:
+            @staticmethod
+            def list_microphone_names():
+                enumeration_called.set()
+                return []
+
+        def _enumerate_microphones():
+            try:
+                voice._microphone_candidates()
+            except Exception as exc:
+                enumeration_errors.append(exc)
+            finally:
+                enumeration_done.set()
+
+        with patch("voice.sr.Microphone", _FakeMicrophone):
+            voice._PYAUDIO_MIC_LOCK.acquire()
+            thread = threading.Thread(target=_enumerate_microphones)
+            try:
+                thread.start()
+                self.assertTrue(enumeration_done.wait(timeout=0.2))
+                self.assertFalse(enumeration_called.is_set())
+            finally:
+                voice._PYAUDIO_MIC_LOCK.release()
+                thread.join(timeout=1.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(enumeration_errors), 1)
+        self.assertRegex(str(enumeration_errors[0]), "probe is busy")
+
+    def test_parent_late_source_cleanup_serializes_close(self):
+        completed_set = threading.Event()
+        timeout_ready = threading.Event()
+        allow_timeout = threading.Event()
+        close_called = threading.Event()
+        errors = []
+        real_event = threading.Event
+        event_calls = 0
+
+        class _CompletedEvent:
+            def set(self):
+                completed_set.set()
+
+            def wait(self, timeout=None):
+                if not completed_set.wait(timeout=1.0):
+                    return False
+                timeout_ready.set()
+                allow_timeout.wait(timeout=1.0)
+                return False
+
+        class _Mic:
+            def __enter__(self):
+                return SimpleNamespace(stream=object(), audio=object())
+
+            def __exit__(self, exc_type, exc, tb):
+                close_called.set()
+
+        def _event_factory():
+            nonlocal event_calls
+            event_calls += 1
+            if event_calls == 1:
+                return _CompletedEvent()
+            return real_event()
+
+        def _open_microphone():
+            try:
+                voice._enter_microphone_with_timeout("Late Mic", _Mic())
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=_open_microphone)
+        lock_acquired = False
+        with patch("voice.threading.Event", side_effect=_event_factory):
+            thread.start()
+            try:
+                self.assertTrue(timeout_ready.wait(timeout=1.0))
+                lock_acquired = voice._PYAUDIO_MIC_LOCK.acquire(timeout=1.0)
+                self.assertTrue(lock_acquired)
+                allow_timeout.set()
+                self.assertFalse(close_called.wait(timeout=0.05))
+            finally:
+                allow_timeout.set()
+                if lock_acquired:
+                    voice._PYAUDIO_MIC_LOCK.release()
+                thread.join(timeout=1.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], TimeoutError)
+        self.assertTrue(close_called.is_set())
 
     def test_native_audio_suppression_covers_stdout_and_stderr(self):
         with TemporaryDirectory() as tmp:
@@ -543,6 +760,27 @@ class VoiceTtsRegressionTests(unittest.TestCase):
 
         self.assertIs(audio, fallback_audio)
         record_mock.assert_called_once_with(source, duration=2.5)
+
+    def test_capture_audio_window_uses_endpoint_detection_for_manual_prompt(self):
+        source = object()
+        endpoint_audio = object()
+
+        with patch.object(voice._recognizer, "listen", return_value=endpoint_audio) as listen_mock, \
+             patch.object(voice._recognizer, "record") as record_mock:
+            audio = voice._capture_audio_window(
+                source,
+                duration=voice.MANUAL_PROMPT_WINDOW_SECONDS,
+                reason="manual prompt",
+                endpoint=True,
+            )
+
+        self.assertIs(audio, endpoint_audio)
+        listen_mock.assert_called_once_with(
+            source,
+            timeout=voice.MANUAL_PROMPT_WINDOW_SECONDS,
+            phrase_time_limit=voice.MANUAL_PROMPT_PHRASE_LIMIT,
+        )
+        record_mock.assert_not_called()
 
     def test_listen_uses_fixed_window_fallback_when_phrase_detection_times_out(self):
         fake_audio = SimpleNamespace(get_wav_data=lambda: b"RIFFfake")
