@@ -18,7 +18,9 @@ from harness.task_contract import (
     contract_for_task,
     evaluate_completion,
     load_contracts,
+    normalized_task_spec_digest,
     save_contracts,
+    task_contract_digest,
     validate_contract,
 )
 
@@ -88,6 +90,33 @@ def test_contract_hash_changes_when_acceptance_contract_changes():
     )
 
     assert original.contract_hash != changed.contract_hash
+
+
+def test_normalized_task_spec_digest_ignores_legacy_adapter_transition():
+    legacy = TaskSpec.from_queue_task(
+        {"task": "Run focused checks", "notes": "Capture failures"}
+    )
+
+    assert legacy.legacy_adapter is True
+    assert normalized_task_spec_digest(legacy) == normalized_task_spec_digest(
+        legacy.for_dispatch()
+    )
+    assert legacy.task_spec_hash != normalized_task_spec_digest(legacy)
+
+
+def test_normalized_task_spec_digest_ignores_queue_state():
+    awaiting = {**_task(), "status": "awaiting_approval", "blocked_at": "now"}
+    queued = {**_task(), "status": "queued"}
+
+    assert normalized_task_spec_digest(awaiting) == normalized_task_spec_digest(queued)
+
+
+@pytest.mark.parametrize(
+    "task_id", ["../escape", "bad/id", "bad id", "bad\x1b[2J", "x" * 129]
+)
+def test_task_spec_rejects_unsafe_explicit_task_ids(task_id):
+    with pytest.raises(ContractError, match="task_id"):
+        TaskSpec.from_queue_task(_task(id=task_id))
 
 
 def test_task_spec_rejects_non_serializable_constraints():
@@ -183,6 +212,7 @@ def _contract(**overrides) -> TaskContract:
         task_id="jarvis-audit-memory-events-verify",
         task_type=TaskType.ANALYSIS,
         description="Verify audit.jsonl captures memory_write events end-to-end",
+        task_spec_sha256="a" * 64,
         outputs=[
             OutputSpec(
                 name="verification_report",
@@ -214,6 +244,16 @@ def test_validate_contract_rejects_empty_task_id():
     assert any("task_id" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    "digest", ["", "a" * 63, "A" * 64, "g" * 64, f" {'a' * 64}", 1]
+)
+def test_validate_contract_requires_canonical_task_spec_digest(digest):
+    is_valid, errors = validate_contract(_contract(task_spec_sha256=digest))
+
+    assert is_valid is False
+    assert any("task_spec_sha256" in error for error in errors)
+
+
 def test_validate_contract_requires_outputs_when_writing_files():
     is_valid, errors = validate_contract(_contract(outputs=[]))
 
@@ -243,7 +283,23 @@ def test_contracts_save_load_round_trip(tmp_path: Path):
     assert reloaded.side_effects == [SideEffect.WRITES_FILES, SideEffect.SUBPROCESS]
     assert reloaded.requires_capabilities == [Capability.FILESYSTEM, Capability.PYTHON]
     assert reloaded.outputs[0].path_template == "logs/{task_id}_report.md"
+    assert reloaded.task_spec_sha256 == "a" * 64
     assert reloaded.to_dict() == original.to_dict()
+
+
+def test_task_contract_digest_changes_with_contract_content():
+    original = _contract()
+    changed = _contract(description="Changed approval scope")
+
+    assert task_contract_digest(original) == original.contract_hash
+    assert task_contract_digest(original) != task_contract_digest(changed)
+
+
+def test_task_contract_digest_includes_task_spec_binding():
+    original = _contract(task_spec_sha256="a" * 64)
+    rebound = _contract(task_spec_sha256="b" * 64)
+
+    assert original.contract_hash != rebound.contract_hash
 
 
 def test_contract_for_task_returns_none_for_unknown_task(tmp_path: Path):
@@ -265,14 +321,49 @@ def test_load_contracts_skips_invalid_entries(tmp_path: Path):
     assert load_contracts(path) == {}
 
 
-def test_approval_logged_reads_approved_tasks_file(tmp_path: Path):
+def test_approval_logged_requires_exact_bound_digests(tmp_path: Path):
     path = tmp_path / "approved_tasks.json"
+    contract_digest = "a" * 64
+    spec_digest = "b" * 64
     path.write_text(
         '[{"task_id": "jarvis-local-llm-cross-session-memory",'
+        f' "task_contract_sha256": "{contract_digest}",'
+        f' "task_spec_sha256": "{spec_digest}",'
         ' "approved_at": "2026-07-04T00:00:00+00:00", "approved_by": "aman"}]',
         encoding="utf-8",
     )
 
-    assert approval_logged("jarvis-local-llm-cross-session-memory", path) is True
-    assert approval_logged("some-other-task", path) is False
-    assert approval_logged("anything", tmp_path / "missing.json") is False
+    assert approval_logged("jarvis-local-llm-cross-session-memory", path) is False
+    assert approval_logged(
+        "jarvis-local-llm-cross-session-memory",
+        path,
+        task_contract_sha256=contract_digest,
+    ) is False
+    assert approval_logged(
+        "jarvis-local-llm-cross-session-memory",
+        path,
+        task_contract_sha256=contract_digest,
+        task_spec_sha256=spec_digest,
+    ) is True
+    assert approval_logged(
+        "jarvis-local-llm-cross-session-memory",
+        path,
+        task_contract_sha256="c" * 64,
+        task_spec_sha256=spec_digest,
+    ) is False
+
+
+def test_approval_logged_rejects_old_unbound_record(tmp_path: Path):
+    path = tmp_path / "approved_tasks.json"
+    path.write_text(
+        '[{"task_id": "legacy-task", "approved_at": "2026-07-04T00:00:00+00:00",'
+        ' "approved_by": "aman"}]',
+        encoding="utf-8",
+    )
+
+    assert approval_logged(
+        "legacy-task",
+        path,
+        task_contract_sha256="a" * 64,
+        task_spec_sha256="b" * 64,
+    ) is False

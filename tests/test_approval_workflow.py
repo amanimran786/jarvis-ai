@@ -10,11 +10,21 @@ import pytest
 import jarvis_cli
 from harness.approval_workflow import (
     ApprovalWorkflowError,
+    consume_approval,
     list_pending_approvals,
     record_approval,
     requeue_approved_task,
+    restore_approval,
 )
-from harness.task_contract import TaskContract, TaskType, save_contracts
+from harness.task_contract import (
+    TaskContract,
+    TaskSpec,
+    TaskType,
+    approval_logged,
+    normalized_task_spec_digest,
+    save_contracts,
+    task_contract_digest,
+)
 
 
 def _contract(task_id: str, *, requires_approval: bool = True) -> TaskContract:
@@ -35,13 +45,30 @@ def _paths(tmp_path: Path) -> tuple[Path, Path, Path]:
     )
 
 
+def _queue_task(task_id: str, **overrides) -> dict:
+    task = {
+        "contract_id": task_id,
+        "task": f"Execute {task_id}",
+        "notes": "Use the approved scope",
+        "status": "awaiting_approval",
+    }
+    task.update(overrides)
+    return task
+
+
+def _write_queue(path: Path, *tasks: dict) -> None:
+    path.write_text(json.dumps(list(tasks)), encoding="utf-8")
+
+
 def test_record_approval_validates_contract_exists(tmp_path: Path) -> None:
-    contracts_path, _, approvals_path = _paths(tmp_path)
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
     save_contracts({}, contracts_path)
+    _write_queue(queue_path, _queue_task("missing-task"))
 
     with pytest.raises(ApprovalWorkflowError, match="no task contract found"):
         record_approval(
             "missing-task",
+            queue_path=queue_path,
             contracts_path=contracts_path,
             approvals_path=approvals_path,
         )
@@ -50,13 +77,16 @@ def test_record_approval_validates_contract_exists(tmp_path: Path) -> None:
 
 
 def test_record_approval_writes_utc_record_atomically(tmp_path: Path) -> None:
-    contracts_path, _, approvals_path = _paths(tmp_path)
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
     contract = _contract("sensitive-task")
     save_contracts({contract.task_id: contract}, contracts_path)
+    task = _queue_task(contract.task_id)
+    _write_queue(queue_path, task)
 
     record, created = record_approval(
         contract.task_id,
         approved_by="aman",
+        queue_path=queue_path,
         contracts_path=contracts_path,
         approvals_path=approvals_path,
     )
@@ -64,25 +94,32 @@ def test_record_approval_writes_utc_record_atomically(tmp_path: Path) -> None:
     assert created is True
     assert json.loads(approvals_path.read_text(encoding="utf-8")) == [record]
     assert record["approved_by"] == "aman"
+    assert record["task_contract_sha256"] == task_contract_digest(contract)
+    assert record["task_spec_sha256"] == normalized_task_spec_digest(task)
     assert datetime.fromisoformat(record["approved_at"]).utcoffset().total_seconds() == 0
     assert approvals_path.stat().st_mode & 0o777 == 0o600
     assert list(tmp_path.glob(".approved_tasks.json.*.tmp")) == []
 
 
-def test_record_approval_deduplicates_by_task_id(tmp_path: Path) -> None:
-    contracts_path, _, approvals_path = _paths(tmp_path)
+def test_record_approval_deduplicates_exact_binding(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
     contract = _contract("sensitive-task")
     save_contracts({contract.task_id: contract}, contracts_path)
-    duplicate = {
-        "task_id": contract.task_id,
-        "approved_at": "2026-07-05T01:00:00+00:00",
-        "approved_by": "aman",
-    }
+    _write_queue(queue_path, _queue_task(contract.task_id))
+    duplicate, _ = record_approval(
+        contract.task_id,
+        approved_by="aman",
+        approved_at="2026-07-05T01:00:00+00:00",
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
     approvals_path.write_text(json.dumps([duplicate, dict(duplicate)]), encoding="utf-8")
 
     record, created = record_approval(
         contract.task_id,
         approved_by="other-user",
+        queue_path=queue_path,
         contracts_path=contracts_path,
         approvals_path=approvals_path,
     )
@@ -93,9 +130,10 @@ def test_record_approval_deduplicates_by_task_id(tmp_path: Path) -> None:
 
 
 def test_record_approval_rejects_malformed_existing_state(tmp_path: Path) -> None:
-    contracts_path, _, approvals_path = _paths(tmp_path)
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
     contract = _contract("sensitive-task")
     save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, _queue_task(contract.task_id))
     approvals_path.write_text(
         json.dumps([{"task_id": contract.task_id}]), encoding="utf-8"
     )
@@ -103,6 +141,7 @@ def test_record_approval_rejects_malformed_existing_state(tmp_path: Path) -> Non
     with pytest.raises(ApprovalWorkflowError, match="approved_at, approved_by"):
         record_approval(
             contract.task_id,
+            queue_path=queue_path,
             contracts_path=contracts_path,
             approvals_path=approvals_path,
         )
@@ -113,10 +152,11 @@ def test_record_approval_rejects_malformed_existing_state(tmp_path: Path) -> Non
 
 
 def test_atomic_replace_failure_preserves_existing_approvals(tmp_path: Path) -> None:
-    contracts_path, _, approvals_path = _paths(tmp_path)
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
     first = _contract("first-task")
     second = _contract("second-task")
     save_contracts({first.task_id: first, second.task_id: second}, contracts_path)
+    _write_queue(queue_path, _queue_task(first.task_id), _queue_task(second.task_id))
     original = [
         {
             "task_id": first.task_id,
@@ -131,6 +171,7 @@ def test_atomic_replace_failure_preserves_existing_approvals(tmp_path: Path) -> 
             record_approval(
                 second.task_id,
                 approved_by="aman",
+                queue_path=queue_path,
                 contracts_path=contracts_path,
                 approvals_path=approvals_path,
             )
@@ -165,17 +206,12 @@ def test_list_pending_approvals_merges_queue_and_contracts(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    approvals_path.write_text(
-        json.dumps(
-            [
-                {
-                    "task_id": approved.task_id,
-                    "approved_at": "2026-07-05T01:00:00+00:00",
-                    "approved_by": "aman",
-                }
-            ]
-        ),
-        encoding="utf-8",
+    record_approval(
+        approved.task_id,
+        approved_by="aman",
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
     )
 
     pending = list_pending_approvals(
@@ -189,6 +225,226 @@ def test_list_pending_approvals_merges_queue_and_contracts(tmp_path: Path) -> No
     assert by_id["queued-task"]["sources"] == ["work_queue", "contract"]
     assert by_id["contract-only"]["sources"] == ["contract"]
     assert by_id["approved-task"]["approval_logged"] is True
+
+
+def test_changed_contract_and_spec_invalidate_approval(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    contract = _contract("sensitive-task")
+    task = _queue_task(contract.task_id)
+    save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, task)
+    record, _ = record_approval(
+        contract.task_id,
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+
+    changed_contract = _contract(contract.task_id)
+    changed_contract.description = "Mutated contract"
+    changed_spec = TaskSpec.from_queue_task({**task, "notes": "Mutated task"})
+
+    assert approval_logged(
+        contract.task_id,
+        approvals_path,
+        task_contract_sha256=task_contract_digest(changed_contract),
+        task_spec_sha256=record["task_spec_sha256"],
+    ) is False
+    assert approval_logged(
+        contract.task_id,
+        approvals_path,
+        task_contract_sha256=record["task_contract_sha256"],
+        task_spec_sha256=normalized_task_spec_digest(changed_spec),
+    ) is False
+
+
+def test_record_approval_does_not_dedupe_changed_spec(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    contract = _contract("sensitive-task")
+    save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, _queue_task(contract.task_id, notes="first"))
+    first, first_created = record_approval(
+        contract.task_id,
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+    _write_queue(queue_path, _queue_task(contract.task_id, notes="second"))
+
+    second, second_created = record_approval(
+        contract.task_id,
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+
+    assert first_created is True
+    assert second_created is True
+    assert first["task_spec_sha256"] != second["task_spec_sha256"]
+    assert len(json.loads(approvals_path.read_text(encoding="utf-8"))) == 2
+
+
+def test_consume_approval_is_single_use_and_preserves_permissions(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    contract = _contract("sensitive-task")
+    save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, _queue_task(contract.task_id))
+    record, _ = record_approval(
+        contract.task_id,
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+    approvals_path.write_text(json.dumps([record, dict(record)]), encoding="utf-8")
+
+    rejected = consume_approval(
+        contract.task_id,
+        task_contract_sha256="c" * 64,
+        task_spec_sha256=record["task_spec_sha256"],
+        approvals_path=approvals_path,
+    )
+    consumed = consume_approval(
+        contract.task_id,
+        task_contract_sha256=record["task_contract_sha256"],
+        task_spec_sha256=record["task_spec_sha256"],
+        approvals_path=approvals_path,
+    )
+    consumed_again = consume_approval(
+        contract.task_id,
+        task_contract_sha256=record["task_contract_sha256"],
+        task_spec_sha256=record["task_spec_sha256"],
+        approvals_path=approvals_path,
+    )
+
+    assert rejected is None
+    assert consumed == record
+    assert consumed_again is None
+    assert json.loads(approvals_path.read_text(encoding="utf-8")) == []
+    assert approvals_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_restore_approval_reinserts_exact_consumed_record(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    contract = _contract("sensitive-task")
+    save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, _queue_task(contract.task_id))
+    record, _ = record_approval(
+        contract.task_id,
+        approved_by="aman",
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+    consumed = consume_approval(
+        contract.task_id,
+        task_contract_sha256=record["task_contract_sha256"],
+        task_spec_sha256=record["task_spec_sha256"],
+        approvals_path=approvals_path,
+    )
+
+    restored = restore_approval(consumed, approvals_path=approvals_path)
+
+    assert restored is True
+    assert json.loads(approvals_path.read_text(encoding="utf-8")) == [record]
+    assert approvals_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_restore_approval_does_not_duplicate_live_binding(tmp_path: Path) -> None:
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    contract = _contract("sensitive-task")
+    save_contracts({contract.task_id: contract}, contracts_path)
+    _write_queue(queue_path, _queue_task(contract.task_id))
+    record, _ = record_approval(
+        contract.task_id,
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+
+    same_binding = {
+        **record,
+        "approved_at": "2026-07-12T12:05:00+00:00",
+        "approved_by": "other-user",
+    }
+    restored = restore_approval(same_binding, approvals_path=approvals_path)
+
+    assert restored is False
+    assert json.loads(approvals_path.read_text(encoding="utf-8")) == [record]
+
+
+@pytest.mark.parametrize(
+    "invalid_update",
+    [
+        pytest.param(lambda record: None, id="not-an-object"),
+        pytest.param(
+            lambda record: {key: value for key, value in record.items() if key != "approved_by"},
+            id="missing-field",
+        ),
+        pytest.param(
+            lambda record: {**record, "task_id": " spaced-task "},
+            id="noncanonical-task-id",
+        ),
+        pytest.param(
+            lambda record: {**record, "task_contract_sha256": "A" * 64},
+            id="invalid-contract-digest",
+        ),
+        pytest.param(
+            lambda record: {**record, "task_spec_sha256": "not-a-digest"},
+            id="invalid-spec-digest",
+        ),
+        pytest.param(
+            lambda record: {**record, "task_spec_sha256": f" {'b' * 64} "},
+            id="noncanonical-spec-digest",
+        ),
+        pytest.param(
+            lambda record: {**record, "approved_at": ""},
+            id="empty-approved-at",
+        ),
+    ],
+)
+def test_restore_approval_rejects_invalid_records_without_writing(
+    tmp_path: Path, invalid_update
+) -> None:
+    _, _, approvals_path = _paths(tmp_path)
+    record = {
+        "task_id": "sensitive-task",
+        "task_contract_sha256": "a" * 64,
+        "task_spec_sha256": "b" * 64,
+        "approved_at": "2026-07-12T12:00:00+00:00",
+        "approved_by": "aman",
+    }
+    approvals_path.write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(ApprovalWorkflowError, match="invalid approval record"):
+        restore_approval(invalid_update(record), approvals_path=approvals_path)
+
+    assert json.loads(approvals_path.read_text(encoding="utf-8")) == []
+
+
+def test_restore_approval_replace_failure_preserves_existing_state(tmp_path: Path) -> None:
+    _, _, approvals_path = _paths(tmp_path)
+    existing = {
+        "task_id": "first-task",
+        "task_contract_sha256": "a" * 64,
+        "task_spec_sha256": "b" * 64,
+        "approved_at": "2026-07-12T12:00:00+00:00",
+        "approved_by": "aman",
+    }
+    restored = {
+        "task_id": "second-task",
+        "task_contract_sha256": "c" * 64,
+        "task_spec_sha256": "d" * 64,
+        "approved_at": "2026-07-12T12:01:00+00:00",
+        "approved_by": "aman",
+    }
+    approvals_path.write_text(json.dumps([existing]), encoding="utf-8")
+
+    with patch("harness.approval_workflow.os.replace", side_effect=OSError("replace failed")):
+        with pytest.raises(OSError, match="replace failed"):
+            restore_approval(restored, approvals_path=approvals_path)
+
+    assert json.loads(approvals_path.read_text(encoding="utf-8")) == [existing]
+    assert list(tmp_path.glob(".approved_tasks.json.*.tmp")) == []
 
 
 def test_requeue_approved_task_releases_matching_awaiting_row(tmp_path: Path) -> None:

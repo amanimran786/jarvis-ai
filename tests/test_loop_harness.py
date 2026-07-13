@@ -30,7 +30,7 @@ from harness.prompt_generator import (
     generate_session_prompt,
 )
 from harness.session_tracker import SessionTracker
-from harness.task_contract import TaskSpec
+from harness.task_contract import TaskContract, TaskSpec, TaskType
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -359,6 +359,25 @@ class TestSessionTracker(unittest.TestCase):
 
 class TestLaunchQueueRoundtrip(unittest.TestCase):
 
+    def test_run_loop_flushes_log_buffer_after_unhandled_exception(self):
+        import orchestrator_loop as ol
+
+        flushed = []
+
+        def fail_loop(**_kwargs):
+            ol._LOG_BUFFER = ["buffered failure context\n"]
+            raise RuntimeError("simulated loop failure")
+
+        with tempfile.TemporaryDirectory() as d, \
+             patch.object(ol, "WORK_QUEUE_PATH", Path(d) / "WORK_QUEUE.json"), \
+             patch.object(ol, "_run_loop", side_effect=fail_loop), \
+             patch.object(ol, "_write_master_lines", side_effect=flushed.append):
+            with self.assertRaisesRegex(RuntimeError, "simulated loop failure"):
+                ol.run_loop()
+
+        self.assertIsNone(ol._LOG_BUFFER)
+        self.assertEqual(flushed, [["buffered failure context\n"]])
+
     def _run_loop_isolated(self, tmp: Path, *, seed_task: dict | None = None, **loop_kwargs) -> dict:
         """Run one loop iteration with all paths redirected to tmp."""
         import orchestrator_loop as ol
@@ -375,6 +394,20 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         # Seed a queued task
         task = seed_task or _sample_task(status="queued", priority=1)
         ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
+        contract_id = str(task.get("contract_id") or task.get("id") or "").strip()
+        task_spec_sha256 = TaskSpec.from_queue_task(
+            task
+        ).normalized_task_spec_hash
+        contract = (
+            TaskContract(
+                task_id=contract_id,
+                task_type=TaskType.ANALYSIS,
+                description="Hermetic loop launch contract",
+                task_spec_sha256=task_spec_sha256,
+            )
+            if contract_id
+            else None
+        )
 
         # Patch SessionTracker to use tmp dir
         orig_tracker = ol.SessionTracker
@@ -387,7 +420,10 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
 
         # Patch prompt generator to return a canned prompt
         with patch("harness.prompt_generator._generate_via_llm",
-                   return_value="<role>Test session</role>"):
+                   return_value="<role>Test session</role>"), \
+             patch("orchestrator_loop.contract_for_task", return_value=contract), \
+             patch("orchestrator_loop.check_contract_capabilities", return_value={}), \
+             patch("orchestrator_loop._ensure_dashboard_running"):
             result = ol.run_loop(**loop_kwargs)
 
         ol.WORK_QUEUE_PATH   = orig_wq
@@ -448,7 +484,8 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         ol.SessionTracker = _TmpTracker
 
         try:
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
+            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]), \
+                 patch("orchestrator_loop._ensure_dashboard_running"):
                 result = ol.run_loop(max_concurrent=0, dry_run=False)
             queue = json.loads(ol.WORK_QUEUE_PATH.read_text())
             attempts = [
@@ -632,7 +669,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
     def test_launch_queue_write_failure_does_not_claim_session(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
-            with patch("orchestrator_loop._write_launch_record", return_value=False):
+            with patch("orchestrator_loop._write_launch_record", return_value="failed"):
                 result = self._run_loop_isolated(
                     tmp, dry_run=False, max_concurrent=1
                 )

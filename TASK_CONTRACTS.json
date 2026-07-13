@@ -4,6 +4,7 @@
     "task_type": "code",
     "description": "Add the missing /history command over usage_log.jsonl and complete the requested Rich CLI presentation without changing runtime routing.",
     "contract_version": "1.0",
+    "task_spec_sha256": "0facee414d4aaa374b4ece5be0229dffd7f1700fc8f0c442a08302773683e1b1",
     "inputs": [
       {
         "name": "usage_log",
@@ -56,6 +57,7 @@
     "task_type": "file_op",
     "description": "Review the current repository architecture and write an evidence-backed report without modifying implementation files.",
     "contract_version": "1.0",
+    "task_spec_sha256": "e1ed48edef6e2896dcd3faf14478abe739bd2bd5bf03426506a277a6013a2034",
     "inputs": [
       {
         "name": "repository",
@@ -100,6 +102,7 @@
     "task_type": "analysis",
     "description": "Analyze self-evaluation records for prompt-quality patterns and write recommendations without editing prompts or configuration.",
     "contract_version": "1.0",
+    "task_spec_sha256": "8c5bf3d9c51e1c705927545e5deef38c7fa35416a561f9130164cf26e72784ed",
     "inputs": [
       {
         "name": "self_eval_log",
@@ -145,6 +148,7 @@
     "task_type": "code",
     "description": "Review repository security, report findings, and apply only explicitly approved HIGH-severity fixes within a recorded file scope.",
     "contract_version": "1.0",
+    "task_spec_sha256": "f3f9d74d1103232b62e4b4bc53ec11434b9fa9e532228ab1431ea58b10be1c8e",
     "inputs": [
       {
         "name": "repository",
@@ -199,6 +203,7 @@
     "task_type": "code",
     "description": "Audit harness test coverage, document concrete gaps, and add ten hermetic tests without real network or Ollama calls.",
     "contract_version": "1.0",
+    "task_spec_sha256": "0f0661685117620716848af0f1ad0cb008da33ce38fc7f3fdcce0ea446c9e547",
     "inputs": [
       {
         "name": "harness_modules",
@@ -258,6 +263,7 @@
     "task_type": "code",
     "description": "Add focused tests for usage records emitted by the brain_ollama structured-output path.",
     "contract_version": "1.0",
+    "task_spec_sha256": "094a724b4c12448b6638d8768cef704cf9b67cda738ccaf5e3c756d4dd3defeb",
     "inputs": [
       {
         "name": "brain_ollama",
@@ -304,6 +310,7 @@
     "task_type": "code",
     "description": "Add bounded audit_errors.log rotation and a configurable alert surface for excessive audit failures.",
     "contract_version": "1.0",
+    "task_spec_sha256": "231d223570c6269dc408033896c5abec3a86af5cf9d76e0461a7553436212bee",
     "inputs": [
       {
         "name": "audit_error_log",
@@ -363,6 +370,7 @@
     "task_type": "analysis",
     "description": "eval_trace_score.py --trace-score surface: observe-only >=2wks/50 runs before ratchet wiring (AGENT_BOARD item 13)",
     "contract_version": "1.0",
+    "task_spec_sha256": "870238d24d8f4745646ab8c59ebd19637d43edb533dea0da335d2c58381a2f2b",
     "inputs": [
       {
         "name": "self_eval_log",
@@ -415,6 +423,7 @@
     "task_type": "analysis",
     "description": "Verify audit.jsonl captures memory_write + route_decision events end-to-end after e84263b+3af8ba4",
     "contract_version": "1.0",
+    "task_spec_sha256": "7bc6c8eb5e297353d1d0bf3655f123eaf0265c5daf2f8739653a849b7d94a12f",
     "inputs": [
       {
         "name": "audit_log",
@@ -461,6 +470,7 @@
     "task_type": "analysis",
     "description": "Validate usage_tracker token fields against controlled brain_ollama response counts without cloud calls.",
     "contract_version": "1.0",
+    "task_spec_sha256": "87cd070c441c906674d449b326a89495f6ee97df54a6d6df72614c7cbeacd8e4",
     "inputs": [
       {
         "name": "brain_ollama",
@@ -516,6 +526,7 @@
     "task_type": "code",
     "description": "Verify audit.jsonl end-to-end: confirm query_received and route_decision log entries appear correctly after commit b4a0fa9. Steps: (1) read audit.jsonl and check for presence of query_received and route_decision event types, (2) if not present, trace through router.py and model_router.py to find why events are not written, (3) fix the wiring if broken, (4) write a regression test. Do NOT add new audit event types \u2014 only verify/fix the two existing ones.",
     "contract_version": "1.0",
+    "task_spec_sha256": "4ab9e78da5f874b94bc2aa4a41d3fb307bbe8ce65cf9d9855ba636516b4a7d0c",
     "inputs": [
       {
         "name": "audit_log",
@@ -582,6 +593,7 @@
     "task_type": "code",
     "description": "Wire run_id threading through operative.py \u2192 execution_engine.py (AGENT_BOARD item 12, R1 prereq). Every audit event written via audit.jsonl needs a run_id field so audit rows can be grouped by session. Specifically: (1) operative.py must generate/accept a run_id at session start, (2) pass it through to execution_engine calls, (3) execution_engine must include run_id in all audit.jsonl entries it writes. Write or update tests to confirm run_id propagates end-to-end.",
     "contract_version": "1.0",
+    "task_spec_sha256": "cc1516077096bbba5921b790643917dc1d98c7ed1bb25b0282670d6bd5129085",
     "inputs": [
       {
         "name": "operative",
@@ -646,6 +658,7 @@
     "task_type": "code",
     "description": "Resolve AGENT_BOARD items 11 and 13. Item 11: JARVIS_RUN_GOLDEN_CASES=1 in .env causes 8m+ of live model calls every full suite run \u2014 investigate the .env line, propose removal (opt-in per-run), and open an approval request. Item 13: build eval_trace_score.py standalone --trace-score CLI surface (observe-only for \u22652 weeks / \u226550 runs before any ratchet wiring). Commit eval_trace_score.py and update AGENT_BOARD marking items 11 and 13 done.",
     "contract_version": "1.0",
+    "task_spec_sha256": "0e6f082ff10a73e369611d94147c889d94cddd196e13ed6afa350a0f8c0b706b",
     "inputs": [
       {
         "name": "agent_board",
@@ -705,6 +718,7 @@
     "task_type": "code",
     "description": "Run the final baseline test suite on the current committed tree to officially lift the code freeze. Per AGENT_BOARD: freeze exit gate is met, B must run final baseline and mark freeze lifted. Run: python -m pytest tests/ -q --timeout=60 --ignore=tests/test_email_reply_reminder.py --ignore=tests/test_git_ops_router.py (exclude PyQt6/infra-dependent tests). Record pass/fail counts, classify any failures. Update AGENT_BOARD with baseline result and FREEZE STATUS: LIFTED if no new regressions.",
     "contract_version": "1.0",
+    "task_spec_sha256": "41fa2e64b4ead1c16e4e138a5eaedb4030cf4b3003c2ccb2ee9599c0fc5773ba",
     "inputs": [
       {
         "name": "repository",
@@ -751,6 +765,7 @@
     "task_type": "file_op",
     "description": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
     "contract_version": "1.0",
+    "task_spec_sha256": "a6fa6b3272af0ed6d0099e7525fe385f65f4b81e74df38a584e6b5fb535caf3a",
     "inputs": [
       {
         "name": "session_orchestrator",
@@ -794,6 +809,7 @@
     "task_type": "code",
     "description": "Cross-session memory: write shared memory entries to vault so all sessions see the same state",
     "contract_version": "1.0",
+    "task_spec_sha256": "73779ab95430290497563565b4d5ec8f6774ff77fe2c9d797aa9872ec155e0fd",
     "inputs": [
       {
         "name": "vault_root",
@@ -847,6 +863,7 @@
     "task_type": "code",
     "description": "Verify and, only with approval, align code-task routing so the installed Ornith 9B model is selected by coder_workbench with an integration test.",
     "contract_version": "1.0",
+    "task_spec_sha256": "fb6f00b873487b93838e7cdaf971bf707c2d14c95070da9a33b062331d0aadd9",
     "inputs": [
       {
         "name": "ornith_model",
@@ -909,6 +926,7 @@
     "task_type": "analysis",
     "description": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
     "contract_version": "1.0",
+    "task_spec_sha256": "63d2a09172182c42963ed59f5064d6591ea0cf607393dbac673e5a25683c1693",
     "inputs": [
       {
         "name": "usage_log",
@@ -962,6 +980,7 @@
     "task_type": "code",
     "description": "Convert confirmed /diagnose health failures into deduplicated actionable AGENT_BOARD items without rewriting unrelated coordination state.",
     "contract_version": "1.0",
+    "task_spec_sha256": "c5b831d7082b660eb00b6aa7c4fc9b12ba4f3253f5a174356a242e4143d6199b",
     "inputs": [
       {
         "name": "diagnostic_output",
@@ -1022,6 +1041,7 @@
     "task_type": "code",
     "description": "Surface the latest reflection delta in the daily session-start briefing without triggering a new reflection or vault write.",
     "contract_version": "1.0",
+    "task_spec_sha256": "88d8a26524db5c62e1290012e14ffa6c40d5d05dd155837f162ed7df33b32d1f",
     "inputs": [
       {
         "name": "reflection_history",
@@ -1075,6 +1095,7 @@
     "task_type": "code",
     "description": "Aggregate routing_tag distribution across scored sessions and include counts and quality by route in /score.",
     "contract_version": "1.0",
+    "task_spec_sha256": "c355458e7d101e54d5208f73428c25128240b1b583f33cde396a51f32fc367bc",
     "inputs": [
       {
         "name": "self_eval_log",
@@ -1128,6 +1149,7 @@
     "task_type": "code",
     "description": "Connect observe-only trace scores to the /score surface and daily briefing without enabling a quality ratchet.",
     "contract_version": "1.0",
+    "task_spec_sha256": "31de8f03edf986ac5670f0d56d9aca0a490ecaa2b2315b61c1601378d68b5b3e",
     "inputs": [
       {
         "name": "trace_log",
