@@ -42,7 +42,7 @@ def _git_status() -> str:
 
 
 def _recent_commits(n: int = 5) -> str:
-    return _run(["git", "log", f"--oneline", f"-{n}"])
+    return _run(["git", "log", "--oneline", f"-{n}"])
 
 
 def _dir_tree(max_depth: int = 2) -> str:

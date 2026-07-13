@@ -73,6 +73,12 @@ os.environ.setdefault(
 # Liveness tests re-enable it per-test via monkeypatch.delenv.
 os.environ.setdefault("JARVIS_OLLAMA_LIVENESS_DISABLED", "1")
 
+# The API's _token_authorized() now fails CLOSED when no token is configured
+# (production safety: `uvicorn api:app` without start() must not be open).
+# TestClient never calls start(), so opt the test session into no-auth access
+# to preserve the empty-token convenience the endpoint tests rely on.
+os.environ.setdefault("JARVIS_API_ALLOW_NO_AUTH", "1")
+
 _EARLY_IMPORTS = [
     "tools",               # must be first: prevents test_backend_engineer from seeing _real_tools=None
     "brains.brain_apple_foundation",

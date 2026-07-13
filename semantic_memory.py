@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import tempfile
 import threading
 import contextlib
@@ -76,6 +77,42 @@ _TIERS = ("public", "semi_private")
 _embed_vecs: list[list[float]] = []
 _embed_ready: bool = False
 _embed_matrix = None          # numpy matrix built once from _embed_vecs
+
+# ── Persistent per-entry embedding cache ─────────────────────────────────────
+# invalidate() runs after every conversation turn, so without this the next
+# retrieve() re-embedded ALL (up to 1200) entries one Ollama call at a time —
+# 12-60s per turn, blowing the 4s retrieval timeout at scale. The cache keys
+# each embedding by a hash of the exact text embedded, so a rebuild only calls
+# embed() for genuinely new/changed entries; unchanged entries are reused.
+EMBED_CACHE_PATH = MEMORY_DIR / "embed_cache.json"
+_disk_embed_cache: dict[str, list[float]] | None = None
+_embed_cache_io_lock = threading.Lock()
+
+
+def _embed_key(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _load_embed_cache() -> dict[str, list[float]]:
+    global _disk_embed_cache
+    if _disk_embed_cache is None:
+        try:
+            data = json.loads(EMBED_CACHE_PATH.read_text(encoding="utf-8"))
+            _disk_embed_cache = data if isinstance(data, dict) else {}
+        except Exception:
+            _disk_embed_cache = {}
+    return _disk_embed_cache
+
+
+def _save_embed_cache(cache: dict[str, list[float]]) -> None:
+    with _embed_cache_io_lock:
+        try:
+            EMBED_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = EMBED_CACHE_PATH.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(cache), encoding="utf-8")
+            tmp.replace(EMBED_CACHE_PATH)
+        except Exception:
+            pass  # best-effort persistence; a miss just re-embeds next build
 
 # ── Query embedding LRU cache ────────────────────────────────────────────────
 # Each Ollama embed() call costs ~10-50ms. Cache the last 64 query vectors so
@@ -183,16 +220,36 @@ def _conversation_tags(entry: dict[str, Any]) -> list[str]:
 
 
 def _build_embed_index(entries: list[dict[str, Any]]) -> bool:
-    """Try to build a real embedding index via Ollama. Returns True on success."""
-    global _embed_vecs, _embed_ready, _embed_matrix
+    """Try to build a real embedding index via Ollama. Returns True on success.
+
+    Reuses previously-computed vectors from the on-disk cache so only new or
+    changed entries hit Ollama. ``fresh`` is rebuilt each call from just the
+    entries in play, which also prunes embeddings for entries that aged out of
+    the conversation window.
+    """
+    global _embed_vecs, _embed_ready, _embed_matrix, _disk_embed_cache
     try:
         from brains.brain_ollama import embed
+        cache = _load_embed_cache()
+        fresh: dict[str, list[float]] = {}
         vecs = []
+        new_count = 0
         for e in entries:
-            v = embed(_doc_text(e))
+            text = _doc_text(e)
+            key = _embed_key(text)
+            v = fresh.get(key) or cache.get(key)
             if v is None:
-                return False
+                v = embed(text)
+                if v is None:
+                    return False
+                new_count += 1
+            fresh[key] = v
             vecs.append(v)
+        # Persist only when the working set changed (new vectors added or stale
+        # ones dropped) to avoid rewriting the cache file on no-op rebuilds.
+        if new_count or len(fresh) != len(cache):
+            _disk_embed_cache = fresh
+            _save_embed_cache(fresh)
         _embed_vecs = vecs
         # Pre-build numpy matrix for O(1) batch cosine similarity
         try:

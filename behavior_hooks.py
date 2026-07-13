@@ -34,6 +34,12 @@ PROTECTED_PREFIXES = (
 BLOCKED_COMMAND_PATTERNS = (
     "rm -rf",
     "rm -fr",
+    "rm -r",            # any recursive remove, incl. `rm -r ~/Documents`, `rm -R`
+    "rm --recursive",
+    " -delete",         # find ... -delete (leading space avoids rsync --delete)
+    "git clean -",      # `git clean -xfd` wipes untracked/ignored files
+    "truncate ",
+    "authorized_keys",  # SSH account-takeover via ~/.ssh/authorized_keys
     "mkfs",
     "dd if=",
     "wipefs",
@@ -130,8 +136,21 @@ def _protected_prefix_mentioned_in_interpreter_write(command: str) -> str | None
     return None
 
 
+# Pipe-to-interpreter RCE (`curl http://x | bash`, `... | sh`, `... |python3`).
+# Word-boundary matched so it never trips on tools like `shuf`/`shasum`.
+_PIPE_TO_INTERPRETER = re.compile(r"\|\s*(?:bash|sh|zsh|python[0-9.]*|perl|ruby|node)\b")
+
+
 def pre_shell_command(command: str, cwd: str | None = None, admin: bool = False) -> dict:
     lower = (command or "").lower().strip()
+    if not max_permissive_profile_enabled() and _PIPE_TO_INTERPRETER.search(lower):
+        result = {
+            "ok": False,
+            "reason": "Blocked by behavior gate: piping remote output into an interpreter is not allowed.",
+            "rule": "pipe_to_interpreter",
+        }
+        _record({"phase": "pre_shell", "admin": admin, "command": command, "cwd": cwd or "", **result})
+        return result
     patterns = HARD_BLOCKED_COMMAND_PATTERNS if max_permissive_profile_enabled() else BLOCKED_COMMAND_PATTERNS
     for pattern in patterns:
         if pattern in lower:

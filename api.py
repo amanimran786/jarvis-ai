@@ -212,10 +212,22 @@ def _allowed_hostnames() -> set[str]:
     return allowed
 
 
+def _no_auth_explicitly_allowed() -> bool:
+    """True only if the operator explicitly opted into unauthenticated access.
+
+    Guards the empty-token path so serving ``api:app`` without calling
+    ``start()`` (which always sets a token) fails closed instead of exposing
+    every command-capable endpoint to whoever can reach the socket.
+    """
+    return os.getenv("JARVIS_API_ALLOW_NO_AUTH", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _token_authorized(request: Request) -> bool:
     expected = (_API_TOKEN or "").strip()
     if not expected:
-        return True
+        # No token configured. Fail CLOSED unless no-auth was explicitly
+        # enabled — a missing token must never mean "allow everyone".
+        return _no_auth_explicitly_allowed()
     bearer = request.headers.get("Authorization", "")
     if bearer.lower().startswith("bearer "):
         supplied = bearer[7:].strip()

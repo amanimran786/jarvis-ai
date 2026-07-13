@@ -43,6 +43,9 @@ def get_mic_level() -> float:
 WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis", "okay jarvis"}
 _last_tts_engine = ""
 MANUAL_PROMPT_WINDOW_SECONDS = 8.0
+# Max seconds of speech captured once the user starts talking (endpointed
+# listen). The window ends automatically on a natural pause well before this.
+MANUAL_PROMPT_PHRASE_LIMIT = 15.0
 WAKE_WORD_WINDOW_SECONDS = 3.0
 _kokoro_disabled_reason = ""
 
@@ -466,29 +469,54 @@ def _open_microphone_source():
         raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
 
 
-def _capture_audio_window(source, *, duration: float, reason: str):
+def _capture_audio_window(source, *, duration: float, reason: str, endpoint: bool = False):
     """
     Record audio from source with a hard timeout to prevent PortAudio/CoreAudio blocking/freezes.
+
+    endpoint=True switches from a fixed-length ``record(duration)`` to
+    energy-based ``listen()``, which returns as soon as the speaker stops
+    talking (up to ``duration`` to start, ``MANUAL_PROMPT_PHRASE_LIMIT`` of
+    speech). This removes the multi-second dead wait on every short command.
+    Returns None when no speech was detected within the window.
     """
-    _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
-    
+    if endpoint:
+        _debug_log(f"[Mic] Listening (endpointed, ≤{duration:.0f}s to start) for {reason}.")
+    else:
+        _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
+
     result = []
     exception_holder = []
-    
+    no_speech = []
+
     def record_target():
         try:
-            audio_data = _recognizer.record(source, duration=duration)
+            if endpoint:
+                audio_data = _recognizer.listen(
+                    source,
+                    timeout=duration,
+                    phrase_time_limit=MANUAL_PROMPT_PHRASE_LIMIT,
+                )
+            else:
+                audio_data = _recognizer.record(source, duration=duration)
             result.append(audio_data)
+        except sr.WaitTimeoutError:
+            # No speech began within the window — not an error, just silence.
+            no_speech.append(True)
         except Exception as e:
             exception_holder.append(e)
-            
+
     record_thread = threading.Thread(target=record_target, daemon=True)
     record_thread.start()
-    
-    # We wait for duration + 3.0 seconds (e.g. 6s for wake word, 11s for prompt)
-    timeout = duration + 3.0
+
+    # Freeze watchdog: bound the wait so a wedged PyAudio read can't hang the
+    # loop. Endpointed listen() can legitimately run up to start-timeout plus a
+    # full phrase, so size the watchdog to its worst case.
+    if endpoint:
+        timeout = duration + MANUAL_PROMPT_PHRASE_LIMIT + 3.0
+    else:
+        timeout = duration + 3.0
     record_thread.join(timeout=timeout)
-    
+
     if record_thread.is_alive():
         _debug_log(f"[Mic] Stream freeze detected for {reason}! PyAudio read blocked for > {timeout:.1f}s.")
         # Try to force terminate PyAudio / close stream to clean up
@@ -500,13 +528,16 @@ def _capture_audio_window(source, *, duration: float, reason: str):
         except Exception:
             logging.debug("[Voice] silent failure in record_target", exc_info=True)
         raise RuntimeError(f"Audio stream frozen or dead during record for {reason}")
-        
+
     if exception_holder:
         raise exception_holder[0]
-        
+
+    if no_speech:
+        return None
+
     if not result:
         raise RuntimeError(f"No audio captured from stream for {reason}")
-        
+
     return result[0]
 
 # Prevents mic from picking up Jarvis's own TTS output.
@@ -721,6 +752,15 @@ def speak(text: str) -> None:
         _done_speaking.set()
 
 
+def _local_stt_reported_no_speech(result: dict) -> bool:
+    """Return whether local STT authoritatively reported no speech."""
+    if (result.get("text") or "").strip():
+        return False
+    if result.get("ok") is True:
+        return True
+    return (result.get("error") or "").strip().lower() == "empty transcript"
+
+
 def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
     """Transcribe WAV bytes in memory — no disk I/O."""
     local_result = local_stt.transcribe_audio(wav_bytes, language="en")
@@ -729,6 +769,9 @@ def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
         if text:
             _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
+    if _local_stt_reported_no_speech(local_result):
+        _debug_log("[STT] Local engine returned no speech; skipping cloud fallback.")
+        return None
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
@@ -764,6 +807,9 @@ def _transcribe_audio_file(path: str) -> str | None:
         if text:
             _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
+    if _local_stt_reported_no_speech(local_result):
+        _debug_log("[STT] Local engine returned no speech; skipping cloud fallback.")
+        return None
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
@@ -870,11 +916,16 @@ def listen() -> str | None:
                 source,
                 duration=MANUAL_PROMPT_WINDOW_SECONDS,
                 reason="manual prompt",
+                endpoint=True,
             )
     except Exception as exc:
         _debug_log(f"[Mic] listen failed: {exc}")
         if _active_mic_label:
             _mark_mic_candidate_failed(_active_mic_label)
+        return None
+
+    if audio is None:
+        _debug_log("[Mic] No speech detected in listen window.")
         return None
 
     # Transcribe in memory — no temp file write/read
@@ -907,6 +958,8 @@ def _transcribe_wake_audio(audio) -> str | None:
         text = (local_result.get("text") or "").strip().lower()
         if text:
             return text
+        if _local_stt_reported_no_speech(local_result):
+            return None
         local_error = (local_result.get("error") or "").strip()
         if local_error:
             _debug_log(f"[Wake STT] {local_error}")
@@ -918,7 +971,9 @@ def _transcribe_wake_audio(audio) -> str | None:
 
         allow_remote_fallback = not model_router.is_open_source_mode()
     except Exception:
-        allow_remote_fallback = True
+        # Fail closed: if we cannot confirm the mode, assume open-source/local
+        # and do not send audio off-device.
+        allow_remote_fallback = False
 
     if not allow_remote_fallback:
         return None

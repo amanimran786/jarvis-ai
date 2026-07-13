@@ -6,7 +6,10 @@ import safety_permissions as perms
 
 
 _DESTRUCTIVE_PATTERNS = [
-    "rm -rf", "rm -fr", "rmdir", "mkfs", "dd if=",
+    "rm -rf", "rm -fr", "rm -r", "rm --recursive", "rmdir",
+    " -delete", "git clean -", "truncate ",
+    "authorized_keys",
+    "mkfs", "dd if=",
     ":(){:|:&};:",  # fork bomb
     "> /dev/sd", "shred", "wipefs",
     "shutdown", "reboot", "halt", "poweroff",

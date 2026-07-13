@@ -2135,7 +2135,7 @@ def _cmd_restore(args: str) -> int:
         for i, snap in enumerate(snapshots, 1):
             created = snap["created_at"][:19].replace("T", " ")
             print(f"{i:<3} {snap['name']:<25} {snap['status']:<14} {created}")
-        print(f"\nUsage: /restore <number or name>")
+        print("\nUsage: /restore <number or name>")
         return 0
 
     # Resolve by number or name

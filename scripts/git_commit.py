@@ -11,7 +11,7 @@ if cmd_file.exists():
     subprocess.run(["chmod", "+x", str(cmd_file)])
     print(f"chmod +x {cmd_file.name} ✅")
 else:
-    print(f"restart_jarvis.command not found (skipping)")
+    print("restart_jarvis.command not found (skipping)")
 
 # 2. Git status
 result = subprocess.run(["git", "status", "--short"], capture_output=True, text=True, cwd=BASE)

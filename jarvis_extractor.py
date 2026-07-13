@@ -31,7 +31,6 @@ from __future__ import annotations
 import logging
 
 import threading
-import logging
 from typing import Any
 
 log = logging.getLogger("jarvis.extractor")
