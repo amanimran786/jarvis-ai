@@ -174,10 +174,66 @@ def _rotate_logs() -> None:
 
 # ── Core write ────────────────────────────────────────────────────────────────
 
+def _audit_errors_log_path() -> Path:
+    return _logs_dir() / "audit_errors.log"
+
+
+_ERROR_LOG_MAX_BYTES = 500_000
+_ERROR_LOG_BACKUP_COUNT = 3
+
+
+def rotate_audit_errors_log(
+    max_bytes: int = _ERROR_LOG_MAX_BYTES, backup_count: int = _ERROR_LOG_BACKUP_COUNT
+) -> None:
+    """Rotate logs/audit_errors.log to .1..N when it exceeds max_bytes.
+
+    No-ops if the file is missing or under the threshold. Never raises.
+    """
+    try:
+        err_path = _audit_errors_log_path()
+        if not err_path.exists() or err_path.stat().st_size <= max_bytes:
+            return
+        for i in range(backup_count - 1, 0, -1):
+            src = err_path.with_name(f"{err_path.name}.{i}")
+            dst = err_path.with_name(f"{err_path.name}.{i + 1}")
+            if src.exists():
+                src.replace(dst)
+        err_path.replace(err_path.with_name(f"{err_path.name}.1"))
+    except Exception:
+        pass  # rotation failure must never crash the process
+
+
+def get_audit_error_count(since_hours: int = 24) -> int:
+    """Count audit_errors.log lines timestamped within the last since_hours."""
+    err_path = _audit_errors_log_path()
+    if not err_path.exists():
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    count = 0
+    try:
+        with open(err_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                ts_str = line.split(" ", 1)[0]
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                if ts >= cutoff:
+                    count += 1
+    except Exception:
+        return 0
+    return count
+
+
 def _log_audit_error(exc: Exception, event_type: str) -> None:
     """Write a failure to audit_errors.log — never raises."""
     try:
-        err_path = _logs_dir() / "audit_errors.log"
+        err_path = _audit_errors_log_path()
         ts = datetime.now(timezone.utc).isoformat()
         msg = f"{ts} audit_log({event_type!r}) failed: {type(exc).__name__}: {exc}\n"
         with open(err_path, "a") as f:
@@ -596,3 +652,7 @@ def heartbeat(current_task: str, session_name: str = "jarvis-audit") -> None:
             os.replace(tmp, path)
     except Exception:
         logging.debug("[Audit] silent failure in heartbeat", exc_info=True)
+
+
+# Rotate audit_errors.log at import time if it's already over threshold.
+rotate_audit_errors_log()
