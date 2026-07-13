@@ -146,6 +146,45 @@ class VoiceTtsRegressionTests(unittest.TestCase):
         self.assertTrue(voice._wake_word_match("can you help me ok jarvis"))
         self.assertFalse(voice._wake_word_match("hello there"))
 
+    def test_transcribe_wav_bytes_skips_openai_for_local_empty_transcript(self):
+        local_silence = {"ok": False, "error": "empty transcript"}
+
+        with patch("voice.local_stt.transcribe_audio", return_value=local_silence), \
+             patch("voice.local_stt.openai_fallback_allowed", return_value=True), \
+             patch("voice._openai_client") as openai_client:
+            text = voice._transcribe_wav_bytes(b"RIFFfake")
+
+        self.assertIsNone(text)
+        openai_client.audio.transcriptions.create.assert_not_called()
+
+    def test_transcribe_audio_file_skips_openai_for_local_empty_transcript(self):
+        local_silence = {"ok": False, "error": "empty transcript"}
+
+        with TemporaryDirectory() as td:
+            path = Path(td) / "silence.wav"
+            path.write_bytes(b"RIFFfake")
+            with patch("voice.local_stt.transcribe_file", return_value=local_silence), \
+                 patch("voice.local_stt.openai_fallback_allowed", return_value=True), \
+                 patch("voice._openai_client") as openai_client:
+                text = voice._transcribe_audio_file(str(path))
+
+        self.assertIsNone(text)
+        openai_client.audio.transcriptions.create.assert_not_called()
+
+    def test_transcribe_wav_bytes_preserves_openai_fallback_for_engine_failure(self):
+        engine_failure = {"ok": False, "error": "local model unavailable"}
+
+        with patch("voice.local_stt.transcribe_audio", return_value=engine_failure), \
+             patch("voice.local_stt.openai_fallback_allowed", return_value=True), \
+             patch("voice._openai_client") as openai_client:
+            openai_client.audio.transcriptions.create.return_value = SimpleNamespace(
+                text="remote transcript"
+            )
+            text = voice._transcribe_wav_bytes(b"RIFFfake")
+
+        self.assertEqual(text, "remote transcript")
+        openai_client.audio.transcriptions.create.assert_called_once()
+
     def test_transcribe_wake_audio_prefers_local_stt_before_google(self):
         class FakeAudio:
             def get_wav_data(self):
@@ -168,6 +207,20 @@ class VoiceTtsRegressionTests(unittest.TestCase):
             text = voice._transcribe_wake_audio(FakeAudio())
 
         self.assertIsNone(text)
+
+    def test_transcribe_wake_audio_skips_google_for_local_empty_transcript(self):
+        class FakeAudio:
+            def get_wav_data(self):
+                return b"RIFFfake"
+
+        local_silence = {"ok": False, "error": "empty transcript"}
+        with patch("voice.local_stt.transcribe_file", return_value=local_silence), \
+             patch("model_router.is_open_source_mode", return_value=False), \
+             patch("voice._recognizer.recognize_google") as google_mock:
+            text = voice._transcribe_wake_audio(FakeAudio())
+
+        self.assertIsNone(text)
+        google_mock.assert_not_called()
 
     def test_wait_for_wake_word_honors_manual_trigger_already_set(self):
         voice._stop_requested.clear()

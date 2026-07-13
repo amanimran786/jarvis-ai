@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """Jarvis AI Dashboard — interactive ops console, server-side rendered."""
 import json
+import hmac
+import os
+import secrets
 import sys
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
-from fastapi import FastAPI, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from urllib.parse import quote
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import uvicorn
+
+import runtime_state
+from harness.state_lock import queue_state_lock
 
 BASE = Path(__file__).parent
 if str(BASE) not in sys.path:
@@ -15,17 +24,109 @@ if str(BASE) not in sys.path:
 
 app = FastAPI()
 
+
+def _load_dashboard_token() -> str:
+    configured = os.getenv("JARVIS_DASHBOARD_TOKEN", "").strip()
+    if configured:
+        return configured
+    token_path = runtime_state.app_data_dir() / ".jarvis_dashboard_token"
+    try:
+        persisted = token_path.read_text(encoding="utf-8").strip()
+        if len(persisted) < 32:
+            raise RuntimeError("persisted dashboard token is invalid")
+        token_path.chmod(0o600)
+        return persisted
+    except FileNotFoundError:
+        pass
+
+    generated = secrets.token_urlsafe(32)
+    try:
+        descriptor = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        persisted = token_path.read_text(encoding="utf-8").strip()
+        if len(persisted) < 32:
+            raise RuntimeError("persisted dashboard token is invalid")
+        return persisted
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(generated)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return generated
+
+
+_DASHBOARD_TOKEN = _load_dashboard_token()
+_DASHBOARD_COOKIE = "jarvis_dashboard_token"
+_STATE_LOCK = threading.Lock()
+_RUN_LOOP_LOCK = threading.Lock()
+
+
+def _validated_dashboard_host() -> str:
+    host = os.getenv("JARVIS_DASHBOARD_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("Jarvis dashboard must bind to a loopback address")
+    return host
+
+
+def dashboard_bootstrap_url(host: str, port: int = 7842) -> str:
+    """Return the local browser URL without sending its token to the server."""
+    url_host = "[::1]" if host == "::1" else host
+    return f"http://{url_host}:{port}/session-bootstrap#{quote(_DASHBOARD_TOKEN)}"
+
+
+def _request_token(request: Request) -> str:
+    return _bearer_token(request) or request.cookies.get(
+        _DASHBOARD_COOKIE, ""
+    ).strip()
+
+
+def _bearer_token(request: Request) -> str:
+    bearer = request.headers.get("Authorization", "")
+    if bearer.lower().startswith("bearer "):
+        return bearer[7:].strip()
+    return ""
+
+
+@app.middleware("http")
+async def _require_dashboard_auth(request: Request, call_next):
+    if request.url.path == "/session-bootstrap":
+        return await call_next(request)
+    supplied = _request_token(request)
+    if not supplied or not hmac.compare_digest(supplied, _DASHBOARD_TOKEN):
+        return JSONResponse(
+            {"error": "dashboard_auth_required"},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not _bearer_token(request):
+        expected_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if request.headers.get("Origin", "") != expected_origin:
+            return JSONResponse({"error": "dashboard_origin_required"}, status_code=403)
+    return await call_next(request)
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _load(fname, default):
     try:
-        return json.load(open(BASE / fname))
+        with (BASE / fname).open(encoding="utf-8") as handle:
+            return json.load(handle)
     except Exception:
         return default
 
 def _save(fname, data):
     path = BASE / fname
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp = path.with_suffix(
+        path.suffix
+        + f".{os.getpid()}.{threading.get_ident()}.{secrets.token_hex(4)}.tmp"
+    )
+    with _STATE_LOCK:
+        try:
+            tmp.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
 
 def _badge(s):
     colors = {
@@ -36,14 +137,17 @@ def _badge(s):
         "fired": "#ab47bc", "awaiting_approval": "#f0a000",
     }
     c = colors.get(str(s).lower(), "#888")
-    return f"<span style='background:{c};color:#111;padding:2px 8px;border-radius:4px;font-size:.82em;white-space:nowrap'>{s}</span>"
+    return f"<span style='background:{c};color:#111;padding:2px 8px;border-radius:4px;font-size:.82em;white-space:nowrap'>{escape(str(s))}</span>"
 
 def _btn(label, action, color="#4fc3f7", confirm=None):
-    onclick = f" onclick=\"return confirm('{confirm}')\"" if confirm else ""
-    return (f"<form method='post' action='{action}' style='display:inline'>"
+    onclick = ""
+    if confirm:
+        expression = f"return confirm({json.dumps(str(confirm))})"
+        onclick = f' onclick="{escape(expression, quote=True)}"'
+    return (f"<form method='post' action='{escape(str(action), quote=True)}' style='display:inline'>"
             f"<button type='submit'{onclick} style='background:{color};color:#0d1117;border:none;"
             f"padding:3px 11px;border-radius:4px;cursor:pointer;font-family:monospace;font-size:.8em'>"
-            f"{label}</button></form>")
+            f"{escape(str(label))}</button></form>")
 
 def _sessions_list(raw):
     if isinstance(raw, list):
@@ -66,7 +170,7 @@ def _log_tail():
         for line in lines:
             c = "#ef5350" if "ERROR" in line or "FAIL" in line.upper() else \
                 "#f0c040" if "WARN" in line else "#ccc"
-            out.append(f'<span style="color:{c}">{line}</span>')
+            out.append(f'<span style="color:{c}">{escape(line)}</span>')
         return "<br>".join(out) or "(empty)"
     except Exception:
         pass
@@ -79,12 +183,16 @@ def _log_tail():
                 ts = str(obj.get("ts", ""))[:19]
                 evt = obj.get("event_type", "")
                 payload = json.dumps(obj.get("payload", {}), ensure_ascii=False)[:80]
-                out.append(f'<span style="color:#555">{ts}</span> <span style="color:#4fc3f7">{evt}</span> {payload}')
+                out.append(
+                    f'<span style="color:#555">{escape(ts)}</span> '
+                    f'<span style="color:#4fc3f7">{escape(str(evt))}</span> '
+                    f'{escape(payload)}'
+                )
             except Exception:
-                out.append(line)
+                out.append(escape(line))
         return "<br>".join(out) or "(empty)"
     except Exception as e:
-        return f"(no log: {e})"
+        return f"(no log: {escape(str(e))})"
 
 # ── HTML sections ──────────────────────────────────────────────────────────────
 
@@ -103,20 +211,20 @@ def _pending_approvals_section() -> str:
         from harness.approval_workflow import list_pending_approvals
         pending = list_pending_approvals()
     except Exception as exc:
-        return f"<p style='color:#ef5350'>Could not load approvals: {exc}</p>"
+        return f"<p style='color:#ef5350'>Could not load approvals: {escape(str(exc))}</p>"
     if not pending:
         return "<p style='color:#66bb6a;margin:0'>✓ Nothing awaiting approval</p>"
     rows = []
     for item in pending:
-        tid = item["task_id"]
-        desc = item.get("description", "")[:120]
+        tid = str(item["task_id"])
+        desc = escape(str(item.get("description", ""))[:120])
         status = item.get("status", "")
         already = item.get("approval_logged", False)
         btn = ("<span style='color:#66bb6a'>✓ logged</span>" if already
-               else _btn("Approve", f"/approve/{tid}"))
+               else _btn("Approve", f"/approve/{quote(tid, safe='')}"))
         rows.append(
             f"<tr>"
-            f"<td style='padding:8px 10px;border-bottom:1px solid #1e1e1e;font-size:.8em;color:#aaa'>{tid}</td>"
+            f"<td style='padding:8px 10px;border-bottom:1px solid #1e1e1e;font-size:.8em;color:#aaa'>{escape(tid)}</td>"
             f"<td style='padding:8px 10px;border-bottom:1px solid #1e1e1e'>{desc}</td>"
             f"<td style='padding:8px 10px;border-bottom:1px solid #1e1e1e'>{_badge(status)}</td>"
             f"<td style='padding:8px 10px;border-bottom:1px solid #1e1e1e'>{btn}</td>"
@@ -139,9 +247,9 @@ def _work_queue_table() -> str:
     rows = []
     for idx, t in enumerate(tasks):
         status = t.get("status", "")
-        task_text = t.get("task", "")
+        task_text = escape(str(t.get("task", ""))[:80])
         notes = t.get("notes", "") or t.get("result", "")
-        detail = f"<div style='color:#555;font-size:.78em;margin-top:2px'>{notes[:120]}</div>" if notes else ""
+        detail = f"<div style='color:#555;font-size:.78em;margin-top:2px'>{escape(str(notes)[:120])}</div>" if notes else ""
         actions = ""
         if status in ("blocked", "stalled", "failed"):
             actions = _btn("Requeue", f"/requeue/{idx}", "#f0c040")
@@ -150,11 +258,11 @@ def _work_queue_table() -> str:
                            "Reset this in-progress task back to queued?")
         rows.append(
             f"<tr>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.82em;white-space:nowrap'>{t.get('session_name','')}</td>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{task_text[:80]}{detail}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.82em;white-space:nowrap'>{escape(str(t.get('session_name','')))}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{task_text}{detail}</td>"
             f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;white-space:nowrap'>{_badge(status)}</td>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;text-align:center'>{t.get('priority','')}</td>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;font-size:.78em;white-space:nowrap'>{str(t.get('created_at',''))[:10]}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;text-align:center'>{escape(str(t.get('priority','')))}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;font-size:.78em;white-space:nowrap'>{escape(str(t.get('created_at',''))[:10])}</td>"
             f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{actions}</td>"
             f"</tr>"
         )
@@ -179,15 +287,15 @@ def _sessions_table() -> str:
     for s in items:
         sid = str(s.get("session_id", s.get("_key", "?")))
         status = s.get("status", "active")
-        expire_btn = (_btn("Expire", f"/expire-session/{sid}", "#ef5350",
+        expire_btn = (_btn("Expire", f"/expire-session/{quote(sid, safe='')}", "#ef5350",
                            f"Expire session {sid[:16]}?")
                       if status != "done" else "")
         rows.append(
             f"<tr>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.82em'>{sid[:24]}</td>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{s.get('task_id', s.get('title',''))}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.82em'>{escape(sid[:24])}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{escape(str(s.get('task_id', s.get('title',''))))}</td>"
             f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{_badge(status)}</td>"
-            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;font-size:.8em'>{str(s.get('started_at',''))[:16]}</td>"
+            f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#888;font-size:.8em'>{escape(str(s.get('started_at',''))[:16])}</td>"
             f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e'>{expire_btn}</td>"
             f"</tr>"
         )
@@ -203,6 +311,45 @@ def _sessions_table() -> str:
     )
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.get("/session-bootstrap", response_class=HTMLResponse)
+def session_bootstrap():
+    """Exchange a URL-fragment token without placing it in an HTTP request URL."""
+    return HTMLResponse("""<!doctype html><meta charset="utf-8">
+<title>Jarvis Ops</title>
+<body style="background:#0d1117;color:#e6edf3;font-family:monospace;padding:24px">
+Opening Jarvis Ops...
+<script>
+const token = decodeURIComponent(location.hash.slice(1));
+history.replaceState(null, "", "/session-bootstrap");
+fetch("/session-bootstrap", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({token})
+}).then(response => {
+  if (!response.ok) throw new Error("authorization failed");
+  location.replace("/");
+}).catch(() => { document.body.textContent = "Dashboard authorization failed."; });
+</script></body>""")
+
+
+@app.post("/session-bootstrap")
+async def establish_dashboard_session(request: Request):
+    try:
+        supplied = str((await request.json()).get("token") or "").strip()
+    except (AttributeError, TypeError, ValueError):
+        supplied = ""
+    if not supplied or not hmac.compare_digest(supplied, _DASHBOARD_TOKEN):
+        return JSONResponse({"error": "dashboard_auth_required"}, status_code=401)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        _DASHBOARD_COOKIE,
+        _DASHBOARD_TOKEN,
+        httponly=True,
+        samesite="strict",
+        secure=False,
+    )
+    return response
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -276,12 +423,17 @@ overflow-x:auto;white-space:pre-wrap;line-height:1.6;margin:0'>{_log_tail()}</pr
 @app.post("/run-loop")
 def run_loop_now():
     """Trigger one orchestrator loop iteration in a background thread."""
+    if not _RUN_LOOP_LOCK.acquire(blocking=False):
+        return JSONResponse({"error": "orchestrator_loop_already_running"}, status_code=409)
+
     def _go():
         try:
             from orchestrator_loop import run_loop
             run_loop(max_concurrent=3, dry_run=False)
         except Exception as exc:
             print(f"[dashboard] run-loop error: {exc}")
+        finally:
+            _RUN_LOOP_LOCK.release()
     threading.Thread(target=_go, daemon=True, name="DashRunLoop").start()
     return RedirectResponse(url="/", status_code=303)
 
@@ -293,33 +445,63 @@ def clear_stalled():
         from harness.session_tracker import SessionTracker
         from orchestrator_loop import _expire_stalled_sessions
         tracker = SessionTracker()
-        _expire_stalled_sessions(tracker, timeout_minutes=0)  # 0 = expire all stalled now
+        with queue_state_lock(BASE / "WORK_QUEUE.json"):
+            _expire_stalled_sessions(
+                tracker, timeout_minutes=0
+            )  # 0 = expire all stalled now
     except Exception as exc:
         print(f"[dashboard] clear-stalled error: {exc}")
+        return JSONResponse({"error": "clear_stalled_failed"}, status_code=500)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/requeue/{idx:int}")
 def requeue_task(idx: int):
     """Reset a task at position idx back to queued status."""
-    tasks = _load("WORK_QUEUE.json", [])
-    if 0 <= idx < len(tasks):
-        tasks[idx]["status"] = "queued"
-        tasks[idx].pop("blocked_reason", None)
-        tasks[idx].pop("blocked_at", None)
-        tasks[idx].pop("assigned_at", None)
-        _save("WORK_QUEUE.json", tasks)
+    with queue_state_lock(BASE / "WORK_QUEUE.json"):
+        tasks = _load("WORK_QUEUE.json", [])
+        if 0 <= idx < len(tasks):
+            tasks[idx]["status"] = "queued"
+            tasks[idx].pop("blocked_reason", None)
+            tasks[idx].pop("blocked_at", None)
+            tasks[idx].pop("assigned_at", None)
+            _save("WORK_QUEUE.json", tasks)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/approve/{task_id:path}")
 def approve_task(task_id: str):
+    record = None
+    created = False
     try:
-        from harness.approval_workflow import record_approval, requeue_approved_task
-        record_approval(task_id, approved_by="dashboard")
-        requeue_approved_task(task_id)
-    except Exception:
-        pass
+        from harness.approval_workflow import (
+            consume_approval,
+            record_approval,
+            requeue_approved_task,
+        )
+        record, created = record_approval(task_id, approved_by="dashboard")
+        if not requeue_approved_task(task_id):
+            if created:
+                consume_approval(
+                    record["task_id"],
+                    task_contract_sha256=record["task_contract_sha256"],
+                    task_spec_sha256=record["task_spec_sha256"],
+                )
+            return JSONResponse(
+                {"error": "approved_task_could_not_be_requeued"}, status_code=409
+            )
+    except Exception as exc:
+        if created and record is not None:
+            try:
+                consume_approval(
+                    record["task_id"],
+                    task_contract_sha256=record["task_contract_sha256"],
+                    task_spec_sha256=record["task_spec_sha256"],
+                )
+            except Exception:
+                pass
+        print(f"[dashboard] approval failed for {task_id}: {exc}")
+        return JSONResponse({"error": "approval_failed"}, status_code=409)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -329,25 +511,31 @@ def expire_session(session_id: str):
     try:
         from harness.session_tracker import SessionTracker
         tracker = SessionTracker()
-        data = tracker._load()
-        now = datetime.utcnow().isoformat() + "Z"
-        for s in data.get("sessions", []):
-            if str(s.get("session_id", "")) == session_id:
-                s["status"] = "stalled"
-                s["last_updated"] = now
-                s["stall_reason"] = "manually expired via dashboard"
-        tracker._save(data)
-        # Requeue any task linked to this session
-        tasks = _load("WORK_QUEUE.json", [])
-        changed = False
-        for t in tasks:
-            if t.get("status") == "in_progress" and str(t.get("session_id", "")) == session_id:
-                t["status"] = "queued"
-                changed = True
-        if changed:
-            _save("WORK_QUEUE.json", tasks)
+        with queue_state_lock(BASE / "WORK_QUEUE.json"):
+            data = tracker._load()
+            now = datetime.now(timezone.utc).isoformat()
+            for s in data.get("sessions", []):
+                if str(s.get("session_id", "")) == session_id:
+                    s["status"] = "stalled"
+                    s["last_updated"] = now
+                    s["stall_reason"] = "manually expired via dashboard"
+            tracker._save(data)
+            # Requeue any task linked to this session.
+            tasks = _load("WORK_QUEUE.json", [])
+            changed = False
+            for t in tasks:
+                assigned_session = t.get("assigned_to") or t.get("session_id")
+                if (
+                    t.get("status") == "in_progress"
+                    and str(assigned_session or "") == session_id
+                ):
+                    t["status"] = "queued"
+                    changed = True
+            if changed:
+                _save("WORK_QUEUE.json", tasks)
     except Exception as exc:
         print(f"[dashboard] expire-session error: {exc}")
+        return JSONResponse({"error": "expire_session_failed"}, status_code=500)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -372,8 +560,13 @@ def api_pending():
 
 if __name__ == "__main__":
     import webbrowser
+    try:
+        host = _validated_dashboard_host()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    dashboard_url = dashboard_bootstrap_url(host)
     threading.Thread(
-        target=lambda: __import__("time").sleep(1.5) or webbrowser.open("http://localhost:7842"),
+        target=lambda: __import__("time").sleep(1.5) or webbrowser.open(dashboard_url),
         daemon=True,
     ).start()
-    uvicorn.run(app, host="0.0.0.0", port=7842, log_level="info")
+    uvicorn.run(app, host=host, port=7842, log_level="info")

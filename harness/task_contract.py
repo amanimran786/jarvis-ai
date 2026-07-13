@@ -21,6 +21,7 @@ import fnmatch
 import hashlib
 import json
 import logging
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -32,6 +33,10 @@ class ContractError(ValueError):
     """Raised when a queue task cannot become an executable contract."""
 
 
+_TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+
 def _now() -> str:
     return _datetime.datetime.now(_datetime.timezone.utc).isoformat()
 
@@ -41,6 +46,21 @@ def _canonical_sha256(value: Mapping[str, Any]) -> str:
         dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def normalize_task_id(value: Any) -> str:
+    """Return a conservative task identifier or raise ``ContractError``."""
+    task_id = str(value or "").strip()
+    if not _TASK_ID_RE.fullmatch(task_id):
+        raise ContractError(
+            "task_id must be 1-128 ASCII letters, digits, dots, underscores, or hyphens"
+        )
+    return task_id
+
+
+def is_sha256_digest(value: Any) -> bool:
+    """Return whether value is a canonical lowercase SHA-256 hex digest."""
+    return bool(_SHA256_RE.fullmatch(str(value or "").strip()))
 
 
 def _strings(value: Any, field_name: str) -> tuple[str, ...]:
@@ -133,7 +153,7 @@ class TaskSpec:
         explicit_id = str(task.get("id") or "").strip()
         legacy_adapter = bool(task.get("legacy_adapter", not bool(explicit_id)))
         if explicit_id:
-            task_id = explicit_id
+            task_id = normalize_task_id(explicit_id)
         else:
             digest = hashlib.sha256(f"{title}\n{description}".encode("utf-8")).hexdigest()[:12]
             task_id = f"LEGACY-{digest}"
@@ -194,6 +214,11 @@ class TaskSpec:
     @property
     def task_spec_hash(self) -> str:
         return _canonical_sha256(self.to_dict())
+
+    @property
+    def normalized_task_spec_hash(self) -> str:
+        """Digest the executable form, excluding legacy-adapter state."""
+        return _canonical_sha256(self.for_dispatch().to_dict())
 
     @property
     def contract_hash(self) -> str:
@@ -499,6 +524,7 @@ class TaskContract:
     task_type: TaskType
     description: str
     contract_version: str = "1.0"
+    task_spec_sha256: str = ""      # canonical normalized queue TaskSpec digest
 
     # I/O
     inputs: list[InputSpec] = field(default_factory=list)
@@ -557,10 +583,11 @@ class TaskContract:
                 f"unknown capability in {data.get('requires_capabilities')!r}"
             ) from exc
         return cls(
-            task_id=str(data.get("task_id", "")),
+            task_id=normalize_task_id(data.get("task_id")),
             task_type=task_type,
             description=str(data.get("description", "")),
             contract_version=str(data.get("contract_version", "1.0")),
+            task_spec_sha256=data.get("task_spec_sha256", ""),
             inputs=[InputSpec(**dict(i)) for i in data.get("inputs", [])],
             outputs=[OutputSpec(**dict(o)) for o in data.get("outputs", [])],
             side_effects=side_effects,
@@ -581,8 +608,15 @@ class TaskContract:
 def validate_contract(contract: TaskContract) -> tuple[bool, list[str]]:
     """Validate a TaskContract. Returns (is_valid, list_of_errors)."""
     errors: list[str] = []
-    if not str(contract.task_id or "").strip():
-        errors.append("task_id must not be empty")
+    try:
+        normalize_task_id(contract.task_id)
+    except ContractError as exc:
+        errors.append(str(exc))
+    if (
+        not isinstance(contract.task_spec_sha256, str)
+        or not _SHA256_RE.fullmatch(contract.task_spec_sha256)
+    ):
+        errors.append("task_spec_sha256 must be a lowercase SHA-256 hex digest")
     try:
         TaskType(contract.task_type)
     except ValueError:
@@ -653,9 +687,22 @@ def contract_for_task(
     task_id: str, path: Path = TASK_CONTRACTS_PATH
 ) -> Optional[TaskContract]:
     """Convenience lookup: return the TaskContract for task_id, or None."""
-    if not task_id:
+    try:
+        normalized_id = normalize_task_id(task_id)
+    except ContractError:
         return None
-    return load_contracts(path).get(task_id)
+    return load_contracts(path).get(normalized_id)
+
+
+def task_contract_digest(contract: TaskContract) -> str:
+    """Return the canonical digest used to bind a human approval."""
+    return contract.contract_hash
+
+
+def normalized_task_spec_digest(spec: TaskSpec | Mapping[str, Any]) -> str:
+    """Return a digest of the exact normalized executable TaskSpec."""
+    parsed = spec if isinstance(spec, TaskSpec) else TaskSpec.from_queue_task(spec)
+    return parsed.normalized_task_spec_hash
 
 
 def approval_logged(
@@ -665,19 +712,15 @@ def approval_logged(
     task_contract_sha256: str = "",
     task_spec_sha256: str = "",
 ) -> bool:
-    """True if a human approval exists for task_id.
-
-    When digest arguments are provided both must match the stored record —
-    this binds the approval to a specific contract version (stronger check).
-    When digests are omitted the check falls back to task_id match only,
-    which is the standard orchestrator dispatch path.
-    """
-    normalized_id = str(task_id or "").strip()
-    if not normalized_id:
+    """True only for an approval bound to both expected canonical digests."""
+    try:
+        normalized_id = normalize_task_id(task_id)
+    except ContractError:
         return False
     contract_digest = str(task_contract_sha256 or "").strip()
     spec_digest = str(task_spec_sha256 or "").strip()
-    digest_check = bool(contract_digest and spec_digest)
+    if not is_sha256_digest(contract_digest) or not is_sha256_digest(spec_digest):
+        return False
     path = Path(path)
     if not path.exists():
         return False
@@ -689,15 +732,12 @@ def approval_logged(
         return False
     if not isinstance(data, list):
         return False
-    for entry in data:
-        if not isinstance(entry, Mapping):
-            continue
-        if entry.get("task_id") != normalized_id:
-            continue
-        if digest_check:
-            if (entry.get("task_contract_sha256") == contract_digest
-                    and entry.get("task_spec_sha256") == spec_digest):
-                return True
-        else:
-            return True
-    return False
+    return any(
+        isinstance(entry, Mapping)
+        and entry.get("task_id") == normalized_id
+        and entry.get("task_contract_sha256") == contract_digest
+        and entry.get("task_spec_sha256") == spec_digest
+        and bool(str(entry.get("approved_at") or "").strip())
+        and bool(str(entry.get("approved_by") or "").strip())
+        for entry in data
+    )
