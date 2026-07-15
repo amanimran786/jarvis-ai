@@ -40,11 +40,6 @@ When implementing third-party libraries, prefer up-to-date source documentation 
 
 Do not use Context7 as a substitute for reading this repository’s code or preserving Jarvis patterns.
 
-### Pre-Commit Gate (mandatory)
-
-Before every commit, run **`REVIEW.md`** in full: security scan, `py_compile`, affected
-tests, and the git plumbing commit pattern. No exceptions.
-
 ### Domain-Specific Rules
 
 Detailed rules for specialized domains:
