@@ -1,5 +1,194 @@
 # Orchestrator Runbook
 
+> **Two unrelated systems share the word "orchestrator" in this repo.** This
+> file documents both — read the section that matches what you're touching:
+> - **Session Dashboard & Autonomous Loop** (`session_orchestrator.py`,
+>   `orchestrator.py`, `orchestrator_loop.py`) — file-based dev-session
+>   coordination + a scheduled loop that harvests/dispatches `WORK_QUEUE.json`
+>   tasks automatically. Covered immediately below.
+> - **ADE Lanes** (`orchestrate.py`) — manual tmux + git-worktree lane
+>   dispatch, described in "Codex architecture addendum" onward further down
+>   this file.
+>
+> They do not call into each other. `orchestrate.py` never touches
+> `session_orchestrator.py`, and the autonomous loop never spawns a tmux lane.
+
+## Session Dashboard & Autonomous Loop
+
+### What each file does
+
+- **`session_orchestrator.py`** — a read-only terminal dashboard (rich UI,
+  falls back to plain ANSI if `rich` isn't installed) for watching dev
+  sessions and the work queue. Reads `ORCHESTRATOR_STATUS.json` (session
+  health/`last_active`), `WORK_QUEUE.json` (task queue), and `SESSIONS.json`
+  (registry of named lanes + their Claude session IDs). Writes activity lines
+  to `MASTER_LOG.md`. Its `watch` command is a separate hourly rate-limit
+  watchdog: on each UTC top-of-hour it checks whether any of the four named
+  dev lanes (`jarvis-board`, `jarvis-self-eval`, `jarvis-local-llm`,
+  `jarvis-audit`) is stalled and, if so, writes `RESUME_SIGNAL.json` so those
+  sessions can resume.
+
+- **`orchestrator.py`** — primarily the LLM intent classifier (`classify()`)
+  that `router.py` uses to route chat input to tools; unrelated to session
+  coordination. Its `if __name__ == "__main__":` block is a thin alias:
+  running `python orchestrator.py <cmd>` imports `session_orchestrator.main`
+  and calls it — so `python orchestrator.py status` is identical to
+  `python session_orchestrator.py status`. Nothing else in `orchestrator.py`
+  touches the dashboard or the loop.
+
+- **`orchestrator_loop.py`** — the autonomous single-iteration loop. It is
+  invoked every 5 minutes by the `com.jarvis.loop` launchd job
+  (`scripts/com.jarvis.loop.plist` → `harness/cowork_launcher.py` →
+  `orchestrator_loop.run_loop()`). Each call: expires sessions stalled >90 min
+  (`ACTIVE_SESSIONS.json` via `harness/session_tracker.py`), harvests
+  completed sessions (verifying evidence with
+  `harness/completion_verifier.py` + `harness/task_contract.py`, applying
+  `harness/retry_policy.py` on failure), asks a local LLM for follow-up
+  tasks, picks the next queued task up to `--max-concurrent`, validates its
+  typed `TaskContract` (approval via `harness/approval_workflow.py`,
+  capabilities via `harness/capability_checker.py`), renders a prompt
+  (`harness/prompt_generator.py`), and writes a launch record to
+  `LAUNCH_QUEUE.json` for the Cowork companion to actually start the session.
+
+**Important:** `orchestrator_loop.py` tracks sessions for harvest/retry via
+`ACTIVE_SESSIONS.json` (`harness/session_tracker.py`) — a completely
+different registry from the `ORCHESTRATOR_STATUS.json` / `SESSIONS.json` pair
+that `session_orchestrator.py`'s dashboard reads. A lane can be "active" in
+one and stale or absent in the other. The one file both sides actually share
+is `WORK_QUEUE.json` — that's the real integration point, documented in
+`WORK_QUEUE_SCHEMA.md`.
+
+### Invocation
+
+```bash
+# Dashboard (read-only, human-facing)
+python session_orchestrator.py              # live dashboard, refresh 30s
+python session_orchestrator.py status        # one-shot status, then exit
+python session_orchestrator.py register <session-name> [next-task]
+python session_orchestrator.py add-task <session> <task> <priority>
+python session_orchestrator.py history       # tail MASTER_LOG.md
+python session_orchestrator.py watch         # hourly rate-limit watchdog, 60s poll
+
+# Equivalent — delegates straight to session_orchestrator.main()
+python orchestrator.py status
+
+# One iteration of the autonomous loop (normally launchd's job — see below)
+python orchestrator_loop.py --max-concurrent 3 [--dry-run] [--verbose]
+```
+
+Environment variables:
+- `JARVIS_ORCHESTRATOR_ATTEMPT_LOG` — override path for `attempts.jsonl`
+  (default `~/Library/Application Support/Jarvis/orchestrator/attempts.jsonl`).
+
+### How it integrates with WORK_QUEUE.json
+
+- The `com.jarvis.loop` launchd job runs every 300s and calls
+  `orchestrator_loop.run_loop()` — this is the production cadence; once the
+  job is loaded, nothing needs to be invoked manually for tasks to be
+  harvested and dispatched.
+- `run_loop()` also starts `jarvis_dashboard` (uvicorn, port 7842) in a daemon
+  thread the first time it runs in a process — idempotent across iterations,
+  logged and swallowed if the port is already taken.
+- `session_orchestrator.py`'s dashboard is read-only with respect to the
+  loop: `add-task` and `register` write `WORK_QUEUE.json` /
+  `ORCHESTRATOR_STATUS.json` directly and are picked up by the loop on its
+  next poll — there is no direct call from one script into the other.
+
+### Common dev workflows
+
+**Watch dev lanes and the queue:**
+```bash
+python session_orchestrator.py
+```
+
+**Register a manual dev lane so it shows on the dashboard** (e.g. a Cowork
+session that isn't running `main.py` and wouldn't otherwise appear):
+```bash
+python orchestrator.py register jarvis-board "Wire context window budget"
+```
+
+**Queue a task for a named lane:**
+```bash
+python orchestrator.py add-task jarvis-board "Fix flaky STT test" 1
+```
+
+**Dry-run the autonomous loop** (no state mutation, useful for debugging
+prompt generation or contract resolution):
+```bash
+python orchestrator_loop.py --dry-run --verbose
+```
+
+**Run the loop for real, manually** (normally launchd's job — only do this to
+force an iteration between the 5-minute launchd cadence):
+```bash
+python orchestrator_loop.py --max-concurrent 3
+```
+
+**Check history:**
+```bash
+python session_orchestrator.py history     # tails MASTER_LOG.md
+tail -f logs/orchestrator.log              # session_orchestrator's own log
+```
+
+**Bootstrap orchestration from scratch (fresh checkout):**
+1. `WORK_QUEUE.json` starts as `[]` if missing — seed it with
+   `python orchestrator.py add-task <lane> "<first task>" 1`, or hand-edit it
+   per the schema in `WORK_QUEUE_SCHEMA.md` (a code task needs
+   `allowed_files`, `acceptance_criteria`, and `verification_commands`; a
+   no-code task can skip verification per that schema's status lifecycle).
+2. Load the scheduled loop: `launchctl load scripts/com.jarvis.loop.plist`
+   (runs every 5 min; logs to `logs/launchd.log` / `logs/launchd_error.log`).
+3. Watch it work: `python session_orchestrator.py` (dashboard), or
+   `tail -f MASTER_LOG.md` / `tail -f logs/orchestrator.log`.
+4. For the four named dev lanes, also run `python session_orchestrator.py
+   watch` (or load it as its own launchd job) so `RESUME_SIGNAL.json` gets
+   written on hourly rate-limit resets.
+
+### Troubleshooting
+
+- **Dashboard says "No sessions in ORCHESTRATOR_STATUS.json yet"** — no
+  session has called `register` (or `harness/audit.py`'s `start_session`)
+  yet. This file is disk-only and gitignored, so a fresh checkout always
+  starts empty; it is not an error.
+- **Task stuck in `blocked` / `awaiting_approval`** — `orchestrator_loop.py`
+  requires a typed `TaskContract` (`harness/task_contract.py`,
+  `contract_for_task`) resolvable via `contract_id`, the derived `TaskSpec`
+  id, or `session_name`. A queue row with no matching contract is blocked
+  with "autonomous execution requires an explicit typed task contract" — add
+  or fix the contract, don't just retry the task.
+- **Task shows `unverified` after a session claims completion** —
+  `harness/completion_verifier.py` couldn't collect evidence (missing
+  `repo_path`/`base_ref` on the session record, or the verification commands
+  didn't produce the expected evidence). Check `verification_reasons` on the
+  task entry in `WORK_QUEUE.json`.
+- **A lane looks STALLED on the dashboard but seems fine otherwise** —
+  `_session_health()` in `session_orchestrator.py` only applies the 5-minute
+  stall threshold to sessions reporting `status: active`; check what's
+  writing `last_active` into `ORCHESTRATOR_STATUS.json` for that lane. Also
+  remember this is a different liveness signal than
+  `orchestrator_loop.py`'s own `ACTIVE_SESSIONS.json` — a lane can be fine in
+  one and stale in the other.
+- **`python orchestrator.py <cmd>` behaves unexpectedly** — it's an alias
+  straight into `session_orchestrator.main()`; it has nothing to do with the
+  `classify()` intent-routing logic that makes up the rest of
+  `orchestrator.py`.
+- **Follow-up task suggestions never appear** — `_suggest_follow_ups()` calls
+  `brains.brain_ollama.ask_local`; if Ollama isn't running or the configured
+  model isn't pulled, it logs a warning and returns `[]` — the loop keeps
+  going, it just won't auto-enqueue follow-ups for that completion.
+- **`MASTER_LOG.md` isn't growing even though the loop is clearly running** —
+  by design: `_run_loop` buffers each iteration's log lines and drops them if
+  the iteration did nothing (harvested/follow_ups/launched/blocked/
+  unverified/rejected/retried all zero), so idle polling every 5 minutes
+  doesn't bloat the file.
+- **Dashboard renders plain text instead of tables/colors** — `rich` isn't
+  importable in the active interpreter; this is an automatic fallback, not a
+  bug. `pip install rich` in the same venv if you want the rich UI.
+
+---
+
+## ADE Lanes (`orchestrate.py`)
+
 This Claude session is the **conductor** over parallel autonomous agents. Each
 agent is an ADE lane: an isolated git worktree + tmux session running a real
 `claude` agent on a Plan → Execute → Verify → Retry loop. The conductor plans
