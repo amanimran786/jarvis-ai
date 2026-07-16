@@ -943,7 +943,7 @@
     "task_type": "analysis",
     "description": "Verify devstral/qwen3:30b routing in production — confirm specialist model wins are stable under load",
     "contract_version": "1.0",
-    "task_spec_sha256": "63d2a09172182c42963ed59f5064d6591ea0cf607393dbac673e5a25683c1693",
+    "task_spec_sha256": "3f8987f13f212172acefe71f2363c7f7ce0ba478c750d2773ebf43bb15035217",
     "inputs": [
       {
         "name": "usage_log",
