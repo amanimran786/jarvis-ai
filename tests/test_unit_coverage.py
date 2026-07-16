@@ -43,6 +43,7 @@ class BriefingModuleTests(unittest.TestCase):
         import briefing
         with patch("briefing._greeting", return_value="Good morning"), \
              patch("briefing._focus_line", return_value=""), \
+             patch("briefing._reflection_delta_summary", return_value=""), \
              patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good morning, Aman.")
@@ -51,6 +52,7 @@ class BriefingModuleTests(unittest.TestCase):
         import briefing
         with patch("briefing._greeting", return_value="Good evening"), \
              patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."), \
+             patch("briefing._reflection_delta_summary", return_value=""), \
              patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good evening, Aman. Current focus: Jarvis local-first roadmap.")

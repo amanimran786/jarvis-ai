@@ -12,10 +12,13 @@ No LLM calls — everything is mocked.
 
 from __future__ import annotations
 
+import json
 import sys
 import os
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Ensure repo root is on path
@@ -423,6 +426,72 @@ class AgentPendingAlertsTests(unittest.TestCase):
         with patch.object(ja, "_safe_import", return_value=mock_pw):
             result = ja._agent_pending_alerts()
         self.assertEqual(result["status"], "error")
+
+
+class ReflectionBriefingTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self._history = Path(self._tmpdir.name) / "reflection_history.jsonl"
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _summary(self) -> str:
+        import briefing
+        with patch("harness.reflection._reflection_history_path", return_value=self._history), \
+             patch("harness.reflection.run_reflection") as run_reflection:
+            summary = briefing._reflection_delta_summary()
+        run_reflection.assert_not_called()
+        return summary
+
+    def test_missing_history_is_non_fatal(self):
+        self.assertEqual(self._summary(), "")
+
+    def test_malformed_history_is_non_fatal(self):
+        self._history.write_text("not json\n{broken\n", encoding="utf-8")
+        self.assertEqual(self._summary(), "")
+
+    def test_latest_delta_reports_quality_and_largest_axis_shift(self):
+        previous = {
+            "ts": "2026-07-14T08:00:00+00:00",
+            "overall_quality": 0.60,
+            "axes": {
+                "routing_accuracy": 0.50,
+                "response_relevance": 0.55,
+                "conciseness": 0.75,
+                "\x1b[31mspoof": 0.0,
+            },
+        }
+        latest = {
+            "ts": "2026-07-15T08:00:00+00:00",
+            "overall_quality": 0.65,
+            "axes": {
+                "routing_accuracy": 0.57,
+                "response_relevance": 0.54,
+                "conciseness": 0.76,
+                "\x1b[31mspoof": 1.0,
+            },
+        }
+        original = f"{json.dumps(previous)}\n{json.dumps(latest)}\n"
+        self._history.write_text(original, encoding="utf-8")
+
+        summary = self._summary()
+
+        self.assertIn("quality 0.65", summary)
+        self.assertIn("up 0.05", summary)
+        self.assertIn("routing accuracy up 0.07", summary)
+        self.assertNotIn("spoof", summary)
+        self.assertEqual(self._history.read_text(encoding="utf-8"), original)
+
+    def test_legacy_briefing_includes_reflection_delta(self):
+        import briefing
+        with patch.object(briefing, "_greeting", return_value="Good morning, Aman."), \
+             patch.object(briefing, "_focus_line", return_value=""), \
+             patch.object(briefing, "_reflection_delta_summary", return_value="quality 0.65, up 0.05."), \
+             patch.object(briefing, "_trace_score_summary", return_value=""):
+            result = briefing.build_briefing([])
+
+        self.assertIn("Reflection: quality 0.65, up 0.05.", result)
 
 
 if __name__ == "__main__":
