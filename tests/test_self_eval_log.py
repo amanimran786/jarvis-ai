@@ -299,8 +299,14 @@ class ScoreReportTests(unittest.TestCase):
             return_value=self._log,
         )
         self._patcher.start()
+        self._trace_patcher = patch(
+            "eval_trace_score.format_trace_score_summary",
+            return_value="",
+        )
+        self._trace_patcher.start()
 
     def tearDown(self):
+        self._trace_patcher.stop()
         self._patcher.stop()
         self._tmpdir.cleanup()
 

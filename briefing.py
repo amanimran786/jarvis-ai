@@ -55,6 +55,14 @@ def _focus_line() -> str:
     return ""
 
 
+def _trace_score_summary(last_n: int = 50) -> str:
+    try:
+        from eval_trace_score import format_trace_score_summary
+        return format_trace_score_summary(last_n=last_n)
+    except Exception:
+        return ""
+
+
 def _legacy_fact_briefing(facts: list[str] | tuple[str, ...]) -> str:
     name = "Aman"
     for fact in facts:
@@ -71,7 +79,8 @@ def _legacy_fact_briefing(facts: list[str] | tuple[str, ...]) -> str:
     if "aman" not in greeting.lower() and name:
         greeting = f"{greeting}, {name}."
     focus = _focus_line()
-    return f"{greeting} {focus}".strip()
+    trace_summary = _trace_score_summary()
+    return " ".join(part for part in (greeting, focus, trace_summary) if part).strip()
 
 
 def _format_calendar(events_raw: str) -> str:
@@ -145,6 +154,10 @@ def build_briefing(include_memory_summary: str | list[str] | tuple[str, ...] | N
     memory_summary = _normalize_memory_summary(include_memory_summary)
     if memory_summary:
         sections.append(f"**Memory:** {memory_summary}")
+
+    trace_summary = _trace_score_summary()
+    if trace_summary:
+        sections.append(f"**Agent execution:** {trace_summary}")
 
     greeting = _greeting(now)
     if sections:

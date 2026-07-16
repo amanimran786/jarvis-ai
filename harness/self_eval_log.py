@@ -476,16 +476,28 @@ def rolling_average(n: int = 50) -> dict[str, Any]:
 
 # ── /score command text ───────────────────────────────────────────────────────
 
+def _trace_score_summary(n: int) -> str:
+    try:
+        from eval_trace_score import format_trace_score_summary
+        return format_trace_score_summary(last_n=n)
+    except Exception:
+        return ""
+
+
 def score_report(n: int = 50) -> str:
     """Human-readable quality report for the /score router command."""
     avg = rolling_average(n)
     count = avg["count"]
+    trace_summary = _trace_score_summary(n)
     if count == 0:
-        return (
+        lines = [
             f"No self-eval scores logged yet (last {n} responses). "
             "Scores accumulate automatically as responses are delivered. "
             "Run a few queries and check back."
-        )
+        ]
+        if trace_summary:
+            lines.append(trace_summary)
+        return "\n".join(lines)
 
     rq = avg["response_quality"]
     ra = avg["routing_accuracy"]
@@ -528,6 +540,9 @@ def score_report(n: int = 50) -> str:
     if top_flags:
         flag_str = ", ".join(f"{flag} ({cnt}×)" for flag, cnt in list(top_flags.items())[:3])
         lines.append(f"Recurring issues: {flag_str}.")
+
+    if trace_summary:
+        lines.append(trace_summary)
 
     lines.append(
         "Run `python3 -m harness.self_eval_log --report` for the full breakdown."

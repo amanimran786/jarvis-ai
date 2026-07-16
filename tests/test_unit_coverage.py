@@ -42,14 +42,16 @@ class BriefingModuleTests(unittest.TestCase):
     def test_build_briefing_uses_name_fact(self):
         import briefing
         with patch("briefing._greeting", return_value="Good morning"), \
-             patch("briefing._focus_line", return_value=""):
+             patch("briefing._focus_line", return_value=""), \
+             patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good morning, Aman.")
 
     def test_build_briefing_appends_focus_line(self):
         import briefing
         with patch("briefing._greeting", return_value="Good evening"), \
-             patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."):
+             patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."), \
+             patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good evening, Aman. Current focus: Jarvis local-first roadmap.")
 
