@@ -230,6 +230,34 @@ def aggregate_trace_score(last_n: int | None = None) -> dict[str, Any]:
     }
 
 
+def format_trace_score_summary(last_n: int | None = 50) -> str:
+    """Return one bounded, observe-only line for user-facing status surfaces."""
+    report = aggregate_trace_score(last_n=last_n)
+    total_runs = int(report.get("total_runs") or 0)
+    if total_runs == 0:
+        return ""
+
+    total_steps = int(report.get("total_steps") or 0)
+    failed_steps = int(report.get("total_failed_steps") or 0)
+    retries = int(report.get("total_retried_steps") or 0)
+    successful_steps = max(0, total_steps - failed_steps)
+    success_percent = round((successful_steps / total_steps) * 100) if total_steps else 0
+    average_efficiency = report.get("avg_step_efficiency")
+    efficiency_text = (
+        f"{round(float(average_efficiency) * 100)}% average efficiency"
+        if average_efficiency is not None
+        else "average efficiency unavailable"
+    )
+    retry_label = "retry" if retries == 1 else "retries"
+    window = f"last {last_n}" if last_n is not None else "all"
+
+    return (
+        f"Execution traces (observe only, {window}): {total_runs} runs, "
+        f"{total_steps} steps, {success_percent}% step success, "
+        f"{efficiency_text}, {retries} {retry_label}."
+    )
+
+
 def print_trace_score(last_n: int | None = None) -> None:
     """Print a human-readable aggregate trace-score report."""
     report = aggregate_trace_score(last_n=last_n)
