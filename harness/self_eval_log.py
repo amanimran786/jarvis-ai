@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 from datetime import datetime, timezone
@@ -437,6 +438,70 @@ def load_recent(n: int = 50) -> list[dict[str, Any]]:
 
 # ── Rolling average ───────────────────────────────────────────────────────────
 
+_ROUTING_TAG_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _./:-]{0,39}")
+
+
+def routing_tag_distribution(
+    records: list[dict[str, Any]],
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Return bounded route counts and quality averages without raw content."""
+    if not records or limit <= 0:
+        return []
+
+    buckets: dict[str, dict[str, float | int]] = {}
+    for record in records:
+        raw_tag = record.get("routing_tag") or record.get("route") or "unknown"
+        tag = str(raw_tag).strip()
+        if not _ROUTING_TAG_PATTERN.fullmatch(tag):
+            tag = "unknown"
+
+        bucket = buckets.setdefault(
+            tag,
+            {"count": 0, "quality_total": 0.0, "quality_count": 0},
+        )
+        bucket["count"] += 1
+
+        quality = record.get("response_quality", record.get("composite"))
+        if (
+            not isinstance(quality, bool)
+            and isinstance(quality, (int, float))
+            and math.isfinite(float(quality))
+            and 0.0 <= float(quality) <= 1.0
+        ):
+            bucket["quality_total"] += float(quality)
+            bucket["quality_count"] += 1
+
+    ordered = sorted(
+        buckets.items(),
+        key=lambda item: (-int(item[1]["count"]), item[0].lower()),
+    )
+    if len(ordered) > limit:
+        visible = ordered[: max(0, limit - 1)]
+        remainder = ordered[max(0, limit - 1):]
+        other = {
+            "count": sum(int(bucket["count"]) for _, bucket in remainder),
+            "quality_total": sum(float(bucket["quality_total"]) for _, bucket in remainder),
+            "quality_count": sum(int(bucket["quality_count"]) for _, bucket in remainder),
+        }
+        ordered = [*visible, ("other routes", other)]
+
+    result: list[dict[str, Any]] = []
+    for tag, bucket in ordered:
+        quality_count = int(bucket["quality_count"])
+        average_quality = (
+            round(float(bucket["quality_total"]) / quality_count, 3)
+            if quality_count
+            else None
+        )
+        result.append({
+            "tag": tag,
+            "count": int(bucket["count"]),
+            "average_quality": average_quality,
+        })
+    return result
+
+
 def rolling_average(n: int = 50) -> dict[str, Any]:
     """Compute per-axis averages and flag counts across the last n records."""
     records = load_recent(n)
@@ -448,6 +513,7 @@ def rolling_average(n: int = 50) -> dict[str, Any]:
             "conciseness": None,
             "response_quality": None,
             "top_flags": {},
+            "routing_tags": [],
         }
 
     from collections import Counter
@@ -471,6 +537,7 @@ def rolling_average(n: int = 50) -> dict[str, Any]:
         "conciseness": avg(cs_vals),
         "response_quality": avg(rq_vals),
         "top_flags": dict(flag_counts.most_common(5)),
+        "routing_tags": routing_tag_distribution(records),
     }
 
 
@@ -541,6 +608,17 @@ def score_report(n: int = 50) -> str:
     if top_flags:
         flag_str = ", ".join(f"{flag} ({cnt}×)" for flag, cnt in list(top_flags.items())[:3])
         lines.append(f"Recurring issues: {flag_str}.")
+
+    routing_tags = avg.get("routing_tags", [])
+    if routing_tags:
+        lines.append(f"Routing tags (last {count} scored responses):")
+        for route in routing_tags:
+            route_count = int(route["count"])
+            response_label = "response" if route_count == 1 else "responses"
+            lines.append(
+                f"  {route['tag']}: {route_count} {response_label}, "
+                f"avg quality {fmt(route['average_quality'])}"
+            )
 
     if trace_summary:
         lines.append(trace_summary)
