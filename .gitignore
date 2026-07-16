@@ -1,5 +1,6 @@
 # Secrets & credentials
 .env
+.jarvis-work-queue.lock
 credentials.json
 token.json
 

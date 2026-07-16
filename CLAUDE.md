@@ -45,6 +45,15 @@ Do not use Context7 as a substitute for reading this repository’s code or pres
 Before every commit, run **`REVIEW.md`** in full: security scan, `py_compile`, affected
 tests, and the git plumbing commit pattern. No exceptions.
 
+### Cross-Agent Queue
+
+Claude and Codex coordinate queue work through `harness.agent_coordinator`.
+Before autonomous `WORK_QUEUE.json` work, claim exactly one lease with the
+appropriate `--agent` value and `--takeover-cooling`. Do not edit queue status
+directly. Renew long-running work with `heartbeat`, and submit clean committed
+work through `finish` so the loop-owned verifier decides completion. See
+`CROSS_AGENT_ORCHESTRATION.md`.
+
 ### Domain-Specific Rules
 
 Detailed rules for specialized domains:
