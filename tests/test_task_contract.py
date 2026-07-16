@@ -222,6 +222,7 @@ def _contract(**overrides) -> TaskContract:
         ],
         side_effects=[SideEffect.WRITES_FILES, SideEffect.SUBPROCESS],
         requires_capabilities=[Capability.FILESYSTEM, Capability.PYTHON],
+        gate_pre_commit=True,
         preconditions=["logs/audit.jsonl exists"],
         postconditions=["report written"],
     )
@@ -259,6 +260,13 @@ def test_validate_contract_requires_outputs_when_writing_files():
 
     assert is_valid is False
     assert any("writes_files" in error for error in errors)
+
+
+def test_validate_contract_requires_pre_commit_gate_when_writing_files():
+    is_valid, errors = validate_contract(_contract(gate_pre_commit=False))
+
+    assert is_valid is False
+    assert any("gate_pre_commit" in error for error in errors)
 
 
 def test_validate_contract_requires_preconditions_for_approval_gated_tasks():

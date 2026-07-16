@@ -1,6 +1,6 @@
 # Jarvis AI — Session Summary
-**Date:** July 1–2, 2026  
-**Branch:** `improve/local-artifact-and-dashboard`  
+**Date:** July 1–2, 2026
+**Branch:** `improve/local-artifact-and-dashboard`
 **Commits ahead of origin:** 10
 
 ---
