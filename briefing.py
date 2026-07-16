@@ -1,10 +1,13 @@
 """Jarvis smart briefing — on-demand and morning status report."""
 
+import logging
 import threading
 from datetime import datetime
 from typing import Callable
 
 import vault
+
+log = logging.getLogger(__name__)
 
 
 def _fetch_parallel(tasks: dict[str, Callable[[], str]], timeout: float = 8.0) -> dict[str, str]:
@@ -60,6 +63,7 @@ def _trace_score_summary(last_n: int = 50) -> str:
         from eval_trace_score import format_trace_score_summary
         return format_trace_score_summary(last_n=last_n)
     except Exception:
+        log.debug("Trace score summary unavailable", exc_info=True)
         return ""
 
 

@@ -481,6 +481,7 @@ def _trace_score_summary(n: int) -> str:
         from eval_trace_score import format_trace_score_summary
         return format_trace_score_summary(last_n=n)
     except Exception:
+        log.debug("Trace score summary unavailable", exc_info=True)
         return ""
 
 

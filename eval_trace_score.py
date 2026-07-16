@@ -44,32 +44,38 @@ def _iter_trace_files():
     return sorted(TRACE_DIR.glob("*.json"))
 
 
-def load_run(run_id: str) -> list[dict[str, Any]]:
-    """Return all step traces for ``run_id``, ordered by (step_number, timestamp)."""
-    run: list[dict[str, Any]] = []
-    for path in _iter_trace_files():
-        try:
-            rec = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        if isinstance(rec, dict) and rec.get("run_id") == run_id:
-            run.append(rec)
-    run.sort(key=lambda r: (int(r.get("step_number", 0)), str(r.get("timestamp", ""))))
-    return run
-
-
-def list_runs() -> dict[str, int]:
-    """Map run_id -> step count across all on-disk traces (skips legacy, unkeyed)."""
-    counts: dict[str, int] = {}
-    for path in _iter_trace_files():
+def _load_trace_runs() -> dict[str, list[dict[str, Any]]]:
+    """Load traces once and order runs by their latest trace artifact."""
+    runs: dict[str, list[dict[str, Any]]] = {}
+    last_seen: dict[str, int] = {}
+    for position, path in enumerate(_iter_trace_files()):
         try:
             rec = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             continue
         rid = rec.get("run_id") if isinstance(rec, dict) else None
-        if rid:
-            counts[rid] = counts.get(rid, 0) + 1
-    return counts
+        if not rid:
+            continue
+        run_id = str(rid)
+        runs.setdefault(run_id, []).append(rec)
+        last_seen[run_id] = position
+
+    ordered_runs: dict[str, list[dict[str, Any]]] = {}
+    for run_id in sorted(runs, key=last_seen.__getitem__):
+        run = runs[run_id]
+        run.sort(key=lambda r: (int(r.get("step_number", 0)), str(r.get("timestamp", ""))))
+        ordered_runs[run_id] = run
+    return ordered_runs
+
+
+def load_run(run_id: str) -> list[dict[str, Any]]:
+    """Return all step traces for ``run_id``, ordered by (step_number, timestamp)."""
+    return _load_trace_runs().get(run_id, [])
+
+
+def list_runs() -> dict[str, int]:
+    """Map run_id -> step count across all on-disk traces (skips legacy, unkeyed)."""
+    return {run_id: len(run) for run_id, run in _load_trace_runs().items()}
 
 
 # ── Pure metric functions (operate on an in-memory run) ─────────────────────────
@@ -187,17 +193,17 @@ def aggregate_trace_score(last_n: int | None = None) -> dict[str, Any]:
 
     Returns a summary dict. OBSERVE ONLY — no ratchet wiring.
     """
-    runs = list_runs()
+    runs = _load_trace_runs()
     if not runs:
         return {"total_runs": 0, "runs": {}}
 
-    run_ids = sorted(runs.keys())
+    run_ids = list(runs)
     if last_n is not None:
-        run_ids = run_ids[-last_n:]
+        run_ids = run_ids[-last_n:] if last_n > 0 else []
 
     cards = {}
     for rid in run_ids:
-        cards[rid] = score_run(rid)
+        cards[rid] = score_run(rid, run=runs[rid])
 
     eff_scores = [
         c["step_efficiency"]["score"]
