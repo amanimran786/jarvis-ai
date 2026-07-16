@@ -585,10 +585,14 @@ def ask_local_structured(
             source="brain_ollama.ask_local_structured",
             prompt_tokens=prompt_eval_count,
             completion_tokens=eval_count,
-            total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+            total_tokens=(
+                prompt_eval_count + eval_count
+                if prompt_eval_count is not None and eval_count is not None
+                else None
+            ),
             messages=messages,
             response_text=content,
-            estimated=(prompt_eval_count is None and eval_count is None),
+            estimated=(prompt_eval_count is None or eval_count is None),
             metadata={"structured": True, "endpoint_scope": _ollama_endpoint_scope()},
         )
         return content
@@ -731,8 +735,12 @@ def ask_local_stream(
         raw_buffer = ""
         in_think = False  # track local reasoning blocks
         for chunk in stream:
-            prompt_eval_count = getattr(chunk, "prompt_eval_count", prompt_eval_count)
-            eval_count = getattr(chunk, "eval_count", eval_count)
+            chunk_prompt_count = getattr(chunk, "prompt_eval_count", None)
+            chunk_eval_count = getattr(chunk, "eval_count", None)
+            if chunk_prompt_count is not None:
+                prompt_eval_count = chunk_prompt_count
+            if chunk_eval_count is not None:
+                eval_count = chunk_eval_count
             delta = chunk.message.content or ""
             full_reply += delta
             raw_buffer += delta
@@ -779,10 +787,14 @@ def ask_local_stream(
         source="brain_ollama.ask_local_stream",
         prompt_tokens=prompt_eval_count,
         completion_tokens=eval_count,
-        total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+        total_tokens=(
+            prompt_eval_count + eval_count
+            if prompt_eval_count is not None and eval_count is not None
+            else None
+        ),
         messages=messages,
         response_text=cleaned_reply,
-        estimated=(prompt_eval_count is None and eval_count is None),
+        estimated=(prompt_eval_count is None or eval_count is None),
         metadata={
             "track_context": track_context,
             "endpoint_scope": _ollama_endpoint_scope(),
