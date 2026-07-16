@@ -290,6 +290,58 @@ class RollingAverageTests(unittest.TestCase):
         self.assertIsInstance(avg["top_flags"], dict)
 
 
+class RoutingTagDistributionTests(unittest.TestCase):
+    def test_empty_records_return_no_routes(self):
+        self.assertEqual(self_eval_log.routing_tag_distribution([]), [])
+
+    def test_counts_and_averages_quality_by_route(self):
+        records = [
+            {"route": "Calendar", "response_quality": 0.8},
+            {"routing_tag": "Calendar", "response_quality": 0.6},
+            {"route": "TechAssist", "response_quality": 0.9},
+        ]
+
+        routes = self_eval_log.routing_tag_distribution(records)
+
+        self.assertEqual(routes[0], {
+            "tag": "Calendar",
+            "count": 2,
+            "average_quality": 0.7,
+        })
+        self.assertEqual(routes[1], {
+            "tag": "TechAssist",
+            "count": 1,
+            "average_quality": 0.9,
+        })
+
+    def test_missing_and_unsafe_tags_are_grouped_as_unknown(self):
+        records = [
+            {"response_quality": 0.4},
+            {"route": "", "response_quality": 0.6},
+            {"routing_tag": "\x1b[31mspoof", "response_quality": 0.8},
+        ]
+
+        routes = self_eval_log.routing_tag_distribution(records)
+
+        self.assertEqual(routes, [{
+            "tag": "unknown",
+            "count": 3,
+            "average_quality": 0.6,
+        }])
+
+    def test_distribution_is_bounded_and_preserves_total_count(self):
+        records = [
+            {"route": f"Route{index}", "response_quality": index / 10}
+            for index in range(1, 8)
+        ]
+
+        routes = self_eval_log.routing_tag_distribution(records, limit=3)
+
+        self.assertEqual(len(routes), 3)
+        self.assertEqual(sum(route["count"] for route in routes), len(records))
+        self.assertEqual(routes[-1]["tag"], "other routes")
+
+
 class ScoreReportTests(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -322,6 +374,45 @@ class ScoreReportTests(unittest.TestCase):
         self.assertIn("routing_accuracy", report)
         self.assertIn("response_relevance", report)
         self.assertIn("conciseness", report)
+
+    def test_report_includes_bounded_route_counts_without_raw_content(self):
+        records = [
+            {
+                "query": "PRIVATE QUERY",
+                "response": "PRIVATE RESPONSE",
+                "route": "Calendar",
+                "routing_accuracy": 0.9,
+                "response_relevance": 0.8,
+                "conciseness": 0.7,
+                "response_quality": 0.8,
+            },
+            {
+                "route": "Calendar",
+                "routing_accuracy": 0.7,
+                "response_relevance": 0.6,
+                "conciseness": 0.5,
+                "response_quality": 0.6,
+            },
+            {
+                "route": "",
+                "routing_accuracy": 0.5,
+                "response_relevance": 0.5,
+                "conciseness": 0.5,
+                "response_quality": 0.5,
+            },
+        ]
+        self._log.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+
+        report = self_eval_log.score_report(n=50)
+
+        self.assertIn("Routing tags (last 3 scored responses):", report)
+        self.assertIn("Calendar: 2 responses, avg quality 0.70", report)
+        self.assertIn("unknown: 1 response, avg quality 0.50", report)
+        self.assertNotIn("PRIVATE QUERY", report)
+        self.assertNotIn("PRIVATE RESPONSE", report)
 
     def test_report_shows_weakest_axis(self):
         # Force poor relevance by using error responses
