@@ -50,7 +50,8 @@
       "/history defaults to 10 entries and accepts a bounded count",
       "tests use temporary history data",
       "no model or routing defaults changed"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "gemini-lane-architecture-review",
@@ -95,7 +96,8 @@
       "report separates confirmed defects from recommendations",
       "every material finding cites repository evidence",
       "only GEMINI_ARCHITECTURE_REVIEW.md is modified"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "gemini-lane-prompt-quality-analysis",
@@ -141,7 +143,8 @@
       "report quantifies sample size and scoring limitations",
       "recommendations are proposals only",
       "only GEMINI_PROMPT_ANALYSIS.md is modified"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "gemini-lane-security-review",
@@ -196,7 +199,8 @@
       "all findings include severity and evidence",
       "only approved HIGH-severity fixes are applied",
       "full test suite passes or failures are reported without unrelated fixes"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "gemini-lane-test-coverage-audit",
@@ -256,7 +260,8 @@
       "GEMINI_TEST_GAPS.md maps each test to a concrete gap",
       "exactly ten focused tests are added",
       "no production code is modified"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-brain-ollama-usage-summary-tests",
@@ -303,7 +308,8 @@
       "provider counts and estimated-token fallback are asserted",
       "no real model or network call occurs",
       "focused tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-error-log-rotation-alert",
@@ -363,7 +369,8 @@
       "audit_errors.log growth is bounded",
       "dashboard state reports the threshold breach without exposing log contents",
       "focused tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-eval-trace-score-observe",
@@ -416,7 +423,8 @@
     "postconditions": [
       "summary JSON written",
       "no ratchet or config files modified"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-memory-events-verify",
@@ -463,7 +471,8 @@
     "postconditions": [
       "report lists memory_write and route_decision samples",
       "verdict recorded for both event types"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-usage-token-accounting-verify",
@@ -519,12 +528,13 @@
       "report distinguishes provider counts from estimates",
       "partial-count behavior is verified",
       "no cloud request occurs"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-verify-audit-jsonl",
     "task_type": "code",
-    "description": "Verify audit.jsonl end-to-end: confirm query_received and route_decision log entries appear correctly after commit b4a0fa9. Steps: (1) read audit.jsonl and check for presence of query_received and route_decision event types, (2) if not present, trace through router.py and model_router.py to find why events are not written, (3) fix the wiring if broken, (4) write a regression test. Do NOT add new audit event types \u2014 only verify/fix the two existing ones.",
+    "description": "Verify audit.jsonl end-to-end: confirm query_received and route_decision log entries appear correctly after commit b4a0fa9. Steps: (1) read audit.jsonl and check for presence of query_received and route_decision event types, (2) if not present, trace through router.py and model_router.py to find why events are not written, (3) fix the wiring if broken, (4) write a regression test. Do NOT add new audit event types — only verify/fix the two existing ones.",
     "contract_version": "1.0",
     "task_spec_sha256": "4ab9e78da5f874b94bc2aa4a41d3fb307bbe8ce65cf9d9855ba636516b4a7d0c",
     "inputs": [
@@ -532,21 +542,21 @@
         "name": "audit_log",
         "type": "file_path",
         "required": false,
-        "description": "audit.jsonl \u2014 runtime audit log",
+        "description": "audit.jsonl — runtime audit log",
         "default": "logs/audit.jsonl"
       },
       {
         "name": "router",
         "type": "file_path",
         "required": true,
-        "description": "router.py \u2014 intent routing layer",
+        "description": "router.py — intent routing layer",
         "default": "router.py"
       },
       {
         "name": "model_router",
         "type": "file_path",
         "required": true,
-        "description": "model_router.py \u2014 model selection layer",
+        "description": "model_router.py — model selection layer",
         "default": "model_router.py"
       }
     ],
@@ -586,12 +596,13 @@
       "query_received and route_decision events are verified present (or fix applied and verified)",
       "regression test passes",
       "no new audit event types added"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-audit-wire-run-id-threading",
     "task_type": "code",
-    "description": "Wire run_id threading through operative.py \u2192 execution_engine.py (AGENT_BOARD item 12, R1 prereq). Every audit event written via audit.jsonl needs a run_id field so audit rows can be grouped by session. Specifically: (1) operative.py must generate/accept a run_id at session start, (2) pass it through to execution_engine calls, (3) execution_engine must include run_id in all audit.jsonl entries it writes. Write or update tests to confirm run_id propagates end-to-end.",
+    "description": "Wire run_id threading through operative.py → execution_engine.py (AGENT_BOARD item 12, R1 prereq). Every audit event written via audit.jsonl needs a run_id field so audit rows can be grouped by session. Specifically: (1) operative.py must generate/accept a run_id at session start, (2) pass it through to execution_engine calls, (3) execution_engine must include run_id in all audit.jsonl entries it writes. Write or update tests to confirm run_id propagates end-to-end.",
     "contract_version": "1.0",
     "task_spec_sha256": "cc1516077096bbba5921b790643917dc1d98c7ed1bb25b0282670d6bd5129085",
     "inputs": [
@@ -599,14 +610,14 @@
         "name": "operative",
         "type": "file_path",
         "required": true,
-        "description": "operative.py \u2014 session orchestration layer",
+        "description": "operative.py — session orchestration layer",
         "default": "operative.py"
       },
       {
         "name": "execution_engine",
         "type": "file_path",
         "required": true,
-        "description": "execution_engine.py \u2014 tool execution and audit writes",
+        "description": "execution_engine.py — tool execution and audit writes",
         "default": "execution_engine.py"
       }
     ],
@@ -651,12 +662,13 @@
       "run_id is present in all audit.jsonl entries written by execution_engine",
       "test_run_id_threading passes (or equivalent test)",
       "existing audit tests continue to pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-board-agent-board-items-11-13",
     "task_type": "code",
-    "description": "Resolve AGENT_BOARD items 11 and 13. Item 11: JARVIS_RUN_GOLDEN_CASES=1 in .env causes 8m+ of live model calls every full suite run \u2014 investigate the .env line, propose removal (opt-in per-run), and open an approval request. Item 13: build eval_trace_score.py standalone --trace-score CLI surface (observe-only for \u22652 weeks / \u226550 runs before any ratchet wiring). Commit eval_trace_score.py and update AGENT_BOARD marking items 11 and 13 done.",
+    "description": "Resolve AGENT_BOARD items 11 and 13. Item 11: JARVIS_RUN_GOLDEN_CASES=1 in .env causes 8m+ of live model calls every full suite run — investigate the .env line, propose removal (opt-in per-run), and open an approval request. Item 13: build eval_trace_score.py standalone --trace-score CLI surface (observe-only for ≥2 weeks / ≥50 runs before any ratchet wiring). Commit eval_trace_score.py and update AGENT_BOARD marking items 11 and 13 done.",
     "contract_version": "1.0",
     "task_spec_sha256": "0e6f082ff10a73e369611d94147c889d94cddd196e13ed6afa350a0f8c0b706b",
     "inputs": [
@@ -664,7 +676,7 @@
         "name": "agent_board",
         "type": "file_path",
         "required": true,
-        "description": "AGENT_BOARD.md \u2014 source of truth for item status",
+        "description": "AGENT_BOARD.md — source of truth for item status",
         "default": "AGENT_BOARD.md"
       },
       {
@@ -705,13 +717,14 @@
     "preconditions": [
       "AGENT_BOARD.md is readable",
       "human approval logged before editing .env (item 11)",
-      "eval_trace_score.py does NOT wire ratchet \u2014 observe-only"
+      "eval_trace_score.py does NOT wire ratchet — observe-only"
     ],
     "postconditions": [
       "eval_trace_score.py --trace-score runs without error",
       "AGENT_BOARD items 11 and 13 marked done",
       ".env change for item 11 only applied after approval"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-board-run-baseline-lift-freeze",
@@ -758,12 +771,13 @@
       "test run completes and results are recorded in AGENT_BOARD",
       "freeze status updated: LIFTED if no new regressions, EXTENDED with reasons if regressions found",
       "any failures are classified (known flake vs new regression)"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-board-session-orchestrator-runbook",
     "task_type": "file_op",
-    "description": "Wire session_orchestrator.py into dev workflow \u2014 document in ORCHESTRATOR_RUNBOOK.md",
+    "description": "Wire session_orchestrator.py into dev workflow — document in ORCHESTRATOR_RUNBOOK.md",
     "contract_version": "1.0",
     "task_spec_sha256": "a6fa6b3272af0ed6d0099e7525fe385f65f4b81e74df38a584e6b5fb535caf3a",
     "inputs": [
@@ -802,7 +816,8 @@
     "postconditions": [
       "ORCHESTRATOR_RUNBOOK.md documents session_orchestrator.py commands",
       "no code files modified"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-local-llm-cross-session-memory",
@@ -856,7 +871,8 @@
       "shared memory entries readable by a second session",
       "vault schema rules preserved",
       "tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-local-llm-ornith-coder-integration",
@@ -919,12 +935,13 @@
       "code tasks select the approved local Ornith identifier",
       "fallback remains local-first",
       "integration test passes against local Ollama"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-local-llm-routing-verify",
     "task_type": "analysis",
-    "description": "Verify devstral/qwen3:30b routing in production \u2014 confirm specialist model wins are stable under load",
+    "description": "Verify devstral/qwen3:30b routing in production — confirm specialist model wins are stable under load",
     "contract_version": "1.0",
     "task_spec_sha256": "63d2a09172182c42963ed59f5064d6591ea0cf607393dbac673e5a25683c1693",
     "inputs": [
@@ -973,7 +990,8 @@
     "postconditions": [
       "routing report written",
       "no model defaults changed in config.py"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-self-eval-diagnose-agent-board",
@@ -1034,7 +1052,8 @@
       "existing board items are preserved",
       "duplicate findings are not added",
       "new items include evidence, severity, and an owner"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-self-eval-reflection-daily-briefing",
@@ -1088,7 +1107,8 @@
       "briefing shows a concise latest delta when available",
       "no reflection run is triggered at startup",
       "focused tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-self-eval-routing-tag-score-report",
@@ -1142,7 +1162,8 @@
       "/score reports bounded route counts and averages",
       "empty logs remain non-fatal",
       "focused tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   },
   {
     "task_id": "jarvis-self-eval-score-trace-briefing",
@@ -1202,6 +1223,7 @@
       "/score and briefing expose the same bounded trace summary",
       "no automatic gate or threshold is enabled",
       "focused tests pass"
-    ]
+    ],
+    "gate_pre_commit": true
   }
 ]

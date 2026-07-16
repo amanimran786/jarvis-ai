@@ -535,6 +535,7 @@ class TaskContract:
     requires_capabilities: list[Capability] = field(default_factory=list)
     reversible: bool = True
     requires_approval: bool = False  # True = must have human sign-off
+    gate_pre_commit: bool = False    # True = run harness/pre_commit_check.py before commit
 
     # Execution
     entry_point: str = ""           # script or function to call
@@ -594,6 +595,7 @@ class TaskContract:
             requires_capabilities=capabilities,
             reversible=bool(data.get("reversible", True)),
             requires_approval=bool(data.get("requires_approval", False)),
+            gate_pre_commit=bool(data.get("gate_pre_commit", False)),
             entry_point=str(data.get("entry_point", "")),
             working_directory=str(
                 data.get("working_directory", "/Users/truthseeker/jarvis-ai")
@@ -628,6 +630,12 @@ def validate_contract(contract: TaskContract) -> tuple[bool, list[str]]:
         errors.append(f"side_effects contains an unknown value: {exc}")
     if SideEffect.WRITES_FILES in effects and not contract.outputs:
         errors.append("side_effects includes writes_files but outputs is empty")
+    if SideEffect.WRITES_FILES in effects and not contract.gate_pre_commit:
+        errors.append(
+            "side_effects includes writes_files but gate_pre_commit is False — "
+            "set gate_pre_commit=true and run 'python -m harness.pre_commit_check' "
+            "on changed .py files before committing"
+        )
     if contract.requires_approval and not contract.preconditions:
         errors.append("requires_approval=True but preconditions is empty")
     return (not errors, errors)
