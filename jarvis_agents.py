@@ -822,6 +822,15 @@ def _synthesise(raw: str, system: str = _SYNTH_SYSTEM) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+def _trace_score_summary(last_n: int = 50) -> str:
+    try:
+        from eval_trace_score import format_trace_score_summary
+        return format_trace_score_summary(last_n=last_n)
+    except Exception:
+        logging.debug("[JarvisAgents] trace score summary unavailable", exc_info=True)
+        return ""
+
+
 def run_briefing() -> str:
     """Full Iron Man morning briefing using a staged AgentGraph.
 
@@ -839,9 +848,14 @@ def run_briefing() -> str:
     )
     results = graph.run()
     body = _merge_results(results)
+    trace_summary = _trace_score_summary()
     if not body:
-        return "All clear. Nothing on the calendar or task list that needs attention."
-    return _synthesise(body)
+        briefing = "All clear. Nothing on the calendar or task list that needs attention."
+    else:
+        briefing = _synthesise(body)
+    if trace_summary:
+        return f"{briefing}\n\n{trace_summary}"
+    return briefing
 
 
 def run_parallel(agents: list[str], context: str = "") -> str:

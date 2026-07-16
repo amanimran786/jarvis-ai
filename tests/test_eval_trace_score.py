@@ -1,5 +1,8 @@
+import json
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import eval_trace_score as score
 
@@ -61,8 +64,59 @@ class EvalTraceScoreTests(unittest.TestCase):
         ):
             self.assertEqual(score.format_trace_score_summary(last_n=50), "")
 
+    def test_aggregate_last_n_uses_latest_trace_activity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            trace_dir = Path(tmpdir)
+            (trace_dir / "20260101_000000_z-old.json").write_text(
+                json.dumps({
+                    "run_id": "z-old",
+                    "step_number": 1,
+                    "tool": "search",
+                    "ok": True,
+                    "attempts": 1,
+                    "elapsed_ms": 5,
+                }),
+                encoding="utf-8",
+            )
+            (trace_dir / "20260102_000000_a-latest.json").write_text(
+                json.dumps({
+                    "run_id": "a-latest",
+                    "step_number": 1,
+                    "tool": "file",
+                    "ok": True,
+                    "attempts": 1,
+                    "elapsed_ms": 7,
+                }),
+                encoding="utf-8",
+            )
+
+            with patch.object(score, "TRACE_DIR", trace_dir):
+                report = score.aggregate_trace_score(last_n=1)
+
+        self.assertEqual(list(report["runs"]), ["a-latest"])
+
+    def test_aggregate_reads_each_trace_file_once(self):
+        paths = []
+        for index, run_id in enumerate(("run-c", "run-a", "run-b"), 1):
+            path = MagicMock()
+            path.read_text.return_value = json.dumps({
+                "run_id": run_id,
+                "step_number": 1,
+                "tool": "search",
+                "ok": True,
+                "attempts": 1,
+                "elapsed_ms": index,
+            })
+            paths.append(path)
+
+        with patch.object(score, "_iter_trace_files", return_value=paths):
+            score.aggregate_trace_score(last_n=2)
+
+        self.assertEqual(sum(path.read_text.call_count for path in paths), len(paths))
+
     def test_score_and_briefing_use_the_same_trace_summary(self):
         import briefing
+        import jarvis_agents
         from harness import self_eval_log
 
         trace_summary = (
@@ -89,6 +143,17 @@ class EvalTraceScoreTests(unittest.TestCase):
 
         self.assertIn(trace_summary, score_output)
         self.assertIn(f"**Agent execution:** {trace_summary}", briefing_output)
+
+        graph = MagicMock()
+        graph.stage.return_value = graph
+        graph.run.return_value = []
+        with patch.object(score, "format_trace_score_summary", return_value=trace_summary), \
+             patch.object(jarvis_agents, "AgentGraph", return_value=graph), \
+             patch.object(jarvis_agents, "_merge_results", return_value="Raw briefing data."), \
+             patch.object(jarvis_agents, "_synthesise", return_value="Spoken briefing."):
+            packaged_output = jarvis_agents.run_briefing()
+
+        self.assertEqual(packaged_output, f"Spoken briefing.\n\n{trace_summary}")
 
 
 if __name__ == "__main__":
