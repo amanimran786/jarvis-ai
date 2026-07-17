@@ -1225,5 +1225,74 @@
       "focused tests pass"
     ],
     "gate_pre_commit": true
+  },
+  {
+    "task_id": "jarvis-local-planner-thinking-fix",
+    "task_type": "code",
+    "description": "Make qwen3:30b-a3b local planning production-ready by disabling thinking output, bounding context, and making planner tests mode-hermetic.",
+    "contract_version": "1.0",
+    "task_spec_sha256": "07b86f1070357c639e0294ca1d631e340267889424bffbee38e616d4564110f4",
+    "inputs": [
+      {
+        "name": "routing_report",
+        "type": "file_path",
+        "required": true,
+        "description": "Live routing evidence and the planner failure root cause",
+        "default": "logs/LEGACY-088c2de52b42_report.md"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "planner_runtime",
+        "type": "file",
+        "path_template": "task_planner.py",
+        "description": "Bounded Qwen planning that emits JSON in message.content"
+      },
+      {
+        "name": "planner_tests",
+        "type": "file",
+        "path_template": "tests/test_task_planner.py",
+        "description": "Thinking and context-option regression coverage"
+      },
+      {
+        "name": "mode_tests",
+        "type": "file",
+        "path_template": "tests/test_agent_tooling.py",
+        "description": "Planner sanitizer behavior isolated from operator mode"
+      },
+      {
+        "name": "routing_report_update",
+        "type": "file",
+        "path_template": "logs/LEGACY-088c2de52b42_report.md",
+        "description": "Post-fix live Qwen verification results"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_task_planner.py tests/test_agent_tooling.py tests/test_agent_local_routing.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 6000,
+    "max_duration_seconds": 1800,
+    "preconditions": [
+      "qwen3:30b-a3b is installed in Ollama",
+      "LOCAL_REASONING_MODEL resolves to qwen3:30b-a3b",
+      "tracked model defaults remain unchanged"
+    ],
+    "postconditions": [
+      "Qwen planning emits parseable JSON in message.content",
+      "planner uses bounded model-specific context options",
+      "planner tests pass in auto and open-source modes",
+      "three live local planner probes succeed without cloud"
+    ],
+    "gate_pre_commit": true
   }
 ]
