@@ -16,9 +16,10 @@ schema, caps context and generation size, and validates model output before buil
 executable steps.
 
 The broader agentic capability remains not ready because a cold switch from Qwen to
-GLM can exceed the live router's deadlines and autonomous execution still needs the
-run-level controls documented below. Those are separate follow-ups; neither is a
-planner-generation correctness failure.
+GLM can exceed the live router's deadlines and the router still needs a user-facing
+approval record that supplies trusted execution capabilities. The executor controls
+themselves are complete below; neither remaining issue is a planner-generation
+correctness failure.
 
 ## Qwen planner follow-up verification
 
@@ -54,21 +55,64 @@ context and roughly 50 GB resident.
 
 ## Autonomous execution safety follow-up
 
-The Qwen plan generator is ready, but `operative.run_task()` is not yet ready for
-unattended side-effecting execution. Final read-only security review identified
-three cross-module blockers outside this planner contract's allowed paths:
+**EXECUTION SAFETY CORE: READY FOR A TRUSTED CALLER**
 
-1. `ToolSpec.side_effects` is descriptive metadata; generic terminal, file, Git,
-   note, specialist, and code-workbench steps do not pass through a uniform approval
-   or intent-bound capability check before execution.
-2. Every failed corrective step can append three more steps to the list being
-   iterated, with no run-level recovery, total-step, or elapsed-time budget.
-3. Tool argument validation coerces types but does not reject unknown fields or
-   enforce numeric ranges such as `code_task.max_iterations`.
+The follow-up contract `jarvis-agent-execution-safety` closes the planner-to-tool
+privilege gap. Task text cannot authorize itself; a caller must pass a separate,
+allowlisted capability grant. The current router passes no grant and therefore
+fails closed. Wiring a user-confirmed approval record into that caller boundary is
+the next isolated product contract, not an implicit inference from task wording.
 
-These controls require coordinated changes in `operative.py`, `execution_engine.py`,
-`tool_registry.py`, and their tests. They must be completed as the next isolated
-roadmap contract before Jarvis is described as safe for unattended task execution.
+Implemented controls:
+
+1. Every normalized tool action is checked against an immutable run-level grant.
+   File and personal-data reads, network access, Git writes, malware submission,
+   code work, and generic shell authority are distinct capabilities. Recovery steps
+   execute under the original grant and cannot add capabilities.
+2. Runs have clamped total-step, recovery-attempt, and elapsed-time ceilings.
+   Tool dispatch requires enough remaining budget for the registry timeout, retries
+   recheck the deadline, recovery counters are persisted before replanning, and a
+   late-returning tool makes the overall run fail with `time_limit`.
+3. Every step persists an in-flight intent before dispatch. A missing result
+   checkpoint leaves the intent intact and disables automatic replay. Resume uses
+   both in-process and cross-process file locks, skips every previously attempted
+   step, and rejects uncertain in-flight work.
+4. Tool schemas reject unknown keys, enforce types, choices, string limits, numeric
+   bounds, and alias-aware required-field groups. The code workbench is capped at
+   two iterations inside the default run budget.
+5. Sensitive local results are tainted transitively, redacted from traces and step
+   checkpoints, blocked from outbound tools and cloud summaries, and treated as
+   unavailable after resume rather than as placeholder data.
+6. Direct page fetches reject local/private/reserved targets, pin connections to
+   validated public IPs, revalidate redirects, reject malformed ports, and share one
+   20-second fetch deadline. Search auto-fetch is disabled.
+
+Safety-preserving availability decisions:
+
+- Generic terminal execution is disabled in autonomous plans because its current
+  string-only return contract cannot reliably distinguish nonzero exit status.
+- Deep research is disabled in autonomous plans until `research.py` uses the pinned
+  public-network transport.
+- Specialist delegation is disabled in autonomous plans until child agents inherit
+  the parent capability scope and deadline.
+- The bounded local code workbench remains available when a trusted caller grants
+  local read/write, shell, and unrestricted-shell capabilities.
+
+Verification:
+
+```text
+python -m pytest tests/test_agent_execution_safety.py tests/test_agent_tooling.py \
+  tests/test_execution_engine_run_id.py tests/test_router_operative_stream.py \
+  tests/test_parallel_agent_execution.py -q
+```
+
+Result: 72 passed, 0 failed. Two Python deprecation warnings came from
+`speech_recognition` imports in the router stream test.
+
+Mandatory full-suite gate: 3,512 passed, 3 skipped, 34 subtests passed, 0 failed
+in 649.40 seconds. The four warnings were the same speech-recognition deprecations,
+an optional Pydantic mock-type warning, and the existing SciPy/NumPy compatibility
+warning.
 
 ## Environment
 

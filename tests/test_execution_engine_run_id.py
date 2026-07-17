@@ -19,7 +19,8 @@ class ExecutionRunIdTraceTests(unittest.TestCase):
                 params={"query": "jarvis"},
             )
             with patch.object(execution_engine, "TRACE_DIR", trace_dir), \
-                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")):
+                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")), \
+                 execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
                 ok, result = execution_engine.execute_step(step, {}, run_id="run_test")
 
             self.assertTrue(ok)
