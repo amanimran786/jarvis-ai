@@ -1294,5 +1294,109 @@
       "three live local planner probes succeed without cloud"
     ],
     "gate_pre_commit": true
+  },
+  {
+    "task_id": "jarvis-agent-execution-safety",
+    "task_type": "code",
+    "description": "Add intent-bound side-effect authorization, finite recovery budgets, and bounded tool arguments to autonomous task execution.",
+    "contract_version": "1.0",
+    "task_spec_sha256": "05493ef535cadc9e126dc4ae562f822a318ef5827141e169d040aaccc81081d9",
+    "inputs": [
+      {
+        "name": "planner_security_findings",
+        "type": "file_path",
+        "required": true,
+        "description": "Verified execution risks discovered during planner review",
+        "default": "logs/LEGACY-088c2de52b42_report.md"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "runtime_limits",
+        "type": "file",
+        "path_template": "config.py",
+        "description": "Source-of-truth defaults for operative execution budgets"
+      },
+      {
+        "name": "operative_safety",
+        "type": "file",
+        "path_template": "operative.py",
+        "description": "Intent-bound capabilities and finite run/recovery budgets"
+      },
+      {
+        "name": "execution_authorization",
+        "type": "file",
+        "path_template": "execution_engine.py",
+        "description": "Fail-closed capability enforcement before side effects"
+      },
+      {
+        "name": "tool_argument_bounds",
+        "type": "file",
+        "path_template": "tool_registry.py",
+        "description": "Unknown-key rejection and declared numeric bounds"
+      },
+      {
+        "name": "execution_safety_tests",
+        "type": "file",
+        "path_template": "tests/test_agent_execution_safety.py",
+        "description": "Authorization, recovery-budget, and parameter-bound coverage"
+      },
+      {
+        "name": "agent_tooling_tests",
+        "type": "file",
+        "path_template": "tests/test_agent_tooling.py",
+        "description": "Existing execution contract regression coverage"
+      },
+      {
+        "name": "run_id_tests",
+        "type": "file",
+        "path_template": "tests/test_execution_engine_run_id.py",
+        "description": "Execution call-signature regression coverage"
+      },
+      {
+        "name": "streaming_tests",
+        "type": "file",
+        "path_template": "tests/test_router_operative_stream.py",
+        "description": "Operative progress regression coverage"
+      },
+      {
+        "name": "parallel_execution_tests",
+        "type": "file",
+        "path_template": "tests/test_parallel_agent_execution.py",
+        "description": "Concurrent task runtime regression coverage"
+      },
+      {
+        "name": "security_report_update",
+        "type": "file",
+        "path_template": "logs/LEGACY-088c2de52b42_report.md",
+        "description": "Post-fix autonomous execution safety evidence"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_agent_execution_safety.py tests/test_agent_tooling.py tests/test_execution_engine_run_id.py tests/test_router_operative_stream.py tests/test_parallel_agent_execution.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 12000,
+    "max_duration_seconds": 3600,
+    "preconditions": [
+      "the original user task is the only source of side-effect capabilities",
+      "recovery plans reuse the original immutable capability set",
+      "read-only execution remains available without authorization"
+    ],
+    "postconditions": [
+      "unauthorized side-effecting steps fail before tool dispatch",
+      "operative execution terminates at deterministic step, recovery, and elapsed-time limits",
+      "unknown tool arguments and out-of-range numeric values are rejected",
+      "focused and full regression suites pass"
+    ],
+    "gate_pre_commit": true
   }
 ]
