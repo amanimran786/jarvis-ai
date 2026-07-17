@@ -5,15 +5,17 @@ from unittest.mock import patch
 
 from task_planner import (
     TaskStep,
-    _extract_json_steps,
     _build_steps,
+    _extract_json_steps,
+    _local_planner_options,
+    _plan_task_local,
     replan_after_failure,
 )
 
 
-def _ollama_response(content: str) -> object:
+def _ollama_response(content: str, thinking: str = "") -> object:
     """Minimal mock that looks like ollama.Client.chat() return value."""
-    return SimpleNamespace(message=SimpleNamespace(content=content))
+    return SimpleNamespace(message=SimpleNamespace(content=content, thinking=thinking))
 
 
 # ── _extract_json_steps ───────────────────────────────────────────────────────
@@ -67,6 +69,62 @@ class BuildStepsTests(unittest.TestCase):
         self.assertEqual(steps[0].number, 1)
         self.assertEqual(steps[1].number, 2)
 
+    def test_caps_untrusted_plan_at_requested_limit(self):
+        data = [
+            {"number": index, "description": "step", "tool": "chat", "params": {}}
+            for index in range(1, 6)
+        ]
+        steps = _build_steps(data, max_steps=3)
+        self.assertEqual(len(steps), 3)
+
+    def test_rejects_non_object_params(self):
+        data = [{"number": 1, "description": "step", "tool": "chat", "params": "bad"}]
+        with self.assertRaisesRegex(ValueError, "params must be an object"):
+            _build_steps(data)
+
+
+# ── _plan_task_local ──────────────────────────────────────────────────────────
+
+class LocalPlannerRequestTests(unittest.TestCase):
+    def test_unknown_fallback_model_uses_conservative_context(self):
+        with patch("brains.brain_ollama._ollama_options_for_model", return_value={}):
+            options = _local_planner_options("unknown-local-model")
+
+        self.assertEqual(options["num_ctx"], 8_192)
+
+    def test_rejects_non_positive_model_limits_before_request(self):
+        with patch(
+            "brains.brain_ollama._ollama_options_for_model",
+            return_value={"num_ctx": 0, "num_predict": 1_024},
+        ):
+            with self.assertRaisesRegex(ValueError, "must be positive"):
+                _local_planner_options("misconfigured-model")
+
+    def test_disables_thinking_and_bounds_generation(self):
+        raw = '{"steps": [{"number": 1, "description": "plan", "tool": "chat", "params": {}}]}'
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw, thinking="ignored")) as chat, \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"), \
+             patch("brains.brain_ollama._ollama_options_for_model", return_value={"num_ctx": 131_072}):
+            steps = _plan_task_local("do the task")
+
+        request = chat.call_args.kwargs
+        self.assertEqual(len(steps), 1)
+        self.assertIs(request["think"], False)
+        self.assertEqual(request["options"]["num_ctx"], 32_768)
+        self.assertEqual(request["options"]["num_predict"], 1_024)
+        self.assertEqual(request["options"]["temperature"], 0)
+        self.assertEqual(request["format"]["properties"]["steps"]["maxItems"], 12)
+
+    def test_caps_untrusted_task_text_before_request(self):
+        raw = '{"steps": [{"number": 1, "description": "plan", "tool": "chat", "params": {}}]}'
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)) as chat, \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"), \
+             patch("brains.brain_ollama._ollama_options_for_model", return_value={"num_ctx": 32_768}):
+            _plan_task_local("x" * 20_000)
+
+        prompt = chat.call_args.kwargs["messages"][-1]["content"]
+        self.assertEqual(len(prompt), len("Plan this task: ") + 12_000)
+
 
 # ── replan_after_failure ──────────────────────────────────────────────────────
 
@@ -87,13 +145,19 @@ class ReplanAfterFailureTests(unittest.TestCase):
 
     def test_returns_corrective_steps_on_success(self):
         raw = '{"steps": [{"number": 1, "description": "retry write", "tool": "chat", "params": {}}]}'
-        with patch("ollama.Client.chat", return_value=_ollama_response(raw)), \
-             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"):
+        with patch("ollama.Client.chat", return_value=_ollama_response(raw)) as chat, \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"), \
+             patch("brains.brain_ollama._ollama_options_for_model", return_value={"num_ctx": 131_072}):
             result = replan_after_failure(
                 "do the task", self._completed(), self._failed_step(), "Permission denied"
             )
+        request = chat.call_args.kwargs
         self.assertIsNotNone(result)
         self.assertEqual(len(result), 1)
+        self.assertIs(request["think"], False)
+        self.assertEqual(request["options"]["num_ctx"], 32_768)
+        self.assertEqual(request["options"]["num_predict"], 1_024)
+        self.assertEqual(request["format"]["properties"]["steps"]["maxItems"], 3)
 
     def test_corrective_step_numbers_offset_after_failed(self):
         raw = '{"steps": [{"number": 1, "description": "fix", "tool": "chat", "params": {}}]}'
