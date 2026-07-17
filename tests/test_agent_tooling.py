@@ -91,6 +91,17 @@ class ExecutionEngineContractTests(unittest.TestCase):
 
 
 class TaskPlannerSanitizerTests(unittest.TestCase):
+    def test_cloud_plan_is_capped_by_shared_validator(self):
+        response = json.dumps([
+            {"number": index, "description": "step", "tool": "chat", "params": {}}
+            for index in range(1, 15)
+        ])
+        with patch("task_planner.ask_claude", return_value=response), \
+             patch("task_planner.DEFAULT_MODE", "cloud"):
+            steps = task_planner.plan_task("test plan")
+
+        self.assertEqual(len(steps), 12)
+
     def test_plan_task_downgrades_unknown_tools_to_chat(self):
         response = json.dumps(
             [
@@ -100,10 +111,25 @@ class TaskPlannerSanitizerTests(unittest.TestCase):
         )
         # Force cloud path: local planner raises so plan_task falls through to ask_claude
         with patch("task_planner._plan_task_local", side_effect=RuntimeError("mock local failure")), \
-             patch("task_planner.ask_claude", return_value=response):
+             patch("task_planner.ask_claude", return_value=response), \
+             patch("task_planner.DEFAULT_MODE", "auto"):
             steps = task_planner.plan_task("test plan")
         self.assertEqual(steps[0].tool, "chat")
         self.assertEqual(steps[1].tool, "search")
+
+    def test_open_source_mode_does_not_fall_back_to_cloud(self):
+        with patch("task_planner._plan_task_local", side_effect=RuntimeError("mock local failure")), \
+             patch("task_planner.ask_claude") as ask_cloud, \
+             patch("task_planner.DEFAULT_MODE", "open-source"):
+            steps = task_planner.plan_task("test plan")
+
+        self.assertEqual(steps, [task_planner.TaskStep(
+            number=1,
+            description="Execute: test plan",
+            tool="chat",
+            params={"prompt": "test plan"},
+        )])
+        ask_cloud.assert_not_called()
 
 
 if __name__ == "__main__":
