@@ -100,6 +100,7 @@ from harness.repl_history import history_table, parse_history_limit
 
 
 _CONSOLE_STATE = {"effort": "high", "pending_shell": ""}
+_MAX_HISTORY_TURNS = 100
 _OWNS_DAEMON = False
 _TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
@@ -835,6 +836,12 @@ def _print_history(args: str = "", *, console=None) -> int:
         limit = parse_history_limit(args)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if limit > _MAX_HISTORY_TURNS:
+        print(
+            f"Error: history limit must be at most {_MAX_HISTORY_TURNS}",
+            file=sys.stderr,
+        )
         return 1
     target = console or _RICH_CONSOLE or Console()
     target.print(history_table(limit=limit))
