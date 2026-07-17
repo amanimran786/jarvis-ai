@@ -49,7 +49,8 @@ class ExecutionEngineContractTests(unittest.TestCase):
             trace_dir = Path(tmp)
             step = task_planner.TaskStep(number=1, description="search web", tool="search", params={"query": "jarvis"})
             with patch.object(execution_engine, "TRACE_DIR", trace_dir), \
-                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")):
+                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")), \
+                 execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
                 ok, result = execution_engine.execute_step(step, {})
             self.assertTrue(ok)
             self.assertEqual(result, "search output")
@@ -69,7 +70,8 @@ class ExecutionEngineContractTests(unittest.TestCase):
                 return responses.pop(0)
 
             with patch.object(execution_engine, "TRACE_DIR", trace_dir), \
-                 patch("execution_engine._execute_tool_call", side_effect=side_effect):
+                 patch("execution_engine._execute_tool_call", side_effect=side_effect), \
+                 execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
                 ok, result = execution_engine.execute_step(step, {})
             self.assertTrue(ok)
             self.assertEqual(result, "ok result")

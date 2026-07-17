@@ -290,6 +290,17 @@ PROVIDER_PRIORITY_OPUS = _env_csv(
 DEFAULT_MODE = os.getenv("DEFAULT_MODE", "auto").strip().lower()
 MAX_CONVERSATION_TURNS = 8
 
+# Autonomous task execution budgets. These are hard safety ceilings, not targets.
+OPERATIVE_MAX_STEPS = max(1, min(_env_int("JARVIS_OPERATIVE_MAX_STEPS", 24), 100))
+OPERATIVE_MAX_RECOVERY_ATTEMPTS = max(
+    0,
+    min(_env_int("JARVIS_OPERATIVE_MAX_RECOVERY_ATTEMPTS", 3), 20),
+)
+OPERATIVE_TIMEOUT_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_TIMEOUT_SECONDS", 900), 3_600),
+)
+
 # Sliding window for active conversation history (user+assistant turn pairs).
 # conversation_context keeps the last N turns verbatim and compacts older
 # turns into a short summary before the next prompt is built.
