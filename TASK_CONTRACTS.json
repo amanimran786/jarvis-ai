@@ -1398,5 +1398,130 @@
       "focused and full regression suites pass"
     ],
     "gate_pre_commit": true
+  },
+  {
+    "task_id": "jarvis-agent-approval-bridge",
+    "task_type": "code",
+    "description": "Connect autonomous task planning to a durable, digest-bound user approval flow before any privileged execution.",
+    "contract_version": "1.0",
+    "task_spec_sha256": "7a1e5161e0efb65dba99f490024fe6679e753f8a88c37c62c414fde406a8c9bf",
+    "inputs": [
+      {
+        "name": "execution_safety_runtime",
+        "type": "file_path",
+        "required": true,
+        "description": "Verified capability enforcement and bounded operative runtime",
+        "default": "operative.py"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "approval_config",
+        "type": "file",
+        "path_template": "config.py",
+        "description": "Source-of-truth expiry and approval-flow limits"
+      },
+      {
+        "name": "approval_manifest",
+        "type": "file",
+        "path_template": "operative_approval.py",
+        "description": "Immutable execution manifests, canonical digests, resource envelopes, and typed grants"
+      },
+      {
+        "name": "approval_persistence",
+        "type": "file",
+        "path_template": "task_persistence.py",
+        "description": "Atomic proposal approval, cancellation, expiry, and one-time consumption"
+      },
+      {
+        "name": "prepared_execution",
+        "type": "file",
+        "path_template": "operative.py",
+        "description": "Plan-once preparation and digest-verified execution without replanning"
+      },
+      {
+        "name": "authorization_runtime",
+        "type": "file",
+        "path_template": "execution_engine.py",
+        "description": "Capability derivation helpers with no task-text authorization syntax"
+      },
+      {
+        "name": "resource_policy",
+        "type": "file",
+        "path_template": "safety_permissions.py",
+        "description": "Exact path, network origin, recipient, and content-scope enforcement"
+      },
+      {
+        "name": "router_approval_gate",
+        "type": "file",
+        "path_template": "router.py",
+        "description": "Unified explicit approval gate for command and classified operative routes"
+      },
+      {
+        "name": "api_context_binding",
+        "type": "file",
+        "path_template": "api.py",
+        "description": "Session and source context propagation into the approval gate"
+      },
+      {
+        "name": "approval_flow_tests",
+        "type": "file",
+        "path_template": "tests/test_operative_approval_flow.py",
+        "description": "Digest, expiry, session, cancellation, concurrency, and routing coverage"
+      },
+      {
+        "name": "task_command_tests",
+        "type": "file",
+        "path_template": "tests/test_task_command.py",
+        "description": "Slash-task approval interaction regression coverage"
+      },
+      {
+        "name": "streaming_tests",
+        "type": "file",
+        "path_template": "tests/test_router_operative_stream.py",
+        "description": "Classified operative approval streaming coverage"
+      },
+      {
+        "name": "execution_safety_tests",
+        "type": "file",
+        "path_template": "tests/test_agent_execution_safety.py",
+        "description": "No text-derived authorization and recovery reapproval regressions"
+      },
+      {
+        "name": "security_report_update",
+        "type": "file",
+        "path_template": "logs/LEGACY-088c2de52b42_report.md",
+        "description": "Post-fix product reachability and approval safety evidence"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_operative_approval_flow.py tests/test_task_command.py tests/test_router_operative_stream.py tests/test_agent_execution_safety.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 14000,
+    "max_duration_seconds": 4200,
+    "preconditions": [
+      "the execution-safety contract is independently verified",
+      "task text cannot grant capabilities",
+      "the router currently passes no trusted side-effect capabilities"
+    ],
+    "postconditions": [
+      "side-effecting plans require an explicit approval ID bound to task, normalized plan, capabilities, exact resources, budgets, provider policy, principal, session, and expiry",
+      "approved execution atomically consumes one grant and executes the stored plan without replanning",
+      "generic confirmation text and embedded allow directives grant no authority",
+      "any task, plan, parameter, capability, resource, budget, or provider-policy mutation invalidates approval",
+      "recovery outside the approved manifest requires fresh approval",
+      "unrestricted shell, code-task, delegation, wildcard resources, and dynamic sensitive resource placeholders remain blocked",
+      "both operative router entry points share the same gate and focused plus full suites pass"
+    ],
+    "gate_pre_commit": true
   }
 ]
