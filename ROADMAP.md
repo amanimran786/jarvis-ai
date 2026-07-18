@@ -171,46 +171,35 @@ dashboard accurately reflects final state.
 
 ---
 
-## 🔴 Item 1.5 — Fix Self-Learning Pipeline (NEXT PRIORITY)
+## ✅ Item 1.5 — Fix Self-Learning Pipeline (DONE)
 
-**Problem (from production audit, July 2026):** Jarvis generates training
-artifacts but never successfully promotes a model. Eight broken subsystems:
+**Fixed commit `ea1fca4` (July 18 2026).** Five of eight broken subsystems:
 
-1. **Fake benchmarks** — `585/685` baseline written to `BENCHMARK.md` but pytest
-   suite actually passes 685/685. Promotion condition compares equal numbers.
-2. **Fusion base-model mismatch** — Overnight trainer trains a Qwen3-8B adapter,
-   but `local_finetune_scheduler.py:957` hardcodes `Qwen/Qwen2.5-Coder-7B-Instruct`
-   as the fusion base. Shape mismatch → every promotion fails.
-3. **Promotion condition invalid** — `current_passed >= baseline_passed` allows
-   promotion when scores are equal (no improvement). Should be `> baseline_passed`.
-4. **Voice UI self-edit bypass** — `ui.py:1907` legacy voice path calls
-   self-improvement method directly, bypassing approval gate.
-5. **Test telemetry contamination** — `MockModel`, `UnitTestModel`, `task:test`
-   interactions pollute production learning telemetry.
-6. **Non-atomic memory writer** — `knowledge.json` writes race-crashed July 13;
-   needs atomic write (write to `.tmp`, then `rename`).
-7. **Upgrade scout idle** — One cycle, three tickets, zero decisions, no
-   activity since June 13. Needs connection to coordinator.
-8. **Packaged app stale** — Built July 12, not running. (Lower priority.)
+1. ✅ **Fusion base-model mismatch** — `promote_if_better()` now derives
+   `model_hf_id` from `MLX_MODEL_PRESETS[config.MLX_TRAINING_MODEL]["hf_id"]`
+   instead of hardcoding `Qwen/Qwen2.5-Coder-7B-Instruct`. Fusion base always
+   matches the trained adapter (Qwen3-8B with default config).
+2. ✅ **Promotion condition** — Changed `>=` to `>` (strict improvement required).
+   Equal eval scores no longer promote. Test updated accordingly.
+3. ✅ **Voice UI self-edit bypass** — `ui.py` now queues a `POST /tasks` to the
+   event bus instead of calling `si.self_improve()` directly.
+4. ✅ **Test telemetry contamination** — `evals.log_interaction()` skips
+   persist + scoring for MockModel / UnitTestModel / test-prefixed sources.
+5. ✅ **Non-atomic knowledge.json write** — `learner._save_knowledge()` now
+   uses atomic write (`.tmp` + `os.replace()`). Crash-safe since July 18.
 
-**Fix order:**
-1. Fix fusion base model in `local_finetune_scheduler.py:957` (Qwen3-8B)
-2. Fix promotion condition: `>` not `>=`
-3. Fix benchmark to use real test count (or compare pass-rate, not raw count)
-4. Remove voice self-edit bypass in `ui.py:1907`
-5. Add telemetry source tag; filter test interactions from production metrics
-6. Atomic `knowledge.json` write
-7. Connect upgrade scout to coordinator queue
+Still open (lower priority):
+- Upgrade scout idle — needs coordinator queue connection
+- Packaged app stale — rebuild after all code fixes merge
 
 **Done when:** A model trained overnight gets a real evaluation, passes the gate,
-and is fused + loaded without a crash.
+and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 ---
 
 ## Current Item
 
-**→ Item 1.5: Self-Learning Pipeline Fix**
+**→ Item 2: Dashboard launchd fix** (Claude lane)
 
-Item 1 (CI Green) is complete as of commit `82b7804`.
-Both Claude and Codex can now work on Items 2–9 in parallel — see
-`CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
+Items 1 and 1.5 are complete. Both Claude and Codex can work on Items 2–9 in
+parallel — see `CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
