@@ -161,6 +161,10 @@ def _decompose_via_llm(goal: str, memory_ctx: str) -> list[AgentTask]:
             priority=5,
         )]
 
+    if not isinstance(raw, str):
+        log.warning("decompose LLM call returned non-string %r — treating as empty", type(raw))
+        raw = ""
+
     # Parse — strip think tags first
     import re
     raw = re.sub(r"<think>.*?</think>|<thinking>.*?</thinking>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
