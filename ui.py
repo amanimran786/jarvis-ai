@@ -1905,23 +1905,32 @@ class VoiceWorker(QThread):
                 exchanges.append(f"Jarvis: {response}")
 
                 if model == "Self-Improve" and "analyzing" in response.lower():
+                    # Route through the approval-gated event bus instead of
+                    # calling si.self_improve() directly.  Direct calls bypass
+                    # the security review and approval workflow.
                     target = re.sub(
                         r"(improve|upgrade|make yourself better at|fix|update|rewrite|enhance)\s*(your|yourself)?\s*",
                         "", user_input.lower()
-                    ).strip()
-                    def _do_improve(t=target):
+                    ).strip() or "general self-improvement"
+                    def _queue_improve(t=target):
                         try:
-                            result = si.self_improve(instruction=t if t else None)
-                            if "error" in result:
-                                msg = result["error"]
-                            else:
-                                msg = (f"Done. Improved {result['file']} with {result['lines_changed']} "
-                                       f"lines changed. Backup saved. Say 'restart yourself' to apply.")
-                            speak(msg)
-                            self.message.emit(msg, "jarvis", "Self-Improve")
+                            import requests as _req
+                            _req.post(
+                                "http://localhost:7842/tasks",
+                                json={
+                                    "title": "Voice-triggered self-improvement",
+                                    "description": f"Self-improve instruction (via voice): {t}",
+                                    "agent": "backend_engineer",
+                                    "context": {"source": "voice_self_improve"},
+                                },
+                                timeout=5,
+                            )
+                            msg = "Self-improvement task queued for approval."
                         except Exception as ex:
-                            speak(f"Improvement failed: {ex}")
-                    threading.Thread(target=_do_improve, daemon=True).start()
+                            msg = f"Could not queue self-improvement task: {ex}"
+                        speak(msg)
+                        self.message.emit(msg, "jarvis", "Self-Improve")
+                    threading.Thread(target=_queue_improve, daemon=True).start()
 
             except Exception:
                 err = "Sorry, something went wrong."

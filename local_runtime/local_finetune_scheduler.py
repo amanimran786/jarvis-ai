@@ -954,12 +954,17 @@ class OvernightTrainer:
             f"Promotion check: current {current_passed} vs baseline {baseline_passed}"
         )
 
-        if current_passed >= baseline_passed:
-            # Good! Fuse and promote.
+        if current_passed > baseline_passed:
+            # Strict improvement required — equal scores do not promote.
             adapter_path = training_result.get("adapter_path")
             if adapter_path:
                 self.logger.info(f"Promoting adapter: {adapter_path}")
-                model_hf_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
+                # Derive fusion base from the same model used for training so
+                # adapter weights and base weights always match.
+                preset = local_mlx_training.MLX_MODEL_PRESETS.get(
+                    config.MLX_TRAINING_MODEL, {}
+                )
+                model_hf_id = preset.get("hf_id", "Qwen/Qwen3-8B")
                 fused_dir = TRAINING_ROOT / "exports" / "overnight_fused"
 
                 fuse_result = local_mlx_training.fuse_adapter(

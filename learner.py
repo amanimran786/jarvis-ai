@@ -46,8 +46,19 @@ def _load_knowledge() -> dict:
 
 def _save_knowledge(data: dict) -> None:
     data["last_updated"] = str(datetime.now().strftime("%Y-%m-%d %H:%M"))
-    with open(KNOWLEDGE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    # Atomic write: write to a temp file next to the target, then rename.
+    # This prevents a partial write from corrupting knowledge.json on crash.
+    tmp_path = KNOWLEDGE_FILE + ".tmp"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, KNOWLEDGE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ── Auto-extract from conversation ────────────────────────────────────────────

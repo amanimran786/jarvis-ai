@@ -96,8 +96,24 @@ def _find_interaction(data: dict, interaction_id: str) -> dict | None:
     return None
 
 
+_TEST_MODEL_PREFIXES = ("MockModel", "UnitTestModel", "mock_", "test_")
+_TEST_SOURCE_PREFIXES = ("test", "pytest", "ci_")
+
+
+def _is_test_interaction(source: str, model: str) -> bool:
+    """Return True for unit-test or mock interactions that must not enter production telemetry."""
+    s = (source or "").lower()
+    m = (model or "").lower()
+    if any(s.startswith(p.lower()) for p in _TEST_SOURCE_PREFIXES):
+        return True
+    if any(m.startswith(p.lower()) for p in _TEST_MODEL_PREFIXES):
+        return True
+    if s.startswith("task:test") or ":test:" in s:
+        return True
+    return False
+
+
 def log_interaction(user_input: str, response: str, model: str, source: str = "api", context: dict | None = None) -> dict:
-    data = load()
     entry = {
         "id": uuid.uuid4().hex[:12],
         "timestamp": _now_iso(),
@@ -107,6 +123,10 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
         "model": model,
         "context": context or {},
     }
+    if _is_test_interaction(source, model):
+        # Never persist test/mock interactions into production telemetry.
+        return entry
+    data = load()
     data["interactions"].append(entry)
     save(data)
     # Async quality scoring — fire-and-forget, never blocks the caller

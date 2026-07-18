@@ -405,7 +405,11 @@ class OvernightTrainerPromotionTests(unittest.TestCase):
         assert trainer.state["baseline_eval_passed"] == 7
 
     def test_promote_if_better_no_change(self):
-        """When eval same as baseline, should still promote."""
+        """Equal eval scores must NOT promote — strict improvement is required.
+
+        Promoting on equal scores would overwrite a known-good model with one
+        that performed identically, risking a regression from weight differences.
+        """
         trainer = local_finetune_scheduler.OvernightTrainer()
         trainer.logger = MagicMock()
         trainer.state = {"baseline_eval_passed": 5, "baseline_eval_total": 10}
@@ -416,12 +420,9 @@ class OvernightTrainerPromotionTests(unittest.TestCase):
         }
         eval_result = {"passed": 5, "failed": 5, "total": 10}
 
-        with patch("local_runtime.local_mlx_training.fuse_adapter") as mock_fuse:
-            mock_fuse.return_value = {"ok": True, "path": "/path/to/fused"}
+        promoted = trainer.promote_if_better(training_result, eval_result)
 
-            promoted = trainer.promote_if_better(training_result, eval_result)
-
-        assert promoted is True
+        assert promoted is False
 
     def test_promote_if_better_worse_scores(self):
         """When eval worse than baseline, should not promote."""
