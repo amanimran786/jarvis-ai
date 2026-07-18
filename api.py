@@ -3272,8 +3272,7 @@ def bridge_status():
 
 def get_system_telemetry() -> dict:
     import subprocess
-    import re
-    
+
     battery_info = "Unknown"
     try:
         out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=1.5)
