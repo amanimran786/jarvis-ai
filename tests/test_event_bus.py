@@ -29,6 +29,7 @@ for _m in list(sys.modules):
         del sys.modules[_m]
 
 import infra.event_bus as eb
+import infra.threat_screen as _ts  # imported here so patch.object works after test_memory.py nukes sys.modules["infra"]
 from fastapi.testclient import TestClient
 
 
@@ -167,8 +168,10 @@ class TestPostTasks:
     def test_external_task_with_risky_keyword_is_held(self, client):
         """Webhook/external tasks with risky keywords are held when threat_screen import fails."""
         tc, r = client
-        with patch("infra.event_bus._inline_threat_screen", wraps=eb._inline_threat_screen):
-            with patch("infra.threat_screen.screen_payload", side_effect=ImportError):
+        # Use patch.object so the patch targets the already-imported module objects
+        # directly — immune to sys.modules["infra"] being replaced by test_memory.py.
+        with patch.object(eb, "_inline_threat_screen", wraps=eb._inline_threat_screen):
+            with patch.object(_ts, "screen_payload", side_effect=ImportError):
                 resp = tc.post("/tasks", json={
                     "title": "Deploy now",
                     "description": "run deploy script",

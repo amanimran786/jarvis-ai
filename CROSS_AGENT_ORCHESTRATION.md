@@ -118,3 +118,55 @@ Coordination state lives at:
 The canonical Cowork task prompt is
 `scripts/jarvis-autonomous-orchestrator.SKILL.md`. Its deployed copy is
 `~/Claude/Scheduled/jarvis-autonomous-orchestrator/SKILL.md`.
+
+---
+
+## Parallel Claude + Codex — Branch Strategy
+
+CI is now green (Item 1 complete). Both agents can work simultaneously by using
+**isolated branches** and merging via pull-request after CI passes.
+
+### Branch naming
+
+```
+claude/roadmap-N-short-name    # Claude sessions
+codex/roadmap-N-short-name     # Codex sessions
+```
+
+Examples:
+```
+claude/roadmap-15-selflearn-fix
+codex/roadmap-3-orchestrator-watchdog
+```
+
+### Merge protocol
+
+1. Create branch off `main`
+2. Make changes, commit (following REVIEW.md gate)
+3. Push branch — GitHub Actions runs CI
+4. **CI must be green before merge** — never merge a red branch
+5. Merge via `git merge --no-ff` (preserves branch history)
+6. Delete merged branch
+
+### Lane assignments (current)
+
+Claude owns:
+- Item 1.5 — self-learning pipeline fix (fusion bug, promotion, telemetry)
+- Item 2 — Dashboard launchd fix
+- Item 4 — Wire `run_checks()` into orchestrator loop
+- Item 6 — Security review
+- Item 9 — Full 24/7 autonomous operation
+
+Codex owns:
+- Item 3 — Orchestrator self-healing via launchd KeepAlive
+- Item 5 — Specialist model routing (devstral, qwen3:30b-a3b)
+- Item 7 — Test coverage hardening
+- Item 8 — Voice pipeline production ready
+
+### Conflict avoidance rules
+
+- Items in the same lane do not overlap — each agent works one item at a time
+- Shared files (`config.py`, `orchestrator.py`, `router.py`): coordinate in
+  commit messages; the second agent to touch a shared file must rebase first
+- Do not edit the other agent's in-progress branch
+- Both agents: run `python -m harness.pre_commit_check` before every commit
