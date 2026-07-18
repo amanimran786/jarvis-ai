@@ -5,11 +5,15 @@ import os
 import socket
 import tempfile
 import threading
+import datetime as dt
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 import execution_engine
 import operative
+import operative_approval
+import safety_permissions
 import task_persistence
 import tool_registry
 from task_planner import TaskStep
@@ -17,6 +21,44 @@ from task_planner import TaskStep
 
 def _step(number: int, tool: str, **params) -> TaskStep:
     return TaskStep(number=number, description=f"{tool} step", tool=tool, params=params)
+
+
+@contextmanager
+def _authorized_scope(
+    run_id: str,
+    capabilities: set[str],
+    calls: list[tuple[TaskStep, dict]],
+    *,
+    deadline: float | None = None,
+    sensitive_step_numbers: set[int] | None = None,
+    unavailable_step_numbers: set[int] | None = None,
+):
+    resources = []
+    for step, resolved in calls:
+        ok, normalized, error = tool_registry.validate_args(step.tool, resolved)
+        assert ok, error
+        if step.tool == "file":
+            normalized["path"] = str(Path(normalized["path"]).expanduser().resolve(strict=False))
+        resources.append({
+            "step_number": step.number,
+            "tool": step.tool,
+            "call_sha256": operative_approval.tool_call_sha256(step.tool, normalized),
+        })
+    grant = {
+        "run_id": run_id,
+        "grant_expires_at": (
+            dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5)
+        ).isoformat(),
+        "capabilities": sorted(capabilities),
+        "resources": resources,
+    }
+    with execution_engine.execution_capability_scope(
+        capabilities,
+        deadline=deadline,
+        sensitive_step_numbers=sensitive_step_numbers or set(),
+        unavailable_step_numbers=unavailable_step_numbers or set(),
+    ), safety_permissions.execution_grant_scope(grant):
+        yield
 
 
 def _task_payload(run_id: str, plan: list[dict], **overrides) -> dict:
@@ -62,19 +104,16 @@ class TestTrustedCapabilityBoundary:
             execution_engine.CAP_GIT_WRITE,
         })
 
-    def test_directive_is_removed_before_planning(self):
+    def test_allow_directive_is_plain_task_text(self):
         with patch("operative.plan_task", return_value=[]) as planner, \
              patch("operative._persist_task_start", return_value=True), \
              patch("operative._persist_task_finish", return_value=True), \
              patch("operative._summarize", return_value="done"), \
              patch("operative.preflect.is_enabled", return_value=False):
-            result = operative.run_task(
-                "[allow:local_write] Write report.md",
-                authorized_capabilities={execution_engine.CAP_LOCAL_WRITE},
-            )
+            result = operative.run_task("[allow:local_write] Write report.md")
 
-        planner.assert_called_once_with("Write report.md")
-        assert result["authorized_capabilities"] == [execution_engine.CAP_LOCAL_WRITE]
+        planner.assert_called_once_with("[allow:local_write] Write report.md")
+        assert result["authorized_capabilities"] == []
 
     def test_file_write_fails_closed_without_capability(self):
         with tempfile.TemporaryDirectory() as tmp, \
@@ -91,15 +130,16 @@ class TestTrustedCapabilityBoundary:
         dispatch.assert_not_called()
 
     def test_authorized_file_write_reaches_dispatch(self):
+        step = _step(1, "file", action="write", path="out.txt", content="data")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call", return_value=(True, "written")) as dispatch, \
-             execution_engine.execution_capability_scope({execution_engine.CAP_LOCAL_WRITE}):
-            ok, result = execution_engine.execute_step(
-                _step(1, "file", action="write", path="out.txt", content="data"),
-                {},
-                run_id="run_allowed",
-            )
+             _authorized_scope(
+                 "run_allowed",
+                 {execution_engine.CAP_LOCAL_WRITE},
+                 [(step, step.params)],
+             ):
+            ok, result = execution_engine.execute_step(step, {}, run_id="run_allowed")
 
         assert ok is True
         assert result == "written"
@@ -173,13 +213,16 @@ class TestTrustedCapabilityBoundary:
         } <= required
 
     def test_git_validation_text_cannot_be_reported_as_success(self):
+        step = _step(1, "git", action="add", paths="")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call", return_value=(True, "No paths provided.")), \
-             execution_engine.execution_capability_scope({execution_engine.CAP_GIT_WRITE}):
-            ok, result = execution_engine.execute_step(
-                _step(1, "git", action="add", paths=""), {}, run_id="git_false_success"
-            )
+             _authorized_scope(
+                 "git_false_success",
+                 {execution_engine.CAP_GIT_WRITE},
+                 [(step, step.params)],
+             ):
+            ok, result = execution_engine.execute_step(step, {}, run_id="git_false_success")
 
         assert ok is False
         assert "no paths provided" in result.lower()
@@ -241,16 +284,20 @@ class TestToolArgumentBounds:
 class TestDataFlowAndNetworkSafety:
     def test_sensitive_read_cannot_flow_to_search(self):
         capabilities = {execution_engine.CAP_LOCAL_READ, execution_engine.CAP_NETWORK_ACCESS}
+        read_step = _step(1, "file", action="read", path=".env")
+        search_step = _step(2, "search", query="$step_1_result")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call", return_value=(True, "sensitive-value")) as dispatch, \
-             execution_engine.execution_capability_scope(capabilities):
-            ok, value = execution_engine.execute_step(
-                _step(1, "file", action="read", path=".env"), {}, run_id="taint"
-            )
+             _authorized_scope(
+                 "taint",
+                 capabilities,
+                 [(read_step, read_step.params), (search_step, {"query": "sensitive-value"})],
+             ):
+            ok, value = execution_engine.execute_step(read_step, {}, run_id="taint")
             assert ok is True
             ok, result = execution_engine.execute_step(
-                _step(2, "search", query="$step_1_result"), {1: value}, run_id="taint"
+                search_step, {1: value}, run_id="taint"
             )
 
         assert ok is False
@@ -259,22 +306,30 @@ class TestDataFlowAndNetworkSafety:
 
     def test_taint_propagates_through_local_chat_transform(self):
         capabilities = {execution_engine.CAP_LOCAL_READ, execution_engine.CAP_NETWORK_ACCESS}
+        read_step = _step(1, "file", action="read", path=".env")
+        chat_step = _step(2, "chat", prompt="$step_1_result")
+        search_step = _step(3, "search", query="$step_2_result")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call", side_effect=[
                  (True, "sensitive-value"), (True, "transformed value")
              ]) as dispatch, \
-             execution_engine.execution_capability_scope(capabilities):
-            ok, first = execution_engine.execute_step(
-                _step(1, "file", action="read", path=".env"), {}, run_id="transitive"
-            )
+             _authorized_scope(
+                 "transitive",
+                 capabilities,
+                 [
+                     (read_step, read_step.params),
+                     (search_step, {"query": "transformed value"}),
+                 ],
+             ):
+            ok, first = execution_engine.execute_step(read_step, {}, run_id="transitive")
             assert ok is True
             ok, second = execution_engine.execute_step(
-                _step(2, "chat", prompt="$step_1_result"), {1: first}, run_id="transitive"
+                chat_step, {1: first}, run_id="transitive"
             )
             assert ok is True
             ok, result = execution_engine.execute_step(
-                _step(3, "search", query="$step_2_result"),
+                search_step,
                 {1: first, 2: second},
                 run_id="transitive",
             )
@@ -289,16 +344,19 @@ class TestDataFlowAndNetworkSafety:
         ) == {"query": "$step_1_result suffix"}
 
     def test_resumed_redacted_result_cannot_be_written_as_real_data(self):
+        step = _step(2, "file", action="write", path="out.txt", content="$step_1_result")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call") as dispatch, \
-             execution_engine.execution_capability_scope(
+             _authorized_scope(
+                 "resume_redacted",
                  {execution_engine.CAP_LOCAL_WRITE},
+                 [(step, {**step.params, "content": "[SENSITIVE RESULT REDACTED]"})],
                  sensitive_step_numbers={1},
                  unavailable_step_numbers={1},
              ):
             ok, result = execution_engine.execute_step(
-                _step(2, "file", action="write", path="out.txt", content="$step_1_result"),
+                step,
                 {1: "[SENSITIVE RESULT REDACTED]"},
                 run_id="resume_redacted",
             )
@@ -308,16 +366,19 @@ class TestDataFlowAndNetworkSafety:
         dispatch.assert_not_called()
 
     def test_resumed_redacted_result_cannot_be_implicitly_written_to_notes(self):
+        step = _step(2, "notes", action="write", title="Recovered")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call") as dispatch, \
-             execution_engine.execution_capability_scope(
+             _authorized_scope(
+                 "resume_notes",
                  {execution_engine.CAP_LOCAL_WRITE},
+                 [(step, step.params)],
                  sensitive_step_numbers={1},
                  unavailable_step_numbers={1},
              ):
             ok, result = execution_engine.execute_step(
-                _step(2, "notes", action="write", title="Recovered"),
+                step,
                 {1: "[SENSITIVE RESULT REDACTED]"},
                 run_id="resume_notes",
             )
@@ -327,15 +388,16 @@ class TestDataFlowAndNetworkSafety:
         dispatch.assert_not_called()
 
     def test_localhost_fetch_is_blocked_before_dispatch(self):
+        step = _step(1, "fetch_page", url="http://127.0.0.1:8000/private")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call") as dispatch, \
-             execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
-            ok, result = execution_engine.execute_step(
-                _step(1, "fetch_page", url="http://127.0.0.1:8000/private"),
-                {},
-                run_id="ssrf",
-            )
+             _authorized_scope(
+                 "ssrf",
+                 {execution_engine.CAP_NETWORK_ACCESS},
+                 [(step, step.params)],
+             ):
+            ok, result = execution_engine.execute_step(step, {}, run_id="ssrf")
 
         assert ok is False
         assert "blocks" in result.lower()
@@ -351,7 +413,37 @@ class TestDataFlowAndNetworkSafety:
             ok, result = execution_engine._fetch_public_page("https://example.com", 1000)
 
         assert ok is False
-        assert "blocks" in result.lower()
+        # execution_engine now returns "cross-origin redirect is outside approval scope"
+        assert "redirect" in result.lower() or "blocks" in result.lower()
+
+    def test_cross_origin_redirect_is_outside_approved_scope(self):
+        public_dns = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        with patch("execution_engine.socket.getaddrinfo", return_value=public_dns), patch(
+            "execution_engine._pinned_http_request",
+            return_value=(302, {"location": "https://other.example/x"}, b""),
+        ):
+            ok, result = execution_engine._fetch_public_page(
+                "https://example.com/start", 1000
+            )
+
+        assert ok is False
+        assert "cross-origin redirect" in result.lower()
+
+    def test_approved_file_path_rejects_symlink_parent(self, tmp_path: Path):
+        real_parent = tmp_path / "real"
+        real_parent.mkdir()
+        linked_parent = tmp_path / "linked"
+        linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+        ok, result = execution_engine._approved_file_call(
+            str(linked_parent / "output.txt"),
+            "write",
+            "content",
+        )
+
+        assert ok is False
+        assert "approved file operation failed" in result.lower()
+        assert not (real_parent / "output.txt").exists()
 
     def test_invalid_url_port_fails_closed(self):
         error = execution_engine._validate_public_http_url("http://example.com:99999")
@@ -367,6 +459,47 @@ class TestDataFlowAndNetworkSafety:
         assert ok is False
         assert "disabled" in result.lower()
 
+    def test_side_effecting_tool_is_never_retried(self):
+        step = _step(
+            1,
+            "notes",
+            action="write",
+            title="Approved note",
+            content="one write",
+        )
+        with execution_engine.execution_capability_scope(
+            {execution_engine.CAP_LOCAL_WRITE}
+        ), patch(
+            "execution_engine._execute_tool_call",
+            return_value=(False, "write timed out"),
+        ) as dispatch:
+            ok, _ = execution_engine.execute_step(step, {}, run_id="single-attempt")
+
+        assert ok is False
+        dispatch.assert_called_once()
+
+    def test_approved_local_provider_failure_cannot_fall_back_to_cloud(self):
+        policy = {
+            "mode": "open-source",
+            "models": {"local_default": "approved-local-model"},
+        }
+        client = type("Client", (), {})()
+        client.chat = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("offline"))
+        with execution_engine.execution_capability_scope(
+            set(), provider_policy=policy
+        ), patch("ollama.Client", return_value=client), patch(
+            "execution_engine.ask_with_priority"
+        ) as cloud:
+            ok, result = execution_engine.execute_step(
+                _step(1, "chat", prompt="local only"),
+                {},
+                run_id="provider-policy",
+            )
+
+        assert ok is False
+        assert "cloud fallback is blocked" in result.lower()
+        cloud.assert_not_called()
+
     def test_deep_research_is_disabled_until_fetches_are_ssrf_safe(self):
         ok, result = execution_engine._execute_tool_call(
             "research", {"query": "jarvis", "depth": 2}, _step(1, "research"), {}
@@ -375,13 +508,16 @@ class TestDataFlowAndNetworkSafety:
         assert "disabled" in result.lower()
 
     def test_trace_redacts_resolved_parameters_and_results(self):
+        step = _step(1, "file", action="read", path=".env")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine._execute_tool_call", return_value=(True, "sensitive-value")), \
-             execution_engine.execution_capability_scope({execution_engine.CAP_LOCAL_READ}):
-            execution_engine.execute_step(
-                _step(1, "file", action="read", path=".env"), {}, run_id="trace"
-            )
+             _authorized_scope(
+                 "trace",
+                 {execution_engine.CAP_LOCAL_READ},
+                 [(step, step.params)],
+             ):
+            execution_engine.execute_step(step, {}, run_id="trace")
             trace_text = next(Path(tmp).glob("*.json")).read_text()
 
         assert "sensitive-value" not in trace_text
@@ -404,16 +540,18 @@ class TestDeadlineAndContextIsolation:
         dispatch.assert_not_called()
 
     def test_retry_rechecks_remaining_budget(self):
+        step = _step(1, "search", query="jarvis")
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(execution_engine, "TRACE_DIR", Path(tmp)), \
              patch("execution_engine.time.monotonic", side_effect=[0.0, 80.0]), \
              patch("execution_engine._execute_tool_call", return_value=(False, "offline")) as dispatch, \
-             execution_engine.execution_capability_scope(
-                 {execution_engine.CAP_NETWORK_ACCESS}, deadline=100.0
+             _authorized_scope(
+                 "retry_deadline",
+                 {execution_engine.CAP_NETWORK_ACCESS},
+                 [(step, step.params)],
+                 deadline=100.0,
              ):
-            ok, result = execution_engine.execute_step(
-                _step(1, "search", query="jarvis"), {}, run_id="retry_deadline"
-            )
+            ok, result = execution_engine.execute_step(step, {}, run_id="retry_deadline")
 
         assert ok is False
         assert "retry blocked" in result.lower()
@@ -471,14 +609,11 @@ class TestOperativeBudgetsAndPersistence:
              patch("operative.replan_after_failure", return_value=[corrective]), \
              patch("operative.OPERATIVE_MAX_RECOVERY_ATTEMPTS", 1), \
              patch("execution_engine._execute_tool_call", return_value=(False, "offline")) as dispatch:
-            result = operative.run_task(
-                "Research public docs.",
-                authorized_capabilities={execution_engine.CAP_NETWORK_ACCESS},
-            )
+            result = operative.run_task("Research public docs.")
 
         assert len(result["steps"]) == 2
         assert "authorization" in result["steps"][1].result.lower()
-        assert dispatch.call_count == 2
+        dispatch.assert_not_called()
 
     def test_execution_stops_when_initial_persistence_fails(self):
         with patch("operative.plan_task", return_value=[_step(1, "chat")]), \
@@ -673,28 +808,23 @@ class TestOperativeBudgetsAndPersistence:
             task_persistence.reset_for_tests()
 
         dispatch.assert_not_called()
-        assert "unavailable after resume" in result["steps"][1].result.lower()
+        assert result["stop_reason"] == "resume_approval_missing"
 
-    def test_completed_record_retains_grant_and_budget_evidence(self):
+    def test_completed_record_retains_budget_without_forged_grant(self):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.dict(os.environ, {"JARVIS_TASK_DB_PATH": str(Path(tmp) / "tasks.sqlite3")}):
             task_persistence.reset_for_tests()
-            with patch("operative.plan_task", return_value=[
-                     _step(1, "file", action="write", path="out.txt", content="data")
-                 ]), \
+            with patch("operative.plan_task", return_value=[_step(1, "chat", prompt="hello")]), \
                  patch("operative.execute_step", return_value=(True, "written")), \
                  patch("operative._summarize", return_value="done"), \
                  patch("operative.preflect.is_enabled", return_value=False):
-                result = operative.run_task(
-                    "Write out.txt",
-                    authorized_capabilities={execution_engine.CAP_LOCAL_WRITE},
-                )
+                result = operative.run_task("Say hello")
             snapshot = task_persistence.load_snapshot()
             task_persistence.reset_for_tests()
 
         assert result["ok"] is True
         record = snapshot["tasks"][0]
-        assert record["authorized_capabilities"] == [execution_engine.CAP_LOCAL_WRITE]
+        assert record["authorized_capabilities"] == []
         assert record["execution_budget"]["executed_steps"] == 1
         assert "elapsed_seconds" in record["execution_budget"]
 

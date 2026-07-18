@@ -312,3 +312,45 @@ rerun successfully under the actual open-source configuration: 3,465 passed,
 - Local-only timeout behavior: PASS, but too slow (62.20 s focused regression)
 - Full-suite mode isolation: PASS
 - Overall specialist routing capability: **NOT READY**
+
+## Durable operative approval bridge
+
+The autonomous operative path now uses a durable, fail-closed approval boundary
+before privileged execution. Prepared plans are normalized into immutable manifests
+whose digest binds the task, steps, capabilities, exact resource envelopes, budgets,
+provider policy, principal, session, source, and expiry.
+
+Implemented controls:
+
+- Explicit approval IDs are required; generic confirmation text and task-embedded
+  authorization directives provide no authority.
+- Approval consumption is atomic and one-time. Terminal task state and approval
+  outcome are persisted in one SQLite transaction.
+- Runtime authorization revalidates the exact step call immediately before dispatch,
+  including file path, network origin, recipient, content scope, run ID, and expiry.
+- File operations use directory-relative descriptors, reject symlink traversal, and
+  use atomic replacement for writes. Network fetches reject cross-origin redirects.
+- Side-effecting calls are not retried. Ambiguous failures stop in an
+  `uncertain_side_effect_outcome` state instead of replanning or replaying.
+- Approved local-provider execution cannot silently fall back to a cloud provider.
+- Approval identifiers are redacted from API history, audit events, evaluations,
+  semantic memory, and client metadata.
+- Both slash-command and classified operative routes use the same bounded worker,
+  cancellation registry, approval gate, and context binding.
+
+Focused verification:
+
+```text
+python -m pytest tests/test_operative_approval_flow.py tests/test_task_command.py tests/test_router_operative_stream.py tests/test_agent_execution_safety.py tests/test_agent_tooling.py tests/test_execution_engine_run_id.py -q
+```
+
+Result: 129 passed, 0 failed.
+
+Final repository gate:
+
+```text
+python -m pytest tests/ -x -q
+```
+
+Result: 3,561 passed, 3 skipped, 34 subtests passed, 0 failed in 604.32 seconds.
+The current environment also enabled and passed the packaged-app smoke coverage.

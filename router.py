@@ -17,6 +17,7 @@ import os
 import sys
 import shutil
 import threading
+import time
 import tools
 from harness.audit import audit_log
 from harness import web_search as _ws
@@ -68,6 +69,7 @@ import messages_thread as msg_thread
 import call_privacy
 import provider_router
 import safety_permissions as perms
+from operative_approval import RouteContext, redact_approval_ids
 from model_router import (
     smart_stream,
     format_with_mini,
@@ -952,7 +954,23 @@ def _status_command_reply() -> str:
 def _is_task_command(lower: str) -> bool:
     """Trigger: /task <description> — run an operative task end-to-end."""
     stripped = lower.strip()
-    return stripped == "/task" or stripped.startswith("/task ")
+    return (
+        stripped == "/task"
+        or stripped.startswith("/task ")
+        or stripped.startswith("/approve-task ")
+    )
+
+
+def _parse_task_approval_command(text: str) -> tuple[str, str] | None:
+    match = re.fullmatch(
+        r"\s*/(?:task\s+(approve|cancel)|(?:approve-task)\s*)\s+([A-Za-z0-9_-]{12,80})\s*",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    action = (match.group(1) or "approve").lower()
+    return action, match.group(2)
 
 
 def _is_summarize_command(lower: str) -> bool:
@@ -965,83 +983,165 @@ def _is_summarize_command(lower: str) -> bool:
     )
 
 
-# Module-level cancel event — set by /cancel, consumed by _task_command_stream.
-_active_task_cancel: "threading.Event | None" = None
+# Active task cancellation is scoped to the authenticated route context.
+_ACTIVE_TASK_CANCELS: dict[tuple[str, str, str], threading.Event] = {}
+_ACTIVE_TASK_CANCELS_LOCK = threading.Lock()
 
 
-def _task_command_stream(task: str):
-    """Generator that runs operative.run_task and yields live progress."""
-    global _active_task_cancel
+def _task_context_key(context: RouteContext) -> tuple[str, str, str]:
+    normalized = context.normalized()
+    return normalized.principal, normalized.session_id, normalized.source
+
+
+def _register_task_cancel(context: RouteContext, event: threading.Event) -> bool:
+    key = _task_context_key(context)
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        if key in _ACTIVE_TASK_CANCELS:
+            return False
+        _ACTIVE_TASK_CANCELS[key] = event
+        return True
+
+
+def _clear_task_cancel(context: RouteContext, event: threading.Event) -> None:
+    key = _task_context_key(context)
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        if _ACTIVE_TASK_CANCELS.get(key) is event:
+            _ACTIVE_TASK_CANCELS.pop(key, None)
+
+
+def _task_result_text(result: dict) -> str:
+    if result.get("status") == "approval_required":
+        return str(result.get("summary") or "Approval required.")
+    steps = result.get("steps", [])
+    completed = sum(1 for step in steps if getattr(step, "ok", False))
+    if result.get("ok"):
+        return f"Done ({completed}/{len(steps)} steps)\n\n{result.get('summary', '')}"
+    reason = str(result.get("stop_reason") or "failed").replace("_", " ")
+    return f"Task failed ({reason}; {completed}/{len(steps)} steps). {result.get('summary', '')}"
+
+
+def _run_task_worker_stream(
+    header: str,
+    worker,
+    *,
+    context: RouteContext,
+    thread_name: str,
+):
     import queue as _q
     import threading as _th
-
-    if not task.strip():
-        yield "Usage: /task <natural language description of what to do>"
-        return
-
-    from operative import run_task
+    from config import OPERATIVE_TIMEOUT_SECONDS
 
     progress_q: _q.Queue = _q.Queue()
     cancel = _th.Event()
-    _active_task_cancel = cancel
+    if not _register_task_cancel(context, cancel):
+        yield "A task is already active for this session."
+        return
 
-    def _on_progress(step_desc: str, detail: str = "") -> None:
+    def _progress(step_desc: str, detail: str = "") -> None:
         progress_q.put(("progress", step_desc, detail))
 
     def _run() -> None:
         try:
-            result = run_task(task, on_progress=_on_progress, cancel_event=cancel)
-            kind = "cancelled" if cancel.is_set() else "done"
-            progress_q.put((kind, result))
+            progress_q.put(("done", worker(_progress, cancel)))
         except Exception as exc:
-            logging.exception("[/task] operative failed")
+            logging.exception("[%s] operative failed", thread_name)
             progress_q.put(("error", str(exc)))
 
-    _th.Thread(target=_run, daemon=True, name="TaskCommand").start()
-
-    yield f"Task: {task}\n\n"
-
-    while True:
-        try:
-            item = progress_q.get(timeout=0.5)
-        except _q.Empty:
-            if cancel.is_set():
-                yield "\nCancelled."
+    worker_thread = _th.Thread(target=_run, daemon=True, name=thread_name)
+    worker_thread.start()
+    deadline = time.monotonic() + OPERATIVE_TIMEOUT_SECONDS
+    try:
+        yield header
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                cancel.set()
+                yield "Task failed (operative timeout)."
                 break
-            continue
-
-        kind = item[0]
-
-        if kind == "progress":
-            _, step_desc, detail = item
-            line = f"• {step_desc}"
-            if detail:
-                line += f": {detail[:120]}"
-            yield line + "\n"
-
-        elif kind == "done":
-            result = item[1]
-            steps = result.get("steps", [])
-            summary = result.get("summary", "")
-            ok = result.get("ok", False)
-            n_ok = sum(1 for s in steps if s.ok)
-            status = "Done" if ok else "Partial"
-            yield f"\n{status} ({n_ok}/{len(steps)} steps)\n\n{summary}"
-            _active_task_cancel = None
+            try:
+                item = progress_q.get(timeout=min(0.25, remaining))
+            except _q.Empty:
+                continue
+            if item[0] == "progress":
+                _, step_desc, detail = item
+                line = f"• {step_desc}"
+                if detail:
+                    line += f": {detail[:120]}"
+                yield line + "\n"
+                continue
+            if item[0] == "error":
+                yield f"Task failed: {item[1]}"
+            else:
+                yield _task_result_text(item[1])
             break
+    finally:
+        cancel.set()
+        if worker_thread.is_alive():
+            def _clear_after_worker() -> None:
+                worker_thread.join()
+                _clear_task_cancel(context, cancel)
 
-        elif kind == "cancelled":
-            result = item[1]
-            steps = result.get("steps", [])
-            n_ok = sum(1 for s in steps if s.ok)
-            yield f"\nCancelled after {n_ok}/{len(steps)} steps."
-            _active_task_cancel = None
-            break
+            _th.Thread(
+                target=_clear_after_worker,
+                daemon=True,
+                name=f"{thread_name}/cleanup",
+            ).start()
+        else:
+            _clear_task_cancel(context, cancel)
 
-        elif kind == "error":
-            yield f"\nTask failed: {item[1]}"
-            _active_task_cancel = None
-            break
+
+def _task_command_stream(task: str, *, context: RouteContext | None = None):
+    """Prepare once, then execute only capability-free task plans."""
+    if not task.strip():
+        yield "Usage: /task <natural language description of what to do>"
+        return
+    from operative import execute_prepared_task, prepare_task
+
+    route_context = (context or RouteContext.desktop()).normalized()
+
+    def _worker(on_progress, cancel):
+        prepared = prepare_task(task, context=route_context, cancel_event=cancel)
+        if prepared.get("status") == "approval_required":
+            return prepared
+        return execute_prepared_task(
+            prepared["manifest"],
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
+
+    yield from _run_task_worker_stream(
+        f"Task: {task}\n\n",
+        _worker,
+        context=route_context,
+        thread_name="TaskCommand",
+    )
+
+
+def _task_approval_stream(
+    approval_id: str,
+    *,
+    context: RouteContext | None = None,
+):
+    """Consume one explicit approval code and stream its bound execution."""
+    from operative import approve_and_run_task
+
+    route_context = (context or RouteContext.desktop()).normalized()
+
+    def _worker(on_progress, cancel):
+        return approve_and_run_task(
+            approval_id,
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
+
+    yield from _run_task_worker_stream(
+        f"Approving task {approval_id} and verifying its execution manifest.\n",
+        _worker,
+        context=route_context,
+        thread_name="TaskApproval",
+    )
 
 
 def _is_cancel_task_command(lower: str) -> bool:
@@ -1050,11 +1150,15 @@ def _is_cancel_task_command(lower: str) -> bool:
     return stripped in ("/cancel", "/cancel task", "cancel task", "stop task", "/stop task")
 
 
-def _cancel_task_reply() -> str:
-    global _active_task_cancel
-    if _active_task_cancel is not None and not _active_task_cancel.is_set():
-        _active_task_cancel.set()
+def _cancel_task_reply(context: RouteContext | None = None) -> str:
+    route_context = (context or RouteContext.desktop()).normalized()
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        event = _ACTIVE_TASK_CANCELS.get(_task_context_key(route_context))
+    if event is not None and not event.is_set():
+        event.set()
         return "Cancelling — task will stop after the current step."
+    if event is not None:
+        return "Task cancellation is already in progress."
     return "No active task to cancel."
 
 
@@ -1066,16 +1170,32 @@ def _is_resume_command(lower: str) -> bool:
     return stripped.startswith("/resume") or stripped in ("resume task", "resume last task")
 
 
-def _resume_command_stream(user_input: str):
+def _resume_command_stream(
+    user_input: str,
+    *,
+    context: RouteContext | None = None,
+):
     """Stream progress while resuming an interrupted task."""
-    import queue as _queue
     import task_persistence as _tp
 
     # Parse optional run_id from input: "/resume run_abc123"
     parts = user_input.strip().split(None, 1)
     explicit_run_id = parts[1].strip() if len(parts) > 1 and parts[1].strip().startswith("run_") else ""
 
-    interrupted = _tp.find_interrupted_tasks()
+    route_context = (context or RouteContext.desktop()).normalized()
+    interrupted = []
+    for task in _tp.find_interrupted_tasks():
+        approval = task.get("execution_approval") or {}
+        if approval:
+            if (
+                approval.get("principal") != route_context.principal
+                or approval.get("session_id") != route_context.session_id
+                or approval.get("source") != route_context.source
+            ):
+                continue
+        elif route_context.source != "desktop":
+            continue
+        interrupted.append(task)
     if not interrupted:
         yield "No interrupted tasks found — nothing to resume."
         return
@@ -1097,52 +1217,22 @@ def _resume_command_stream(user_input: str):
     done_count = len(target.get("step_events", []))
     total = target.get("steps_total", "?")
 
-    yield f"Resuming: **{task_desc[:80]}**\n({done_count}/{total} steps already done)\n\n"
+    def _worker(on_progress, cancel):
+        from operative import resume_task
 
-    q: "_queue.Queue[tuple]" = _queue.Queue()
+        return resume_task(
+            run_id,
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
 
-    def _on_progress(msg: str, detail: str) -> None:
-        q.put(("progress", msg, detail))
-
-    def _worker() -> None:
-        try:
-            from operative import resume_task
-            result = resume_task(run_id, on_progress=_on_progress)
-            q.put(("done", result))
-        except Exception as exc:
-            q.put(("error", str(exc)))
-
-    import threading as _threading
-    t = _threading.Thread(target=_worker, daemon=True, name="Operative/resume")
-    t.start()
-
-    while True:
-        try:
-            item = q.get(timeout=0.5)
-        except _queue.Empty:
-            continue
-
-        kind = item[0]
-        if kind == "progress":
-            _, msg, detail = item
-            line = f"• {msg}"
-            if detail:
-                line += f": {detail[:120]}"
-            yield line + "\n"
-
-        elif kind == "done":
-            result = item[1]
-            steps = result.get("steps", [])
-            summary = result.get("summary", "")
-            ok = result.get("ok", False)
-            n_ok = sum(1 for s in steps if s.ok)
-            status = "Done" if ok else "Partial"
-            yield f"\n{status} ({n_ok}/{len(steps)} steps)\n\n{summary}"
-            break
-
-        elif kind == "error":
-            yield f"\nResume failed: {item[1]}"
-            break
+    yield from _run_task_worker_stream(
+        f"Resuming: **{task_desc[:80]}**\n({done_count}/{total} steps already done)\n\n",
+        _worker,
+        context=route_context,
+        thread_name="Operative/resume",
+    )
 
 
 # ── Git operations ─────────────────────────────────────────────────────────────
@@ -3194,15 +3284,40 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def route_stream(user_input: str) -> tuple:
+def route_stream(
+    user_input: str,
+    *,
+    context: RouteContext | None = None,
+) -> tuple:
+    context = (context or RouteContext.desktop()).normalized()
     global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions, _pending_email_reply
-    audit_log("query_received", query=user_input[:500])
+    audit_log("query_received", query=redact_approval_ids(user_input)[:500])
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
     lower = user_input.lower().strip()
     if lower:
-        mem.track_topic(lower)
+        mem.track_topic(redact_approval_ids(lower))
+
+    # Explicit operative control commands must remain reachable even when an
+    # unrelated email or message draft is pending.
+    if _is_cancel_task_command(lower):
+        return _s(_cancel_task_reply(context)), "Operative"
+    approval_command = _parse_task_approval_command(user_input)
+    if approval_command:
+        action, approval_id = approval_command
+        if action == "cancel":
+            from operative import cancel_task_approval
+
+            cancelled = cancel_task_approval(approval_id, context=context)
+            reply = (
+                "Task approval cancelled."
+                if cancelled
+                else "Task approval could not be cancelled."
+            )
+            return _s(reply), "Operative"
+        return _task_approval_stream(approval_id, context=context), "Operative"
+
     composed_message = (
         _parse_message_compose(user_input)
         or _parse_message_replacement_compose(user_input)
@@ -3858,18 +3973,14 @@ def route_stream(user_input: str) -> tuple:
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
 
-    # ── /cancel — stop active operative task ─────────────────────────────────
-    if _is_cancel_task_command(lower):
-        return _s(_cancel_task_reply()), "Operative"
-
     # ── /resume command — resume an interrupted task ──────────────────────────
     if _is_resume_command(lower):
-        return _resume_command_stream(user_input), "Operative"
+        return _resume_command_stream(user_input, context=context), "Operative"
 
     # ── /task command — run operative end-to-end ─────────────────────────────
     if _is_task_command(lower):
         task_desc = user_input.strip()[len("/task"):].strip()
-        return _task_command_stream(task_desc), "Operative"
+        return _task_command_stream(task_desc, context=context), "Operative"
 
     # ── /summarize command — local LLM / extractive summarization ─────────────
     if _is_summarize_command(lower):
@@ -4329,7 +4440,7 @@ def route_stream(user_input: str) -> tuple:
 
     # Math fast-path: "what's 20% of 150", "calculate 1234 * 56", "12 + 34"
     _math_match = re.match(
-        r"^(?:what(?:'s| is)\s+)?(?:calculate|compute|eval(?:uate)?|solve)?\s*([\d\s\+\-\*\/\.\(\)\%\^]+[\d\)])$",
+        r"^(?:what(?:'s| is)\s+)?(?:calculate|compute|e(?:val(?:uate)?)|solve)?\s*([\d\s\+\-\*\/\.\(\)\%\^]+[\d\)])$",
         lower.strip()
     )
     if _math_match:
@@ -4899,7 +5010,12 @@ def route_stream(user_input: str) -> tuple:
         return hw_result
 
     # ── 3. Orchestrator dispatch ──────────────────────────────────────────────
-    return _orchestrate(user_input, lower, modifier_system=modifier_system)
+    return _orchestrate(
+        user_input,
+        lower,
+        modifier_system=modifier_system,
+        context=context,
+    )
 
 
 def _parse_file_request(text: str) -> tuple[str, str, str]:
@@ -4951,7 +5067,13 @@ def _parse_file_request(text: str) -> tuple[str, str, str]:
 
 # ── Orchestrator dispatch ─────────────────────────────────────────────────────
 
-def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tuple:
+def _orchestrate(
+    user_input: str,
+    lower: str,
+    modifier_system: str = "",
+    *,
+    context: RouteContext | None = None,
+) -> tuple:
     """Use the orchestrator to classify intent and dispatch the right tool."""
     global _last_msg_recipient
     from orchestrator import classify
@@ -5154,48 +5276,39 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
     # ── Operative agent ───────────────────────────────────────────────────────
     if tool == "operative":
-        import queue as _queue
-        import threading as _threading
-        from operative import run_task
+        from operative import execute_prepared_task, prepare_task
         task = params.get("task", user_input)
+        route_context = (context or RouteContext.desktop()).normalized()
 
         def _operative_stream():
-            yield "Understood. Running the task autonomously now, sir."
+            def _worker(on_progress, cancel):
+                prepared = prepare_task(
+                    task,
+                    context=route_context,
+                    cancel_event=cancel,
+                )
+                if prepared.get("status") == "approval_required":
+                    return prepared
+                result = execute_prepared_task(
+                    prepared["manifest"],
+                    on_progress=on_progress,
+                    cancel_event=cancel,
+                    context=route_context,
+                )
+                from harness.notify import notify as _notify
 
-            _q: _queue.Queue = _queue.Queue()
-            _DONE = object()
-
-            def _progress(step_desc, _detail):
-                _q.put(f" Working on: {step_desc}.")
-
-            def _run():
-                try:
-                    result = run_task(task, on_progress=_progress)
-                    _q.put((_DONE, result))
-                except Exception as exc:
-                    _q.put((_DONE, {"ok": False, "summary": str(exc), "steps": []}))
-
-            _threading.Thread(target=_run, daemon=True, name="Operative").start()
-
-            result = None
-            while True:
-                item = _q.get()
-                if isinstance(item, tuple) and item[0] is _DONE:
-                    result = item[1]
-                    break
-                yield item
-
-            if result:
-                yield " " + result["summary"]
-                if result["ok"]:
-                    from harness.notify import notify as _notify
-                    _notify("Jarvis — Task Complete", result["summary"][:100])
+                if result.get("ok"):
+                    _notify("Jarvis — Task Complete", result.get("summary", "")[:100])
                 else:
-                    failed = [s.description for s in result.get("steps", []) if not s.ok]
-                    if failed:
-                        yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
-                    from harness.notify import notify as _notify
-                    _notify("Jarvis — Task Failed", result["summary"][:100])
+                    _notify("Jarvis — Task Failed", result.get("summary", "")[:100])
+                return result
+
+            yield from _run_task_worker_stream(
+                "Preparing an exact task plan now.",
+                _worker,
+                context=route_context,
+                thread_name="Operative",
+            )
 
         return _operative_stream(), "Operative"
 
@@ -5623,13 +5736,15 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
     global _last_assistant_reply
     if not user_input or not assistant_reply:
         return
-    _last_assistant_reply = assistant_reply.strip()
-    turn = _mem0_turn_text(user_input, assistant_reply)
+    safe_user_input = redact_approval_ids(user_input)
+    safe_assistant_reply = redact_approval_ids(assistant_reply)
+    _last_assistant_reply = safe_assistant_reply.strip()
+    turn = _mem0_turn_text(safe_user_input, safe_assistant_reply)
     _m0.add_async(turn)
     # Background fact extraction — silently captures tasks/decisions/preferences
     try:
         import jarvis_extractor as _jex
-        _jex.extract_async(user_input, assistant_reply)
+        _jex.extract_async(safe_user_input, safe_assistant_reply)
     except Exception:
         logging.debug("[Router] background fact extraction (jarvis_extractor) failed to start", exc_info=True)
 
