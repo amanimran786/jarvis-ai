@@ -53,8 +53,21 @@ def _classify_operative(task_str: str):
 def _collect_stream(prompt: str, run_task_fn) -> list[str]:
     """Call _orchestrate with mocked classify and run_task; collect all tokens."""
     import router
+    def _prepare(task, *, context=None, cancel_event=None):
+        return {"status": "ready", "manifest": {"task": task}}
+
+    def _execute(
+        manifest,
+        *,
+        on_progress=None,
+        cancel_event=None,
+        context=None,
+    ):
+        return run_task_fn(manifest["task"], on_progress=on_progress)
+
     with patch("orchestrator.classify", return_value=_classify_operative(prompt)), \
-         patch("operative.run_task", side_effect=run_task_fn), \
+         patch("operative.prepare_task", side_effect=_prepare), \
+         patch("operative.execute_prepared_task", side_effect=_execute), \
          patch("skills.choose_skill", return_value=None), \
          patch("router.audit_log"):
         stream, _label = router._orchestrate(prompt, prompt.lower())
@@ -71,7 +84,7 @@ class TestOperativeStream:
 
     def test_progress_tokens_appear_mid_stream(self):
         tokens = _collect_stream("do a task", _fake_run_task)
-        progress = [t for t in tokens if "Working on:" in t]
+        progress = [t for t in tokens if t.startswith("•")]
         assert len(progress) == 2, f"expected 2 progress tokens, got: {tokens}"
 
     def test_progress_includes_step_description(self):
@@ -89,9 +102,8 @@ class TestOperativeStream:
     def test_failure_note_appended_when_steps_fail(self):
         tokens = _collect_stream("do a task", _fake_run_task_with_failure)
         full = " ".join(tokens)
-        assert "step" in full.lower() and "issue" in full.lower(), (
-            f"expected failure note in: {full!r}"
-        )
+        assert "task failed" in full.lower()
+        assert "0/1 steps" in full.lower()
 
     def test_exception_in_run_task_does_not_deadlock(self):
         tokens = _collect_stream("do a task", _fake_run_task_raises)

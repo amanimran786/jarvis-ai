@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import os
 import re
+import secrets
 import socket
 import time
 import urllib.error
@@ -14,7 +15,7 @@ import urllib.request
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Mapping
 
 log = logging.getLogger("jarvis.execution_engine")
 from pathlib import Path
@@ -24,6 +25,7 @@ from provider_priority import ask_with_priority
 import skills
 import tool_registry
 import runtime_state
+import safety_permissions
 from task_planner import TaskStep
 
 
@@ -53,14 +55,20 @@ _KNOWN_CAPABILITIES = frozenset({
     CAP_PERSONAL_DATA_READ,
     CAP_UNRESTRICTED_SHELL,
 })
-_ALLOW_DIRECTIVE = re.compile(r"^\s*\[allow:([a-z0-9_,\s-]+)\]\s*", re.IGNORECASE)
-
 _ACTIVE_CAPABILITIES: ContextVar[frozenset[str]] = ContextVar(
     "jarvis_execution_capabilities",
     default=frozenset(),
 )
 _EXECUTION_DEADLINE: ContextVar[float | None] = ContextVar(
     "jarvis_execution_deadline",
+    default=None,
+)
+_RESOURCE_GRANT_REQUIRED: ContextVar[bool] = ContextVar(
+    "jarvis_resource_grant_required",
+    default=False,
+)
+_EXECUTION_PROVIDER_POLICY: ContextVar[dict | None] = ContextVar(
+    "jarvis_execution_provider_policy",
     default=None,
 )
 _SENSITIVE_STEP_RESULTS: ContextVar[frozenset[int]] = ContextVar(
@@ -88,11 +96,6 @@ def capabilities_for_task(
     return frozenset(requested & _KNOWN_CAPABILITIES)
 
 
-def task_without_capability_directive(task: str) -> str:
-    """Remove the trusted grant prefix before sending task text to a model."""
-    return _ALLOW_DIRECTIVE.sub("", task or "", count=1).strip()
-
-
 @contextmanager
 def execution_capability_scope(
     capabilities: Iterable[str],
@@ -100,6 +103,8 @@ def execution_capability_scope(
     deadline: float | None = None,
     sensitive_step_numbers: Iterable[int] = (),
     unavailable_step_numbers: Iterable[int] = (),
+    require_resource_grant: bool = False,
+    provider_policy: Mapping | None = None,
 ) -> Iterator[frozenset[str]]:
     """Apply an immutable capability grant to execution in the current context."""
     normalized = frozenset(str(item).strip() for item in capabilities if str(item).strip())
@@ -111,9 +116,15 @@ def execution_capability_scope(
     unavailable_token = _UNAVAILABLE_STEP_RESULTS.set(
         frozenset(int(number) for number in unavailable_step_numbers)
     )
+    resource_grant_token = _RESOURCE_GRANT_REQUIRED.set(bool(require_resource_grant))
+    provider_policy_token = _EXECUTION_PROVIDER_POLICY.set(
+        dict(provider_policy) if provider_policy is not None else None
+    )
     try:
         yield normalized
     finally:
+        _EXECUTION_PROVIDER_POLICY.reset(provider_policy_token)
+        _RESOURCE_GRANT_REQUIRED.reset(resource_grant_token)
         _UNAVAILABLE_STEP_RESULTS.reset(unavailable_token)
         _SENSITIVE_STEP_RESULTS.reset(sensitive_token)
         _EXECUTION_DEADLINE.reset(deadline_token)
@@ -314,6 +325,12 @@ def _fetch_public_page(url: str, max_chars: int) -> tuple[bool, str]:
     from harness import web_search as _ws
 
     current_url = url
+    approved = urllib.parse.urlsplit(url)
+    approved_origin = (
+        approved.scheme.lower(),
+        (approved.hostname or "").lower(),
+        approved.port or (443 if approved.scheme.lower() == "https" else 80),
+    )
     fetch_deadline = time.monotonic() + 20.0
     execution_deadline = _EXECUTION_DEADLINE.get()
     if execution_deadline is not None:
@@ -344,7 +361,18 @@ def _fetch_public_page(url: str, max_chars: int) -> tuple[bool, str]:
             location = headers.get("location", "")
             if not location:
                 return False, "Could not fetch page: redirect missing Location header"
-            current_url = urllib.parse.urljoin(current_url, location)
+            redirected = urllib.parse.urljoin(current_url, location)
+            target = urllib.parse.urlsplit(redirected)
+            target_origin = (
+                target.scheme.lower(),
+                (target.hostname or "").lower(),
+                target.port or (443 if target.scheme.lower() == "https" else 80),
+            )
+            if target_origin != approved_origin:
+                return False, (
+                    "Could not fetch page: cross-origin redirect is outside approval scope"
+                )
+            current_url = redirected
             continue
         if status >= 400:
             return False, f"Could not fetch page: HTTP {status}"
@@ -362,6 +390,104 @@ def _safe_slug(value: str) -> str:
 
 def _ensure_trace_dir() -> None:
     TRACE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _open_parent_directory(path: Path) -> int:
+    """Open every parent component without following symlinks."""
+    if not path.is_absolute():
+        raise OSError("approved file path must be absolute")
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    directory_fd = os.open("/", flags)
+    try:
+        for component in path.parent.parts[1:]:
+            next_fd = os.open(
+                component,
+                flags | no_follow,
+                dir_fd=directory_fd,
+            )
+            os.close(directory_fd)
+            directory_fd = next_fd
+        return directory_fd
+    except Exception:
+        os.close(directory_fd)
+        raise
+
+
+def _approved_file_call(
+    path_value: str,
+    action: str,
+    content: str = "",
+) -> tuple[bool, str]:
+    """Read or atomically replace an approved file through verified dir fds."""
+    path = Path(path_value)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    parent_fd = -1
+    try:
+        parent_fd = _open_parent_directory(path)
+        if action == "read":
+            if path.suffix.lower() == ".pdf":
+                return False, "Approved PDF reads are unavailable through the secure file path."
+            fd = os.open(
+                path.name,
+                os.O_RDONLY | no_follow | getattr(os, "O_CLOEXEC", 0),
+                dir_fd=parent_fd,
+            )
+            with os.fdopen(fd, "r", errors="replace") as handle:
+                text = handle.read(8001)
+            if len(text) > 8000:
+                return True, text[:8000] + "\n... [truncated]"
+            return True, text
+
+        gate = safety_permissions.can_write_file(
+            str(path), source="execution_engine.approved_file"
+        )
+        if not gate["ok"]:
+            return False, gate["reason"]
+        temporary = f".jarvis-approved-{secrets.token_hex(12)}{path.suffix or '.tmp'}"
+        fd = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | no_follow,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        try:
+            with os.fdopen(fd, "w") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            parent_stat = os.fstat(parent_fd)
+            current_parent = os.stat(path.parent, follow_symlinks=False)
+            if (parent_stat.st_dev, parent_stat.st_ino) != (
+                current_parent.st_dev,
+                current_parent.st_ino,
+            ):
+                return False, "Approved file parent changed before dispatch."
+            temporary_path = str(path.parent / temporary)
+            post = safety_permissions.after_write(
+                temporary_path, source="execution_engine.approved_file"
+            )
+            if not post["ok"]:
+                return False, post["reason"]
+            os.replace(
+                temporary,
+                path.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+            temporary = ""
+            return True, f"File written to {path}."
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+    except OSError as exc:
+        return False, f"Approved file operation failed: {exc}"
+    finally:
+        if parent_fd >= 0:
+            os.close(parent_fd)
 
 
 def resolve_params(params: dict, step_results: dict[int, str]) -> dict:
@@ -505,19 +631,18 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         content = (
             params.get("content")
             or params.get("text")
-            or step_results.get(max(step_results.keys(), default=0), "")
+            or ""
         )
         title = params.get("title", "Jarvis Note")
         return True, notes_mod.add_note(f"# {title}\n\n{content}")
 
     if tool == "file":
-        import terminal
         action = (params.get("action", "write") or "write").strip().lower()
         path = params.get("path", "~/Desktop/jarvis_output.md")
         if action == "write":
             content = params.get("content", step_results.get(max(step_results.keys(), default=0), ""))
-            return True, terminal.write_file(path, content)
-        return True, terminal.read_file(path)
+            return _approved_file_call(path, action, content)
+        return _approved_file_call(path, action)
 
     if tool == "email":
         import google_services as gs
@@ -641,7 +766,9 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
         if last and not _referenced_step_numbers(step.params or {}):
             prompt = f"Context from previous step:\n{last[:1500]}\n\nTask: {prompt}"
     system_extra, _ = skills.build_system_extra(prompt, tool="chat")
-    if DEFAULT_MODE != "cloud":
+    provider_policy = _EXECUTION_PROVIDER_POLICY.get() or {}
+    execution_mode = str(provider_policy.get("mode") or DEFAULT_MODE)
+    if execution_mode != "cloud":
         try:
             import ollama as _ollama_lib
             from brains.brain_ollama import get_best_available
@@ -652,7 +779,8 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
                 )
             except ImportError:
                 _local_client = _ollama_lib.Client(timeout=90.0)
-            _model = get_best_available(LOCAL_DEFAULT)
+            approved_model = (provider_policy.get("models") or {}).get("local_default")
+            _model = str(approved_model or get_best_available(LOCAL_DEFAULT))
             _messages = [{"role": "user", "content": prompt}]
             if system_extra:
                 _messages = [{"role": "system", "content": system_extra}] + _messages
@@ -664,6 +792,12 @@ def _execute_tool_call(tool: str, params: dict, step: TaskStep, step_results: di
                     "[ExecutionEngine] local chat failed; sensitive context blocks cloud fallback"
                 )
                 return False, "Sensitive local data cannot be sent to a cloud model fallback."
+            if provider_policy:
+                log.warning(
+                    "[ExecutionEngine] approved local provider failed; cloud fallback blocked",
+                    exc_info=True,
+                )
+                return False, "The approved local model is unavailable; cloud fallback is blocked."
             log.debug("[ExecutionEngine] local chat fallback failed; trying cloud", exc_info=True)
     return True, ask_with_priority(prompt, tier="strong", system_extra=system_extra)
 
@@ -764,7 +898,9 @@ def execute_step(step: TaskStep, step_results: dict[int, str], run_id: str = "")
         return False, f"{unavailable_error} Trace: {trace_path}"
     if (
         (_is_outbound_tool(tool) and referenced_steps & sensitive_steps)
-        or (tool == "chat" and DEFAULT_MODE == "cloud" and (
+        or (tool == "chat" and str(
+            (_EXECUTION_PROVIDER_POLICY.get() or {}).get("mode") or DEFAULT_MODE
+        ) == "cloud" and (
             referenced_steps & sensitive_steps or uses_implicit_sensitive_context
         ))
     ):
@@ -833,7 +969,33 @@ def execute_step(step: TaskStep, step_results: dict[int, str], run_id: str = "")
             )
             return False, f"{budget_error} Trace: {trace_path}"
 
-    attempts = 2 if spec.idempotent else 1
+    if _RESOURCE_GRANT_REQUIRED.get():
+        scope_ok, scope_error = safety_permissions.authorize_tool_call(
+            tool,
+            normalized,
+            step_number=step.number,
+            run_id=run_id,
+            required_capabilities=required_capabilities,
+        )
+        if not scope_ok:
+            trace_path = _trace_step(
+                {
+                    "timestamp": _now_iso(),
+                    "run_id": run_id,
+                    "step_number": step.number,
+                    "description": step.description,
+                    "tool": tool,
+                    "params": resolved,
+                    "normalized_params": normalized,
+                    "ok": False,
+                    "error": scope_error,
+                    "phase": "resource_authorization",
+                    "required_capabilities": sorted(required_capabilities),
+                }
+            )
+            return False, f"{scope_error} Trace: {trace_path}"
+
+    attempts = 1 if spec.side_effects else (2 if spec.idempotent else 1)
     started = time.time()
     last_result = ""
     last_error = ""

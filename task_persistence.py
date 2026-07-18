@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import runtime_state
 
@@ -32,15 +32,24 @@ def db_path() -> Path:
             "jarvis_tasks.sqlite3",
             seed_from=_repo_root() / "runtime" / "jarvis_tasks.sqlite3",
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
+    parent_existed = path.parent.exists()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not override or not parent_existed:
+        path.parent.chmod(0o700)
     return path
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path()), timeout=5.0)
+    path = db_path()
+    conn = sqlite3.connect(str(path), timeout=5.0)
+    path.chmod(0o600)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    for suffix in ("-wal", "-shm"):
+        sidecar = path.with_name(path.name + suffix)
+        if sidecar.exists():
+            sidecar.chmod(0o600)
     return conn
 
 
@@ -97,8 +106,55 @@ def _ensure_schema() -> bool:
 
                     CREATE INDEX IF NOT EXISTS idx_webhook_receipts_received_at
                     ON webhook_receipts(received_at);
+
+                    CREATE TABLE IF NOT EXISTS operative_approvals (
+                        approval_id TEXT PRIMARY KEY,
+                        manifest_digest TEXT NOT NULL,
+                        principal TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        approved_at TEXT NOT NULL DEFAULT '',
+                        grant_expires_at TEXT NOT NULL DEFAULT '',
+                        consumed_at TEXT NOT NULL DEFAULT '',
+                        cancelled_at TEXT NOT NULL DEFAULT '',
+                        completed_at TEXT NOT NULL DEFAULT '',
+                        outcome TEXT NOT NULL DEFAULT '',
+                        run_id TEXT NOT NULL DEFAULT '',
+                        manifest_json TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_operative_approvals_status_expiry
+                    ON operative_approvals(status, expires_at);
+
+                    CREATE TABLE IF NOT EXISTS operative_approval_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        approval_id TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        ts TEXT NOT NULL,
+                        principal TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        manifest_digest TEXT NOT NULL,
+                        run_id TEXT NOT NULL DEFAULT ''
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_operative_approval_events_id
+                    ON operative_approval_events(approval_id, id);
                     """
                 )
+                approval_columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(operative_approvals)")
+                }
+                for column in ("completed_at", "outcome"):
+                    if column not in approval_columns:
+                        conn.execute(
+                            f"ALTER TABLE operative_approvals "
+                            f"ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+                        )
             _INITIALIZED = True
             return True
         except Exception:
@@ -110,18 +166,371 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def _task_row_payload(task: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "id": str(task.get("id") or ""),
+        "status": str(task.get("status") or ""),
+        "created_at": str(task.get("created_at") or ""),
+        "updated_at": str(task.get("updated_at") or task.get("created_at") or ""),
+        "finished_at": str(task.get("finished_at") or ""),
+        "payload_json": _json_dumps(dict(task)),
+    }
+
+
+def _approval_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    record = dict(row)
+    try:
+        record["manifest"] = json.loads(record.pop("manifest_json"))
+    except (KeyError, TypeError, json.JSONDecodeError):
+        log.error("operative approval record contains invalid manifest JSON")
+        return None
+    return record
+
+
+def _append_approval_event(
+    conn: sqlite3.Connection,
+    record: Mapping[str, Any],
+    event_type: str,
+    now_iso: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO operative_approval_events (
+            approval_id, event_type, ts, principal, session_id, source,
+            manifest_digest, run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(record.get("approval_id") or ""),
+            event_type,
+            now_iso,
+            str(record.get("principal") or ""),
+            str(record.get("session_id") or ""),
+            str(record.get("source") or ""),
+            str(record.get("manifest_digest") or ""),
+            str(record.get("run_id") or ""),
+        ),
+    )
+
+
+def create_operative_proposal(record: Mapping[str, Any]) -> bool:
+    """Persist one immutable pending execution proposal."""
+    if not _ensure_schema():
+        return False
+    required = (
+        "approval_id",
+        "manifest_digest",
+        "principal",
+        "session_id",
+        "source",
+        "created_at",
+        "expires_at",
+        "manifest",
+    )
+    if any(not record.get(field) for field in required):
+        return False
+    try:
+        payload = {
+            "approval_id": str(record["approval_id"]),
+            "manifest_digest": str(record["manifest_digest"]),
+            "principal": str(record["principal"]),
+            "session_id": str(record["session_id"]),
+            "source": str(record["source"]),
+            "status": "pending",
+            "created_at": str(record["created_at"]),
+            "expires_at": str(record["expires_at"]),
+            "manifest_json": _json_dumps(record["manifest"]),
+        }
+        with _LOCK:
+            with _connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO operative_approvals (
+                        approval_id, manifest_digest, principal, session_id, source,
+                        status, created_at, expires_at, manifest_json
+                    ) VALUES (
+                        :approval_id, :manifest_digest, :principal, :session_id, :source,
+                        :status, :created_at, :expires_at, :manifest_json
+                    )
+                    """,
+                    payload,
+                )
+                if cursor.rowcount != 1:
+                    return False
+                _append_approval_event(conn, payload, "created", payload["created_at"])
+        return True
+    except Exception:
+        log.exception("operative approval proposal creation failed")
+        return False
+
+
+def get_operative_proposal(approval_id: str) -> dict[str, Any] | None:
+    if not _ensure_schema():
+        return None
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                row = conn.execute(
+                    "SELECT * FROM operative_approvals WHERE approval_id=?",
+                    (str(approval_id),),
+                ).fetchone()
+                return _approval_row(row)
+    except Exception:
+        log.exception("operative approval lookup failed")
+        return None
+
+
+def consume_operative_approval(
+    approval_id: str,
+    *,
+    manifest_digest: str,
+    principal: str,
+    session_id: str,
+    source: str,
+    run_id: str,
+    now_iso: str,
+    grant_expires_at: str,
+    task_record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Atomically approve, bind, and create one resumable execution run."""
+    if not _ensure_schema():
+        return None
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                task_payload = {
+                    "id": str(task_record.get("id") or ""),
+                    "status": str(task_record.get("status") or "running"),
+                    "created_at": str(task_record.get("created_at") or now_iso),
+                    "updated_at": str(task_record.get("updated_at") or now_iso),
+                    "finished_at": str(task_record.get("finished_at") or ""),
+                    "payload_json": _json_dumps(dict(task_record)),
+                }
+                if task_payload["id"] != str(run_id):
+                    return None
+                conn.execute("BEGIN IMMEDIATE")
+                updated = conn.execute(
+                    """
+                    UPDATE operative_approvals
+                    SET status='consumed', approved_at=?, grant_expires_at=?,
+                        consumed_at=?, run_id=?
+                    WHERE approval_id=? AND status='pending'
+                      AND manifest_digest=?
+                      AND principal=? AND session_id=? AND source=?
+                      AND expires_at>?
+                    """,
+                    (
+                        now_iso,
+                        str(grant_expires_at),
+                        now_iso,
+                        str(run_id),
+                        str(approval_id),
+                        str(manifest_digest),
+                        str(principal),
+                        str(session_id),
+                        str(source),
+                        now_iso,
+                    ),
+                ).rowcount
+                if updated != 1:
+                    return None
+                row = conn.execute(
+                    "SELECT * FROM operative_approvals WHERE approval_id=?",
+                    (str(approval_id),),
+                ).fetchone()
+                record = _approval_row(row)
+                if record is None:
+                    raise sqlite3.DatabaseError("operative approval manifest is unreadable")
+                conn.execute(
+                    """
+                    INSERT INTO tasks (
+                        id, status, created_at, updated_at, finished_at, payload_json
+                    ) VALUES (
+                        :id, :status, :created_at, :updated_at, :finished_at, :payload_json
+                    )
+                    """,
+                    task_payload,
+                )
+                _append_approval_event(conn, record, "approved", now_iso)
+                _append_approval_event(conn, record, "consumed", now_iso)
+                return record
+    except Exception:
+        log.exception("operative approval consumption failed")
+        return None
+
+
+def complete_operative_approval(
+    approval_id: str,
+    *,
+    run_id: str,
+    outcome: str,
+    now_iso: str,
+) -> bool:
+    """Record a terminal execution outcome without exposing task content."""
+    if not _ensure_schema():
+        return False
+    normalized_outcome = str(outcome or "failed").strip()[:100]
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                updated = conn.execute(
+                    """
+                    UPDATE operative_approvals
+                    SET completed_at=?, outcome=?
+                    WHERE approval_id=? AND status='consumed' AND run_id=?
+                      AND outcome=''
+                    """,
+                    (now_iso, normalized_outcome, str(approval_id), str(run_id)),
+                ).rowcount
+                if updated != 1:
+                    return False
+                row = conn.execute(
+                    "SELECT * FROM operative_approvals WHERE approval_id=?",
+                    (str(approval_id),),
+                ).fetchone()
+                record = _approval_row(row)
+                if record is not None:
+                    _append_approval_event(conn, record, normalized_outcome, now_iso)
+                return True
+    except Exception:
+        log.exception("operative approval completion failed")
+        return False
+
+
+def terminalize_operative_task(
+    task: Mapping[str, Any],
+    *,
+    approval_id: str,
+    run_id: str,
+    outcome: str,
+    now_iso: str,
+) -> bool:
+    """Atomically persist a terminal task and its consumed approval outcome."""
+    if not _ensure_schema():
+        return False
+    payload = _task_row_payload(task)
+    if not payload["id"] or payload["id"] != str(run_id) or not approval_id:
+        return False
+    normalized_outcome = str(outcome or "failed").strip()[:100]
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """
+                    INSERT INTO tasks (
+                        id, status, created_at, updated_at, finished_at, payload_json
+                    ) VALUES (
+                        :id, :status, :created_at, :updated_at, :finished_at, :payload_json
+                    )
+                    ON CONFLICT(id) DO UPDATE SET
+                        status=excluded.status,
+                        created_at=excluded.created_at,
+                        updated_at=excluded.updated_at,
+                        finished_at=excluded.finished_at,
+                        payload_json=excluded.payload_json
+                    """,
+                    payload,
+                )
+                updated = conn.execute(
+                    """
+                    UPDATE operative_approvals
+                    SET completed_at=?, outcome=?
+                    WHERE approval_id=? AND status='consumed' AND run_id=?
+                      AND outcome=''
+                    """,
+                    (now_iso, normalized_outcome, str(approval_id), str(run_id)),
+                ).rowcount
+                if updated != 1:
+                    raise sqlite3.DatabaseError(
+                        "consumed approval could not be terminalized"
+                    )
+                row = conn.execute(
+                    "SELECT * FROM operative_approvals WHERE approval_id=?",
+                    (str(approval_id),),
+                ).fetchone()
+                record = _approval_row(row)
+                if record is None:
+                    raise sqlite3.DatabaseError(
+                        "terminal approval manifest is unreadable"
+                    )
+                _append_approval_event(conn, record, normalized_outcome, now_iso)
+        return True
+    except Exception:
+        log.exception("operative task terminalization failed")
+        return False
+
+
+def cancel_operative_proposal(
+    approval_id: str,
+    *,
+    principal: str,
+    session_id: str,
+    source: str,
+    now_iso: str,
+) -> bool:
+    if not _ensure_schema():
+        return False
+    try:
+        with _LOCK:
+            with _connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                updated = conn.execute(
+                    """
+                    UPDATE operative_approvals
+                    SET status='cancelled', cancelled_at=?
+                    WHERE approval_id=? AND status IN ('pending', 'approved')
+                      AND principal=? AND session_id=? AND source=?
+                    """,
+                    (
+                        now_iso,
+                        str(approval_id),
+                        str(principal),
+                        str(session_id),
+                        str(source),
+                    ),
+                ).rowcount
+                if updated != 1:
+                    return False
+                row = conn.execute(
+                    "SELECT * FROM operative_approvals WHERE approval_id=?",
+                    (str(approval_id),),
+                ).fetchone()
+                record = _approval_row(row)
+                if record is not None:
+                    _append_approval_event(conn, record, "cancelled", now_iso)
+                return True
+    except Exception:
+        log.exception("operative approval cancellation failed")
+        return False
+
+
+def load_consumed_operative_approval(
+    approval_id: str,
+    *,
+    run_id: str,
+) -> dict[str, Any] | None:
+    record = get_operative_proposal(approval_id)
+    if not record:
+        return None
+    if (
+        record.get("status") != "consumed"
+        or record.get("run_id") != run_id
+        or record.get("outcome")
+    ):
+        return None
+    return record
+
+
 def upsert_task(task: dict[str, Any]) -> bool:
     if not _ensure_schema():
         return False
     try:
-        payload = {
-            "id": str(task.get("id") or ""),
-            "status": str(task.get("status") or ""),
-            "created_at": str(task.get("created_at") or ""),
-            "updated_at": str(task.get("updated_at") or task.get("created_at") or ""),
-            "finished_at": str(task.get("finished_at") or ""),
-            "payload_json": _json_dumps(task),
-        }
+        payload = _task_row_payload(task)
         if not payload["id"]:
             return False
         with _LOCK:

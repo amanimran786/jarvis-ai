@@ -300,6 +300,14 @@ OPERATIVE_TIMEOUT_SECONDS = max(
     30,
     min(_env_int("JARVIS_OPERATIVE_TIMEOUT_SECONDS", 900), 3_600),
 )
+OPERATIVE_APPROVAL_TTL_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_APPROVAL_TTL_SECONDS", 300), 1_800),
+)
+OPERATIVE_GRANT_TTL_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_GRANT_TTL_SECONDS", 1_200), 3_600),
+)
 
 # Sliding window for active conversation history (user+assistant turn pairs).
 # conversation_context keeps the last N turns verbatim and compacts older
