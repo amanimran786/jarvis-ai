@@ -148,3 +148,19 @@ class TestDiffStatCountsCommittedWork:
 
     def test_empty_worktree_path_is_zero(self, tmp_path):
         assert orchestrate._diff_stat(tmp_path / "does-not-exist") == (0, 0)
+
+
+class TestHarvestReview:
+    def test_includes_committed_lane_diff_from_trunk_merge_base(self, lane_repo):
+        review = orchestrate._harvest_review(lane_repo)
+
+        assert review["error"] == ""
+        assert review["base"] != "HEAD"
+        assert "test_lane.py" in review["diff_stat"]
+
+    def test_includes_untracked_files_in_status(self, lane_repo):
+        (lane_repo / "PLAN.md").write_text("# plan\n")
+
+        review = orchestrate._harvest_review(lane_repo)
+
+        assert "?? PLAN.md" in review["status"]

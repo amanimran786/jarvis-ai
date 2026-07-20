@@ -163,7 +163,7 @@ def test_manager_decomposes_goal_into_subtasks():
         })
 
         # Act
-        with patch("brains.brain_ollama.ask_local_structured", return_value=llm_response):
+        with patch("core.manager.ask_local_structured", return_value=llm_response):
             tasks = _decompose_via_llm("Build a research-backed AI API", memory_ctx="")
 
     # Assert

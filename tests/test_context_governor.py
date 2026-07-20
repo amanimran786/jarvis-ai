@@ -12,7 +12,7 @@ class ContextBudgetCompilerTests(unittest.TestCase):
     def test_target_tokens_uses_long_context_local_glm_without_cloud_expansion(self):
         self.assertEqual(
             context_budget.target_tokens_for("chat", model="glm-4.7-flash", local=True),
-            48_000,
+            96_000,
         )
         self.assertEqual(
             context_budget.target_tokens_for("chat", model="gpt-4o", local=False),
@@ -57,6 +57,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
              patch.object(model_router._smem, "format_for_prompt", return_value="SEMANTIC_CONTEXT"), \
              patch.object(model_router._m0, "search", return_value=[]), \
              patch.object(model_router._m0, "format_for_prompt", return_value="MEM0_CONTEXT"), \
+             patch.object(model_router._mem, "get_context", return_value="MEMORY_CONTEXT"), \
              patch.object(model_router._repeat_context, "context_for_prompt", return_value="REPEAT_CONTEXT"), \
              patch.object(model_router.vault, "build_context", return_value="VAULT_CONTEXT"), \
              patch.object(model_router._gctx, "context_for_query", return_value="GRAPH_CONTEXT"), \
@@ -70,9 +71,11 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
             stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
             self.assertEqual("".join(stream), "ok")
 
+        # smem.retrieve returns [] so smem_hits=[] → no semantic_hint (empty hint) and
+        # no per-hit "semantic:X" blocks. rank_context_blocks only emits non-empty content.
         self.assertEqual(
             [b["label"] for b in captured["blocks"]],
-            ["repeat_context", "vault", "graph", "semantic_hint", "semantic_memory", "mem0"],
+            ["working_memory", "repeat_context", "vault", "graph", "mem0"],
         )
         self.assertIn("SELECTED_CONTEXT", ask_local.call_args.kwargs["system_extra"])
         self.assertEqual(
@@ -113,7 +116,7 @@ class ModelRouterContextGovernorTests(unittest.TestCase):
             stream, _label = model_router.smart_stream("repo context question", tool="chat", prefer_local=True)
             self.assertEqual("".join(stream), "ok")
 
-        self.assertEqual(captured["kwargs"]["target_tokens"], 48_000)
+        self.assertEqual(captured["kwargs"]["target_tokens"], 96_000)
 
 
 class OllamaPromptFitTests(unittest.TestCase):
@@ -149,7 +152,7 @@ class OllamaPromptFitTests(unittest.TestCase):
         self.assertTrue(chunks)
         self.assertIn("BASE_SYSTEM", captured["fit_prompt"])
         self.assertIn("FULL_CONTEXT_MARKER", captured["fit_prompt"])
-        self.assertEqual(captured["chat_kwargs"]["options"]["num_ctx"], 64000)
+        self.assertEqual(captured["chat_kwargs"]["options"]["num_ctx"], 131072)
 
     def test_track_context_drops_oldest_messages_before_ollama_call(self):
         captured = {}
@@ -196,7 +199,13 @@ class OllamaPromptFitTests(unittest.TestCase):
         sent_text = brain_ollama._messages_text(captured["chat_kwargs"]["messages"])
         self.assertNotIn("OLD_CONTEXT_MARKER", sent_text)
         self.assertIn("CURRENT_REQUEST_MARKER", sent_text)
-        target_for.assert_called_once_with("chat", model="glm-4.7-flash", local=True)
+        # target_tokens_for is consulted for both the conversation capper and
+        # the explicit num_ctx option sent to Ollama; every call must be for
+        # the chat lane of this local model.
+        self.assertGreaterEqual(target_for.call_count, 1)
+        for call_item in target_for.call_args_list:
+            self.assertEqual(call_item.args, ("chat",))
+            self.assertEqual(call_item.kwargs, {"model": "glm-4.7-flash", "local": True})
         conversation_budget = recorded["kwargs"]["metadata"]["conversation_budget"]
         self.assertGreaterEqual(conversation_budget["dropped_message_count"], 1)
         self.assertGreater(conversation_budget["dropped_message_tokens"], 0)

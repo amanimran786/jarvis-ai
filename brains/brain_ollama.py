@@ -13,7 +13,7 @@ import threading
 import time
 import uuid
 from urllib.parse import urlparse
-from typing import Any
+from typing import Any, Generator
 from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
 import context_budget
 import memory as mem
@@ -41,6 +41,61 @@ try:
     import httpx
 except Exception:
     httpx = None
+
+
+class OllamaUnavailableError(ConnectionError):
+    """Raised when the Ollama server fails its liveness check.
+
+    Raising immediately (instead of waiting out a long request timeout) lets
+    model_router._execute_plan_stream fall through to the next candidate fast."""
+
+
+# ── Ollama liveness cache ─────────────────────────────────────────────────────
+# If Ollama dies mid-session, a routing attempt would otherwise block for the
+# full request timeout (up to 600s) before failover. A cached 2s GET /api/tags
+# probe makes the local lane fail fast so cloud fallback fires instantly.
+
+_ollama_liveness = {"ok": True, "checked_at": 0.0}
+_liveness_lock = threading.Lock()
+LIVENESS_TTL = float(os.getenv("OLLAMA_LIVENESS_TTL_SECONDS", "30"))  # seconds
+
+
+def _ollama_base_url() -> str:
+    host = os.getenv("OLLAMA_HOST", "").strip() or "http://127.0.0.1:11434"
+    if "://" not in host:
+        host = f"http://{host}"
+    return host.rstrip("/")
+
+
+def _check_ollama_liveness() -> bool:
+    """GET /api/tags with a 2s timeout. Result cached for LIVENESS_TTL seconds."""
+    if os.getenv("JARVIS_OLLAMA_LIVENESS_DISABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return True  # test suites mock the Ollama client and must not probe the network
+    host = os.getenv("OLLAMA_HOST", "").strip()
+    if host.startswith("unix://"):
+        return True  # HTTP probe not applicable to unix sockets; let the client surface errors
+    now = time.time()
+    with _liveness_lock:
+        if now - _ollama_liveness["checked_at"] < LIVENESS_TTL:
+            return _ollama_liveness["ok"]
+    url = f"{_ollama_base_url()}/api/tags"
+    try:
+        if httpx is not None:
+            ok = httpx.get(url, timeout=2.0).status_code == 200
+        else:
+            import urllib.request
+            with urllib.request.urlopen(url, timeout=2) as response:
+                ok = response.status == 200
+    except Exception:
+        ok = False
+    with _liveness_lock:
+        was_ok = _ollama_liveness["ok"]
+        _ollama_liveness.update({"ok": ok, "checked_at": time.time()})
+    if not ok:
+        log.warning("Ollama liveness check failed — marking local unavailable")
+    elif not was_ok:
+        log.info("Ollama recovered — resuming local routing")
+    return ok
 
 
 # DeepSeek R1:14b reasons heavily before first token — 600s default, overridable via env
@@ -159,7 +214,7 @@ def _close_client():
         try:
             close()
         except Exception:
-            pass
+            logging.debug("[BrainOllama] silent failure in _close_client", exc_info=True)
 
 
 atexit.register(_close_client)
@@ -193,7 +248,7 @@ def _system_has_headroom() -> bool:
         level = int(result.stdout.strip())
         return level >= int(_KEEPALIVE_MIN_FREE_RAM_FRACTION * 100)
     except Exception:
-        pass
+        logging.debug("[BrainOllama] silent failure in _system_has_headroom", exc_info=True)
     try:
         import psutil
         vm = psutil.virtual_memory()
@@ -273,9 +328,16 @@ _LOCAL_MODEL_CONTEXT_TOKENS = {
     "gemma4:e4b": 8192,
     "gemma3:4b": 8192,
     "llama3.1:8b": 8192,
-    "qwen3:8b": 40960,
+    "qwen3:8b": 32768,
+    "qwen3:14b": 131072,
+    "qwen3:30b": 131072,
+    "qwen2.5:32b": 131072,
     "qwen2.5-coder:7b": 32768,
-    "deepseek-r1:14b": 8192,  # we cap DeepSeek to 8k via DEEPSEEK_CTX anyway
+    "qwen2.5-coder:32b": 131072,
+    "devstral": 32768,
+    "phi4-mini": 4096,
+    "phi4": 16384,
+    "deepseek-r1:14b": 32768,  # capped via DEEPSEEK_CTX (default 32k, model supports 128k)
     "qwen3-coder:30b": 262144,
     "qwen3.6:35b": 262144,
 }
@@ -375,11 +437,23 @@ def _ollama_options_for_model(model: str) -> dict[str, int]:
     lower = (model or "").lower()
     options: dict[str, int] = {}
     if "glm" in lower:
-        options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "64000")))
+        # GLM 4.7 Flash supports 202K context; 128K is practical for M4 Pro 48 GB.
+        # Override via GLM_CTX env if you want a different value.
+        options["num_ctx"] = int(os.getenv("GLM_CTX", os.getenv("OLLAMA_GLM_CONTEXT", "131072")))
     if "deepseek" in lower:
-        # Cap DeepSeek R1 to limit reasoning token explosion on Mac.
-        options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "8192"))
+        # DeepSeek R1 supports 128K; 32K keeps reasoning-token explosion
+        # bounded on Mac while leaving real room for multi-turn context.
+        options["num_ctx"] = int(os.getenv("DEEPSEEK_CTX", "32768"))
         options["num_predict"] = int(os.getenv("DEEPSEEK_MAX_TOKENS", "1024"))
+    if "qwen3" in lower:
+        if any(tag in lower for tag in ("30b", "32b", "14b")):
+            # Larger Qwen3 variants: 128K practical window on 48 GB
+            options.setdefault("num_ctx", int(os.getenv("QWEN3_LARGE_CTX", "131072")))
+        else:
+            # qwen3:8b and smaller: native 32K window
+            options.setdefault("num_ctx", int(os.getenv("QWEN3_CTX", "32768")))
+    if "devstral" in lower:
+        options.setdefault("num_ctx", int(os.getenv("DEVSTRAL_CTX", "32768")))
     return options
 
 
@@ -473,6 +547,10 @@ def ask_local_structured(
     raise_on_error: bool = True,
 ) -> str:
     """Return one non-streamed local response constrained by an Ollama JSON schema."""
+    if not _check_ollama_liveness():
+        if raise_on_error:
+            raise OllamaUnavailableError("Ollama is not responding (liveness check failed)")
+        return ""
     prompt_for_fit = f"{system}\n\n{user_input}" if system else user_input
     model = _fits_local(prompt_for_fit, model)
     model = get_best_available(model)
@@ -483,15 +561,19 @@ def ask_local_structured(
     messages.append({"role": "user", "content": user_input})
 
     try:
+        options = _ollama_options_for_model(model)
+        options.setdefault(
+            "num_ctx",
+            int(context_budget.target_tokens_for("chat", model=model, local=True)),
+        )
+        options["temperature"] = 0
+        options["num_predict"] = int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256"))
         response = _structured_client().chat(
             model=model,
             messages=messages,
             stream=False,
             format=schema,
-            options={
-                "temperature": 0,
-                "num_predict": int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256")),
-            },
+            options=options,
         )
         content = (response.message.content or "").strip()
         prompt_eval_count = getattr(response, "prompt_eval_count", None)
@@ -503,10 +585,14 @@ def ask_local_structured(
             source="brain_ollama.ask_local_structured",
             prompt_tokens=prompt_eval_count,
             completion_tokens=eval_count,
-            total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+            total_tokens=(
+                prompt_eval_count + eval_count
+                if prompt_eval_count is not None and eval_count is not None
+                else None
+            ),
             messages=messages,
             response_text=content,
-            estimated=(prompt_eval_count is None and eval_count is None),
+            estimated=(prompt_eval_count is None or eval_count is None),
             metadata={"structured": True, "endpoint_scope": _ollama_endpoint_scope()},
         )
         return content
@@ -574,6 +660,12 @@ def ask_local_stream(
     include_memory: bool = True,
 ):
     """Stream a response from a local Ollama model."""
+    # Fail fast when Ollama is down — don't wait out the request timeout.
+    if not _check_ollama_liveness():
+        if raise_on_error:
+            raise OllamaUnavailableError("Ollama is not responding (liveness check failed)")
+        yield "I wasn't able to complete that one. The local model engine isn't responding right now."
+        return
     # Inject chain-of-thought boost only for task/question inputs, not casual conversation.
     # Casual statements lack a question mark and don't contain task/technical keywords — injecting
     # the reasoning prompt on those makes small models respond with "please clarify the question."
@@ -626,18 +718,29 @@ def ask_local_stream(
     eval_count = None
     try:
         options = _ollama_options_for_model(model)
+        # Always send an explicit num_ctx. Without it, models not covered by
+        # _ollama_options_for_model run at the Ollama server default (~4K) and
+        # silently truncate prompts the budget capper sized for 24-96K.
+        options.setdefault(
+            "num_ctx",
+            int(context_budget.target_tokens_for("chat", model=model, local=True)),
+        )
 
         stream = _client().chat(
             model=model,
             messages=messages,
             stream=True,
-            options=options if options else None,
+            options=options,
         )
         raw_buffer = ""
         in_think = False  # track local reasoning blocks
         for chunk in stream:
-            prompt_eval_count = getattr(chunk, "prompt_eval_count", prompt_eval_count)
-            eval_count = getattr(chunk, "eval_count", eval_count)
+            chunk_prompt_count = getattr(chunk, "prompt_eval_count", None)
+            chunk_eval_count = getattr(chunk, "eval_count", None)
+            if chunk_prompt_count is not None:
+                prompt_eval_count = chunk_prompt_count
+            if chunk_eval_count is not None:
+                eval_count = chunk_eval_count
             delta = chunk.message.content or ""
             full_reply += delta
             raw_buffer += delta
@@ -684,10 +787,14 @@ def ask_local_stream(
         source="brain_ollama.ask_local_stream",
         prompt_tokens=prompt_eval_count,
         completion_tokens=eval_count,
-        total_tokens=((prompt_eval_count or 0) + (eval_count or 0)) if (prompt_eval_count is not None or eval_count is not None) else None,
+        total_tokens=(
+            prompt_eval_count + eval_count
+            if prompt_eval_count is not None and eval_count is not None
+            else None
+        ),
         messages=messages,
         response_text=cleaned_reply,
-        estimated=(prompt_eval_count is None and eval_count is None),
+        estimated=(prompt_eval_count is None or eval_count is None),
         metadata={
             "track_context": track_context,
             "endpoint_scope": _ollama_endpoint_scope(),
@@ -1010,6 +1117,9 @@ def ask_local_with_tools(
 
     Falls back to plain ask_local_stream when no callable tools are requested.
     """
+    if not _check_ollama_liveness():
+        yield "The local tool agent could not complete this request. The local model engine isn't responding right now."
+        return
     requested_tool_names = [t for t in (tools or []) if t in _AGENT_TOOL_SCHEMAS]
     tool_names = list(requested_tool_names)
     if not _network_agent_tools_enabled():
@@ -1589,3 +1699,109 @@ def local_capabilities() -> dict:
         "reasoning_boost_enabled": True,
         "timeout_seconds": _OLLAMA_TIMEOUT_SECONDS,
     }
+
+
+# ── Ollama Cloud (api.ollama.com) ─────────────────────────────────────────────
+
+def ask_ollama_cloud_stream(
+    user_input: str,
+    model: str = "",
+    *,
+    system_extra: str = "",
+    track_context: bool = False,
+    raise_on_error: bool = False,
+) -> "Generator[str, None, None]":
+    """
+    Stream from the Ollama Cloud API (api.ollama.com) using the OpenAI-compat interface.
+
+    Requires OLLAMA_CLOUD_API_KEY to be set. If missing, raises RuntimeError so
+    _execute_plan_stream falls through to local.
+
+    Priority: ollama_local → ollama_cloud → paid providers. Use this when the
+    local model isn't capable enough and Ollama Cloud free tier has budget left.
+    """
+    from config import OLLAMA_CLOUD_BASE_URL, OLLAMA_CLOUD_API_KEY, OLLAMA_CLOUD_MODEL
+    from openai import OpenAI, APIError, AuthenticationError
+
+    api_key = OLLAMA_CLOUD_API_KEY.strip()
+    if not api_key:
+        raise RuntimeError("OLLAMA_CLOUD_API_KEY is not set — skipping Ollama Cloud")
+
+    resolved_model = model or OLLAMA_CLOUD_MODEL
+
+    system_parts = [SYSTEM_PROMPT]
+    ctx_text = mem.get_context(user_input) if track_context else ""
+    if ctx_text:
+        system_parts.append(ctx_text)
+    if system_extra:
+        system_parts.append(system_extra)
+    system = "\n\n".join(p for p in system_parts if p)
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_input},
+    ]
+
+    try:
+        from brains import _retry
+        client = OpenAI(base_url=OLLAMA_CLOUD_BASE_URL, api_key=api_key)
+        # Rate-limit backoff around the request open only (429 raises before
+        # the first token). After max retries the error propagates so
+        # _execute_plan_stream falls through to the next candidate.
+        stream = _retry.call_with_backoff(
+            lambda: client.chat.completions.create(
+                model=resolved_model,
+                messages=messages,
+                stream=True,
+                timeout=60,
+            ),
+            provider="ollama_cloud",
+        )
+
+        full_text = []
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                full_text.append(delta.content)
+                yield delta.content
+            # Capture usage if present in the final chunk
+            if hasattr(chunk, "usage") and chunk.usage:
+                prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(chunk.usage, "completion_tokens", 0) or 0
+
+        response_text = "".join(full_text)
+        if not prompt_tokens:
+            prompt_tokens = max(1, len(system + user_input) // 4)
+        if not completion_tokens:
+            completion_tokens = max(1, len(response_text) // 4)
+
+        usage_tracker.record(
+            provider="ollama_cloud",
+            model=resolved_model,
+            local=False,
+            source="brain_ollama_cloud",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+        )
+
+        # Also log to budget.jsonl
+        try:
+            from harness import budget as _budget
+            _budget.record(
+                provider="ollama_cloud",
+                model=resolved_model,
+                tokens_in=prompt_tokens,
+                tokens_out=completion_tokens,
+            )
+        except Exception:
+            logging.debug("[BrainOllama] silent failure in unknown", exc_info=True)
+
+    except (AuthenticationError, Exception) as exc:
+        log.warning("[OllamaCloud] Error: %s", exc)
+        if raise_on_error:
+            raise
+        yield f"[Ollama Cloud unavailable: {exc}]"

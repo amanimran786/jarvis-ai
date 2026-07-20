@@ -587,7 +587,7 @@ def local_ipv4_addresses() -> list[str]:
                 if ip and not ip.startswith("127."):
                     addresses.add(ip)
     except Exception:
-        pass
+        logging.debug("[Hardware] silent failure in local_ipv4_addresses", exc_info=True)
 
     for iface in ("en0", "en1", "bridge0"):
         try:
@@ -602,7 +602,7 @@ def local_ipv4_addresses() -> list[str]:
             if ip and not ip.startswith("127."):
                 addresses.add(ip)
         except Exception:
-            pass
+            logging.debug("[Hardware] silent failure in local_ipv4_addresses", exc_info=True)
 
     return sorted(addresses)
 
@@ -630,7 +630,7 @@ def bridge_status(api_host: str = "127.0.0.1", api_port: int = 8765) -> dict:
         if public_url:
             urls.insert(0, public_url)
     except Exception:
-        pass
+        logging.debug("[Hardware] silent failure in bridge_status", exc_info=True)
 
     return {
         "enabled": lan_enabled,
@@ -694,7 +694,7 @@ def open_system_settings(target: str) -> str:
         if proc.returncode == 0:
             return f"Opened System Settings. Navigate to {key} from there."
     except Exception:
-        pass
+        logging.debug("[Hardware] silent failure in open_system_settings", exc_info=True)
 
     return f"Couldn't open {key} settings."
 

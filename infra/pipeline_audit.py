@@ -36,6 +36,7 @@ CLI:
 Exit code: 0 = clean, 1 = warnings only, 2 = at least one critical.
 """
 from __future__ import annotations
+import logging
 
 import argparse
 import hashlib
@@ -94,7 +95,7 @@ def _verifiable_agents() -> frozenset[str]:
         if agents:
             return frozenset(agents)
     except Exception:
-        pass
+        logging.debug("[PipelineAudit] silent failure in _verifiable_agents", exc_info=True)
     return _DEFAULT_VERIFIABLE
 
 
@@ -475,7 +476,7 @@ def reconcile_projects_db(db_path: Path, verdict_task_ids: set[str]) -> list[Fin
         try:
             con.close()
         except Exception:
-            pass
+            logging.debug("[PipelineAudit] silent failure in unknown", exc_info=True)
     return findings
 
 

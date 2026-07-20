@@ -33,6 +33,7 @@ TOOLS = {
     "osint_subdomains": "Passive subdomain enumeration via subfinder.",
     "osint_whois": "WHOIS lookup for domain registration and ownership information.",
     "artifact": "Generate a shareable Local Artifact — a self-contained interactive HTML page (diagrams, dashboards, code walkthroughs, PR reviews, data visualizations, or any team-shareable output) created on-device and saved to the Desktop.",
+    "code_task": "Write Python code files and tests locally, run tests, and fix failures in a loop until passing. Use for: implement X, write a function that does Y, fix the failing test, create a script that does Z.",
 }
 
 
@@ -46,14 +47,53 @@ class ToolSpec:
     timeout_seconds: int
     verifier: str
     idempotent: bool = True
+    require_one_of: tuple[tuple[str, ...], ...] = ()
 
 
 TOOL_SPECS: dict[str, ToolSpec] = {
+    "git": ToolSpec(
+        name="git",
+        description="Run git operations: status, diff, log, branch, show (read-only); add, commit (write). Push is excluded — must be done manually.",
+        args_schema={
+            "action": {
+                "type": "string",
+                "choices": ("status", "diff", "log", "branch", "show", "add", "add_all", "commit"),
+            },
+            "message": {"type": "string", "default": "", "max_length": 500},
+            "paths": {"type": "string", "default": "", "max_length": 4096},
+            "path": {"type": "string", "default": "", "max_length": 4096},
+            "staged": {"type": "bool", "default": False},
+            "n": {"type": "int", "default": 10, "min": 1, "max": 50},
+            "ref": {"type": "string", "default": "HEAD", "max_length": 200},
+            "oneline": {"type": "bool", "default": True},
+        },
+        required=("action",),
+        side_effects=True,
+        timeout_seconds=20,
+        verifier="non_empty_text",
+        idempotent=False,
+    ),
     "search": ToolSpec(
         name="search",
-        description="Quick web search for current info.",
-        args_schema={"query": {"type": "string"}, "max_results": {"type": "int", "default": 5}},
+        description="Search the web via DuckDuckGo. Returns ranked results with titles, URLs, and snippets, summarised by a local model.",
+        args_schema={
+            "query": {"type": "string", "max_length": 20_000},
+            "max_results": {"type": "int", "default": 5, "min": 1, "max": 20},
+            "fetch_top": {"type": "bool", "default": False},
+        },
         required=("query",),
+        side_effects=False,
+        timeout_seconds=30,
+        verifier="non_empty_text",
+    ),
+    "fetch_page": ToolSpec(
+        name="fetch_page",
+        description="Fetch a web page and return its plain-text content for further processing.",
+        args_schema={
+            "url": {"type": "string", "max_length": 8192},
+            "max_chars": {"type": "int", "default": 6000, "min": 1, "max": 100_000},
+        },
+        required=("url",),
         side_effects=False,
         timeout_seconds=20,
         verifier="non_empty_text",
@@ -61,19 +101,25 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "research": ToolSpec(
         name="research",
         description="Deep web research with source-backed report.",
-        args_schema={"query": {"type": "string"}, "depth": {"type": "int", "default": 2}},
-        required=("query",),
+        args_schema={
+            "query": {"type": "string", "max_length": 20_000},
+            "topic": {"type": "string", "max_length": 20_000},
+            "depth": {"type": "int", "default": 2, "min": 1, "max": 5},
+        },
+        required=(),
         side_effects=False,
         timeout_seconds=180,
         verifier="report_with_sources",
+        require_one_of=(("query", "topic"),),
     ),
     "notes": ToolSpec(
         name="notes",
         description="Write or read personal notes.",
         args_schema={
-            "action": {"type": "string", "default": "write"},
-            "title": {"type": "string", "default": "Jarvis Note"},
-            "content": {"type": "string", "default": ""},
+            "action": {"type": "string", "default": "write", "choices": ("read", "list", "write")},
+            "title": {"type": "string", "default": "Jarvis Note", "max_length": 500},
+            "content": {"type": "string", "default": "", "max_length": 1_000_000},
+            "text": {"type": "string", "max_length": 1_000_000},
         },
         required=("action",),
         side_effects=True,
@@ -84,10 +130,10 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="email",
         description="Read or send email.",
         args_schema={
-            "action": {"type": "string", "default": "read"},
-            "to": {"type": "string", "default": ""},
-            "subject": {"type": "string", "default": "Jarvis Report"},
-            "body": {"type": "string", "default": ""},
+            "action": {"type": "string", "default": "read", "choices": ("read", "send")},
+            "to": {"type": "string", "default": "", "max_length": 500},
+            "subject": {"type": "string", "default": "Jarvis Report", "max_length": 500},
+            "body": {"type": "string", "default": "", "max_length": 1_000_000},
         },
         required=("action",),
         side_effects=True,
@@ -98,7 +144,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "calendar": ToolSpec(
         name="calendar",
         description="Read calendar events.",
-        args_schema={"action": {"type": "string", "default": "read"}},
+        args_schema={"action": {"type": "string", "default": "read", "choices": ("read",)}},
         required=("action",),
         side_effects=False,
         timeout_seconds=20,
@@ -107,20 +153,24 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "terminal": ToolSpec(
         name="terminal",
         description="Run a shell command.",
-        args_schema={"command": {"type": "string"}},
-        required=("command",),
+        args_schema={
+            "command": {"type": "string", "max_length": 4096},
+            "cmd": {"type": "string", "max_length": 4096},
+        },
+        required=(),
         side_effects=True,
         timeout_seconds=45,
         verifier="terminal_output",
         idempotent=False,
+        require_one_of=(("command", "cmd"),),
     ),
     "file": ToolSpec(
         name="file",
         description="Read or write a local file.",
         args_schema={
-            "action": {"type": "string", "default": "write"},
-            "path": {"type": "string", "default": "~/Desktop/jarvis_output.md"},
-            "content": {"type": "string", "default": ""},
+            "action": {"type": "string", "default": "write", "choices": ("read", "write")},
+            "path": {"type": "string", "default": "~/Desktop/jarvis_output.md", "max_length": 4096},
+            "content": {"type": "string", "default": "", "max_length": 1_000_000},
         },
         required=("action", "path"),
         side_effects=True,
@@ -140,16 +190,19 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "chat": ToolSpec(
         name="chat",
         description="Text generation only.",
-        args_schema={"prompt": {"type": "string"}},
-        required=("prompt",),
+        args_schema={
+            "prompt": {"type": "string", "max_length": 50_000},
+            "content": {"type": "string", "max_length": 50_000},
+        },
+        required=(),
         side_effects=False,
-        timeout_seconds=45,
+        timeout_seconds=95,
         verifier="non_empty_text",
     ),
     "malware_get_alert": ToolSpec(
         name="malware_get_alert",
         description="Fetch malware alert by id from malware detection API.",
-        args_schema={"alert_id": {"type": "string"}},
+        args_schema={"alert_id": {"type": "string", "max_length": 500}},
         required=("alert_id",),
         side_effects=False,
         timeout_seconds=20,
@@ -158,7 +211,7 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "malware_get_case": ToolSpec(
         name="malware_get_case",
         description="Fetch malware investigation case details by case id.",
-        args_schema={"case_id": {"type": "string"}},
+        args_schema={"case_id": {"type": "string", "max_length": 500}},
         required=("case_id",),
         side_effects=False,
         timeout_seconds=20,
@@ -168,9 +221,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="malware_list_samples",
         description="List malware samples by status or family filter.",
         args_schema={
-            "status": {"type": "string", "default": "open"},
-            "family": {"type": "string", "default": ""},
-            "limit": {"type": "int", "default": 25},
+            "status": {"type": "string", "default": "open", "max_length": 100},
+            "family": {"type": "string", "default": "", "max_length": 200},
+            "limit": {"type": "int", "default": 25, "min": 1, "max": 100},
         },
         required=(),
         side_effects=False,
@@ -180,7 +233,10 @@ TOOL_SPECS: dict[str, ToolSpec] = {
     "malware_submit_hash": ToolSpec(
         name="malware_submit_hash",
         description="Submit IOC hash to malware detection API for enrichment/scan.",
-        args_schema={"hash": {"type": "string"}, "source": {"type": "string", "default": "jarvis"}},
+        args_schema={
+            "hash": {"type": "string", "max_length": 256},
+            "source": {"type": "string", "default": "jarvis", "max_length": 200},
+        },
         required=("hash",),
         side_effects=True,
         timeout_seconds=25,
@@ -191,10 +247,10 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="osint_username",
         description="Scan username presence across platforms with local Maigret.",
         args_schema={
-            "username": {"type": "string"},
-            "timeout_seconds": {"type": "int", "default": 45},
-            "top_sites": {"type": "int", "default": 200},
-            "max_results": {"type": "int", "default": 25},
+            "username": {"type": "string", "max_length": 200},
+            "timeout_seconds": {"type": "int", "default": 45, "min": 1, "max": 120},
+            "top_sites": {"type": "int", "default": 200, "min": 1, "max": 500},
+            "max_results": {"type": "int", "default": 25, "min": 1, "max": 100},
         },
         required=("username",),
         side_effects=False,
@@ -205,9 +261,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="osint_domain_typos",
         description="Scan typo-squat domains with local DNSTwist.",
         args_schema={
-            "domain": {"type": "string"},
-            "timeout_seconds": {"type": "int", "default": 60},
-            "max_results": {"type": "int", "default": 25},
+            "domain": {"type": "string", "max_length": 253},
+            "timeout_seconds": {"type": "int", "default": 60, "min": 1, "max": 120},
+            "max_results": {"type": "int", "default": 25, "min": 1, "max": 100},
             "registered_only": {"type": "bool", "default": True},
         },
         required=("domain",),
@@ -219,9 +275,9 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="osint_subdomains",
         description="Passive subdomain enumeration via subfinder.",
         args_schema={
-            "domain": {"type": "string"},
-            "timeout_seconds": {"type": "int", "default": 60},
-            "max_results": {"type": "int", "default": 100},
+            "domain": {"type": "string", "max_length": 253},
+            "timeout_seconds": {"type": "int", "default": 60, "min": 1, "max": 120},
+            "max_results": {"type": "int", "default": 100, "min": 1, "max": 500},
             "passive_only": {"type": "bool", "default": True},
         },
         required=("domain",),
@@ -233,13 +289,40 @@ TOOL_SPECS: dict[str, ToolSpec] = {
         name="osint_whois",
         description="WHOIS lookup for domain registration and ownership information.",
         args_schema={
-            "domain": {"type": "string"},
-            "timeout_seconds": {"type": "int", "default": 15},
+            "domain": {"type": "string", "max_length": 253},
+            "timeout_seconds": {"type": "int", "default": 15, "min": 1, "max": 60},
         },
         required=("domain",),
         side_effects=False,
         timeout_seconds=30,
         verifier="json_object",
+    ),
+    "specialized_agent": ToolSpec(
+        name="specialized_agent",
+        description="Run a specialist agent by name for a scoped sub-task.",
+        args_schema={
+            "agent": {"type": "string", "max_length": 100},
+            "task": {"type": "string", "max_length": 50_000},
+            "context": {"type": "string", "default": "", "max_length": 100_000},
+        },
+        required=("agent", "task"),
+        side_effects=True,
+        timeout_seconds=120,
+        verifier="non_empty_text",
+        idempotent=False,
+    ),
+    "code_task": ToolSpec(
+        name="code_task",
+        description="Write, test, and fix Python code in a local workspace loop.",
+        args_schema={
+            "task": {"type": "string", "max_length": 50_000},
+            "max_iterations": {"type": "int", "default": 2, "min": 1, "max": 2},
+        },
+        required=("task",),
+        side_effects=True,
+        timeout_seconds=800,
+        verifier="non_empty_text",
+        idempotent=False,
     ),
 }
 
@@ -261,6 +344,17 @@ def validate_args(tool_name: str, params: dict) -> tuple[bool, dict, str]:
     if not spec:
         return False, {}, f"Unknown tool: {tool_name}"
     params = dict(params or {})
+    unknown = sorted(set(params) - set(spec.args_schema))
+    if unknown:
+        return False, {}, (
+            f"Unknown argument(s) for tool '{tool_name}': {', '.join(unknown)}."
+        )
+    for group in spec.require_one_of:
+        if not any(key in params and str(params[key]).strip() for key in group):
+            return False, {}, (
+                f"Missing required argument for tool '{tool_name}': "
+                f"one of {', '.join(group)}."
+            )
     normalized: dict[str, Any] = {}
 
     for key, meta in spec.args_schema.items():
@@ -302,11 +396,31 @@ def validate_args(tool_name: str, params: dict) -> tuple[bool, dict, str]:
                 value = str(value)
         except (TypeError, ValueError):
             return False, {}, f"Invalid type for '{key}' in tool '{tool_name}': expected {expected}."
-        normalized[key] = value
 
-    for key, value in params.items():
-        if key not in normalized and key not in spec.args_schema:
-            normalized[key] = value
+        if expected in {"int", "float"}:
+            minimum = meta.get("min")
+            maximum = meta.get("max")
+            if minimum is not None and value < minimum:
+                return False, {}, (
+                    f"Argument '{key}' for tool '{tool_name}' must be at least {minimum}."
+                )
+            if maximum is not None and value > maximum:
+                return False, {}, (
+                    f"Argument '{key}' for tool '{tool_name}' must be at most {maximum}."
+                )
+        if expected == "string":
+            max_length = meta.get("max_length")
+            if max_length is not None and len(value) > max_length:
+                return False, {}, (
+                    f"Argument '{key}' for tool '{tool_name}' exceeds {max_length} characters."
+                )
+        choices = meta.get("choices")
+        if choices is not None and value not in choices:
+            return False, {}, (
+                f"Argument '{key}' for tool '{tool_name}' must be one of: "
+                f"{', '.join(str(choice) for choice in choices)}."
+            )
+        normalized[key] = value
     return True, normalized, ""
 
 

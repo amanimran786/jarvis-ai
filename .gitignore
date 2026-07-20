@@ -1,5 +1,6 @@
 # Secrets & credentials
 .env
+.jarvis-work-queue.lock
 credentials.json
 token.json
 
@@ -17,6 +18,7 @@ last_session.json
 evals.json
 memory/chroma/
 memory/working/session.json
+memory/embed_cache.json
 usage_log.jsonl
 usage_state.json
 usage_state.*.tmp
@@ -113,6 +115,32 @@ kb/career/universal_base.md
 training/benchmarks.jsonl
 training/overnight_log.jsonl
 training/overnight_state.json
+
+# Runtime snapshots and training traces
+snapshots/
+training/execution_traces/
+logs/*.jsonl
+logs/*.log
+logs/*.json
+logs/circuit_breaker.json
+ACTIVE_SESSIONS.json
+LAUNCH_QUEUE.json
+ORCHESTRATOR_STATUS.json
+RESUME_SIGNAL.json
+PENDING_SESSIONS/
+approved_tasks.json
+evals/
+
+# Daemon-rewritten coordination/queue state — runtime data, not source.
+# These churn on every orchestrator/session loop; tracking them keeps the tree
+# permanently dirty and makes every autonomous lane conflict on log noise.
+MASTER_LOG.md
+WORK_QUEUE.json
+SESSIONS.json
+training/dashboard.html
+logs/LEGACY-*_report.md
+logs/operations.md
+.pr_body.txt
 
 # Runtime SQLite databases
 *.db

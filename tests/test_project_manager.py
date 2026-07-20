@@ -31,6 +31,14 @@ def _isolated_db(tmp_path, monkeypatch):
 
     yield pm
 
+    # Join executor threads while env var still points at this test's DB.
+    # Without this, threads from this test can linger and call _db_path() after
+    # monkeypatch restores the env var, accidentally writing to the next test's
+    # DB and causing SQLite lock errors under parallel test runs.
+    for thread in list(pm._EXECUTORS.values()):
+        thread.join(timeout=2.0)
+    pm._EXECUTORS.clear()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,6 @@
 import os
+import re
+import shlex
 import subprocess
 import tempfile
 import behavior_hooks as hooks
@@ -6,12 +8,16 @@ import safety_permissions as perms
 
 
 _DESTRUCTIVE_PATTERNS = [
-    "rm -rf", "rm -fr", "rmdir", "mkfs", "dd if=",
+    "rm -rf", "rm -fr", "rm -r", "rm --recursive", "rmdir",
+    " -delete", "git clean -", "truncate ",
+    "authorized_keys",
+    "mkfs", "dd if=",
     ":(){:|:&};:",  # fork bomb
     "> /dev/sd", "shred", "wipefs",
     "shutdown", "reboot", "halt", "poweroff",
     "chmod -R 777 /", "chown -R",
 ]
+_SHELL_CONTROL_PATTERN = re.compile(r"(?:&&|\|\||[;|<>`]|\$\(|[\r\n])")
 
 
 def _contains_blocked_pattern(command: str) -> str | None:
@@ -27,17 +33,27 @@ def _escape_applescript(text: str) -> str:
 
 
 def run_command(command: str, cwd: str = None) -> str:
-    """Run a shell command and return its output."""
+    """Run one approved command directly and return its output."""
     gate = perms.can_run_shell(command, cwd=cwd, admin=False)
     if not gate["ok"]:
         return gate["reason"]
     pattern = _contains_blocked_pattern(command)
     if pattern:
         return f"Blocked: '{pattern}' is a destructive operation. Be more specific if you really need this."
+    if _SHELL_CONTROL_PATTERN.search(command):
+        return "Blocked: shell pipelines, redirects, substitutions, and command chaining are not supported."
     try:
+        args = shlex.split(command)
+        if not args:
+            return "Command is empty."
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=cwd or os.path.expanduser("~")
+            args,
+            shell=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=cwd or os.path.expanduser("~"),
+            check=False,
         )
         output = result.stdout.strip() or result.stderr.strip()
         final = output if output else "Command ran with no output."
@@ -45,6 +61,8 @@ def run_command(command: str, cwd: str = None) -> str:
         return final
     except subprocess.TimeoutExpired:
         return "Command timed out after 30 seconds."
+    except ValueError as e:
+        return f"Invalid command syntax: {e}"
     except Exception as e:
         return f"Error running command: {e}"
 
@@ -82,9 +100,43 @@ def run_admin_command(command: str) -> str:
         return f"Error running admin command: {e}"
 
 
-def read_file(path: str) -> str:
-    """Read a file and return its contents."""
+def read_pdf(path: str) -> str:
+    """Extract text from a PDF. Tries pdftotext first, falls back to pypdf."""
     path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return f"File not found: {path}"
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-layout", path, "-"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        text = result.stdout.strip()
+        if text:
+            if len(text) > 12000:
+                text = text[:12000] + f"\n... [truncated — {len(text)} chars total]"
+            return text
+    except Exception:
+        pass
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(path)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+        if len(text) > 12000:
+            text = text[:12000] + f"\n... [truncated — {len(text)} chars total]"
+        return text or "PDF appears to have no extractable text."
+    except Exception as e:
+        return f"Could not read PDF: {e}"
+
+
+def read_file(path: str) -> str:
+    """Read a file and return its contents. PDFs are extracted as text."""
+    path = os.path.expanduser(path)
+    if path.lower().endswith(".pdf"):
+        return read_pdf(path)
     if not os.path.exists(path):
         return f"File not found: {path}"
     try:

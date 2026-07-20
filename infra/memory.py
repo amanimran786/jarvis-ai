@@ -106,7 +106,7 @@ def _qdrant() -> Any:
         log.info("Qdrant: connected to HTTP server %s:%d", host, port)
         return _client_cache
     except Exception:
-        pass
+        logging.debug("[Memory] silent failure in _qdrant", exc_info=True)
 
     # Fall back to on-disk
     Path(_QDRANT_DISK_PATH).mkdir(parents=True, exist_ok=True)

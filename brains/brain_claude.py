@@ -1,9 +1,11 @@
+import logging
 import anthropic
 from config import ANTHROPIC_API_KEY, HAIKU, SYSTEM_PROMPT
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
 from brains import _postprocess
+from brains import _retry
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
@@ -33,7 +35,7 @@ def _get_client() -> "anthropic.Anthropic":
                     if key:
                         break
         except Exception:
-            pass
+            logging.debug("[BrainClaude] silent failure in _get_client", exc_info=True)
     if key:
         client = anthropic.Anthropic(api_key=key)
     return client
@@ -89,23 +91,45 @@ def ask_claude_stream(
 
     full_reply = ""
     final_message = None
-    with _client.messages.stream(
-        model=model,
-        max_tokens=2048,
-        system=effective_system,
-        messages=messages
-    ) as stream:
-        buffer = ""
-        for text in stream.text_stream:
-            full_reply += text
-            buffer += text
-            if any(buffer.endswith(c) for c in ('.', '!', '?', '\n')):
-                yield _strip_markdown(buffer)
+    _attempt = 0
+    while True:
+        try:
+            # cache_control enables Anthropic prompt caching: the system block
+            # (persona + memory + grounding, ~1-4K tokens) is cached for ~5min,
+            # so consecutive turns re-read it at ~10% of the input token cost.
+            with _client.messages.stream(
+                model=model,
+                max_tokens=2048,
+                system=[
+                    {
+                        "type": "text",
+                        "text": effective_system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=messages
+            ) as stream:
                 buffer = ""
+                for text in stream.text_stream:
+                    full_reply += text
+                    buffer += text
+                    if any(buffer.endswith(c) for c in ('.', '!', '?', '\n')):
+                        yield _strip_markdown(buffer)
+                        buffer = ""
 
-        if buffer:
-            yield _strip_markdown(buffer)
-        final_message = stream.get_final_message()
+                if buffer:
+                    yield _strip_markdown(buffer)
+                final_message = stream.get_final_message()
+            break
+        except Exception as exc:
+            # Retry only rate limits raised before any text streamed (a 429
+            # raises on stream open); once output was yielded a retry would
+            # duplicate it, so re-raise and let the router fail over. After
+            # max retries the error propagates for provider failover.
+            if full_reply or _attempt >= _retry.MAX_RETRIES or not _retry.is_rate_limit_error(exc):
+                raise
+            _retry.sleep_before_retry("anthropic", _attempt, exc)
+            _attempt += 1
 
     cleaned_reply = _strip_markdown(full_reply)
     usage = getattr(final_message, "usage", None) if final_message is not None else None

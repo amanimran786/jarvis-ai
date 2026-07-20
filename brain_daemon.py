@@ -550,7 +550,7 @@ class EmailAlertAgent(BrainAgent):
                     name_match = re.match(r'^([^<"]+)', from_raw)
                     senders.append(name_match.group(1).strip() if name_match else from_raw.split("@")[0])
                 except Exception:
-                    pass
+                    logging.debug("[BrainDaemon] silent failure in run_once", exc_info=True)
 
             count = len(new_msgs)
             if senders:

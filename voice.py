@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 import subprocess
@@ -42,6 +43,9 @@ def get_mic_level() -> float:
 WAKE_WORDS = {"jarvis", "hey jarvis", "ok jarvis", "okay jarvis"}
 _last_tts_engine = ""
 MANUAL_PROMPT_WINDOW_SECONDS = 8.0
+# Max seconds of speech captured once the user starts talking (endpointed
+# listen). The window ends automatically on a natural pause well before this.
+MANUAL_PROMPT_PHRASE_LIMIT = 15.0
 WAKE_WORD_WINDOW_SECONDS = 3.0
 _kokoro_disabled_reason = ""
 
@@ -64,13 +68,17 @@ _VOICE_DEVICE_SKIP = [
 ]
 _VOICE_LOG_PATH = Path.home() / "Library" / "Application Support" / "Jarvis" / ".jarvis_voice.log"
 _MIC_OPEN_RETRY_SECONDS = 5.0
+_MIC_OPEN_TIMEOUT_SECONDS = 5.0
 _MIC_DEVICE_RETRY_SECONDS = 60.0
 _MIC_SKIP_LOGGED: set[str] = set()
 _MIC_RECENT_FAILURES: dict[str, float] = {}
 _MIC_OPEN_LOCK = threading.Lock()
+# PyAudio microphone lifecycle calls can crash when run concurrently.
+_PYAUDIO_MIC_LOCK = threading.Lock()
 _mic_failure_cooldown_until = 0.0
 _mic_last_failure_detail = ""
 _active_mic_label = ""
+_mic_open_worker: threading.Thread | None = None
 
 
 @contextmanager
@@ -125,7 +133,7 @@ def _debug_log(*args, **kwargs) -> None:
         with _VOICE_LOG_PATH.open("a", encoding="utf-8") as fh:
             fh.write(f"[{datetime.now().isoformat(timespec='seconds')}] {line}\n")
     except Exception:
-        pass
+        logging.debug("[Voice] silent failure in _debug_log", exc_info=True)
 
 
 def _get_microphone() -> sr.Microphone:
@@ -133,7 +141,12 @@ def _get_microphone() -> sr.Microphone:
     candidates = _microphone_candidates()
     if candidates:
         return candidates[0][1]
-    return sr.Microphone()
+    if not _PYAUDIO_MIC_LOCK.acquire(blocking=False):
+        raise RuntimeError("Microphone device probe is busy")
+    try:
+        return sr.Microphone()
+    finally:
+        _PYAUDIO_MIC_LOCK.release()
 
 
 def _voice_device_skip_reason(name: str) -> str:
@@ -195,7 +208,7 @@ def _input_capable_device_indexes() -> set[int] | None:
             if audio is not None:
                 audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] PyAudio terminate failed in device scan", exc_info=True)
 
 
 def _default_input_device_info() -> dict | None:
@@ -214,7 +227,7 @@ def _default_input_device_info() -> dict | None:
             if audio is not None:
                 audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] PyAudio terminate failed in default device probe", exc_info=True)
 
 
 def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
@@ -229,7 +242,21 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
 
     This ensures the Default input device is only used when nothing better exists,
     rather than always winning by being inserted first.
+
+    Raises RuntimeError instead of waiting when another lifecycle call is active.
     """
+    if _mic_open_worker is not None and _mic_open_worker.is_alive():
+        raise RuntimeError("Microphone device probe unavailable while an open is still running")
+    if not _PYAUDIO_MIC_LOCK.acquire(blocking=False):
+        raise RuntimeError("Microphone device probe is busy")
+    try:
+        return _microphone_candidates_locked()
+    finally:
+        _PYAUDIO_MIC_LOCK.release()
+
+
+def _microphone_candidates_locked() -> list[tuple[str, sr.Microphone]]:
+    """Build microphone candidates while the caller owns _PYAUDIO_MIC_LOCK."""
     candidates: list[tuple[str, sr.Microphone]] = []
     seen: set[int | None] = set()
 
@@ -319,6 +346,76 @@ def _microphone_candidates() -> list[tuple[str, sr.Microphone]]:
     return candidates
 
 
+def _close_cancelled_microphone_source(microphone, source) -> None:
+    with _PYAUDIO_MIC_LOCK:
+        try:
+            microphone.__exit__(None, None, None)
+            return
+        except Exception:
+            logging.debug("[Voice] timed-out microphone __exit__ failed", exc_info=True)
+
+        try:
+            stream = getattr(source, "stream", None)
+            if stream is not None:
+                stream.close()
+            audio = getattr(source, "audio", None)
+            if audio is not None:
+                audio.terminate()
+        except Exception:
+            logging.debug("[Voice] timed-out mic cleanup failed", exc_info=True)
+
+
+def _enter_microphone_with_timeout(label: str, microphone):
+    """Bound a native CoreAudio open without starting overlapping AUHAL calls."""
+    global _mic_open_worker
+
+    if _mic_open_worker is not None and _mic_open_worker.is_alive():
+        raise RuntimeError("Previous microphone open is still blocked in CoreAudio")
+
+    completed = threading.Event()
+    state_lock = threading.Lock()
+    state = {"cancelled": False, "source": None, "error": None}
+
+    def _open_target() -> None:
+        source = None
+        try:
+            with _PYAUDIO_MIC_LOCK:
+                source = microphone.__enter__()
+            with state_lock:
+                if not state["cancelled"]:
+                    state["source"] = source
+                    source = None
+        except Exception as exc:
+            with state_lock:
+                state["error"] = exc
+        finally:
+            if source is not None:
+                _close_cancelled_microphone_source(microphone, source)
+            completed.set()
+
+    worker = threading.Thread(target=_open_target, name="jarvis-mic-open", daemon=True)
+    _mic_open_worker = worker
+    with _suppress_native_audio_stderr():
+        worker.start()
+        finished = completed.wait(timeout=_MIC_OPEN_TIMEOUT_SECONDS)
+
+    if not finished:
+        with state_lock:
+            state["cancelled"] = True
+            late_source = state["source"]
+            state["source"] = None
+        if late_source is not None:
+            _close_cancelled_microphone_source(microphone, late_source)
+        raise TimeoutError(
+            f"{label} microphone open timed out after {_MIC_OPEN_TIMEOUT_SECONDS:.1f}s"
+        )
+
+    _mic_open_worker = None
+    if state["error"] is not None:
+        raise state["error"]
+    return state["source"]
+
+
 @contextmanager
 def _open_microphone_source():
     """Open a live microphone stream, skipping candidates that fail to provide one."""
@@ -329,14 +426,15 @@ def _open_microphone_source():
         if now < _mic_failure_cooldown_until:
             detail = _mic_last_failure_detail or "microphone retry cooldown active"
             raise RuntimeError(f"Microphone retry cooldown active. {detail}")
+        if _mic_open_worker is not None and _mic_open_worker.is_alive():
+            raise RuntimeError("Previous microphone open is still blocked in CoreAudio")
 
         for label, microphone in _microphone_candidates():
             if _recent_mic_failure_active(label):
                 continue
             source = None
             try:
-                with _suppress_native_audio_stderr():
-                    source = microphone.__enter__()
+                source = _enter_microphone_with_timeout(label, microphone)
                 if getattr(source, "stream", None) is None:
                     raise RuntimeError(f"{label} opened without a live input stream")
                 _debug_log(f"[Mic] Using input device: {label}")
@@ -362,7 +460,7 @@ def _open_microphone_source():
                                     global _mic_level
                                     _mic_level = min(1.0, rms / 8000.0)
                             except Exception:
-                                pass
+                                logging.debug("[Voice] RMS mic level calc failed", exc_info=True)
                             return chunk
                         source.stream.read = _wrapped_read
 
@@ -370,7 +468,8 @@ def _open_microphone_source():
                 finally:
                     global _mic_level
                     _mic_level = 0.0
-                    microphone.__exit__(None, None, None)
+                    with _PYAUDIO_MIC_LOCK:
+                        microphone.__exit__(None, None, None)
                 return
             except Exception as exc:
                 last_error = exc
@@ -378,15 +477,18 @@ def _open_microphone_source():
                 _debug_log(f"[Mic] Failed to open {label}: {exc}")
                 try:
                     if source is not None:
-                        stream = getattr(source, "stream", None)
-                        audio = getattr(source, "audio", None)
-                        if stream is not None:
-                            stream.close()
-                        if audio is not None:
-                            audio.terminate()
-                        source.stream = None
+                        with _PYAUDIO_MIC_LOCK:
+                            stream = getattr(source, "stream", None)
+                            audio = getattr(source, "audio", None)
+                            if stream is not None:
+                                stream.close()
+                            if audio is not None:
+                                audio.terminate()
+                            source.stream = None
                 except Exception:
-                    pass
+                    logging.debug("[Voice] mic stream cleanup failed for %s", label, exc_info=True)
+                if isinstance(exc, TimeoutError):
+                    break
 
         detail = str(last_error) if last_error is not None else "No microphone devices are available."
         _mic_last_failure_detail = detail
@@ -394,47 +496,76 @@ def _open_microphone_source():
         raise RuntimeError(f"Jarvis could not open a usable microphone input. {detail}")
 
 
-def _capture_audio_window(source, *, duration: float, reason: str):
+def _capture_audio_window(source, *, duration: float, reason: str, endpoint: bool = False):
     """
     Record audio from source with a hard timeout to prevent PortAudio/CoreAudio blocking/freezes.
+
+    endpoint=True switches from a fixed-length ``record(duration)`` to
+    energy-based ``listen()``, which returns as soon as the speaker stops
+    talking (up to ``duration`` to start, ``MANUAL_PROMPT_PHRASE_LIMIT`` of
+    speech). This removes the multi-second dead wait on every short command.
+    Returns None when no speech was detected within the window.
     """
-    _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
-    
+    if endpoint:
+        _debug_log(f"[Mic] Listening (endpointed, ≤{duration:.0f}s to start) for {reason}.")
+    else:
+        _debug_log(f"[Mic] Recording {duration:.1f}s audio window for {reason}.")
+
     result = []
     exception_holder = []
-    
+    no_speech = []
+
     def record_target():
         try:
-            audio_data = _recognizer.record(source, duration=duration)
+            if endpoint:
+                audio_data = _recognizer.listen(
+                    source,
+                    timeout=duration,
+                    phrase_time_limit=MANUAL_PROMPT_PHRASE_LIMIT,
+                )
+            else:
+                audio_data = _recognizer.record(source, duration=duration)
             result.append(audio_data)
+        except sr.WaitTimeoutError:
+            # No speech began within the window — not an error, just silence.
+            no_speech.append(True)
         except Exception as e:
             exception_holder.append(e)
-            
+
     record_thread = threading.Thread(target=record_target, daemon=True)
     record_thread.start()
-    
-    # We wait for duration + 3.0 seconds (e.g. 6s for wake word, 11s for prompt)
-    timeout = duration + 3.0
+
+    # Freeze watchdog: bound the wait so a wedged PyAudio read can't hang the
+    # loop. Endpointed listen() can legitimately run up to start-timeout plus a
+    # full phrase, so size the watchdog to its worst case.
+    if endpoint:
+        timeout = duration + MANUAL_PROMPT_PHRASE_LIMIT + 3.0
+    else:
+        timeout = duration + 3.0
     record_thread.join(timeout=timeout)
-    
+
     if record_thread.is_alive():
         _debug_log(f"[Mic] Stream freeze detected for {reason}! PyAudio read blocked for > {timeout:.1f}s.")
         # Try to force terminate PyAudio / close stream to clean up
         try:
-            if getattr(source, "stream", None) is not None:
-                source.stream.close()
-            if getattr(source, "audio", None) is not None:
-                source.audio.terminate()
+            with _PYAUDIO_MIC_LOCK:
+                if getattr(source, "stream", None) is not None:
+                    source.stream.close()
+                if getattr(source, "audio", None) is not None:
+                    source.audio.terminate()
         except Exception:
-            pass
+            logging.debug("[Voice] silent failure in record_target", exc_info=True)
         raise RuntimeError(f"Audio stream frozen or dead during record for {reason}")
-        
+
     if exception_holder:
         raise exception_holder[0]
-        
+
+    if no_speech:
+        return None
+
     if not result:
         raise RuntimeError(f"No audio captured from stream for {reason}")
-        
+
     return result[0]
 
 # Prevents mic from picking up Jarvis's own TTS output.
@@ -649,6 +780,15 @@ def speak(text: str) -> None:
         _done_speaking.set()
 
 
+def _local_stt_reported_no_speech(result: dict) -> bool:
+    """Return whether local STT authoritatively reported no speech."""
+    if (result.get("text") or "").strip():
+        return False
+    if result.get("ok") is True:
+        return True
+    return (result.get("error") or "").strip().lower() == "empty transcript"
+
+
 def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
     """Transcribe WAV bytes in memory — no disk I/O."""
     local_result = local_stt.transcribe_audio(wav_bytes, language="en")
@@ -657,6 +797,9 @@ def _transcribe_wav_bytes(wav_bytes: bytes) -> str | None:
         if text:
             _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
+    if _local_stt_reported_no_speech(local_result):
+        _debug_log("[STT] Local engine returned no speech; skipping cloud fallback.")
+        return None
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
@@ -692,6 +835,9 @@ def _transcribe_audio_file(path: str) -> str | None:
         if text:
             _debug_log(f"[STT] Transcribed locally via {local_result.get('engine')}.")
             return text
+    if _local_stt_reported_no_speech(local_result):
+        _debug_log("[STT] Local engine returned no speech; skipping cloud fallback.")
+        return None
 
     local_error = local_result.get("error", "local transcription failed")
     if not local_stt.openai_fallback_allowed():
@@ -798,11 +944,16 @@ def listen() -> str | None:
                 source,
                 duration=MANUAL_PROMPT_WINDOW_SECONDS,
                 reason="manual prompt",
+                endpoint=True,
             )
     except Exception as exc:
         _debug_log(f"[Mic] listen failed: {exc}")
         if _active_mic_label:
             _mark_mic_candidate_failed(_active_mic_label)
+        return None
+
+    if audio is None:
+        _debug_log("[Mic] No speech detected in listen window.")
         return None
 
     # Transcribe in memory — no temp file write/read
@@ -835,6 +986,8 @@ def _transcribe_wake_audio(audio) -> str | None:
         text = (local_result.get("text") or "").strip().lower()
         if text:
             return text
+        if _local_stt_reported_no_speech(local_result):
+            return None
         local_error = (local_result.get("error") or "").strip()
         if local_error:
             _debug_log(f"[Wake STT] {local_error}")
@@ -846,7 +999,9 @@ def _transcribe_wake_audio(audio) -> str | None:
 
         allow_remote_fallback = not model_router.is_open_source_mode()
     except Exception:
-        allow_remote_fallback = True
+        # Fail closed: if we cannot confirm the mode, assume open-source/local
+        # and do not send audio off-device.
+        allow_remote_fallback = False
 
     if not allow_remote_fallback:
         return None

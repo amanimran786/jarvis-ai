@@ -13,6 +13,7 @@ Reflection:
 - Periodically synthesizes everything learned into a coherent user model
 """
 
+import logging
 import json
 import os
 import threading
@@ -45,8 +46,19 @@ def _load_knowledge() -> dict:
 
 def _save_knowledge(data: dict) -> None:
     data["last_updated"] = str(datetime.now().strftime("%Y-%m-%d %H:%M"))
-    with open(KNOWLEDGE_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    # Atomic write: write to a temp file next to the target, then rename.
+    # This prevents a partial write from corrupting knowledge.json on crash.
+    tmp_path = KNOWLEDGE_FILE + ".tmp"
+    try:
+        with open(tmp_path, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_path, KNOWLEDGE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 # ── Auto-extract from conversation ────────────────────────────────────────────
@@ -213,11 +225,16 @@ def reflect() -> str:
     Called once a day — makes Jarvis progressively smarter.
     Only runs when there's enough real data to synthesize.
     """
+    kdata = _load_knowledge()
+    today = datetime.now().strftime("%Y-%m-%d")
+    if kdata.get("user_profile", {}).get("last_reflection") == today:
+        print("[Learner] Reflection already ran today — skipping.")
+        return kdata.get("user_profile", {}).get("synthesis", "")
+
     facts = mem.list_facts()
     prefs = mem.get_all_preferences()
     projects = mem.get_projects()
     recent_convos = mem.get_recent_conversations(10)
-    kdata = _load_knowledge()
     insights = kdata.get("insights", [])
 
     # Need at least some real data before reflecting
@@ -252,10 +269,34 @@ Return only the profile paragraph, no labels or headers."""
         kdata["user_profile"]["last_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
         _save_knowledge(kdata)
         print(f"[Learner] Reflection complete: {profile[:80]}...")
-        return profile
     except Exception as e:
         print(f"[Learner] Reflection error: {e}")
-        return ""
+        profile = ""
+
+    # Also run Jarvis performance self-reflection and append to KB
+    try:
+        import self_eval
+        perf_note = self_eval.jarvis_reflection(hours=24 * 14)
+        if perf_note:
+            self_eval.write_reflection_note(perf_note)
+            kdata.setdefault("jarvis_perf", {})["last_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
+            _save_knowledge(kdata)
+            print("[Learner] Jarvis performance reflection written.")
+    except Exception as e:
+        print(f"[Learner] Jarvis performance reflection error: {e}")
+
+    # 3-axis reflection pipeline — writes kb/core/jarvis_self_eval.md
+    try:
+        from harness import reflection
+        result = reflection.run_reflection(hours=24 * 7)
+        if result.total_scored > 0:
+            kdata.setdefault("jarvis_perf", {})["last_3axis_reflection"] = str(datetime.now().strftime("%Y-%m-%d"))
+            _save_knowledge(kdata)
+            print(f"[Learner] 3-axis reflection: {result.total_scored} responses, quality {result.overall_quality:.2f}")
+    except Exception as e:
+        print(f"[Learner] 3-axis reflection error: {e}")
+
+    return profile
 
 
 # ── Get full context for system prompt ────────────────────────────────────────
@@ -285,5 +326,14 @@ def get_learning_context() -> str:
     if insights:
         capped = [str(i)[:80] for i in insights[-2:]]
         parts.append("Behavioral insights:\n" + "\n".join(f"- {i}" for i in capped))
+
+    # Adaptive prompt hint from self-eval quality scores — single top issue only
+    try:
+        from harness.prompt_tuner import prompt_appendix
+        hint = prompt_appendix(n=20)
+        if hint:
+            parts.append(hint)
+    except Exception:
+        logging.debug("[Learner] silent failure in get_learning_context", exc_info=True)
 
     return "\n\n" + "\n\n".join(parts) if parts else ""

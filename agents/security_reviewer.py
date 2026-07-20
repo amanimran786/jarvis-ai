@@ -412,7 +412,7 @@ def emit_to_dag(verdict: SecurityVerdict, pg_conn=None) -> None:
         try:
             pg_conn.rollback()
         except Exception:
-            pass
+            logging.debug("[SecurityReviewer] silent failure in emit_to_dag", exc_info=True)
 
 
 # ─── Convenience: review + emit in one call ───────────────────────────────────

@@ -1630,7 +1630,7 @@ class RouterTests(unittest.TestCase):
     def test_search_query_bypasses_pending_email_draft(self):
         router.route_stream("Email beta@example.com subject: Beta body: Ship it")
 
-        with patch("router.tools.web_search", return_value="- Result: body"):
+        with patch("harness.web_search.search", return_value="- Result: body"):
             stream, label = router.route_stream("search web for local-first assistant")
             text = "".join(stream)
 
@@ -2264,7 +2264,7 @@ class RouterTests(unittest.TestCase):
 
     def test_search_query_bypasses_pending_message_draft(self):
         router.route_stream("text Dad to get milk")
-        with patch("router.tools.web_search", return_value="- Result: body"):
+        with patch("harness.web_search.search", return_value="- Result: body"):
             stream, label = router.route_stream("Search the web for latest AI news")
             text = "".join(stream)
         self.assertEqual(label, "Search")
@@ -2278,7 +2278,7 @@ class RouterTests(unittest.TestCase):
                 router._clear_message_state()
                 with patch("router._eager_resolve_contact", return_value=None):
                     router.route_stream("text Dad to get milk")
-                with patch("router.tools.web_search", return_value="- Result: body") as search_mock, \
+                with patch("harness.web_search.search", return_value="- Result: body") as search_mock, \
                      patch("router.smart_stream") as smart_mock:
                     stream, label = router.route_stream(phrase)
                     text = "".join(stream)
@@ -2288,6 +2288,18 @@ class RouterTests(unittest.TestCase):
                 self.assertEqual(router._pending_message_draft["body"], "get milk")
                 search_mock.assert_called_once()
                 smart_mock.assert_not_called()
+
+    def test_search_query_bypasses_awaiting_msg_recipient(self):
+        # Jarvis is waiting for a contact name — search should escape rather than be treated as a name
+        router._awaiting_msg_recipient = True
+        router._pending_msg_recipient = ""
+        with patch("harness.web_search.search", return_value="- Result: body") as mock_search:
+            stream, label = router.route_stream("Search the web for latest AI news")
+            text = "".join(stream)
+        self.assertEqual(label, "Search")
+        self.assertIn("- Result", text)
+        self.assertTrue(router._awaiting_msg_recipient)  # state preserved; user still needs to name a contact
+        mock_search.assert_called_once()
 
     def test_general_question_bypasses_pending_message_draft(self):
         router.route_stream("text Dad to get milk")
@@ -2611,25 +2623,49 @@ class RouterTests(unittest.TestCase):
         self.assertTrue(any(term in text.lower() for term in ("write amplification", "query plan", "application logic")))
 
     def test_python_race_condition_routes_to_specialized_agents(self):
-        stream, label = router.route_stream(
-            "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?"
+        answer = (
+            "Map the shared state and thread ordering, build a reproducible stress test, "
+            "then add the narrowest lock and rerun it."
         )
+        with patch(
+            "router.specialized_agents.run",
+            return_value={"ok": True, "final": answer},
+        ):
+            stream, label = router.route_stream(
+                "I think I have a race condition in a Python worker. How would you narrow it down and make it reproducible?"
+            )
         text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertTrue(any(term in text for term in ("shared state", "thread", "reproduce", "stress test", "lock")))
 
     def test_stale_read_routes_to_specialized_agents(self):
-        stream, label = router.route_stream(
-            "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?"
+        answer = (
+            "Tag each read as cache, primary, or replica; compare invalidation TTL timing "
+            "with replica lag and read-after-write behavior."
         )
+        with patch(
+            "router.specialized_agents.run",
+            return_value={"ok": True, "final": answer},
+        ):
+            stream, label = router.route_stream(
+                "Users sometimes see stale data after writes. How would you debug whether this is a cache invalidation problem or a replica lag problem?"
+            )
         text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertTrue(any(term in text for term in ("cache invalidation", "replica lag", "read-after-write", "primary", "TTL", "correlation")))
 
     def test_fastapi_502_routes_to_specialized_agents(self):
-        stream, label = router.route_stream(
-            "I have a Dockerized FastAPI app that works locally but returns 502 behind Nginx in production. What are the top likely causes and how would you narrow them down?"
+        answer = (
+            "Check the Nginx proxy_pass target, Docker networking, and whether FastAPI "
+            "binds to 0.0.0.0 before investigating upstream timeouts causing the 502."
         )
+        with patch(
+            "router.specialized_agents.run",
+            return_value={"ok": True, "final": answer},
+        ):
+            stream, label = router.route_stream(
+                "I have a Dockerized FastAPI app that works locally but returns 502 behind Nginx in production. What are the top likely causes and how would you narrow them down?"
+            )
         text = "".join(stream)
         self.assertEqual(label, "Specialized Agents")
         self.assertTrue(any(term in text for term in ("Nginx", "0.0.0.0", "proxy_pass", "Docker", "502")))
@@ -4612,7 +4648,7 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
             "report": "Detailed report text.",
         }
         with patch(
-            "research.ask_claude",
+            "research.ask_with_priority",
             return_value="Use retries, idempotency, and dead-letter handling.",
         ) as ask_mock:
             text = research.format_for_voice(result)
@@ -4631,7 +4667,10 @@ class LongFormTechnicalGroundingTests(unittest.TestCase):
             SimpleNamespace(number=1, description="Inspect logs", ok=True, result="Found queue contention."),
             SimpleNamespace(number=2, description="Propose fix", ok=True, result="Add idempotent worker handling."),
         ]
+        # Force cloud mode so _summarize() calls ask_claude (not local Ollama),
+        # letting us assert on the prompt and system_extra it receives.
         with patch("operative.plan_task", return_value=fake_steps), \
+             patch("operative.DEFAULT_MODE", "cloud"), \
              patch(
                  "operative.execute_step",
                  side_effect=[
@@ -5795,7 +5834,7 @@ class WebSearchSummaryTests(unittest.TestCase):
 
     def test_web_search_routes_to_search_label(self):
         """'search the web for AI news' should hit the Search label."""
-        with patch("tools.web_search", return_value="AI is advancing rapidly.") as mock_search:
+        with patch("harness.web_search.search", return_value="AI is advancing rapidly.") as mock_search:
             stream, label = router.route_stream("search the web for AI news")
             self._consume(stream)
         self.assertEqual(label, "Search")

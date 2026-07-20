@@ -7,6 +7,7 @@ background to keep the loop tight while the user is actively testing.
 """
 
 from __future__ import annotations
+import logging
 
 import json
 import os
@@ -96,7 +97,7 @@ def _append_jsonl(path: Path, payload: dict) -> None:
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
-        pass
+        logging.debug("[LiveBeta] silent failure in _append_jsonl", exc_info=True)
 
 
 def record_interaction(entry: dict, *, source: str = "live_beta") -> None:

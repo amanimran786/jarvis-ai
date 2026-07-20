@@ -25,6 +25,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 # Ensure the repo root is on the path so module imports resolve correctly.
@@ -42,14 +43,18 @@ class BriefingModuleTests(unittest.TestCase):
     def test_build_briefing_uses_name_fact(self):
         import briefing
         with patch("briefing._greeting", return_value="Good morning"), \
-             patch("briefing._focus_line", return_value=""):
+             patch("briefing._focus_line", return_value=""), \
+             patch("briefing._reflection_delta_summary", return_value=""), \
+             patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good morning, Aman.")
 
     def test_build_briefing_appends_focus_line(self):
         import briefing
         with patch("briefing._greeting", return_value="Good evening"), \
-             patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."):
+             patch("briefing._focus_line", return_value="Current focus: Jarvis local-first roadmap."), \
+             patch("briefing._reflection_delta_summary", return_value=""), \
+             patch("briefing._trace_score_summary", return_value=""):
             result = briefing.build_briefing(["My name is Aman"])
         self.assertEqual(result, "Good evening, Aman. Current focus: Jarvis local-first roadmap.")
 
@@ -516,6 +521,27 @@ class TerminalCommandGatingTests(unittest.TestCase):
             result = terminal.run_command("rm -rf /")
         self.assertIn("Blocked", result)
         self.assertIn("rm -rf", result)
+
+    def test_run_command_uses_direct_argv(self):
+        import terminal
+        completed = SimpleNamespace(returncode=0, stdout="hello\n", stderr="")
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}), \
+             patch("terminal.subprocess.run", return_value=completed) as run_mock:
+            result = terminal.run_command("printf '%s' hello")
+
+        self.assertEqual(result, "hello")
+        args, kwargs = run_mock.call_args
+        self.assertEqual(args[0], ["printf", "%s", "hello"])
+        self.assertIs(kwargs["shell"], False)
+
+    def test_run_command_rejects_shell_control_operators(self):
+        import terminal
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}), \
+             patch("terminal.subprocess.run") as run_mock:
+            result = terminal.run_command("printf hello | zsh")
+
+        self.assertIn("shell pipelines", result)
+        run_mock.assert_not_called()
 
     def test_run_admin_command_blocked_by_hook(self):
         import terminal

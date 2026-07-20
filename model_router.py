@@ -64,6 +64,7 @@ import graph_context as _gctx
 import semantic_memory as _smem
 import memory as _mem
 import context_budget as _context_budget
+import context_assembler as _ctx_asm
 import provider_router
 import telemetry
 import jarvis_core_brain as _core_brain
@@ -454,21 +455,21 @@ def _best_local(text: str) -> str:
     if LOCAL_PREFER_TUNED and LOCAL_TUNED and _has_model(LOCAL_TUNED, available) and not is_code_task:
         return LOCAL_TUNED
 
-    # 3. Coding tasks — GLM Flash is the primary manager/coder lane.
+    # 3. Coding tasks — specialist models first; GLM_FLASH as fallback.
     if is_code_task:
         for coder in (
-            LOCAL_GLM_FLASH,
+            LOCAL_DEVSTRAL,        # purpose-built for code, fastest on M4
             LOCAL_CODER_RECOMMENDED,
             LOCAL_CODER,
             LOCAL_QWEN3_MID,
-            LOCAL_DEVSTRAL,
+            LOCAL_GLM_FLASH,       # general fallback
         ):
             if coder and _has_model(coder, available):
                 return coder
 
-    # 4. Deep reasoning — GLM Flash has the primary long-context reasoning lane.
+    # 4. Deep reasoning — qwen3-strong > GLM_FLASH (larger context + MoE efficiency).
     if is_deep:
-        for deep in (LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
+        for deep in (LOCAL_QWEN3_STRONG, LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
             if deep and _has_model(deep, available):
                 return deep
 
@@ -865,6 +866,31 @@ def _cloud_token_budget_exhausted() -> bool:
     return False
 
 
+def _breaker_recovery_wait_seconds(plan, circuit_breaker_mod, cap: float = 60.0) -> float | None:
+    """Seconds until the soonest OPEN circuit breaker on this plan's cloud
+    providers recovers (transitions to HALF_OPEN), or None if no breaker will
+    recover within `cap` seconds. Used by the streaming path to decide whether
+    a wait-and-retry is worth it after all candidates fail."""
+    if circuit_breaker_mod is None:
+        return None
+    soonest: float | None = None
+    for candidate in plan.candidates:
+        if candidate.local:
+            continue
+        try:
+            state = circuit_breaker_mod.get_state(candidate.provider)
+        except Exception:
+            continue
+        if state.get("state") != circuit_breaker_mod.OPEN or not state.get("opened_at"):
+            continue
+        remaining = float(state["opened_at"]) + circuit_breaker_mod.OPEN_SECONDS - _time.time()
+        if remaining <= 0:
+            remaining = 0.0
+        if remaining <= cap and (soonest is None or remaining < soonest):
+            soonest = remaining
+    return soonest
+
+
 def _capture_cloud_stream(prompt, tier, candidate, raw_stream, source: str = "model_router_cloud_teacher"):
     """Thin shim around brains._teacher_capture.wrap_stream so callers in this
     module can keep their existing import surface."""
@@ -900,6 +926,7 @@ def smart_stream(
     so re-retrieval only adds tokens, an embedding call per turn, and prompt-
     prefix churn that defeats Ollama's KV prefix cache.
     """
+    _smart_stream_t0 = _time.monotonic()
     # ── Mobile web fast-path: skip slow local models, go straight to GPT-mini ──
     # IMPORTANT: must NOT use yield/yield-from here — that would make smart_stream
     # a generator function and break all callers that expect a (stream, label) tuple.
@@ -991,7 +1018,8 @@ def smart_stream(
     def _get_smem():
         if runtime_voice_query:
             return [], ""
-        hits = _smem.retrieve(user_input, top_k=3)
+        # min_score=0.3 filters low-relevance noise before injection
+        hits = _smem.retrieve(user_input, top_k=5, min_score=0.3)
         return hits, _smem.format_for_prompt(hits, max_chars=1200)
 
     def _get_mem0():
@@ -1001,7 +1029,19 @@ def smart_stream(
         hits = _m0.search(user_input, top_k=5)
         return _m0.format_for_prompt(hits, max_chars=600)
 
-    repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = ""
+    def _get_working_mem():
+        """Working memory: facts, preferences, projects from memory.json."""
+        if runtime_voice_query:
+            return ""
+        ctx = _mem.get_context()
+        if not ctx:
+            return ""
+        # Cap at ~500 tokens (~2000 chars); split on newline to avoid mid-line truncation
+        if len(ctx) > 2000:
+            ctx = ctx[:2000].rsplit("\n", 1)[0]
+        return f"<memory>\n{ctx}\n</memory>"
+
+    repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = working_mem_extra = ""
     smem_hits: list[dict] = []
     if not skip_dynamic_context:
         # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins
@@ -1009,13 +1049,14 @@ def smart_stream(
         # socket timeout would block this request forever despite the result()
         # timeouts below (live incident 2026-06-10: agent task stuck in
         # "streaming" for 50+ min behind a hung embedding request).
-        _pool = ThreadPoolExecutor(max_workers=5, thread_name_prefix="ctx")
+        _pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="ctx")
         try:
             _fr = _pool.submit(_get_repeat)
             _fv = _pool.submit(_get_vault)
             _fg = _pool.submit(_get_graph)
             _fs = _pool.submit(_get_smem)
             _fm = _pool.submit(_get_mem0)
+            _fw = _pool.submit(_get_working_mem)
             try:
                 repeat_extra = _fr.result(timeout=2.0) or ""
             except Exception as _exc:
@@ -1036,20 +1077,24 @@ def smart_stream(
                 mem0_extra = _fm.result(timeout=4.0) or ""
             except Exception as _exc:
                 logging.debug("[Context] mem0 retrieval failed: %s", _exc)
+            try:
+                working_mem_extra = _fw.result(timeout=2.0) or ""
+            except Exception as _exc:
+                logging.debug("[Context] working_memory retrieval failed: %s", _exc)
         finally:
             _pool.shutdown(wait=False, cancel_futures=True)
 
     semantic_hint = _semantic_memory_hint(smem_hits)
     compiled_context = _context_budget.compile_context_blocks(
-        [
-            {"label": "repeat_context", "content": repeat_extra, "priority": 96, "max_chars": 1400},
-            {"label": "vault", "content": vault_extra, "priority": 90, "max_chars": 2400},
-            {"label": "graph", "content": graph_extra, "priority": 75, "max_chars": 1400},
-            {"label": "semantic_hint", "content": semantic_hint, "priority": 70, "max_chars": 700},
-            {"label": "semantic_memory", "content": smem_ctx, "priority": 65, "max_chars": 1200},
-            # mem0 cross-session episodic memory goes last — most dynamic, lowest trust rank.
-            {"label": "mem0", "content": mem0_extra, "priority": 55, "max_chars": 600},
-        ],
+        _ctx_asm.rank_context_blocks(
+            working_mem=working_mem_extra,
+            repeat_ctx=repeat_extra,
+            vault_ctx=vault_extra,
+            graph_ctx=graph_extra,
+            semantic_hint=semantic_hint,
+            smem_hits=smem_hits,
+            mem0_ctx=mem0_extra,
+        ),
         base_text=system_extra,
         user_input=user_input,
         target_tokens=_context_budget.target_tokens_for(
@@ -1060,6 +1105,48 @@ def smart_stream(
     )
     if compiled_context["text"]:
         system_extra = system_extra + ("\n\n" if system_extra else "") + compiled_context["text"]
+
+    # Context pressure gate: if context is >75% full, drop episodic blocks and recompile;
+    # if >90% full and local available, force routing to a larger-context local model.
+    try:
+        from harness import budget as _budget_mod
+        ctx_pressure = _budget_mod.context_pressure(
+            compiled_context.get("context_used_tokens", 0),
+            compiled_context.get("context_budget_tokens", 1),
+        )
+        if ctx_pressure in ("compress", "switch"):
+            _ctx_used = compiled_context.get("context_used_tokens", 0)
+            _ctx_budget = compiled_context.get("context_budget_tokens", 1) or 1
+            _pressure_float = _ctx_used / _ctx_budget
+            logging.info(
+                "[ContextPressure] %.0f%% full — recompiling with pressure-aware ranking",
+                _pressure_float * 100,
+            )
+            compressed = _context_budget.compile_context_blocks(
+                _ctx_asm.rank_context_blocks(
+                    working_mem=working_mem_extra,
+                    repeat_ctx=repeat_extra,
+                    vault_ctx=vault_extra,
+                    graph_ctx=graph_extra,
+                    semantic_hint=semantic_hint,
+                    smem_hits=smem_hits,
+                    mem0_ctx=mem0_extra,
+                    pressure=_pressure_float,
+                ),
+                base_text=system_extra,
+                user_input=user_input,
+                target_tokens=_context_budget.target_tokens_for(tool, model=context_model, local=context_is_local),
+            )
+            compiled_context = compressed
+            system_extra = (system_extra.split("\n\n")[0] if "\n\n" in system_extra else system_extra)
+            if compressed["text"]:
+                system_extra = system_extra + ("\n\n" if system_extra else "") + compressed["text"]
+            if ctx_pressure == "switch" and local_available and local_model:
+                logging.warning("[ContextPressure] >90%% full — forcing local model with larger context window")
+                prefer_local = True
+                local_only = True
+    except Exception as _ctx_exc:
+        logging.debug("[ContextPressure] check failed: %s", _ctx_exc)
 
     def _resilient_stream(primary_factory, fallback_factories):
         def _stream():
@@ -1148,7 +1235,7 @@ def smart_stream(
                 from brains.brain_ollama import start_keepalive
                 start_keepalive(candidate.model)
             except Exception:
-                pass
+                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1160,6 +1247,39 @@ def smart_stream(
         if candidate.provider == "apple_foundation":
             from brains.brain_apple_foundation import ask_apple_foundation_stream
             return ask_apple_foundation_stream(
+                user_input,
+                candidate.model,
+                system_extra=system_extra,
+                track_context=True,
+                raise_on_error=True,
+            )
+        # Gate all non-local cloud providers through the budget check.
+        # Soft limit → warning already logged inside budget.check().
+        # Hard limit → raise so _execute_plan_stream falls through to next candidate (local).
+        if not candidate.local:
+            # Global hourly cap across all cloud providers (JARVIS_CLOUD_TOKENS_PER_HOUR).
+            # Checked per candidate so it fires in every mode — not just the
+            # auto-mode plan gate above, which only covers explicit-cloud routes.
+            if _cloud_token_budget_exhausted():
+                raise RuntimeError(
+                    f"[Budget] cloud hourly token budget exhausted "
+                    f"(JARVIS_CLOUD_TOKENS_PER_HOUR) — skipping {candidate.provider}, "
+                    f"falling through to local"
+                )
+            try:
+                from harness import budget as _budget
+                bcheck = _budget.check(candidate.provider)
+                if bcheck["hard"]:
+                    raise RuntimeError(
+                        f"[Budget] {candidate.provider} hard rate limit exceeded "
+                        f"({bcheck.get('used_1h') or bcheck.get('used_session', 0):,} tokens) "
+                        f"— falling through to local"
+                    )
+            except ImportError:
+                pass
+        if candidate.provider == "ollama_cloud":
+            from brains.brain_ollama import ask_ollama_cloud_stream
+            return ask_ollama_cloud_stream(
                 user_input,
                 candidate.model,
                 system_extra=system_extra,
@@ -1184,43 +1304,95 @@ def smart_stream(
         raise RuntimeError(f"Unknown provider candidate: {candidate.provider}")
 
     def _execute_plan_stream():
+        try:
+            from harness import circuit_breaker as _circuit_breaker
+        except Exception:
+            _circuit_breaker = None
         last_error = None
         selected = None
-        for candidate in plan.candidates:
-            try:
-                selected = {
-                    "provider": candidate.provider,
-                    "model": candidate.model,
-                    "local": candidate.local,
-                    "label": candidate.label,
-                }
-                telemetry.log_route_decision(
-                    user_input=user_input,
-                    mode=plan.mode,
-                    tier=plan.tier,
-                    plan={"candidates": [c.__dict__ for c in plan.candidates]},
-                    selected=selected,
-                    reason=plan.reason,
-                )
-                # Wrap cloud streams so successful answers feed the local
-                # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
-                # tier in {strong, deep}).
-                raw_stream = _candidate_stream(candidate)
-                if candidate.local:
-                    yield from raw_stream
-                else:
-                    yield from _capture_cloud_stream(
-                        prompt=user_input,
+        # Two passes at most: if every candidate fails on the first pass and a
+        # circuit breaker will recover within 60s, announce the wait, sleep,
+        # and retry the full plan once before giving up.
+        for _attempt in (0, 1):
+            for candidate in plan.candidates:
+                if _circuit_breaker is not None:
+                    try:
+                        if not _circuit_breaker.is_available(candidate.provider):
+                            logging.warning(
+                                "[ModelRouter] Skipping %s: circuit breaker OPEN", candidate.label
+                            )
+                            continue
+                    except Exception:
+                        logging.debug("[ModelRouter] circuit breaker check failed", exc_info=True)
+                try:
+                    selected = {
+                        "provider": candidate.provider,
+                        "model": candidate.model,
+                        "local": candidate.local,
+                        "label": candidate.label,
+                    }
+                    telemetry.log_route_decision(
+                        user_input=user_input,
+                        mode=plan.mode,
                         tier=plan.tier,
-                        candidate=candidate,
-                        raw_stream=raw_stream,
+                        plan={"candidates": [c.__dict__ for c in plan.candidates]},
+                        selected=selected,
+                        reason=plan.reason,
                     )
-                return
-            except Exception as exc:
-                last_error = exc
-                logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
+                    # Wrap cloud streams so successful answers feed the local
+                    # teacher pack (no-op unless JARVIS_TEACHER_CAPTURE=1 and
+                    # tier in {strong, deep}).
+                    raw_stream = _candidate_stream(candidate)
+                    if candidate.local:
+                        yield from raw_stream
+                    else:
+                        yield from _capture_cloud_stream(
+                            prompt=user_input,
+                            tier=plan.tier,
+                            candidate=candidate,
+                            raw_stream=raw_stream,
+                        )
+                    if _circuit_breaker is not None:
+                        try:
+                            _circuit_breaker.record_success(candidate.provider)
+                        except Exception:
+                            logging.debug("[ModelRouter] circuit breaker record_success failed", exc_info=True)
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    logging.warning("[ModelRouter] Candidate %s failed: %s", candidate.label, exc)
+                    if _circuit_breaker is not None:
+                        try:
+                            if _circuit_breaker.is_rate_limit_error(exc):
+                                _circuit_breaker.record_failure(candidate.provider)
+                        except Exception:
+                            logging.debug("[ModelRouter] circuit breaker record_failure failed", exc_info=True)
+            if _attempt == 0:
+                _wait = _breaker_recovery_wait_seconds(plan, _circuit_breaker)
+                if _wait is not None:
+                    _wait_display = max(1, int(_wait) + 1)
+                    logging.warning(
+                        "[ModelRouter] All candidates failed — breaker recovery in %ds, retrying plan once",
+                        _wait_display,
+                    )
+                    yield f"[Jarvis: all providers busy, retrying in {_wait_display}s...]"
+                    _time.sleep(_wait_display)
+                    continue
+            break
         yield f"I hit an upstream model error while answering this, and the fallback path also failed: {last_error}"
 
+    try:
+        from harness.audit import audit_log as _audit_log
+        _audit_log(
+            "model_call",
+            model_used=primary_label,
+            latency_ms=round((_time.monotonic() - _smart_stream_t0) * 1000),
+            tool=tool,
+            tier=plan.tier,
+            mode=plan.mode,
+        )
+    except Exception:
+        logging.debug("[ModelRouter] silent failure in unknown", exc_info=True)
     return _execute_plan_stream(), primary_label
 
 
@@ -1231,7 +1403,7 @@ def _execute_forced_stream(plan: provider_router.RoutePlan, user_input: str, sys
                 from brains.brain_ollama import start_keepalive
                 start_keepalive(candidate.model)
             except Exception:
-                pass
+                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1324,6 +1496,14 @@ def format_with_mini(
         last_error = None
         for candidate in plan.candidates:
             try:
+                # Same global hourly cloud cap as smart_stream's candidate gate:
+                # raise inside the try so the loop falls through to the next
+                # (local) candidate instead of spending cloud tokens.
+                if not candidate.local and _cloud_token_budget_exhausted():
+                    raise RuntimeError(
+                        f"[Budget] cloud hourly token budget exhausted "
+                        f"(JARVIS_CLOUD_TOKENS_PER_HOUR) — skipping {candidate.provider}"
+                    )
                 if candidate.provider == "ollama":
                     yield from ask_local_stream(
                         prompt,

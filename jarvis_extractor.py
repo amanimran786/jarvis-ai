@@ -28,9 +28,9 @@ Each fact dict:
 """
 
 from __future__ import annotations
+import logging
 
 import threading
-import logging
 from typing import Any
 
 log = logging.getLogger("jarvis.extractor")
@@ -75,7 +75,7 @@ def _write_extractions(facts: list[dict]) -> None:
         try:
             _m0.add_async(content)
         except Exception:
-            pass
+            logging.debug("[Extractor] silent failure in _write_extractions", exc_info=True)
 
         # Route to vault based on fact type
         try:

@@ -253,7 +253,7 @@ def _run_project(project_id: str) -> None:
                 try:
                     task_runtime.cancel_task(info["submitted_id"])
                 except Exception:
-                    pass
+                    logging.debug("[ProjectManager] silent failure in _cancel_in_flight", exc_info=True)
 
         last_heartbeat = time.monotonic()
 
@@ -414,7 +414,7 @@ def _run_project(project_id: str) -> None:
             _set_project_status(project_id, "failed")
             _emit(project_id, "project_error", error="unhandled exception in executor")
         except Exception:
-            pass
+            logging.debug("[ProjectManager] silent failure in unknown", exc_info=True)
     finally:
         with _LOCK:
             _EXECUTORS.pop(project_id, None)
@@ -429,8 +429,8 @@ _TEMPLATES: dict[str, dict] = {
         "description": "Automated security review of {target}",
         "tasks": [
             # Scans 0-3 are independent — fan out in parallel.
-            {"title": "subprocess scan", "prompt": "Search {target} for subprocess calls with shell=True. For each match report: file, line number, the command string, and whether it processes user-controlled data. Output a bullet list.", "depends_on": []},
-            {"title": "eval/exec scan", "prompt": "Search {target} for eval(), exec(), pickle.load(), and yaml.load() usage. For each match report: file, line number, what data flows into it. Output a bullet list.", "depends_on": []},
+            {"title": "subprocess scan", "prompt": "Search {target} for subprocess calls with shell=True. For each match report: file, line number, the command string, and whether it processes user-controlled data. Output a bullet list.", "depends_on": []},  # pre-commit-ok
+            {"title": "eval/exec scan", "prompt": "Search {target} for eval(), exec(), pickle.load(), and yaml.load() usage. For each match report: file, line number, what data flows into it. Output a bullet list.", "depends_on": []},  # pre-commit-ok
             {"title": "secrets scan", "prompt": "Search {target} for hardcoded secrets: patterns matching API_KEY, TOKEN, PASSWORD, SECRET not wrapped in os.getenv(). Report file, line, and the variable name. Output a bullet list.", "depends_on": []},
             {"title": "path traversal scan", "prompt": "Check all user-controlled input paths in {target} for path traversal risk. Look for file opens, path joins, or directory listings that use untrusted input without Path.resolve() + prefix validation. Output a bullet list.", "depends_on": []},
             # Summary task depends on all four scans.

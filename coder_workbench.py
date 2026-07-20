@@ -7,13 +7,17 @@ actual git state instead of generic coding-agent advice.
 
 from __future__ import annotations
 
-import os
 import json
+import logging
+import os
+import re
 import shlex
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -58,12 +62,40 @@ def _run(args: list[str], *, cwd: Path = ROOT) -> tuple[int, str]:
 
 
 def _run_shell(command: str, *, cwd: Path = ROOT, timeout_seconds: int = 120) -> tuple[int, str, float]:
+    """Run a verification command without invoking a command shell."""
     started = time.monotonic()
     try:
+        if re.search(r"(?:&&|\|\||[;|<>`]|\$\(|[\r\n])", command):
+            raise ValueError("Shell control operators are not allowed in verification commands")
+        args = shlex.split(command)
+        env = os.environ.copy()
+        while args and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", args[0]):
+            name, value = args.pop(0).split("=", 1)
+            if (name, value) != ("JARVIS_RUN_PACKAGED_SMOKE", "1"):
+                raise ValueError(f"Unsupported verification environment override: {name}")
+            env[name] = value
+        if not args:
+            raise ValueError("Verification command is empty")
+
+        executable = Path(args[0]).name
+        allowed = {"echo", "git", "pytest", "python", "python3"}
+        installer = (ROOT / "scripts" / "install_jarvis_app.sh").resolve()
+        requested = Path(args[0]).expanduser()
+        if "/" in args[0] and requested.resolve(strict=False) != installer:
+            raise ValueError(f"Executable paths are not allowed here: {args[0]}")
+        if executable == "git" and args[1:] != ["diff", "--check"]:
+            raise ValueError("Only 'git diff --check' is allowed as a verification command")
+        vault_check = ["python3", "-c", "import vault; print(vault.build_wiki_text())"]
+        if executable in {"python", "python3"} and "-c" in args and args != vault_check:
+            raise ValueError("Inline Python is not allowed as a verification command")
+        if executable not in allowed and requested.resolve(strict=False) != installer:
+            raise ValueError(f"Unsupported verification executable: {args[0]}")
+
         completed = subprocess.run(
-            command,
+            args,
             cwd=str(cwd),
-            shell=True,
+            env=env,
+            shell=False,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -204,7 +236,7 @@ def verification_plan(paths: list[str] | None = None) -> list[dict[str, Any]]:
             {
                 "id": "vault_index",
                 "why": "Vault graph/index changes should regenerate the compiled wiki index.",
-                "command": "python3 - <<'PY'\nimport vault\nprint(vault.build_wiki_text())\nPY",
+                "command": "python3 -c 'import vault; print(vault.build_wiki_text())'",
                 "required": True,
             }
         )
@@ -311,6 +343,245 @@ def _latest_benchmark() -> dict[str, Any]:
     except Exception:
         return {}
     return latest
+
+
+# ── Git write operations ──────────────────────────────────────────────────────
+
+def git_diff(args: list[str] | None = None) -> str:
+    """Return git diff for the working tree (or staged if args includes --cached)."""
+    return _git(["diff", *(args or [])])
+
+
+def git_commit(msg: str, paths: list[str] | None = None) -> str:
+    """Stage specified paths (or all changes) and commit with msg.
+
+    Uses list args throughout and never enables shell execution.  # pre-commit-ok
+    """
+    if paths:
+        code, out = _run(["git", "add", "--", *paths])
+    else:
+        code, out = _run(["git", "add", "-A"])
+    if code != 0:
+        return f"git add failed: {out}"
+    code, out = _run(["git", "commit", "-m", msg])
+    if code != 0:
+        return f"git commit failed: {out}"
+    return out
+
+
+# ── Code fix loop (P2 — Cursor/Codex gap) ────────────────────────────────────
+
+_CODER_WRITE_SYSTEM = """\
+You are a precise Python coding agent. When given a task:
+- Write all necessary Python files (implementation + tests).
+- Return ONLY a valid JSON object — no markdown, no explanation, no preamble.
+Format:
+{"files": [{"path": "relative/path.py", "content": "...full code..."}], "test_command": "python -m pytest test_foo.py -q"}
+
+Rules:
+- Write tests in a file prefixed with 'test_'
+- Use pytest for testing
+- The runtime derives the pytest command from validated test-file paths; command text is never executed
+- paths are relative to the working directory
+- Output ONLY the JSON object\
+"""
+
+_CODER_FIX_SYSTEM = """\
+You are a Python debugging agent. Fix the failing code so the tests pass.
+Return ONLY a valid JSON object — no markdown, no explanation.
+Format:
+{"files": [{"path": "relative/path.py", "content": "...complete fixed code..."}]}
+
+Output ONLY the JSON object with the fixed file(s).\
+"""
+
+
+def _parse_coder_json(raw: str) -> dict:
+    """Extract JSON object from coder model response."""
+    text = raw.strip()
+    # Strip markdown fences if present
+    if text.startswith("```"):
+        lines = text.split("\n")
+        text = "\n".join(lines[1:]).strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    obj_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if obj_match:
+        return json.loads(obj_match.group())
+    raise ValueError(f"No JSON object in coder response (first 200 chars): {text[:200]}")
+
+
+def fix_loop(
+    task: str,
+    *,
+    workspace: Path | None = None,
+    max_iterations: int = 5,
+    execution_approved: bool = False,
+) -> dict[str, Any]:
+    """Write code with devstral, run tests, patch on failure, repeat.
+
+    LOOP:
+      ask devstral to write code → run test_command → capture output
+      if exit 0 → return success
+      if exit ≠ 0 → send failure + current files back to devstral → apply patch
+      if max_iterations hit → return best attempt with failure log
+
+    Args:
+        task: Natural language description (e.g. "write a function that reverses a string and test it")
+        workspace: Working directory; defaults to <jarvis-root>/workspace
+        max_iterations: Max write-test-fix cycles (default 5)
+        execution_approved: Trusted caller confirms generated pytest execution.
+
+    Returns:
+        {
+          "ok": bool,
+          "iterations": int,
+          "files": {path: content},
+          "test_command": str,
+          "output": str,
+          "history": [{"iteration": int, "output": str, "ok": bool, "elapsed_seconds": float}],
+        }
+    """
+    import ollama as _ollama_lib
+    from brains.brain_ollama import get_best_available
+    from config import LOCAL_CODER, LOCAL_ORNITH_35B
+
+    cwd = (workspace or ROOT / "workspace").resolve()
+    cwd.mkdir(parents=True, exist_ok=True)
+
+    files: dict[str, str] = {}
+    test_command = ""
+    test_output = ""
+    history: list[dict[str, Any]] = []
+
+    def _safe_write(rel_path: str, content: str) -> None:
+        target = (cwd / rel_path).resolve()
+        if not target.is_relative_to(cwd):
+            raise PermissionError(f"Path traversal rejected: {rel_path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    # Use a direct Ollama client with coding-appropriate timeouts (code gen can be slow)
+    try:
+        import httpx
+        _code_timeout = httpx.Timeout(connect=30.0, read=300.0, write=60.0, pool=30.0)
+        _ollama_client = _ollama_lib.Client(timeout=_code_timeout)
+    except ImportError:
+        _ollama_client = _ollama_lib.Client(timeout=300.0)
+
+    # Prefer ornith-35b (agentic coding specialist, SWE-bench 82.4); fall back to LOCAL_CODER.
+    # The check avoids get_best_available's default-to-first-model behaviour when the
+    # preferred model isn't pulled — we want an explicit presence test.
+    try:
+        _avail = {m.model for m in _ollama_client.list().models}
+        if any(LOCAL_ORNITH_35B in m for m in _avail):
+            model = LOCAL_ORNITH_35B
+        else:
+            model = get_best_available(LOCAL_CODER)
+    except Exception:
+        model = get_best_available(LOCAL_CODER)
+    log.info("[fix_loop] Starting — model=%s cwd=%s task=%s", model, cwd, task[:80])
+
+    for iteration in range(1, max_iterations + 1):
+        if iteration == 1:
+            prompt = (
+                f"Task: {task}\n\n"
+                "Write all necessary Python files (implementation + tests) to complete this task. "
+                "Return JSON with 'files' list and 'test_command'."
+            )
+            system = _CODER_WRITE_SYSTEM
+        else:
+            files_summary = "\n\n".join(
+                f"File: {p}\n```python\n{c}\n```" for p, c in files.items()
+            )
+            prompt = (
+                f"Task: {task}\n\n"
+                f"Current files:\n{files_summary}\n\n"
+                f"Test command: {test_command}\n"
+                f"Failure output:\n{test_output[:3000]}\n\n"
+                "Fix the code so all tests pass."
+            )
+            system = _CODER_FIX_SYSTEM
+
+        try:
+            response = _ollama_client.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=False,
+                options={"temperature": 0},
+            )
+            raw = (response.message.content or "").strip()
+            parsed = _parse_coder_json(raw)
+        except Exception as exc:
+            log.warning("[fix_loop] iteration %d parse error: %s", iteration, exc)
+            history.append({"iteration": iteration, "output": f"Model/parse error: {exc}", "ok": False, "elapsed_seconds": 0.0})
+            continue
+
+        # Write files from this iteration
+        for fspec in parsed.get("files", []):
+            rel_path = str(fspec.get("path", "output.py")).strip()
+            content = str(fspec.get("content", ""))
+            try:
+                _safe_write(rel_path, content)
+                files[rel_path] = content
+            except PermissionError as exc:
+                return {"ok": False, "error": str(exc), "iterations": iteration, "files": files, "history": history}
+
+        # Never execute model-supplied command text. Derive a fixed pytest command
+        # solely from generated paths that already passed the workspace boundary.
+        test_files = sorted(
+            path for path in files
+            if Path(path).name.startswith("test_") and Path(path).suffix == ".py"
+        )
+        if not test_files:
+            test_output = "Generated code did not include a pytest test file."
+            history.append({
+                "iteration": iteration,
+                "output": test_output,
+                "ok": False,
+                "elapsed_seconds": 0.0,
+            })
+            continue
+        test_command = f"python -m pytest {_quote_paths(test_files)} -q"
+        if not execution_approved:
+            return {
+                "ok": False,
+                "iterations": iteration,
+                "files": files,
+                "test_command": test_command,
+                "output": "",
+                "history": history,
+                "error": "Explicit approval is required before running generated tests.",
+            }
+
+        returncode, test_output, elapsed = _run_shell(test_command, cwd=cwd, timeout_seconds=60)
+        ok = returncode == 0
+
+        log.info("[fix_loop] iteration %d exit=%d elapsed=%.1fs", iteration, returncode, elapsed)
+        history.append({"iteration": iteration, "output": test_output, "ok": ok, "elapsed_seconds": round(elapsed, 2)})
+
+        if ok:
+            return {
+                "ok": True,
+                "iterations": iteration,
+                "files": files,
+                "test_command": test_command,
+                "output": test_output,
+                "history": history,
+            }
+
+    return {
+        "ok": False,
+        "iterations": max_iterations,
+        "files": files,
+        "test_command": test_command,
+        "output": test_output,
+        "history": history,
+        "error": f"Still failing after {max_iterations} iterations",
+    }
 
 
 def improvement_text() -> str:

@@ -6,6 +6,7 @@ and small durable edits so agent-native note changes stay explicit and bounded.
 """
 
 from __future__ import annotations
+import logging
 
 from datetime import datetime
 from pathlib import Path
@@ -47,7 +48,7 @@ def _audit_vault_write(path: Path, *, decision: str, rollback_ref: str, reason: 
             rollback_ref=rollback_ref,
         )
     except Exception:
-        pass
+        logging.debug("[VaultEdit] silent failure in _audit_vault_write", exc_info=True)
 
 
 def _normalize_note_ref(note_ref: str) -> str:

@@ -9,6 +9,7 @@ Fallback: local embeddings via Ollama HTTP API + numpy cosine similarity search.
 """
 
 from __future__ import annotations
+import logging
 
 import json
 import os
@@ -108,14 +109,14 @@ class _SimpleVaultIndex(VaultIndexer):
                 self._metadata = data.get("metadata", {})
                 self._chunks = data.get("chunks", [])
             except Exception:
-                pass
+                logging.debug("[CocoIndex] silent failure in _load_index", exc_info=True)
 
         if self._embeddings is None and self.embeddings_path.exists() and HAS_NUMPY:
             try:
                 with np.load(self.embeddings_path) as npz:
                     self._embeddings = npz["embeddings"]
             except Exception:
-                pass
+                logging.debug("[CocoIndex] silent failure in _load_index", exc_info=True)
 
     def _save_index(self) -> None:
         """Save metadata and embeddings to disk."""
@@ -124,13 +125,13 @@ class _SimpleVaultIndex(VaultIndexer):
             with open(self.index_meta_path, "w") as f:
                 json.dump(meta_data, f, indent=2)
         except Exception:
-            pass
+            logging.debug("[CocoIndex] silent failure in _save_index", exc_info=True)
 
         if self._embeddings is not None and HAS_NUMPY:
             try:
                 np.savez(self.embeddings_path, embeddings=self._embeddings)
             except Exception:
-                pass
+                logging.debug("[CocoIndex] silent failure in _save_index", exc_info=True)
 
     def _chunk_markdown(self, text: str) -> list[str]:
         """

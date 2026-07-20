@@ -26,6 +26,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
+from brains.brain_ollama import ask_local_structured
+
 log = logging.getLogger("jarvis.manager")
 
 # Agents whose tasks always get a security review pass regardless of LLM flag
@@ -144,7 +146,6 @@ def _build_decompose_prompt(goal: str, memory_ctx: str) -> tuple[str, str]:
 # ─── LLM decomposition ────────────────────────────────────────────────────────
 
 def _decompose_via_llm(goal: str, memory_ctx: str) -> list[AgentTask]:
-    from brains.brain_ollama import ask_local_structured
     from config import LOCAL_DEFAULT, AGENT_ROSTER
 
     system, user = _build_decompose_prompt(goal, memory_ctx)
@@ -160,6 +161,10 @@ def _decompose_via_llm(goal: str, memory_ctx: str) -> list[AgentTask]:
             agent="researcher",
             priority=5,
         )]
+
+    if not isinstance(raw, str):
+        log.warning("decompose LLM call returned non-string %r — treating as empty", type(raw))
+        raw = ""
 
     # Parse — strip think tags first
     import re
@@ -394,7 +399,7 @@ class JarvisManager:
                     data = resp.json()
                     task.status = _map_event_type(data.get("type", ""))
             except Exception:
-                pass
+                logging.debug("[Manager] silent failure in status", exc_info=True)
             out[task.task_id] = task.status
         return out
 

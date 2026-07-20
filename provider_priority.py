@@ -1,3 +1,7 @@
+import logging
+import os
+import threading
+import time
 from config import (
     FREE_FIRST_ENABLED,
     GEMINI_FLASH,
@@ -11,6 +15,78 @@ from config import (
     SONNET,
 )
 from brains import _teacher_capture
+
+
+# ── Rate-limit cooldown ───────────────────────────────────────────────────────
+# When a cloud provider returns a rate-limit/quota error, skip it for a window
+# instead of re-hammering it on every request (which burns quota and adds a
+# failed round-trip of latency before the fallback fires).
+
+_provider_cooldowns: dict[str, float] = {}
+_cooldown_lock = threading.Lock()
+
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "ratelimit",
+    "quota",
+    "overloaded",
+    "too many requests",
+    "resource_exhausted",
+)
+
+
+def _cooldown_seconds() -> float:
+    try:
+        return float(os.getenv("JARVIS_PROVIDER_COOLDOWN_SECONDS", "120"))
+    except ValueError:
+        return 120.0
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    haystack = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in haystack for marker in _RATE_LIMIT_MARKERS)
+
+
+def _in_cooldown(provider: str) -> bool:
+    with _cooldown_lock:
+        return time.monotonic() < _provider_cooldowns.get(provider, 0.0)
+
+
+def _start_cooldown(provider: str) -> None:
+    with _cooldown_lock:
+        _provider_cooldowns[provider] = time.monotonic() + _cooldown_seconds()
+
+
+def _record_provider_failure(provider: str) -> None:
+    """Rate-limit failure: short in-memory cooldown + persistent circuit breaker."""
+    _start_cooldown(provider)
+    try:
+        from harness import circuit_breaker
+
+        circuit_breaker.record_failure(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker record_failure failed", exc_info=True)
+
+
+def _record_provider_success(provider: str) -> None:
+    try:
+        from harness import circuit_breaker
+
+        circuit_breaker.record_success(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker record_success failed", exc_info=True)
+
+
+def _circuit_open(provider: str) -> bool:
+    try:
+        from harness import circuit_breaker
+
+        return not circuit_breaker.is_available(provider)
+    except Exception:
+        logging.debug("[ProviderPriority] circuit breaker is_available failed", exc_info=True)
+        return False
 
 
 def _local_model_for_tier(tier: str) -> str:
@@ -63,7 +139,11 @@ def ask_with_priority(
     tier: str = "cheap",
     system_extra: str = "",
     system: str | None = None,
+    _queued: bool = False,
 ) -> str:
+    # _queued: internal flag — True when this call is a drain-loop retry coming
+    # out of harness.request_queue. Prevents a failed retry from re-enqueueing
+    # itself forever.
     tier = (tier or "cheap").strip().lower()
     plans = {
         "cheap": [
@@ -95,8 +175,15 @@ def ask_with_priority(
                 raise
 
     for provider_name, runner in plans.get(tier, plans["cheap"]):
+        if _in_cooldown(provider_name):
+            print(f"[ProviderPriority] skipping {provider_name} for tier {tier}: rate-limit cooldown")
+            continue
+        if _circuit_open(provider_name):
+            print(f"[ProviderPriority] skipping {provider_name} for tier {tier}: circuit breaker OPEN")
+            continue
         try:
             answer = runner()
+            _record_provider_success(provider_name)
             # Best-effort teacher capture: high-tier cloud answers can train the
             # local open-source model. No-op unless JARVIS_TEACHER_CAPTURE=1.
             try:
@@ -109,12 +196,48 @@ def ask_with_priority(
                     source="provider_priority_cloud_teacher",
                 )
             except Exception:
-                pass
+                logging.debug("[ProviderPriority] silent failure in ask_with_priority", exc_info=True)
             return answer
         except Exception as exc:
             last_error = exc
-            print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
+            if _is_rate_limit_error(exc):
+                _record_provider_failure(provider_name)
+                print(
+                    f"[ProviderPriority] {provider_name} rate-limited — "
+                    f"cooling down for {_cooldown_seconds():.0f}s: {exc}"
+                )
+            else:
+                print(f"[ProviderPriority] provider failed for tier {tier}: {exc}")
+
+    # All providers exhausted. Park the request until a circuit breaker closes
+    # instead of failing hard — enqueue() blocks until the drain loop retries
+    # this same call (with _queued=True so a second exhaustion raises).
+    if not _queued:
+        try:
+            from harness import request_queue
+        except Exception:
+            request_queue = None
+        if request_queue is not None and request_queue.QUEUE_ENABLED:
+            if request_queue.queue_depth() >= request_queue.QUEUE_MAX_DEPTH:
+                raise RuntimeError(
+                    "All providers exhausted and request queue is full — "
+                    "try again in a few minutes"
+                ) from last_error
+            try:
+                return request_queue.enqueue(
+                    ask_with_priority,
+                    prompt,
+                    tier,
+                    system_extra=system_extra,
+                    system=system,
+                    _queued=True,
+                )
+            except request_queue.QueueFullError:
+                raise RuntimeError(
+                    "All providers exhausted and request queue is full — "
+                    "try again in a few minutes"
+                ) from last_error
 
     if last_error is not None:
         raise last_error
-    raise RuntimeError("No provider plan available.")
+    raise RuntimeError("No provider plan available (all providers failed or in rate-limit cooldown).")

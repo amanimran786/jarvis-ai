@@ -198,9 +198,9 @@ LOCAL_DEFAULT = os.getenv("LOCAL_DEFAULT_MODEL", LOCAL_GLM_FLASH)
 # Speculative decoding drafter. Leave empty unless a compatible drafter is
 # installed for the selected default model.
 LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")
-LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", LOCAL_GLM_FLASH)
-LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", LOCAL_GLM_FLASH)
-LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", LOCAL_GLM_FLASH)
+LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", "devstral")
+LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen2.5-coder:32b")
+LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", "qwen3:30b-a3b")
 
 # ── Qwen3 model fleet (2026-04) ───────────────────────────────────────────────
 # Qwen3 outperforms prior models at each size class.  Pull the ones that fit:
@@ -217,6 +217,13 @@ LOCAL_PHI4_MINI    = os.getenv("LOCAL_PHI4_MINI", "phi4-mini")     # ollama pull
 
 # Devstral — Mistral's open coder (ollama pull devstral)
 LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
+
+# Ornith-1.0 — DeepReinforce agentic coding family (2026-06, SWE-bench verified 82.4)
+#   Self-scaffolding RL; beats devstral and qwen3.5-35b on Terminal-Bench 2.1 (64.4 vs 53.5).
+#   ollama pull maxwell1500/ornith-9b    (~5 GB,  fast agentic coder; post-trained on Gemma4)
+#   ollama pull maxwell1500/ornith-35b   (~20 GB, strongest open agentic coder available)
+LOCAL_ORNITH_9B   = os.getenv("LOCAL_ORNITH_9B",  "maxwell1500/ornith-9b")
+LOCAL_ORNITH_35B  = os.getenv("LOCAL_ORNITH_35B", "maxwell1500/ornith-35b")
 
 # Newer verified model candidates. These are not defaults; /model-fleet surfaces
 # them for explicit pull/eval/promotion only.
@@ -242,6 +249,14 @@ LOCAL_WHISPER_MODEL = os.getenv("JARVIS_WHISPER_MODEL",
 FREE_FIRST_ENABLED = _env_flag("JARVIS_FREE_FIRST_ENABLED", True)
 PAID_FALLBACK_ENABLED = _env_flag("JARVIS_PAID_FALLBACK_ENABLED", True)
 LOCAL_STRICT_FIRST = _env_flag("JARVIS_LOCAL_STRICT_FIRST", True)
+
+# Ollama Cloud (remote free tier) — get API key from https://ollama.com → account → Keys
+# ollama.com/v1 is the correct chat endpoint; api.ollama.com POSTs redirect to marketing site
+OLLAMA_CLOUD_BASE_URL = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://ollama.com/v1").strip() or "https://ollama.com/v1"
+OLLAMA_CLOUD_API_KEY  = os.getenv("OLLAMA_CLOUD_API_KEY", "").strip()
+OLLAMA_CLOUD_ENABLED  = _env_flag("OLLAMA_CLOUD_ENABLED", bool(OLLAMA_CLOUD_API_KEY))
+# gemma4:31b — confirmed free tier on ollama.com, larger than 30B local cap
+OLLAMA_CLOUD_MODEL    = os.getenv("OLLAMA_CLOUD_MODEL", "gemma4:31b").strip() or "gemma4:31b"
 ROUTING_TRANSPARENCY_ENABLED = _env_flag("JARVIS_ROUTING_TRANSPARENCY_ENABLED", True)
 LOCAL_STRUCTURED_CLASSIFIER_ENABLED = _env_flag("JARVIS_LOCAL_STRUCTURED_CLASSIFIER_ENABLED", True)
 APPLE_FOUNDATION_ENABLED = _env_flag("JARVIS_APPLE_FOUNDATION_ENABLED", False)
@@ -275,6 +290,30 @@ PROVIDER_PRIORITY_OPUS = _env_csv(
 DEFAULT_MODE = os.getenv("DEFAULT_MODE", "auto").strip().lower()
 MAX_CONVERSATION_TURNS = 8
 
+# Autonomous task execution budgets. These are hard safety ceilings, not targets.
+OPERATIVE_MAX_STEPS = max(1, min(_env_int("JARVIS_OPERATIVE_MAX_STEPS", 24), 100))
+OPERATIVE_MAX_RECOVERY_ATTEMPTS = max(
+    0,
+    min(_env_int("JARVIS_OPERATIVE_MAX_RECOVERY_ATTEMPTS", 3), 20),
+)
+OPERATIVE_TIMEOUT_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_TIMEOUT_SECONDS", 900), 3_600),
+)
+OPERATIVE_APPROVAL_TTL_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_APPROVAL_TTL_SECONDS", 300), 1_800),
+)
+OPERATIVE_GRANT_TTL_SECONDS = max(
+    30,
+    min(_env_int("JARVIS_OPERATIVE_GRANT_TTL_SECONDS", 1_200), 3_600),
+)
+
+# Sliding window for active conversation history (user+assistant turn pairs).
+# conversation_context keeps the last N turns verbatim and compacts older
+# turns into a short summary before the next prompt is built.
+MAX_ACTIVE_TURNS = _env_int("JARVIS_MAX_ACTIVE_TURNS", 20)
+
 # ── MLX local training (Apple Silicon only) ──────────────────────────────────
 # mlx-tune: pip install mlx-tune (only on Apple Silicon Mac)
 MLX_TRAINING_ENABLED = _env_flag("JARVIS_MLX_TRAINING_ENABLED", True)
@@ -282,7 +321,7 @@ MLX_TRAINING_MODEL   = os.getenv("JARVIS_MLX_TRAINING_MODEL", LOCAL_QWEN3_MID)
 MLX_NUM_ITERS        = _env_int("JARVIS_MLX_NUM_ITERS", 100)
 MLX_LEARNING_RATE    = float(os.getenv("JARVIS_MLX_LEARNING_RATE", "1e-5"))
 MLX_LORA_RANK        = _env_int("JARVIS_MLX_LORA_RANK", 8)
-MLX_BATCH_SIZE       = _env_int("JARVIS_MLX_BATCH_SIZE", 4)
+MLX_BATCH_SIZE       = _env_int("JARVIS_MLX_BATCH_SIZE", 1)  # 2+ OOMs on Metal with Qwen3-8B-4bit; 1 is safe
 
 
 def provider_runtime_config() -> dict:
@@ -349,6 +388,7 @@ def stt_runtime_config() -> dict:
 # Text-to-speech runtime config.
 # Keep this config-first like STT so the voice path can move to local-first
 # without breaking the current paid fallbacks or the existing voice module.
+VOICE_ENABLED = _env_flag("VOICE_ENABLED", False)
 TTS_BACKENDS = _resolve_tts_backends()
 TTS_PRIMARY_BACKEND = TTS_BACKENDS[0]
 LOCAL_TTS_ENABLED = "say" in TTS_BACKENDS

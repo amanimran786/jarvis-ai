@@ -33,6 +33,7 @@ import json
 import itertools
 import os
 import hmac
+import re
 import sqlite3
 from pathlib import Path
 import hashlib
@@ -48,6 +49,7 @@ log = logging.getLogger("api")
 from pydantic import BaseModel, Field
 
 from router import route_stream as _route_stream_raw, record_turn as _record_turn
+from operative_approval import RouteContext, redact_approval_data, redact_approval_ids
 import memory as mem
 import model_router
 import hardware as hw
@@ -75,6 +77,10 @@ import security_roe
 import usage_tracker
 import runtime_state
 import provider_router
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
 import task_runtime
 import task_persistence
 import semantic_memory
@@ -83,12 +89,36 @@ import osint_tools
 import skill_monitor as _skill_monitor
 
 
-def route_stream(user_input: str) -> tuple:
-    """Thin wrapper that records every route_stream call to skill_monitor."""
+def route_stream(
+    user_input: str,
+    *,
+    context: RouteContext | None = None,
+) -> tuple:
+    """Thin wrapper that records every route_stream call to skill_monitor.
+
+    Adaptive routing: if a text-only route is demoted (consistently low quality
+    with ≥5 samples), the response stream is replaced with a direct LLM fallback.
+    Side-effect routes (Calendar, Gmail, Messages, Browser) are never bypassed.
+    """
     _t0 = time.monotonic()
     try:
-        result = _route_stream_raw(user_input)
+        result = _route_stream_raw(user_input, context=context)
         skill = result[1] if isinstance(result, tuple) and len(result) > 1 else "chat"
+
+        # Adaptive routing: replace demoted safe-to-bypass routes with LLM fallback
+        try:
+            from harness import adaptive_router as _ar
+            _ar.notify_route_used(user_input, skill)
+            if _ar.should_fallback(skill):
+                logging.info(
+                    "[AdaptiveRouter] Route '%s' is demoted — using LLM fallback", skill
+                )
+                fallback_stream = _ar.build_fallback_stream(user_input, skill)
+                result = (fallback_stream, f"Fallback[{skill}]")
+                skill = result[1]
+        except Exception as _ar_exc:
+            logging.debug("[AdaptiveRouter] intercept failed: %s", _ar_exc)
+
         _skill_monitor.record_call(skill, success=True, latency_ms=(time.monotonic() - _t0) * 1000)
         return result
     except Exception as exc:
@@ -126,6 +156,29 @@ def _safe_self_review(area: str | None = None) -> tuple[dict, str]:
 app = FastAPI(title="Jarvis", version="1.0")
 _CHAT_LOCK = threading.Lock()
 _API_TOKEN = ""
+
+
+def _api_source(source: str) -> str:
+    del source
+    return "api"
+
+
+def _api_route_context(source: str, session_id: str = "") -> RouteContext:
+    normalized_source = (
+        source if source in {"api", "mobile_web", "openai_compat"} else "api"
+    )
+    raw_session = str(session_id or "").strip() or f"{normalized_source}:default"
+    normalized_session = hashlib.sha256(
+        f"{normalized_source}\0{raw_session}".encode("utf-8")
+    ).hexdigest()[:32]
+    credential = _API_TOKEN or "local-api-token"
+    principal = "api:" + hashlib.sha256(credential.encode("utf-8")).hexdigest()[:16]
+    return RouteContext(
+        principal=principal,
+        session_id=normalized_session,
+        source=normalized_source,
+        authenticated=bool(_API_TOKEN),
+    )
 # Optional cloud-mode override for mobile_web requests (avoids slow local models
 # on the headless server without changing the global default mode).
 # mobile_web requests bypass route_stream() and go directly to Claude Haiku.
@@ -183,15 +236,27 @@ def _allowed_hostnames() -> set[str]:
             tunnel_host = tu.replace("https://", "").replace("http://", "").split("/")[0].lower()
             allowed.add(tunnel_host)
     except Exception:
-        pass
+        logging.debug("[API] tunnel CORS origin fetch failed", exc_info=True)
 
     return allowed
+
+
+def _no_auth_explicitly_allowed() -> bool:
+    """True only if the operator explicitly opted into unauthenticated access.
+
+    Guards the empty-token path so serving ``api:app`` without calling
+    ``start()`` (which always sets a token) fails closed instead of exposing
+    every command-capable endpoint to whoever can reach the socket.
+    """
+    return os.getenv("JARVIS_API_ALLOW_NO_AUTH", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _token_authorized(request: Request) -> bool:
     expected = (_API_TOKEN or "").strip()
     if not expected:
-        return True
+        # No token configured. Fail CLOSED unless no-auth was explicitly
+        # enabled — a missing token must never mean "allow everyone".
+        return _no_auth_explicitly_allowed()
     bearer = request.headers.get("Authorization", "")
     if bearer.lower().startswith("bearer "):
         supplied = bearer[7:].strip()
@@ -697,10 +762,11 @@ class OAIMessage(BaseModel):
 
 class OAICompletionRequest(BaseModel):
     model: str = "jarvis"
-    messages: list[OAIMessage] = []
+    messages: list[OAIMessage] = Field(default_factory=list)
     stream: bool = False
     temperature: float | None = None
     max_tokens: int | None = None
+    session_id: str = "openai_default"
 
 
 # ── Mobile web stream helper ───────────────────────────────────────────────────
@@ -750,7 +816,12 @@ def _mobile_history_append(session_id: str, user_text: str, assistant_text: str)
         _mobile_sessions[session_id] = history[-(  _MOBILE_MAX_TURNS * 2):]
 
 
-def _mobile_web_stream(message: str, system_extra: str = ""):
+def _mobile_web_stream(
+    message: str,
+    system_extra: str = "",
+    *,
+    context: RouteContext | None = None,
+):
     """Return (stream_iterator, model_label) for a mobile_web /chat request.
 
     Routes through the full Jarvis router (calendar, email, messages, web search,
@@ -767,7 +838,7 @@ def _mobile_web_stream(message: str, system_extra: str = ""):
     # ── 1. Full Jarvis routing (calendar, email, messages, search, etc.) ───────
     try:
         with model_router.mobile_web_override(system_extra=system_extra):
-            stream, model = route_stream(message)
+            stream, model = route_stream(message, context=context)
 
             def _wrap(gen):
                 with model_router.mobile_web_override(system_extra=system_extra):
@@ -786,8 +857,15 @@ def _mobile_web_stream(message: str, system_extra: str = ""):
 @app.post("/chat")
 def chat(req: ChatRequest):
     """Send a message to Jarvis and get a response."""
-    source = (req.source or "api").strip() or "api"
-    client_meta = req.meta or {}
+    source = _api_source(req.source)
+    client_meta = redact_approval_data(req.meta or {})
+    cancel_request = req.message.strip().lower() in {
+        "/cancel",
+        "/cancel task",
+        "cancel task",
+        "stop task",
+        "/stop task",
+    }
     if req.stream:
         # mobile_web bypasses _CHAT_LOCK — it goes direct to cloud, no TTS/voice
         # gating needed, and the lock must not be held across a slow HTTP stream.
@@ -803,39 +881,51 @@ def chat(req: ChatRequest):
                     + ("\n\n" + history_prefix if history_prefix else "")
                 )
                 start_seq = usage_tracker.current_seq()
-                stream, model = _mobile_web_stream(req.message, system_extra=combined_system)
+                stream, model = _mobile_web_stream(
+                    req.message,
+                    system_extra=combined_system,
+                    context=_api_route_context(source, session_id),
+                )
                 chunks = []
                 for chunk in stream:
                     if chunk:
                         chunks.append(chunk)
                         yield f"data: {json.dumps({'chunk': chunk, 'model': model})}\n\n"
                 response = "".join(chunks)
-                _mobile_history_append(session_id, req.message, response)
+                safe_message = redact_approval_ids(req.message)
+                safe_response = redact_approval_ids(response)
+                _mobile_history_append(session_id, safe_message, safe_response)
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 stream_source = "mobile_web_stream"
                 context_stats = ctx.record_request_stats(model, source=stream_source)
                 interaction = evals.log_interaction(
-                    req.message, response, model,
+                    safe_message, safe_response, model,
                     source=stream_source,
-                    context={**context_stats, "client_meta": client_meta},
+                    context={**context_stats, "routing_tag": model, "client_meta": client_meta},
                 )
                 evals.maybe_log_automatic_failure(interaction)
                 try:
-                    semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
+                    semantic_memory.log_conversation_turn(safe_message, safe_response, model=model, source=stream_source)
                 except Exception:
-                    pass
-                _record_turn(req.message, response)
+                    logging.debug("[API] semantic_memory turn log failed", exc_info=True)
+                _record_turn(safe_message, safe_response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
             return StreamingResponse(generate_mobile(), media_type="text/event-stream")
 
-        if not _acquire_chat_lock():
+        lock_acquired = False
+        if not cancel_request and not _acquire_chat_lock():
             return JSONResponse(status_code=409, content=_chat_busy_payload())
+        if not cancel_request:
+            lock_acquired = True
 
         def generate():
             try:
                 start_seq = usage_tracker.current_seq()
-                stream, model = route_stream(req.message)
+                stream, model = route_stream(
+                    req.message,
+                    context=_api_route_context(source, req.session_id or ""),
+                )
                 chunks = []
                 for chunk in stream:
                     if chunk:
@@ -846,31 +936,38 @@ def chat(req: ChatRequest):
                         # send SSE comment to hold the connection open
                         yield ": keepalive\n\n"
                 response = "".join(chunks)
+                safe_message = redact_approval_ids(req.message)
+                safe_response = redact_approval_ids(response)
+                _audit_log("response_sent", model_used=model, query=safe_message[:200], chars=len(response))
                 usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
                 stream_source = f"{source}_stream"
                 context_stats = ctx.record_request_stats(model, source=stream_source)
                 interaction = evals.log_interaction(
-                    req.message,
-                    response,
+                    safe_message,
+                    safe_response,
                     model,
                     source=stream_source,
-                    context={**context_stats, "client_meta": client_meta},
+                    context={**context_stats, "routing_tag": model, "client_meta": client_meta},
                 )
                 evals.maybe_log_automatic_failure(interaction)
                 try:
-                    semantic_memory.log_conversation_turn(req.message, response, model=model, source=stream_source)
+                    semantic_memory.log_conversation_turn(safe_message, safe_response, model=model, source=stream_source)
                 except Exception:
-                    pass
+                    logging.debug("[API] semantic_memory turn log failed", exc_info=True)
                 # mem0 cross-session episodic memory — fire-and-forget
-                _record_turn(req.message, response)
+                _record_turn(safe_message, safe_response)
                 yield f"data: {json.dumps({'interaction_id': interaction['id'], 'model': model, 'usage': usage, 'type': 'meta'})}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
-                _CHAT_LOCK.release()
+                if lock_acquired:
+                    _CHAT_LOCK.release()
         return StreamingResponse(generate(), media_type="text/event-stream")
 
-    if not _acquire_chat_lock():
+    lock_acquired = False
+    if not cancel_request and not _acquire_chat_lock():
         return JSONResponse(status_code=409, content=_chat_busy_payload())
+    if not cancel_request:
+        lock_acquired = True
 
     try:
         start_seq = usage_tracker.current_seq()
@@ -881,41 +978,52 @@ def chat(req: ChatRequest):
                 _MOBILE_SYSTEM_EXTRA
                 + ("\n\n" + history_prefix if history_prefix else "")
             )
-            stream, model = _mobile_web_stream(req.message, system_extra=combined_system)
+            stream, model = _mobile_web_stream(
+                req.message,
+                system_extra=combined_system,
+                context=_api_route_context(source, session_id),
+            )
         else:
-            stream, model = route_stream(req.message)
+            stream, model = route_stream(
+                req.message,
+                context=_api_route_context(source, req.session_id or ""),
+            )
         response = "".join(stream)
+        safe_message = redact_approval_ids(req.message)
+        safe_response = redact_approval_ids(response)
+        _audit_log("response_sent", model_used=model, query=safe_message[:200], chars=len(response))
         if source == "mobile_web":
-            _mobile_history_append(session_id, req.message, response)
+            _mobile_history_append(session_id, safe_message, safe_response)
         usage = usage_tracker.summarize(since_seq=start_seq, include_recent=10)
         context_stats = ctx.record_request_stats(model, source=source)
         interaction = evals.log_interaction(
-            req.message,
-            response,
+            safe_message,
+            safe_response,
             model,
             source=source,
-            context={**context_stats, "client_meta": client_meta},
+            context={**context_stats, "routing_tag": model, "client_meta": client_meta},
         )
         evals.maybe_log_automatic_failure(interaction)
         try:
-            semantic_memory.log_conversation_turn(req.message, response, model=model, source=source)
+            semantic_memory.log_conversation_turn(safe_message, safe_response, model=model, source=source)
         except Exception:
-            pass
+            logging.debug("[API] semantic_memory turn log failed", exc_info=True)
         # mem0 cross-session episodic memory — fire-and-forget
-        _record_turn(req.message, response)
+        _record_turn(safe_message, safe_response)
         return {"response": response, "model": model, "interaction_id": interaction["id"], "context": context_stats, "usage": usage}
     finally:
-        _CHAT_LOCK.release()
+        if lock_acquired:
+            _CHAT_LOCK.release()
 
 
 @app.post("/feedback")
 def feedback(req: FeedbackRequest):
     entry = evals.log_failure(
-        issue=req.issue,
+        issue=redact_approval_ids(req.issue),
         interaction_id=req.interaction_id,
-        expected=req.expected,
-        user_input=req.user_input,
-        response=req.response,
+        expected=redact_approval_ids(req.expected),
+        user_input=redact_approval_ids(req.user_input),
+        response=redact_approval_ids(req.response),
         model=req.model,
         source=req.source,
     )
@@ -1447,7 +1555,7 @@ def _pipeline_health_check() -> dict:
                             "message": f"Task {t.get('id','?')[-8:]} running for {int(age)}s",
                         })
                 except Exception:
-                    pass
+                    logging.debug("[API] stalled-task alert build failed", exc_info=True)
 
     # Detect garbage outputs in recently completed tasks
     garbage_patterns = ("task completed", "successfully created", "open tasks:",
@@ -1622,7 +1730,7 @@ def get_eval_log(request: Request, limit: int = 50, agent: str = "", verdict: st
                     continue
                 entries.append(e)
             except Exception:
-                pass
+                logging.debug("[API] verdict jsonl parse error — skipping line", exc_info=True)
     return {"ok": True, "entries": entries[-limit:][::-1]}
 
 
@@ -1997,7 +2105,7 @@ def manager_status(session_id: str, request: Request):
         if resp.status_code == 200:
             return {"ok": True, "metrics": resp.json()}
     except Exception:
-        pass
+        logging.debug("[API] event_bus metrics fetch failed", exc_info=True)
     return {"ok": True, "metrics": {}, "note": "event_bus_unreachable"}
 
 
@@ -2591,30 +2699,27 @@ def oai_chat_completions(req: OAICompletionRequest):
     """
     import time, uuid
 
-    # Extract last user message; prepend prior turns as plain context
-    user_msg = ""
-    history_lines: list[str] = []
-    for m in req.messages:
-        role = (m.role or "").lower()
-        content = (m.content or "").strip()
-        if not content:
-            continue
-        if role == "system":
-            history_lines.append(f"[System context: {content}]")
-        elif role == "assistant":
-            history_lines.append(f"Assistant: {content}")
-        elif role == "user":
-            user_msg = content  # keep updating — last user wins
-
-    if not user_msg:
+    # Only the final user turn is routed. Flattening history into router input can
+    # replay earlier side-effect commands; model-only history needs a separate API.
+    last_user_index = next(
+        (
+            index
+            for index in range(len(req.messages) - 1, -1, -1)
+            if (req.messages[index].role or "").lower() == "user"
+            and (req.messages[index].content or "").strip()
+        ),
+        None,
+    )
+    if last_user_index is None:
         return JSONResponse(
             status_code=400,
             content={"error": {"message": "No user message found", "type": "invalid_request_error"}},
         )
 
-    # Prepend history as context prefix if there are prior turns
-    prior = "\n".join(history_lines[:-1]) if len(history_lines) > 1 else ""
-    routed_input = f"{prior}\n\n{user_msg}".strip() if prior else user_msg
+    user_msg = (req.messages[last_user_index].content or "").strip()
+    # Commands remain verbatim so conversation history cannot alter strict
+    # router parsing or replay a prior side effect.
+    routed_input = user_msg
 
     cmpl_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
@@ -2628,7 +2733,10 @@ def oai_chat_completions(req: OAICompletionRequest):
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             }) + "\n\n"
 
-            stream, _model = route_stream(routed_input)
+            stream, _model = route_stream(
+                routed_input,
+                context=_api_route_context("openai_compat", req.session_id),
+            )
             for chunk in stream:
                 if chunk:
                     yield "data: " + json.dumps({
@@ -2647,7 +2755,10 @@ def oai_chat_completions(req: OAICompletionRequest):
         return StreamingResponse(generate(), media_type="text/event-stream")
 
     # Non-streaming
-    stream, _model = route_stream(routed_input)
+    stream, _model = route_stream(
+        routed_input,
+        context=_api_route_context("openai_compat", req.session_id),
+    )
     response_text = "".join(chunk for chunk in stream if chunk)
     return {
         "id": cmpl_id,
@@ -3161,8 +3272,7 @@ def bridge_status():
 
 def get_system_telemetry() -> dict:
     import subprocess
-    import re
-    
+
     battery_info = "Unknown"
     try:
         out = subprocess.check_output(["pmset", "-g", "batt"], text=True, timeout=1.5)
@@ -3172,7 +3282,7 @@ def get_system_telemetry() -> dict:
             if "charging" in out.lower() or "ac power" in out.lower():
                 battery_info += " (Charging)"
     except Exception:
-        pass
+        logging.debug("[API] battery stat unavailable", exc_info=True)
 
     cpu_info = "Unknown"
     try:
@@ -3181,7 +3291,7 @@ def get_system_telemetry() -> dict:
         if load_match:
             cpu_info = f"{load_match[0]} (1m load)"
     except Exception:
-        pass
+        logging.debug("[API] CPU stat unavailable", exc_info=True)
 
     memory_info = "Unknown"
     try:
@@ -3195,11 +3305,11 @@ def get_system_telemetry() -> dict:
                 page_size = int(re.search(r"page size of (\d+) bytes", line).group(1))
             elif "Pages free:" in line:
                 free_pages = int(re.search(r"Pages free:\s+(\d+)\.", line).group(1))
-        
+
         used_gb = total_gb - (free_pages * page_size / (1024**3))
         memory_info = f"{used_gb:.1f} / {total_gb:.0f} GB ({int(used_gb/total_gb*100)}%)"
     except Exception:
-        pass
+        logging.debug("[API] memory stat unavailable", exc_info=True)
 
     return {
         "battery": battery_info,
@@ -7658,7 +7768,7 @@ def get_voice_diagnostics():
             lines = log_path.read_text(errors="replace").splitlines()
             diag["voice_log_tail"] = lines[-20:]
     except Exception:
-        pass
+        log.debug("[API] voice log tail read failed", exc_info=True)
     return {"ok": True, "diagnostics": diag}
 
 
@@ -8017,7 +8127,7 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     try:
         runtime_state.write_api_endpoint(_host, _port, token=_API_TOKEN)
     except Exception:
-        pass
+        logging.warning("[API] failed to write runtime endpoint — UI/CLI may not find Jarvis", exc_info=True)
 
     def _run():
         uvicorn.run(app, host=_host, port=_port, log_level="warning")

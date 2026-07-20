@@ -7,6 +7,7 @@ from unittest.mock import patch
 import execution_engine
 import task_planner
 import tool_registry
+import tools
 
 
 class ToolRegistryTests(unittest.TestCase):
@@ -43,13 +44,25 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertIs(normalized["registered_only"], False)
 
 
+class MathToolTests(unittest.TestCase):
+    def test_eval_math_handles_supported_operators(self):
+        self.assertEqual(tools.eval_math("2 + 3 * 4"), "14")
+        self.assertEqual(tools.eval_math("2^8"), "256")
+
+    def test_eval_math_rejects_code_and_unbounded_exponents(self):
+        self.assertEqual(tools.eval_math("__import__('os')"), "")
+        self.assertEqual(tools.eval_math("9^999999"), "")
+        self.assertEqual(tools.eval_math("1+" * 200 + "1"), "")
+
+
 class ExecutionEngineContractTests(unittest.TestCase):
     def test_execute_step_records_trace(self):
         with tempfile.TemporaryDirectory() as tmp:
             trace_dir = Path(tmp)
             step = task_planner.TaskStep(number=1, description="search web", tool="search", params={"query": "jarvis"})
             with patch.object(execution_engine, "TRACE_DIR", trace_dir), \
-                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")):
+                 patch("execution_engine._execute_tool_call", return_value=(True, "search output")), \
+                 execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
                 ok, result = execution_engine.execute_step(step, {})
             self.assertTrue(ok)
             self.assertEqual(result, "search output")
@@ -69,7 +82,8 @@ class ExecutionEngineContractTests(unittest.TestCase):
                 return responses.pop(0)
 
             with patch.object(execution_engine, "TRACE_DIR", trace_dir), \
-                 patch("execution_engine._execute_tool_call", side_effect=side_effect):
+                 patch("execution_engine._execute_tool_call", side_effect=side_effect), \
+                 execution_engine.execution_capability_scope({execution_engine.CAP_NETWORK_ACCESS}):
                 ok, result = execution_engine.execute_step(step, {})
             self.assertTrue(ok)
             self.assertEqual(result, "ok result")
@@ -91,6 +105,17 @@ class ExecutionEngineContractTests(unittest.TestCase):
 
 
 class TaskPlannerSanitizerTests(unittest.TestCase):
+    def test_cloud_plan_is_capped_by_shared_validator(self):
+        response = json.dumps([
+            {"number": index, "description": "step", "tool": "chat", "params": {}}
+            for index in range(1, 15)
+        ])
+        with patch("task_planner.ask_claude", return_value=response), \
+             patch("task_planner.DEFAULT_MODE", "cloud"):
+            steps = task_planner.plan_task("test plan")
+
+        self.assertEqual(len(steps), 12)
+
     def test_plan_task_downgrades_unknown_tools_to_chat(self):
         response = json.dumps(
             [
@@ -98,10 +123,27 @@ class TaskPlannerSanitizerTests(unittest.TestCase):
                 {"number": 2, "description": "search", "tool": "search", "params": {"query": "jarvis"}},
             ]
         )
-        with patch("task_planner.ask_claude", return_value=response):
+        # Force cloud path: local planner raises so plan_task falls through to ask_claude
+        with patch("task_planner._plan_task_local", side_effect=RuntimeError("mock local failure")), \
+             patch("task_planner.ask_claude", return_value=response), \
+             patch("task_planner.DEFAULT_MODE", "auto"):
             steps = task_planner.plan_task("test plan")
         self.assertEqual(steps[0].tool, "chat")
         self.assertEqual(steps[1].tool, "search")
+
+    def test_open_source_mode_does_not_fall_back_to_cloud(self):
+        with patch("task_planner._plan_task_local", side_effect=RuntimeError("mock local failure")), \
+             patch("task_planner.ask_claude") as ask_cloud, \
+             patch("task_planner.DEFAULT_MODE", "open-source"):
+            steps = task_planner.plan_task("test plan")
+
+        self.assertEqual(steps, [task_planner.TaskStep(
+            number=1,
+            description="Execute: test plan",
+            tool="chat",
+            params={"prompt": "test plan"},
+        )])
+        ask_cloud.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -135,7 +135,7 @@ def _session_window_date(session: dict | None) -> str | None:
                 parsed = parsed - timedelta(days=1)
             return parsed.strftime("%Y-%m-%d")
         except Exception:
-            pass
+            logging.debug("[FinetuneScheduler] timestamp parse failed: %r", timestamp, exc_info=True)
     date_value = str(session.get("date") or "").strip()
     return date_value or None
 
@@ -833,8 +833,9 @@ class OvernightTrainer:
             model_tag,
             train_jsonl=pack_path,
             # Use config default (JARVIS_MLX_NUM_ITERS, default 100).
-            # 74 examples × batch_size 4 ≈ 18 steps/epoch → 100 iters ≈ 5.4 epochs.
-            # At ~18s/iter that's ~30 minutes — well within the 7-hour window.
+            # batch_size=1 to avoid Metal GPU OOM on Qwen3-8B-4bit; --grad-checkpoint also added.
+            # 100 iters at batch_size 1 ≈ 0.8 epochs for ~128 examples — consider raising
+            # JARVIS_MLX_NUM_ITERS to 300+ for more effective training.
             dry_run=False,
         )
 
@@ -953,12 +954,17 @@ class OvernightTrainer:
             f"Promotion check: current {current_passed} vs baseline {baseline_passed}"
         )
 
-        if current_passed >= baseline_passed:
-            # Good! Fuse and promote.
+        if current_passed > baseline_passed:
+            # Strict improvement required — equal scores do not promote.
             adapter_path = training_result.get("adapter_path")
             if adapter_path:
                 self.logger.info(f"Promoting adapter: {adapter_path}")
-                model_hf_id = "Qwen/Qwen2.5-Coder-7B-Instruct"
+                # Derive fusion base from the same model used for training so
+                # adapter weights and base weights always match.
+                preset = local_mlx_training.MLX_MODEL_PRESETS.get(
+                    config.MLX_TRAINING_MODEL, {}
+                )
+                model_hf_id = preset.get("hf_id", "Qwen/Qwen3-8B")
                 fused_dir = TRAINING_ROOT / "exports" / "overnight_fused"
 
                 fuse_result = local_mlx_training.fuse_adapter(

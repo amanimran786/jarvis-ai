@@ -125,6 +125,11 @@ def classify(user_input: str) -> ToolDecision:
         local_short = _local_short_query_classify(user_input.lower().strip())
         if local_short:
             return _attach_skill(user_input, local_short)
+        # Regex missed it — try fast local LLM with a hard 3s timeout before
+        # falling back to chat. Never call a slow model here; speed is the point.
+        local_fast = _classify_with_local_structured_timed(user_input, timeout=3.0)
+        if local_fast:
+            return _attach_skill(user_input, local_fast)
         return _attach_skill(user_input, _FALLBACK)
 
     # Use the fast heuristic specialist classifier in every mode.
@@ -139,6 +144,13 @@ def classify(user_input: str) -> ToolDecision:
         if local_decision:
             return _attach_skill(user_input, local_decision)
         return _attach_skill(user_input, _FALLBACK)
+
+    # Local-first: try the local structured classifier before spending a cloud
+    # call. Hard timeout so a slow local model never stalls the turn; on
+    # None/failure/timeout we fall through to Haiku below.
+    local_first = _classify_with_local_structured_timed(user_input, timeout=3.0)
+    if local_first:
+        return _attach_skill(user_input, local_first)
 
     # Full LLM classification
     _t0 = time.monotonic()
@@ -161,6 +173,10 @@ def classify(user_input: str) -> ToolDecision:
             error=str(e)[:200],
         )
         logging.warning("[Orchestrator] Classification failed: %s", e)
+        # Cloud failed — try local structured classifier before falling back to chat
+        local_fallback = _classify_with_local_structured(user_input)
+        if local_fallback:
+            return _attach_skill(user_input, local_fallback)
         return _FALLBACK
 
 
@@ -181,12 +197,39 @@ def _fast_classify(lower: str) -> ToolDecision | None:
     # Volume/brightness/system
     if re.search(r"\b(volume|mute|unmute|brightness|screenshot|lock screen|lock my screen)\b", lower):
         return ToolDecision("system", 0.99, "control")
+    # File/folder watching — before generic file ops
+    _is_watch_cmd = (
+        re.search(r"(?:^|[\s])/watch\b", lower)           # /watch [path]
+        or re.search(r"(?:^|\s)watch\s+(?:~/|/|\w.*\.)", lower)  # watch ~/path or watch file.ext
+        or re.search(r"\b(watch this|watch for changes|unwatch|stop watching|stop watch)\b", lower)
+        or lower.strip() in ("/watch", "/unwatch")
+    )
+    if _is_watch_cmd:
+        if re.search(r"\b(unwatch|stop watching|stop watch)\b", lower) or lower.strip() == "/unwatch":
+            return ToolDecision("watch", 0.99, "unwatch")
+        return ToolDecision("watch", 0.99, "watch")
+    # File ops — must come before app so "open ~/foo.pdf" routes to file, not app
+    _has_path = bool(re.search(r"~/|(?:\.pdf|\.txt|\.md|\.py|\.json|\.csv|\.log|\.docx|\.xlsx|\.sh)\b", lower))
+    if _has_path:
+        if re.search(r"\b(read|open|show|view|cat|display|load|summarize|summarise)\b", lower):
+            return ToolDecision("file", 0.95, "read")
+        if re.search(r"\b(write|save|create|append)\b", lower):
+            return ToolDecision("file", 0.95, "write")
+        if re.search(r"\b(list|ls|what.{0,5}in|show.{0,10}(files?|folder|dir))\b", lower):
+            return ToolDecision("file", 0.92, "list")
     # App open
     if re.match(r"\b(open|launch|start)\b\s+\w+", lower) and "interface" not in lower:
         app = re.sub(r"^(open|launch|start)\s+", "", lower).strip()
         return ToolDecision("app", 0.99, "open", {"app": app})
+    # Web fetch (headless URL read) — must come before generic browser open
+    _has_url = bool(re.search(r"https?://\S+", lower))
+    if _has_url and re.search(r"\b(fetch|read|get|show|display|load|summarize|summarise|what.{0,10}(say|on|does))\b", lower):
+        return ToolDecision("browser", 0.96, "fetch")
+    # Web search (text query, no URL — keep separate from browser/open)
+    if re.search(r"\b(search the web for|search google for|search online for|look it up online)\b", lower):
+        return ToolDecision("search", 0.97, "search")
     # Browser
-    if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|search the web|search google for|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
+    if re.search(r"\b(browse to|open website|open site|go to https?://|go to www\.|summarize this page|reload page|go back|go forward|click (the )?(link|button))\b", lower):
         return ToolDecision("browser", 0.97, "browse")
     # Weather
     if re.search(r"\b(weather|forecast|temperature)\b", lower):
@@ -233,7 +276,7 @@ def _fast_classify(lower: str) -> ToolDecision | None:
             action = "status"
         return ToolDecision("knowledge", 0.97, action)
     # Calendar
-    if re.search(r"\b(my schedule|my calendar|what do i have today|any events)\b", lower):
+    if re.search(r"\b(my schedule|my calendar|what do i have today|any events|next event|next meeting|upcoming meetings?|any meetings?)\b", lower):
         return ToolDecision("calendar", 0.99, "read")
     # Memory
     if re.match(r"^(remember |forget )", lower):
@@ -387,6 +430,29 @@ def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
         return None
 
 
+def _classify_with_local_structured_timed(user_input: str, timeout: float = 3.0) -> ToolDecision | None:
+    """Classify with a hard wall-clock timeout (default 3s).
+
+    Returns None on timeout or error so the caller can fall back to chat
+    rather than waiting on a slow local model for a short query.
+    """
+    if not LOCAL_STRUCTURED_CLASSIFIER_ENABLED:
+        return None
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+    _pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = _pool.submit(_classify_with_local_structured, user_input)
+        return future.result(timeout=timeout)
+    except _FutTimeout:
+        logging.debug("[Orchestrator] Short-query classifier timed out (%.1fs)", timeout)
+        return None
+    except Exception as exc:
+        logging.debug("[Orchestrator] Short-query classifier error: %s", exc)
+        return None
+    finally:
+        _pool.shutdown(wait=False)
+
+
 def _parse(raw: str) -> ToolDecision:
     """Parse LLM JSON response into ToolDecision."""
     raw = raw.strip()
@@ -430,3 +496,14 @@ def _load_json_object(raw: str) -> dict | None:
         if isinstance(data, dict):
             return data
     return None
+
+
+# ── Dev session coordination dashboard ───────────────────────────────────────
+# When this file is run directly (`python orchestrator.py [cmd]`) it launches
+# the file-based session coordination dashboard defined in session_orchestrator.py.
+# Importing this module as a library (from orchestrator import classify) has
+# zero effect from this block — the guard only fires when __name__ == "__main__".
+
+if __name__ == "__main__":
+    from session_orchestrator import main as _session_orch_main
+    _session_orch_main()

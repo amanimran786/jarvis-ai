@@ -133,51 +133,68 @@ def _restore_stubs():
 
 def test_workspace_file_operations():
     """Verify that read_file and write_file successfully manipulate files inside workspace/."""
+    # Re-import inside the test so patch.object targets the SAME module object
+    # that the functions use for LOAD_GLOBAL.  Module-level imports in this file
+    # may be stale if another test reloaded tools.fs_tools between collection and
+    # test execution.
+    import importlib
+    _fs = importlib.import_module("tools.fs_tools")
+    _write_file = _fs.write_file
+    _read_file = _fs.read_file
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_workspace = Path(tmp_dir) / "workspace"
         tmp_workspace.mkdir()
 
-        # Patch WORKSPACE_DIR to use our temp workspace
-        with patch("tools.fs_tools.WORKSPACE_DIR", tmp_workspace):
+        with patch.object(_fs, "WORKSPACE_DIR", tmp_workspace):
             # Write a file
-            w_res = write_file("test.txt", "Hello Workspace")
+            w_res = _write_file("test.txt", "Hello Workspace")
             assert "Success" in w_res
             assert (tmp_workspace / "test.txt").exists()
 
             # Read the file
-            r_res = read_file("test.txt")
+            r_res = _read_file("test.txt")
             assert r_res == "Hello Workspace"
 
 
 def test_path_traversal_confinement():
     """Verify that files outside the workspace are blocked with PermissionError."""
+    import importlib
+    _fs = importlib.import_module("tools.fs_tools")
+    _write_file = _fs.write_file
+    _read_file = _fs.read_file
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_workspace = Path(tmp_dir) / "workspace"
         tmp_workspace.mkdir()
 
-        with patch("tools.fs_tools.WORKSPACE_DIR", tmp_workspace):
+        with patch.object(_fs, "WORKSPACE_DIR", tmp_workspace):
             # Attempt path traversal read
-            r_res = read_file("../some_external_file.txt")
+            r_res = _read_file("../some_external_file.txt")
             assert "Access denied" in r_res or "outside the workspace" in r_res
 
             # Attempt path traversal write
-            w_res = write_file("../some_external_file.txt", "exploit")
+            w_res = _write_file("../some_external_file.txt", "exploit")
             assert "Access denied" in w_res or "outside the workspace" in w_res
 
 
 def test_shell_run_tests():
     """Verify that run_tests runs pytest securely."""
+    import importlib
     import subprocess
+    _st = importlib.import_module("tools.shell_tools")
+    _run_tests = _st.run_tests
+
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_workspace = Path(tmp_dir) / "workspace"
         tmp_workspace.mkdir()
 
-        with patch("tools.shell_tools.WORKSPACE_DIR", tmp_workspace), \
+        with patch.object(_st, "WORKSPACE_DIR", tmp_workspace), \
              patch("subprocess.run") as mock_sub_run:
             mock_sub_run.return_value.stdout = "pytest output: 5 passed"
             mock_sub_run.return_value.returncode = 0
 
-            res = run_tests("-v -k test_math")
+            res = _run_tests("-v -k test_math")
 
             assert res == "pytest output: 5 passed"
             mock_sub_run.assert_called_once_with(

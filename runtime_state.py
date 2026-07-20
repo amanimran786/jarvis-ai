@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import json
 import shutil
@@ -381,7 +382,7 @@ def refresh_call_assist(force_refresh: bool = False) -> dict[str, Any]:
             if age < _CALL_ASSIST_CACHE_TTL:
                 return dict(_STATE.call_assist)
         except Exception:
-            pass
+            logging.debug("[RuntimeState] call_assist cache timestamp parse failed", exc_info=True)
 
     try:
         import meeting_listener

@@ -5,6 +5,7 @@ from config import OPENAI_API_KEY, GPT_MINI, SYSTEM_PROMPT, FREE_FIRST_ENABLED, 
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
+from brains import _retry
 
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
@@ -121,11 +122,18 @@ def ask_stream(
             {"role": "user", "content": user_input}
         ]
 
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
+    # Rate-limit backoff around the request open only — a 429 raises before the
+    # first token, so retrying here can never duplicate streamed output. After
+    # max retries the error propagates so the router fails over to the next
+    # provider (ultimately local).
+    stream = _retry.call_with_backoff(
+        lambda: client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+        ),
+        provider="openai",
     )
 
     full_reply = ""

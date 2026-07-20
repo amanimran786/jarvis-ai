@@ -8,6 +8,7 @@ that appear only in the hidden Jarvis window.
 Nobody on the call sees or hears any of this.
 """
 
+import logging
 import threading
 import tempfile
 import os
@@ -1227,7 +1228,7 @@ def stop() -> str:
     try:
         sd.stop()
     except Exception:
-        pass
+        logging.debug("[MeetingListener] silent failure in stop", exc_info=True)
     worker = _thread
     if worker and worker.is_alive():
         worker.join(timeout=2.0)

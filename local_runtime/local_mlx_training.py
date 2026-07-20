@@ -15,6 +15,7 @@ but MLX/Apple Silicon support is coming soon. See local_unsloth.py for routing.
 """
 
 from __future__ import annotations
+import logging
 
 import json
 import platform
@@ -147,7 +148,7 @@ def status() -> dict:
             import mlx
             mlx_version = getattr(mlx, "__version__", "unknown")
         except Exception:
-            pass
+            logging.debug("[MLXTraining] silent failure in status", exc_info=True)
 
     return {
         "available": available,
@@ -463,6 +464,7 @@ def run_sft(
             "--batch-size", str(batch_size),
             "--adapter-path", str(output_dir),
             "-c", str(lora_config_path),
+            "--grad-checkpoint",  # reduce Metal memory usage with minimal speed penalty
         ]
 
         if val_jsonl:

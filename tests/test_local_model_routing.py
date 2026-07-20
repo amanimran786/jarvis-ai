@@ -10,9 +10,10 @@ def _best_local_with(models: set[str], prompt: str) -> str:
         return model_router._best_local(prompt)
 
 
-def test_coding_tasks_prefer_installed_glm_flash_before_legacy_coders():
+def test_coding_tasks_prefer_installed_glm_flash_when_no_specialist():
+    # When no specialist coder (devstral, qwen2.5-coder) is installed, glm-4.7-flash is used
     assert _best_local_with(
-        {LOCAL_GLM_FLASH, "qwen2.5-coder:7b", LOCAL_DEFAULT},
+        {LOCAL_GLM_FLASH, LOCAL_DEFAULT},
         "debug this python function",
     ) == LOCAL_GLM_FLASH
 

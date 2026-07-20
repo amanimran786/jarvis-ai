@@ -67,5 +67,13 @@ jobs:
         run: pip install -r requirements-ci.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -q --tb=short --no-header -x
-        timeout-minutes: 25
+        run: |
+          python -m pytest tests/ -q --tb=short --no-header -x \
+            --ignore=tests/test_jarvis_live_integrations.py \
+            --ignore=tests/test_jarvis_regression_suite.py \
+            --ignore=tests/test_message_intent_parsing.py \
+            --ignore=tests/test_memory_persistence.py
+          # Ignored files require macOS-only tools (osascript), live network access,
+          # local model files (Qdrant/mem0), or other resources not available in
+          # the CI Ubuntu environment.
+        timeout-minutes: 10

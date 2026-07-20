@@ -1,3 +1,4 @@
+import logging
 import copy
 import json
 import os
@@ -6,6 +7,7 @@ import threading
 from datetime import date, datetime
 
 import runtime_state
+from harness.audit import audit_log
 
 _BUNDLED_MEMORY_FILE = os.path.join(os.path.dirname(__file__), "memory.json")
 MEMORY_FILE = str(runtime_state.writable_data_path("memory.json", seed_from=_BUNDLED_MEMORY_FILE))
@@ -148,6 +150,7 @@ def add_fact(fact: str) -> None:
     if fact not in data["facts"]:
         data["facts"].append(fact)
         save(data)
+        audit_log("memory_write", operation="add_fact", fact=fact[:200])
         consolidate_memory()
 
 
@@ -172,6 +175,7 @@ def set_preference(key: str, value: str) -> None:
     data = load()
     data["preferences"][key] = value
     save(data)
+    audit_log("memory_write", operation="set_preference", key=key)
     consolidate_memory()
 
 
@@ -195,6 +199,7 @@ def save_conversation(summary: str) -> None:
     # Keep last 30 conversations
     data["conversation_history"] = data["conversation_history"][-30:]
     save(data)
+    audit_log("memory_write", operation="save_conversation", summary_preview=summary[:120])
     consolidate_memory()
 
 
@@ -242,6 +247,7 @@ def consolidate_memory() -> dict:
     data["working_memory"] = _build_working_memory(data)
     data["long_term_profile"] = _build_long_term_profile(data)
     save(data)
+    audit_log("memory_promotion", facts=len(data.get("facts", [])), preferences=len(data.get("preferences", {})))
     return {
         "ok": True,
         "working_memory": data["working_memory"],
@@ -305,7 +311,7 @@ def get_context() -> str:
         if learning:
             parts.append(learning.strip())
     except Exception:
-        pass
+        logging.debug("[MemoryModule] silent failure in get_context", exc_info=True)
 
     if not parts:
         return ""

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import os
 import queue
 import re
@@ -17,7 +18,7 @@ import threading
 
 from brains.brain_claude import ask_claude
 from brains.brain_ollama import ask_local, get_best_available
-from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT
+from config import HAIKU, SONNET, SYSTEM_PROMPT, LOCAL_REASONING, LOCAL_DEFAULT, LOCAL_STRICT_FIRST
 import model_router
 import skills
 import specialized_agent_native
@@ -527,8 +528,10 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
     if context:
         prompt += f"\n\nContext from other agents:\n{context}"
 
-    # In open-source mode skip the cloud attempt entirely — go local immediately
-    if model_router.is_open_source_mode():
+    # In open-source or local-strict mode try local first, before any cloud call.
+    # Explicit cloud mode overrides strict-first (same as provider_router).
+    _open_source = model_router.is_open_source_mode()
+    if _open_source or (LOCAL_STRICT_FIRST and model_router.get_mode() != "cloud"):
         preferred = _LOCAL_ROLE_MODELS.get(role, LOCAL_REASONING)
         try:
             local_model = get_best_available(preferred)
@@ -541,9 +544,12 @@ def _run_role(role: str, task: str, context: str = "") -> dict:
             )
             return {"role": role, "model": f"local/{local_model}", "output": output}
         except Exception as local_exc:
-            output = _fallback_role_output(role, task, context=context).strip()
-            return {"role": role, "model": "local/fallback", "output": output,
-                    "fallback": True, "error": str(local_exc)}
+            if _open_source:
+                output = _fallback_role_output(role, task, context=context).strip()
+                return {"role": role, "model": "local/fallback", "output": output,
+                        "fallback": True, "error": str(local_exc)}
+            # Local-strict with cloud fallback allowed — fall through to ask_claude below.
+            logging.warning("[SpecializedAgents] Local-first %s failed, trying cloud: %s", role, local_exc)
 
     try:
         output = ask_claude(

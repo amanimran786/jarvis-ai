@@ -16,6 +16,7 @@ Cold-start elimination:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import tempfile
@@ -82,7 +83,7 @@ def _resolve_paths() -> tuple[str | None, str | None]:
                     exe.parent.parent / "Resources" / "local_runtime" / "tts_subprocess.py"
                 )
         except Exception:
-            pass
+            logging.debug("[KokoroSubproc] frozen bundle script path resolution failed", exc_info=True)
 
         found_script: str | None = None
         for c in script_candidates:
@@ -106,7 +107,7 @@ def _resolve_paths() -> tuple[str | None, str | None]:
                     str(exe.parent.parent.parent / "venv" / "bin" / "python3")
                 )
         except Exception:
-            pass
+            logging.debug("[KokoroSubproc] frozen bundle python path resolution failed", exc_info=True)
 
         found_python: str | None = None
         for p in python_candidates:
@@ -204,7 +205,7 @@ def _start_daemon() -> bool:
         try:
             proc.kill()
         except Exception:
-            pass
+            logging.debug("[KokoroSubproc] daemon kill on startup failure failed", exc_info=True)
         return False
 
     _daemon_proc = proc
@@ -227,7 +228,7 @@ def _ensure_daemon() -> bool:
             try:
                 _daemon_proc.kill()
             except Exception:
-                pass
+                logging.debug("[KokoroSubproc] daemon kill on ensure-restart failed", exc_info=True)
             _daemon_proc = None
             _daemon_ready = False
         return _start_daemon()
@@ -248,7 +249,7 @@ def _daemon_synthesize(text: str, voice: str) -> str | None:
                 try:
                     _daemon_proc_local.kill()
                 except Exception:
-                    pass
+                    logging.debug("[KokoroSubproc] daemon kill on synthesize restart failed", exc_info=True)
             _daemon_proc = None
             _daemon_ready = False
             if not _start_daemon():
@@ -269,7 +270,7 @@ def _daemon_synthesize(text: str, voice: str) -> str | None:
             try:
                 line_holder.append(proc.stdout.readline())
             except Exception:
-                pass
+                logging.debug("[KokoroSubproc] daemon response readline failed", exc_info=True)
 
         t = threading.Thread(target=_read_line, daemon=True)
         t.start()
@@ -330,7 +331,7 @@ def _play_and_delete(wav_path: str) -> None:
     try:
         subprocess.run(["afplay", wav_path], check=True, capture_output=True, timeout=120)
     except Exception:
-        pass
+        logging.debug("[KokoroSubproc] afplay failed for %s", wav_path, exc_info=True)
     finally:
         try:
             os.unlink(wav_path)
@@ -418,7 +419,7 @@ def speak(text: str) -> dict[str, Any]:
             return {"ok": True, "engine": DEFAULT_ENGINE, "spoken": True,
                     "text": normalized, "voice": voice, "error": ""}
         except Exception:
-            pass
+            logging.debug("[KokoroSubproc] cached phrase playback failed for %r", normalized, exc_info=True)
 
     python, script = _resolve_paths()
     if not python:

@@ -66,7 +66,7 @@ def _extract_rect(rect: Any) -> tuple[float, float, float, float]:
         try:
             return float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
         except Exception:
-            pass
+            logging.debug("[OCR] silent failure in _extract_rect", exc_info=True)
 
     raise TypeError(f"Could not parse bounding box geometry of type {type(rect)}: {rect}")
 

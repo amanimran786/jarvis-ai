@@ -36,6 +36,8 @@
 		<string>1</string>
 		<key>JARVIS_OVERNIGHT_NICE</key>
 		<string>10</string>
+		<key>JARVIS_MLX_BATCH_SIZE</key>
+		<string>1</string>
 		<key>PATH</key>
 		<string>/Users/truthseeker/jarvis-ai/venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
 	</dict>

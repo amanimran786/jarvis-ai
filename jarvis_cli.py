@@ -39,6 +39,7 @@ Usage:
   python jarvis_cli.py -p fix the login bug        # alias for --task
 """
 
+import logging
 import sys
 import json
 import os
@@ -48,6 +49,7 @@ import re
 import urllib.request
 import urllib.error
 import urllib.parse
+from pathlib import Path
 
 try:
     import readline  # noqa: F401
@@ -80,9 +82,31 @@ except Exception:
     Table = None
     Text = None
 
+from harness.approval_workflow import (
+    ApprovalWorkflowError,
+    list_pending_approvals,
+    record_approval,
+    requeue_approved_task,
+)
+from harness.task_contract import (
+    TASK_CONTRACTS_PATH,
+    ContractError,
+    TaskContract,
+    contract_for_task,
+    load_contracts,
+    validate_contract,
+)
+from harness.repl_history import history_table, parse_history_limit
+
 
 _CONSOLE_STATE = {"effort": "high", "pending_shell": ""}
+_MAX_HISTORY_TURNS = 100
 _OWNS_DAEMON = False
+_TERMINAL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+
+
+def _terminal_safe(value: object) -> str:
+    return _TERMINAL_CONTROL_RE.sub("", str(value)).replace("\x1b", "")
 _DAEMON_CLEANUP_REGISTERED = False
 _RICH_CONSOLE = Console() if Console else None
 
@@ -96,6 +120,9 @@ _SLASH_COMMANDS = (
     "/effort",
     "/agents",
     "/tasks",
+    "/contracts",
+    "/history",
+    "/pending-approval",
     "/task",
     "/code",
     "/task-status",
@@ -133,6 +160,7 @@ _SLASH_COMMANDS = (
     "/run",
     "/clear",
     "/exit",
+    "/restore",
 )
 
 
@@ -191,7 +219,7 @@ def _base() -> str:
         if discovered:
             return str(discovered["base_url"]).rstrip("/")
     except Exception:
-        pass
+        logging.debug("[CLI] API endpoint discovery failed", exc_info=True)
 
     return "http://127.0.0.1:8765"
 
@@ -206,7 +234,7 @@ def _clear_owned_daemon_state() -> None:
         runtime_state.clear_api_endpoint()
         runtime_state.clear_console_session()
     except Exception:
-        pass
+        logging.debug("[CLI] daemon state cleanup failed", exc_info=True)
     _OWNS_DAEMON = False
 
 
@@ -475,6 +503,46 @@ def approve_task(task_id: str) -> int:
     return 0
 
 
+def _approve_contract_task(task_id: str) -> int:
+    try:
+        record, created = record_approval(task_id)
+        requeued = requeue_approved_task(task_id)
+    except (ApprovalWorkflowError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    state = "Approved" if created else "Already approved"
+    print(
+        f"{state}: {record['task_id']} by {record['approved_by']} "
+        f"at {record['approved_at']}"
+        + ("; queued for execution" if requeued else "")
+    )
+    return 0
+
+
+def _print_pending_approvals() -> int:
+    try:
+        pending = list_pending_approvals()
+    except ApprovalWorkflowError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if not pending:
+        print("No pending contract approvals.")
+        return 0
+    print("Pending Contract Approvals")
+    for item in pending:
+        state = (
+            "approved; awaiting orchestrator"
+            if item["approval_logged"]
+            else item["status"]
+        )
+        description = f" - {item['description']}" if item["description"] else ""
+        print(
+            f"{_terminal_safe(item['task_id'])}: {_terminal_safe(state)}"
+            f"{_terminal_safe(description)}"
+        )
+    return 0
+
+
 def deny_task(task_id: str) -> int:
     task_id = (task_id or "").strip()
     if not task_id:
@@ -662,6 +730,122 @@ def _print_tasks(status: str = "") -> None:
         autonomy = task.get("autonomy") or ""
         autonomy_text = f" {autonomy}" if autonomy else ""
         print(f"{task['id']}: {lifecycle} {task['kind']} -> {task['assigned_agent_id']}{autonomy_text}{confidence_text}{approval}")
+
+
+def _strict_contract_validation(path: Path) -> list[tuple[str, list[str]]]:
+    """Validate every raw contract entry without silently dropping bad rows."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [("<file>", [str(exc)])]
+    if not isinstance(payload, list):
+        return [("<file>", ["TASK_CONTRACTS.json must contain a JSON list"])]
+
+    results: list[tuple[str, list[str]]] = []
+    for index, entry in enumerate(payload):
+        fallback_id = f"entry[{index}]"
+        if isinstance(entry, dict) and entry.get("task_id"):
+            fallback_id = str(entry["task_id"])
+        try:
+            contract = TaskContract.from_dict(entry)
+            _, errors = validate_contract(contract)
+        except (ContractError, TypeError, ValueError) as exc:
+            errors = [str(exc)]
+        results.append((fallback_id, errors))
+    return results
+
+
+def _print_contracts(args: str = "", *, console=None) -> int:
+    if not Table or not Console:
+        print("Error: Rich is required for /contracts.", file=sys.stderr)
+        return 1
+
+    target = console or _RICH_CONSOLE or Console()
+    contracts = load_contracts()
+    selector = (args or "").strip()
+
+    if selector == "validate":
+        table = Table(title="Contract Validation", box=box.SIMPLE_HEAVY if box else None)
+        table.add_column("Task ID", style="cyan")
+        table.add_column("Status")
+        table.add_column("Error")
+        error_count = 0
+        validation_rows = _strict_contract_validation(Path(TASK_CONTRACTS_PATH))
+        for task_id, errors in validation_rows:
+            if not errors:
+                table.add_row(task_id, "VALID", "-")
+                continue
+            error_count += len(errors)
+            for index, error in enumerate(errors):
+                table.add_row(
+                    task_id if index == 0 else "",
+                    "INVALID" if index == 0 else "",
+                    error,
+                )
+        table.caption = f"{len(validation_rows)} contract(s), {error_count} error(s)"
+        target.print(table)
+        return 1 if error_count else 0
+
+    if selector:
+        contract = contracts.get(selector)
+        if contract is None:
+            table = Table(title="Contract Lookup", box=box.SIMPLE_HEAVY if box else None)
+            table.add_column("Status")
+            table.add_column("Message")
+            table.add_row("NOT FOUND", f"No contract found for task_id: {selector}")
+            target.print(table)
+            return 1
+
+        table = Table(title=f"Contract: {selector}", box=box.SIMPLE_HEAVY if box else None)
+        table.add_column("Field", style="cyan", no_wrap=True)
+        table.add_column("Value", overflow="fold")
+        for field_name, value in contract.to_dict().items():
+            rendered = (
+                json.dumps(value, indent=2, ensure_ascii=True)
+                if isinstance(value, (list, dict))
+                else str(value)
+            )
+            table.add_row(field_name, rendered)
+        target.print(table)
+        return 0
+
+    table = Table(title="Task Contracts", box=box.SIMPLE_HEAVY if box else None)
+    table.add_column("Task ID", style="cyan")
+    table.add_column("Type")
+    table.add_column("Approval")
+    table.add_column("Validation")
+    for task_id in sorted(contracts):
+        contract = contracts[task_id]
+        valid, errors = validate_contract(contract)
+        task_type = getattr(contract.task_type, "value", str(contract.task_type))
+        table.add_row(
+            task_id,
+            task_type,
+            "YES" if contract.requires_approval else "NO",
+            "VALID" if valid else f"{len(errors)} error(s)",
+        )
+    target.print(table)
+    return 0
+
+
+def _print_history(args: str = "", *, console=None) -> int:
+    if not Console:
+        print("Error: Rich is required for /history.", file=sys.stderr)
+        return 1
+    try:
+        limit = parse_history_limit(args)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if limit > _MAX_HISTORY_TURNS:
+        print(
+            f"Error: history limit must be at most {_MAX_HISTORY_TURNS}",
+            file=sys.stderr,
+        )
+        return 1
+    target = console or _RICH_CONSOLE or Console()
+    target.print(history_table(limit=limit))
+    return 0
 
 
 def _print_memory() -> None:
@@ -1278,12 +1462,15 @@ def _console_help() -> str:
             "  /effort [level]       Show or set effort: low | medium | high | xhigh",
             "  /agents               List managed agents",
             "  /tasks [status]       List tasks, optionally filtered by lifecycle state",
+            "  /contracts [id]       List, inspect, or validate task contracts",
+            "  /history [N]          Show the last N conversation turns (default 10)",
+            "  /pending-approval     List contract tasks awaiting human approval",
             "  /task <prompt>        Run a managed task",
             "  /code <prompt>        Run an isolated coding task",
             "  /task-status <id>     Show one task payload",
             "  /watch <task_id>      Stream an existing task until completion",
             "  /cancel <task_id>     Request cancellation for a task",
-            "  /approve <task_id>    Approve a managed task waiting for approval",
+            "  /approve <task_id>    Approve a contract task, or a managed task if uncontracted",
             "  /deny <task_id>       Deny a managed task waiting for approval",
             "  /memory               Show memory snapshot",
             "  /skills               List skills",
@@ -1337,7 +1524,7 @@ def _banner_text() -> str:
         status = str(payload.get("status", "unknown")).upper()
         mode = str(payload.get("mode", "unknown")).upper()
     except Exception:
-        pass
+        logging.debug("[CLI] /status fetch for status bar failed", exc_info=True)
     return "\n".join(
         [
             "JARVIS // Command Deck",
@@ -1761,6 +1948,8 @@ def _handle_console_command(line: str) -> int | None:
         return 0
     if command == "approve":
         if args:
+            if contract_for_task(args) is not None:
+                return _approve_contract_task(args)
             return approve_task(args)
         return _approve_pending_shell_command()
     if command == "deny":
@@ -1802,6 +1991,12 @@ def _handle_console_command(line: str) -> int | None:
     if command == "tasks":
         _print_tasks(args)
         return 0
+    if command == "contracts":
+        return _print_contracts(args)
+    if command == "history":
+        return _print_history(args)
+    if command == "pending-approval":
+        return _print_pending_approvals()
     if command in {"context-budget", "tokens"}:
         _print_context_budget()
         return 0
@@ -1913,6 +2108,9 @@ def _handle_console_command(line: str) -> int | None:
     if command == "run":
         return _run_shell_command(args)
 
+    if command == "restore":
+        return _cmd_restore(args)
+
     # Shared-skill fallback: any /<command> that matches a file under
     # .claude/commands/ is treated as a runbook prompt that we send to the
     # LLM. This lets Jarvis execute the same slash commands Claude Code does.
@@ -1925,6 +2123,49 @@ def _handle_console_command(line: str) -> int | None:
     return 1
 
 
+def _cmd_restore(args: str) -> int:
+    """Handle /restore [snapshot_name] — list or restore a memory snapshot."""
+    try:
+        from harness.audit import list_snapshots, restore_snapshot
+    except ImportError:
+        print("Error: audit module not available.", file=sys.stderr)
+        return 1
+
+    snapshots = list_snapshots()
+    if not snapshots:
+        print("No snapshots available.")
+        return 0
+
+    if not args:
+        print(f"{'#':<3} {'Name':<25} {'Status':<14} {'Created'}")
+        print("-" * 72)
+        for i, snap in enumerate(snapshots, 1):
+            created = snap["created_at"][:19].replace("T", " ")
+            print(f"{i:<3} {snap['name']:<25} {snap['status']:<14} {created}")
+        print("\nUsage: /restore <number or name>")
+        return 0
+
+    # Resolve by number or name
+    target = None
+    if args.isdigit():
+        idx = int(args) - 1
+        if 0 <= idx < len(snapshots):
+            target = snapshots[idx]["path"]
+    else:
+        for snap in snapshots:
+            if snap["name"].startswith(args) or args in snap["name"]:
+                target = snap["path"]
+                break
+
+    if target is None:
+        print(f"No snapshot matching '{args}'. Run /restore to list available snapshots.", file=sys.stderr)
+        return 1
+
+    ok, msg = restore_snapshot(target)
+    print(msg)
+    return 0 if ok else 1
+
+
 def run_interactive_console() -> int:
     if not _ensure_daemon_running(reason="jarvis_cli_console"):
         print("Error: Jarvis could not start its local daemon.", file=sys.stderr)
@@ -1934,7 +2175,13 @@ def run_interactive_console() -> int:
         runtime_state.write_console_session(command="jarvis_cli --interactive")
         atexit.register(runtime_state.clear_console_session)
     except Exception:
-        pass
+        logging.debug("[CLI] console session write failed", exc_info=True)
+    try:
+        from harness.audit import start_session, end_session
+        start_session("jarvis_cli")
+        atexit.register(end_session)
+    except Exception:
+        logging.debug("[CLI] audit session start failed", exc_info=True)
     _print_banner()
     while True:
         try:

@@ -16,9 +16,13 @@ from unittest.mock import MagicMock, patch, call
 # imports complete (prevents contaminating test files collected after this one,
 # e.g. test_qwen3_routing.py imports brain_ollama functions at module level).
 import config as _real_config  # noqa: E402
-_real_brain_ollama = sys.modules.get("brains.brain_ollama")
-_real_qdrant       = sys.modules.get("qdrant_client")
+_real_brain_ollama  = sys.modules.get("brains.brain_ollama")
+_real_qdrant        = sys.modules.get("qdrant_client")
 _real_qdrant_models = sys.modules.get("qdrant_client.models")
+# Save infra package so sub-module attributes (event_bus, security_audit, …)
+# remain accessible for string-based patches in later test files.
+_real_infra         = sys.modules.get("infra")
+_real_infra_memory  = sys.modules.get("infra.memory")
 
 # config stub
 _mock_config = MagicMock()
@@ -68,6 +72,11 @@ if _real_qdrant_models is not None:
     sys.modules["qdrant_client.models"] = _real_qdrant_models
 else:
     sys.modules.pop("qdrant_client.models", None)
+# Restore the real infra package now that the memory import prep is done.
+# This ensures later test files can use string-based patches like
+# patch("infra.security_audit.audit_event") without hitting AttributeError.
+if _real_infra is not None:
+    sys.modules["infra"] = _real_infra
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +100,9 @@ def _memory_stubs():
         sys.modules["qdrant_client.models"] = _real_qdrant_models
     else:
         sys.modules.pop("qdrant_client.models", None)
+    # Restore real infra so post-memory-test files use the real package.
+    if _real_infra is not None:
+        sys.modules["infra"] = _real_infra
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -124,6 +136,15 @@ def _make_store():
 
     from infra.memory import MemoryStore, _COLLECTION_PREFIX
     import infra.memory as mem_mod
+
+    # Restore the real infra package so string-based patches in concurrent test
+    # files (e.g. patch("infra.security_audit.audit_event")) keep working.
+    # We set _real_infra.memory to the freshly-mocked module so that
+    # sys.modules["infra"].memory resolves to the mock-backed version.
+    _fresh_mem = sys.modules.get("infra.memory")
+    if _real_infra is not None and _fresh_mem is not None:
+        _real_infra.memory = _fresh_mem
+        sys.modules["infra"] = _real_infra
 
     mock_client = MagicMock()
     mock_client.get_collections.return_value = MagicMock(collections=[])

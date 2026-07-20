@@ -17,7 +17,10 @@ import os
 import sys
 import shutil
 import threading
+import time
 import tools
+from harness.audit import audit_log
+from harness import web_search as _ws
 import terminal
 import browser
 from desktop import overlay
@@ -66,6 +69,7 @@ import messages_thread as msg_thread
 import call_privacy
 import provider_router
 import safety_permissions as perms
+from operative_approval import RouteContext, redact_approval_ids
 from model_router import (
     smart_stream,
     format_with_mini,
@@ -270,6 +274,14 @@ def _parse_browser_click_target(text: str):
     label = match.group(1).strip(" ,.?\"'")
     label = re.sub(r"\b(?:link|button)\b$", "", label, flags=re.IGNORECASE).strip(" ,.?\"'")
     return label or None
+
+
+def _extract_url(text: str) -> str:
+    """Pull the first https?:// URL from freeform text."""
+    m = re.search(r"https?://\S+", text)
+    if not m:
+        return ""
+    return m.group(0).rstrip(".,;:\"')")
 
 
 def _parse_source_target(text: str) -> str | None:
@@ -747,6 +759,578 @@ def _interview_profile_reply(user_input: str) -> str:
     return base
 
 
+def _is_performance_report_query(lower: str) -> bool:
+    return any(
+        phrase in lower for phrase in (
+            "how are you doing",
+            "how am i doing",
+            "how have you been doing",
+            "show me your performance",
+            "show your performance",
+            "self eval report",
+            "self-eval report",
+            "quality report",
+            "response quality",
+            "quality scores",
+            "quality metrics",
+            "your quality score",
+            "eval scores",
+            "eval report",
+            "performance report",
+            "performance metrics",
+            "how are your responses",
+            "how good are your responses",
+            "where are you weakest",
+            "your weakest area",
+            "your weakest domain",
+            "show eval",
+            "show self eval",
+        )
+    )
+
+
+def _performance_report_reply() -> str:
+    try:
+        import self_eval
+        return self_eval.performance_report(hours=24 * 7)
+    except Exception as exc:
+        return f"Self-eval report unavailable: {exc}"
+
+
+def _is_score_command(lower: str) -> bool:
+    """Trigger: /score or explicit rolling-score phrases."""
+    return lower.strip() in ("/score", "score") or any(
+        phrase in lower for phrase in (
+            "/score",
+            "rolling score",
+            "rolling average",
+            "show score",
+            "average score",
+            "last 50",
+            "response score",
+            "self eval score",
+            "self-eval score",
+            "conciseness score",
+            "routing score",
+            "relevance score",
+        )
+    )
+
+
+def _score_command_reply() -> str:
+    try:
+        from harness import self_eval_log
+        return self_eval_log.score_report(n=50)
+    except Exception as exc:
+        return f"/score unavailable: {exc}"
+
+
+def _is_reflect_command(lower: str) -> bool:
+    """Trigger: /reflect or explicit reflection-request phrases."""
+    return lower.strip() in ("/reflect", "reflect") or any(
+        phrase in lower for phrase in (
+            "/reflect",
+            "run reflection",
+            "trigger reflection",
+            "reflection pipeline",
+            "self reflection",
+            "reflect on",
+            "jarvis performance reflection",
+            "run self eval reflection",
+            "update self eval",
+            "generate reflection",
+            "write reflection",
+        )
+    )
+
+
+def _reflect_command_reply() -> str:
+    try:
+        from harness import reflection
+        summary = reflection.reflect_text(hours=168)
+        # Also kick off LLM improvement notes (async — doesn't block response)
+        try:
+            reflection.write_improvement_notes_async(n=50)
+        except Exception:
+            pass
+        return summary
+    except Exception as exc:
+        return f"/reflect unavailable: {exc}"
+
+
+def _is_diagnose_command(lower: str) -> bool:
+    """Trigger: /diagnose or health/failure phrases."""
+    return lower.strip() in ("/diagnose", "diagnose") or any(
+        phrase in lower for phrase in (
+            "/diagnose",
+            "worst interactions",
+            "worst responses",
+            "failing interactions",
+            "lowest scoring",
+            "worst scoring",
+            "what's failing",
+            "what is failing",
+            "show failures",
+            "worst quality",
+            "diagnose quality",
+            "system health",
+            "health check",
+            "jarvis health",
+            "subsystem status",
+            "is ollama running",
+            "is google auth",
+            "check subsystems",
+        )
+    )
+
+
+def _diagnose_command_reply() -> str:
+    try:
+        from harness import diagnose
+        return diagnose.diagnose_text()
+    except Exception as exc:
+        # Fall back to legacy health_check
+        try:
+            from harness import health_check
+            return health_check.health_text(include_score_report=True)
+        except Exception:
+            return f"/diagnose unavailable: {exc}"
+
+
+def _is_optimize_command(lower: str) -> bool:
+    """Trigger: /optimize [apply <id>] — prompt self-optimization."""
+    stripped = lower.strip()
+    return stripped.startswith("/optimize") or stripped.startswith("optimize apply ") or any(
+        phrase in lower for phrase in (
+            "prompt optimization",
+            "optimize prompts",
+            "optimize system prompt",
+            "suggest prompt edits",
+            "prompt suggestions",
+            "improve system prompt",
+        )
+    )
+
+
+def _optimize_command_reply(raw_input: str) -> str:
+    try:
+        from harness import prompt_optimizer
+        lower = raw_input.strip().lower()
+        # Handle: /optimize apply s001
+        apply_m = re.search(r"\bapply\s+(s\d+)\b", lower)
+        if apply_m:
+            return prompt_optimizer.apply_suggestion(apply_m.group(1))
+        return prompt_optimizer.optimize_text(n=200)
+    except Exception as exc:
+        return f"/optimize unavailable: {exc}"
+
+
+def _is_status_command(lower: str) -> bool:
+    """Trigger: /status — autonomous loop status dashboard."""
+    stripped = lower.strip()
+    return stripped in ("/status", "loop status", "status") or any(
+        phrase in lower for phrase in (
+            "/status",
+            "loop status",
+            "orchestrator status",
+            "work queue status",
+            "task queue status",
+            "active sessions status",
+            "show loop status",
+            "show orchestrator",
+            "autonomous loop status",
+        )
+    )
+
+
+def _status_command_reply() -> str:
+    try:
+        from harness import loop_monitor
+        return loop_monitor.status_text()
+    except Exception as exc:
+        return f"/status unavailable: {exc}"
+
+
+def _is_task_command(lower: str) -> bool:
+    """Trigger: /task <description> — run an operative task end-to-end."""
+    stripped = lower.strip()
+    return (
+        stripped == "/task"
+        or stripped.startswith("/task ")
+        or stripped.startswith("/approve-task ")
+    )
+
+
+def _parse_task_approval_command(text: str) -> tuple[str, str] | None:
+    match = re.fullmatch(
+        r"\s*/(?:task\s+(approve|cancel)|(?:approve-task)\s*)\s+([A-Za-z0-9_-]{12,80})\s*",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    action = (match.group(1) or "approve").lower()
+    return action, match.group(2)
+
+
+def _is_summarize_command(lower: str) -> bool:
+    """Trigger: /summarize (or /summarise) <text or file path> — local LLM summarization."""
+    stripped = lower.strip()
+    return (
+        stripped in ("/summarize", "/summarise")
+        or stripped.startswith("/summarize ")
+        or stripped.startswith("/summarise ")
+    )
+
+
+# Active task cancellation is scoped to the authenticated route context.
+_ACTIVE_TASK_CANCELS: dict[tuple[str, str, str], threading.Event] = {}
+_ACTIVE_TASK_CANCELS_LOCK = threading.Lock()
+
+
+def _task_context_key(context: RouteContext) -> tuple[str, str, str]:
+    normalized = context.normalized()
+    return normalized.principal, normalized.session_id, normalized.source
+
+
+def _register_task_cancel(context: RouteContext, event: threading.Event) -> bool:
+    key = _task_context_key(context)
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        if key in _ACTIVE_TASK_CANCELS:
+            return False
+        _ACTIVE_TASK_CANCELS[key] = event
+        return True
+
+
+def _clear_task_cancel(context: RouteContext, event: threading.Event) -> None:
+    key = _task_context_key(context)
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        if _ACTIVE_TASK_CANCELS.get(key) is event:
+            _ACTIVE_TASK_CANCELS.pop(key, None)
+
+
+def _task_result_text(result: dict) -> str:
+    if result.get("status") == "approval_required":
+        return str(result.get("summary") or "Approval required.")
+    steps = result.get("steps", [])
+    completed = sum(1 for step in steps if getattr(step, "ok", False))
+    if result.get("ok"):
+        return f"Done ({completed}/{len(steps)} steps)\n\n{result.get('summary', '')}"
+    reason = str(result.get("stop_reason") or "failed").replace("_", " ")
+    return f"Task failed ({reason}; {completed}/{len(steps)} steps). {result.get('summary', '')}"
+
+
+def _run_task_worker_stream(
+    header: str,
+    worker,
+    *,
+    context: RouteContext,
+    thread_name: str,
+):
+    import queue as _q
+    import threading as _th
+    from config import OPERATIVE_TIMEOUT_SECONDS
+
+    progress_q: _q.Queue = _q.Queue()
+    cancel = _th.Event()
+    if not _register_task_cancel(context, cancel):
+        yield "A task is already active for this session."
+        return
+
+    def _progress(step_desc: str, detail: str = "") -> None:
+        progress_q.put(("progress", step_desc, detail))
+
+    def _run() -> None:
+        try:
+            progress_q.put(("done", worker(_progress, cancel)))
+        except Exception as exc:
+            logging.exception("[%s] operative failed", thread_name)
+            progress_q.put(("error", str(exc)))
+
+    worker_thread = _th.Thread(target=_run, daemon=True, name=thread_name)
+    worker_thread.start()
+    deadline = time.monotonic() + OPERATIVE_TIMEOUT_SECONDS
+    try:
+        yield header
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                cancel.set()
+                yield "Task failed (operative timeout)."
+                break
+            try:
+                item = progress_q.get(timeout=min(0.25, remaining))
+            except _q.Empty:
+                continue
+            if item[0] == "progress":
+                _, step_desc, detail = item
+                line = f"• {step_desc}"
+                if detail:
+                    line += f": {detail[:120]}"
+                yield line + "\n"
+                continue
+            if item[0] == "error":
+                yield f"Task failed: {item[1]}"
+            else:
+                yield _task_result_text(item[1])
+            break
+    finally:
+        cancel.set()
+        if worker_thread.is_alive():
+            def _clear_after_worker() -> None:
+                worker_thread.join()
+                _clear_task_cancel(context, cancel)
+
+            _th.Thread(
+                target=_clear_after_worker,
+                daemon=True,
+                name=f"{thread_name}/cleanup",
+            ).start()
+        else:
+            _clear_task_cancel(context, cancel)
+
+
+def _task_command_stream(task: str, *, context: RouteContext | None = None):
+    """Prepare once, then execute only capability-free task plans."""
+    if not task.strip():
+        yield "Usage: /task <natural language description of what to do>"
+        return
+    from operative import execute_prepared_task, prepare_task
+
+    route_context = (context or RouteContext.desktop()).normalized()
+
+    def _worker(on_progress, cancel):
+        prepared = prepare_task(task, context=route_context, cancel_event=cancel)
+        if prepared.get("status") == "approval_required":
+            return prepared
+        return execute_prepared_task(
+            prepared["manifest"],
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
+
+    yield from _run_task_worker_stream(
+        f"Task: {task}\n\n",
+        _worker,
+        context=route_context,
+        thread_name="TaskCommand",
+    )
+
+
+def _task_approval_stream(
+    approval_id: str,
+    *,
+    context: RouteContext | None = None,
+):
+    """Consume one explicit approval code and stream its bound execution."""
+    from operative import approve_and_run_task
+
+    route_context = (context or RouteContext.desktop()).normalized()
+
+    def _worker(on_progress, cancel):
+        return approve_and_run_task(
+            approval_id,
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
+
+    yield from _run_task_worker_stream(
+        f"Approving task {approval_id} and verifying its execution manifest.\n",
+        _worker,
+        context=route_context,
+        thread_name="TaskApproval",
+    )
+
+
+def _is_cancel_task_command(lower: str) -> bool:
+    """Trigger: /cancel — stop the active operative task."""
+    stripped = lower.strip()
+    return stripped in ("/cancel", "/cancel task", "cancel task", "stop task", "/stop task")
+
+
+def _cancel_task_reply(context: RouteContext | None = None) -> str:
+    route_context = (context or RouteContext.desktop()).normalized()
+    with _ACTIVE_TASK_CANCELS_LOCK:
+        event = _ACTIVE_TASK_CANCELS.get(_task_context_key(route_context))
+    if event is not None and not event.is_set():
+        event.set()
+        return "Cancelling — task will stop after the current step."
+    if event is not None:
+        return "Task cancellation is already in progress."
+    return "No active task to cancel."
+
+
+# ── /resume command ─────────────────────────────────────────────────────────────
+
+def _is_resume_command(lower: str) -> bool:
+    """Trigger: /resume [run_id] — resume the most-recent interrupted task."""
+    stripped = lower.strip()
+    return stripped.startswith("/resume") or stripped in ("resume task", "resume last task")
+
+
+def _resume_command_stream(
+    user_input: str,
+    *,
+    context: RouteContext | None = None,
+):
+    """Stream progress while resuming an interrupted task."""
+    import task_persistence as _tp
+
+    # Parse optional run_id from input: "/resume run_abc123"
+    parts = user_input.strip().split(None, 1)
+    explicit_run_id = parts[1].strip() if len(parts) > 1 and parts[1].strip().startswith("run_") else ""
+
+    route_context = (context or RouteContext.desktop()).normalized()
+    interrupted = []
+    for task in _tp.find_interrupted_tasks():
+        approval = task.get("execution_approval") or {}
+        if approval:
+            if (
+                approval.get("principal") != route_context.principal
+                or approval.get("session_id") != route_context.session_id
+                or approval.get("source") != route_context.source
+            ):
+                continue
+        elif route_context.source != "desktop":
+            continue
+        interrupted.append(task)
+    if not interrupted:
+        yield "No interrupted tasks found — nothing to resume."
+        return
+
+    if explicit_run_id:
+        target = next((t for t in interrupted if t.get("id") == explicit_run_id), None)
+        if target is None:
+            yield f"No interrupted task with id {explicit_run_id!r}.\n\nInterrupted tasks:\n"
+            for t in interrupted:
+                done = len(t.get("step_events", []))
+                total = t.get("steps_total", "?")
+                yield f"  • {t['id']}  ({done}/{total} steps done)  — {t.get('task', '')[:60]}\n"
+            return
+    else:
+        target = interrupted[0]
+
+    run_id = target["id"]
+    task_desc = target.get("task", run_id)
+    done_count = len(target.get("step_events", []))
+    total = target.get("steps_total", "?")
+
+    def _worker(on_progress, cancel):
+        from operative import resume_task
+
+        return resume_task(
+            run_id,
+            on_progress=on_progress,
+            cancel_event=cancel,
+            context=route_context,
+        )
+
+    yield from _run_task_worker_stream(
+        f"Resuming: **{task_desc[:80]}**\n({done_count}/{total} steps already done)\n\n",
+        _worker,
+        context=route_context,
+        thread_name="Operative/resume",
+    )
+
+
+# ── Git operations ─────────────────────────────────────────────────────────────
+
+def _is_git_status_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+status\b"
+        r"|\bwhat(?:'s|\s+is|\s+are)?\s+(?:modified|changed|staged|unstaged|dirty)\b"
+        r"|\bshow\s+(?:me\s+)?(?:modified|changed|unstaged|staged)\s+files?\b"
+        r"|\bwhat\s+files?\s+(?:did\s+i\s+change|changed|are\s+modified)\b",
+        lower,
+    ))
+
+
+def _is_git_diff_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+diff\b"
+        r"|\bshow\s+(?:me\s+)?(?:the\s+)?diff\b"
+        r"|\bwhat\s+(?:did\s+i\s+change|changed|are\s+(?:my\s+)?changes)\b"
+        r"|\bshow\s+(?:me\s+)?(?:my\s+)?changes?\b"
+        r"|\bdiff\s+(?:my\s+)?(?:changes|code|files?)\b",
+        lower,
+    ))
+
+
+def _is_git_log_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+log\b"
+        r"|\b(?:show|list)\s+(?:recent\s+)?commits?\b"
+        r"|\bcommit\s+history\b"
+        r"|\blast\s+\d+\s+commits?\b"
+        r"|\brecent\s+commits?\b",
+        lower,
+    ))
+
+
+def _parse_git_commit_message(text: str) -> str | None:
+    """Extract commit message from 'commit my changes with message X' etc."""
+    patterns = [
+        r'(?:commit|stage\s+and\s+commit|save\s+and\s+commit).*?(?:with\s+message|message|as|saying)\s+["\']?(.+?)["\']?\s*$',
+        r'(?:commit|save)\s+(?:these|my|all|the)\s+changes?\s+(?:as|with|with\s+message)\s+["\']?(.+?)["\']?\s*$',
+        r'git\s+commit\s+(?:-m\s+)?["\']?(.+?)["\']?\s*$',
+        r'(?:commit|save)\s+(?:this|it)\s+(?:as|with)\s+["\']?(.+?)["\']?\s*$',
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE | re.DOTALL)
+        if m:
+            msg = m.group(1).strip().strip('"\'')
+            if len(msg) >= 5:
+                return msg
+    return None
+
+
+def _is_git_commit_query(lower: str) -> bool:
+    return bool(re.search(
+        r"\bgit\s+commit\b"
+        r"|\bcommit\s+(?:my|these|all|the|this)?\s*(?:changes?|files?|code|work)\b"
+        r"|\bstage\s+and\s+commit\b"
+        r"|\bsave\s+(?:and\s+commit|my\s+changes?\s+(?:as|with))\b",
+        lower,
+    )) and "push" not in lower
+
+
+def _git_status_reply() -> str:
+    from tools.git_ops import git_status
+    return git_status()
+
+
+def _git_diff_reply(lower: str) -> str:
+    from tools.git_ops import git_diff
+    staged = "staged" in lower or "cached" in lower
+    return git_diff(staged=staged)
+
+
+def _git_log_reply(lower: str) -> str:
+    from tools.git_ops import git_log
+    m = re.search(r"\b(\d+)\s+commits?\b", lower)
+    n = int(m.group(1)) if m else 10
+    return git_log(n=min(n, 20))
+
+
+def _git_commit_reply(user_input: str) -> str:
+    from tools.git_ops import git_add_all, git_commit, git_status
+    msg = _parse_git_commit_message(user_input)
+    if not msg:
+        status = git_status()
+        return (
+            f"Current status:\n{status}\n\n"
+            "What commit message should I use? Say: commit my changes with message <your message>"
+        )
+    status_before = git_status()
+    if status_before == "Working tree is clean.":
+        return "Nothing to commit — working tree is already clean."
+    git_add_all()
+    result = git_commit(msg)
+    return result
+
+
 def _is_meta_improvement_query(lower: str) -> bool:
     return any(
         phrase in lower for phrase in (
@@ -857,6 +1441,9 @@ _fuzzy_contact_suggestions: list[str] = []
 _pending_resolved_address: str = ""  # pre-resolved address set alongside pending recipient
 _last_assistant_reply: str = ""
 _JARVIS_INTRO_SHORT = "Hi, this is Jarvis, Aman's assistant."
+_GOOGLE_REAUTH_MSG = (
+    "Google access needs re-authorization. Run: python3 google_services.py --reauth"
+)
 _JARVIS_INTRO_DETAILED = (
     "Hi, I’m Jarvis, Aman’s local-first AI assistant. I help him with coding, research, writing, planning, and Mac workflows, "
     "and I can draft messages or coordinate tasks when Aman explicitly confirms them. I do not act on private systems silently; "
@@ -2135,20 +2722,20 @@ def _dispatch_single_intent(query: str) -> str | None:
             return gs.get_todays_events()
         except Exception as exc:
             logging.warning("[Router] Calendar fetch failed: %s", exc)
-            return "Calendar needs re-authorization. On your MacBook open Terminal and run: python google_services.py --reauth  or visit jarvis-ai/auth to reconnect."
+            return _GOOGLE_REAUTH_MSG
     if hint == "email" and _is_email_digest_query(query):
         try:
             import jarvis_agents as _ja
             return _ja.email_digest()
         except Exception as exc:
             logging.warning("[Router] Email digest failed: %s", exc)
-            return "Email is unavailable. You may need to re-authorize Google access."
+            return _GOOGLE_REAUTH_MSG
     if hint == "email" and _looks_like_email_read_query(query):
         try:
             return gs.get_unread_emails(max_results=3)
         except Exception as exc:
             logging.warning("[Router] Email read failed: %s", exc)
-            return "Email is unavailable. You may need to re-authorize Google access."
+            return _GOOGLE_REAUTH_MSG
     return None
 
 
@@ -2651,7 +3238,7 @@ def _pending_draft_interrupt_route(user_input: str, lower: str) -> tuple | None:
         return _briefing_gen(), "Jarvis"
     search_query = _extract_search_query(user_input)
     if search_query:
-        return _s(tools.web_search(search_query)), "Search"
+        return _s(_ws.search(search_query)), "Search"
     if _is_timer_request(lower):
         parsed = _parse_timer(lower)
         if parsed:
@@ -2697,14 +3284,40 @@ def _detect_multi_intent(lower: str) -> list[str] | None:
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def route_stream(user_input: str) -> tuple:
+def route_stream(
+    user_input: str,
+    *,
+    context: RouteContext | None = None,
+) -> tuple:
+    context = (context or RouteContext.desktop()).normalized()
     global _pending_msg_recipient, _awaiting_msg_recipient, _last_msg_recipient, _last_message_send_result, _pending_message_draft, _fuzzy_contact_suggestions, _pending_email_reply
+    audit_log("query_received", query=redact_approval_ids(user_input)[:500])
     modifiers = prompt_modifiers.parse(user_input)
     user_input = modifiers.clean_text
     modifier_system = modifiers.system_extra
     lower = user_input.lower().strip()
     if lower:
-        mem.track_topic(lower)
+        mem.track_topic(redact_approval_ids(lower))
+
+    # Explicit operative control commands must remain reachable even when an
+    # unrelated email or message draft is pending.
+    if _is_cancel_task_command(lower):
+        return _s(_cancel_task_reply(context)), "Operative"
+    approval_command = _parse_task_approval_command(user_input)
+    if approval_command:
+        action, approval_id = approval_command
+        if action == "cancel":
+            from operative import cancel_task_approval
+
+            cancelled = cancel_task_approval(approval_id, context=context)
+            reply = (
+                "Task approval cancelled."
+                if cancelled
+                else "Task approval could not be cancelled."
+            )
+            return _s(reply), "Operative"
+        return _task_approval_stream(approval_id, context=context), "Operative"
+
     composed_message = (
         _parse_message_compose(user_input)
         or _parse_message_replacement_compose(user_input)
@@ -3043,7 +3656,7 @@ def route_stream(user_input: str) -> tuple:
             return _s(_message_confirmation_prompt(recipient_correction, body)), "Messages"
         search_query = _extract_search_query(user_input)
         if search_query:
-            return _s(tools.web_search(search_query)), "Search"
+            return _s(_ws.search(search_query)), "Search"
         # Interrupt route: briefing, time, weather etc. escape from pending draft context
         interrupt_early = _pending_draft_interrupt_route(user_input, lower)
         if interrupt_early is not None:
@@ -3157,6 +3770,12 @@ def route_stream(user_input: str) -> tuple:
             _fuzzy_contact_suggestions.clear()
             _awaiting_msg_recipient = False
             return _s(msg.describe_contact_handles(contact_details_query)), "Contacts"
+        _sq = _extract_search_query(user_input)
+        if _sq:
+            return _s(_ws.search(_sq)), "Search"
+        interrupt_early = _pending_draft_interrupt_route(user_input, lower)
+        if interrupt_early is not None:
+            return interrupt_early
         if composed_message:
             recipient, body = composed_message
             unsafe_reply = _unsafe_message_draft_reply(body)
@@ -3353,6 +3972,43 @@ def route_stream(user_input: str) -> tuple:
         return _greeting_brief_gen(), "Jarvis"
     if lower in _NIGHT_TRIGGERS:
         return _s("Good night. Systems standing by — I'll be here when you need me."), "Chat"
+
+    # ── /resume command — resume an interrupted task ──────────────────────────
+    if _is_resume_command(lower):
+        return _resume_command_stream(user_input, context=context), "Operative"
+
+    # ── /task command — run operative end-to-end ─────────────────────────────
+    if _is_task_command(lower):
+        task_desc = user_input.strip()[len("/task"):].strip()
+        return _task_command_stream(task_desc, context=context), "Operative"
+
+    # ── /summarize command — local LLM / extractive summarization ─────────────
+    if _is_summarize_command(lower):
+        _sum_raw = user_input.strip()
+        # Strip both spellings of the command prefix
+        if _sum_raw.lower().startswith("/summarise"):
+            arg = _sum_raw[len("/summarise"):].strip()
+        else:
+            arg = _sum_raw[len("/summarize"):].strip()
+        if not arg:
+            return _s("Usage: /summarize <text or file path>"), "Summarize"
+        from harness import summarizer as _sumz
+        _sum_path = os.path.expanduser(arg)
+        if os.path.isfile(_sum_path):
+            result = _sumz.summarize_file(_sum_path)
+        else:
+            result = _sumz.summarize(arg)
+        return _s(result), "Summarize"
+
+    # ── Git operations ────────────────────────────────────────────────────────
+    if _is_git_commit_query(lower):
+        return _s(_git_commit_reply(user_input)), "Git"
+    if _is_git_diff_query(lower):
+        return _s(_git_diff_reply(lower)), "Git"
+    if _is_git_status_query(lower):
+        return _s(_git_status_reply()), "Git"
+    if _is_git_log_query(lower):
+        return _s(_git_log_reply(lower)), "Git"
 
     # ── Task list fast-path: "what are my tasks" / "show task list" ─────────
     if _is_task_list_query(lower):
@@ -3557,8 +4213,26 @@ def route_stream(user_input: str) -> tuple:
         return _s(browser.focus_meeting_tab()), "Browser"
     if _is_meta_improvement_query(lower):
         return _s(_meta_improvement_reply()), "Status"
+    if _is_performance_report_query(lower):
+        return _s(_performance_report_reply()), "Self-Eval"
+    if _is_score_command(lower):
+        return _s(_score_command_reply()), "Self-Eval"
+    if _is_reflect_command(lower):
+        return _s(_reflect_command_reply()), "Self-Eval"
+    if _is_diagnose_command(lower):
+        return _s(_diagnose_command_reply()), "Self-Eval"
+    if _is_optimize_command(lower):
+        return _s(_optimize_command_reply(user_input)), "Self-Eval"
+    if _is_status_command(lower):
+        return _s(_status_command_reply()), "Loop-Status"
     if any(p in lower for p in ("hook status", "behavior gates", "behavior gate status", "hook summary")):
         return _s(behavior_hooks.status_text(hours=24)), "Status"
+    if any(p in lower for p in ("/budget", "budget status", "api budget", "api rate limit", "token rate", "hourly budget", "ollama cloud budget", "local first ratio", "cloud spend")):
+        try:
+            from harness import budget as _budget_module
+            return _s(_budget_module.status_text()), "Budget"
+        except Exception as _exc:
+            return _s(f"Budget module unavailable: {_exc}"), "Budget"
     if any(p in lower for p in ("cost policy", "routing policy", "training policy", "should we train", "should we distill")):
         return _s(cost_policy.policy_text()), "Status"
     if any(p in lower for p in (
@@ -3766,7 +4440,7 @@ def route_stream(user_input: str) -> tuple:
 
     # Math fast-path: "what's 20% of 150", "calculate 1234 * 56", "12 + 34"
     _math_match = re.match(
-        r"^(?:what(?:'s| is)\s+)?(?:calculate|compute|eval(?:uate)?|solve)?\s*([\d\s\+\-\*\/\.\(\)\%\^]+[\d\)])$",
+        r"^(?:what(?:'s| is)\s+)?(?:calculate|compute|e(?:val(?:uate)?)|solve)?\s*([\d\s\+\-\*\/\.\(\)\%\^]+[\d\)])$",
         lower.strip()
     )
     if _math_match:
@@ -3844,7 +4518,7 @@ def route_stream(user_input: str) -> tuple:
     # Web search fast-path (return results, don't open browser)
     _sq = _extract_search_query(user_input)
     if _sq:
-        raw = tools.web_search(_sq)
+        raw = _ws.search(_sq)
         return _s(raw), "Search"
 
     # Browser
@@ -4006,6 +4680,33 @@ def route_stream(user_input: str) -> tuple:
         return _s(
             f"Queued background vault task {task['id']} for the knowledge-vault agent and added it to [[92 Agent Inbox]]."
         ), "Tasks"
+
+    # ── Background task status fast-path ─────────────────────────────────────
+    _TASK_STATUS_TRIGGERS = (
+        "what's the status of background tasks",
+        "what is the status of background tasks",
+        "background task status",
+        "status of my tasks",
+        "task queue status",
+        "what tasks are running",
+        "what tasks are in progress",
+        "show background tasks",
+        "list background tasks",
+        "any background tasks",
+        "tasks running",
+    )
+    if any(t in lower for t in _TASK_STATUS_TRIGGERS):
+        import task_runtime as _tr
+        tasks = _tr.list_tasks(limit=10)
+        if not tasks:
+            return _s("No background tasks in the queue."), "Tasks"
+        lines = []
+        for t in tasks:
+            tid = t.get("id", "?")[:8]
+            st = t.get("status", "?")
+            desc = (t.get("description") or t.get("kind") or "task")[:60]
+            lines.append(f"• [{tid}] {st}: {desc}")
+        return _s("Background tasks:\n" + "\n".join(lines)), "Tasks"
 
     # ── Screen vision fast-path ───────────────────────────────────────────────
     # Routes directly to camera.screenshot_and_describe() — local llava first,
@@ -4309,12 +5010,70 @@ def route_stream(user_input: str) -> tuple:
         return hw_result
 
     # ── 3. Orchestrator dispatch ──────────────────────────────────────────────
-    return _orchestrate(user_input, lower, modifier_system=modifier_system)
+    return _orchestrate(
+        user_input,
+        lower,
+        modifier_system=modifier_system,
+        context=context,
+    )
+
+
+def _parse_file_request(text: str) -> tuple[str, str, str]:
+    """Parse a natural-language file request into (action, path, content).
+
+    action: 'read' | 'write' | 'list'
+    path:   expanded path string, or '' if not found
+    content: text to write (write action only), or ''
+    """
+    lower = (text or "").lower()
+    if re.search(r"\b(write|save|append|create.*file)\b", lower):
+        action = "write"
+    elif re.search(r"\b(list|ls)\b.{0,20}\b(files?|folder|dir|directory)\b"
+                   r"|\b(what(?:'s| is) in|show me)\b.{0,20}\b(folder|dir|directory)\b", lower):
+        action = "list"
+    else:
+        action = "read"
+
+    # Extract path — four strategies in priority order.
+    _EXT = r"(?:pdf|txt|md|py|json|csv|log|docx|xlsx|yaml|yml|toml|sh|rst)"
+    path = ""
+    m = (
+        # 1. Quoted: 'My Report.pdf' or "~/path/file.pdf" — any content between quotes
+        re.search(r"[\"']([^\"']+)[\"']", text)
+        # 2. ~/… ending at a known extension — lazy so it handles spaces in names
+        or re.search(r"(~/[\w\s.\-/]+?\." + _EXT + r")\b", text, re.IGNORECASE)
+        # 3. /absolute/… ending at a known extension
+        or re.search(r"(/[\w\s.\-/]+?\." + _EXT + r")\b", text, re.IGNORECASE)
+        # 4. ~/dir or /dir with no extension (for list action or extensionless files)
+        or re.search(r"(~/[\w.\-/]+|/[\w.\-/]+)", text)
+        # 5. Bare filename.ext — no directory, no spaces
+        or re.search(r"([\w.\-]+\." + _EXT + r")\b", text, re.IGNORECASE)
+    )
+    if m:
+        path = m.group(1).rstrip(".,;:")
+
+    content = ""
+    if action == "write":
+        content_match = re.search(
+            r"(?::\s*[\"']?|saying\s+[\"']?|content[:\s]+[\"']?|with[:\s]+[\"']?)(.+)$",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if content_match:
+            content = content_match.group(1).strip().strip("\"'")
+
+    return action, path, content
 
 
 # ── Orchestrator dispatch ─────────────────────────────────────────────────────
 
-def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tuple:
+def _orchestrate(
+    user_input: str,
+    lower: str,
+    modifier_system: str = "",
+    *,
+    context: RouteContext | None = None,
+) -> tuple:
     """Use the orchestrator to classify intent and dispatch the right tool."""
     global _last_msg_recipient
     from orchestrator import classify
@@ -4323,6 +5082,21 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     tool      = decision.tool
     params    = decision.params
     skill_id  = params.get("skill_id")
+
+    # Inject workspace snapshot for coding/terminal tools
+    if tool in ("code_task", "terminal", "self_improve"):
+        try:
+            import workspace_context as _wctx
+            ws_block = _wctx.format_for_prompt()
+            if ws_block:
+                modifier_system = (modifier_system + "\n\n" + ws_block).strip()
+        except Exception as _wctx_exc:
+            logging.debug("[Router] workspace_context failed: %s", _wctx_exc)
+
+    try:
+        audit_log("route_decision", tool=tool, confidence=decision.confidence)
+    except Exception:
+        logging.debug("[Router] audit_log route_decision failed", exc_info=True)
     if not skill_id:
         skill = skills.choose_skill(user_input, tool=tool)
         if skill:
@@ -4332,7 +5106,7 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     # ── Search ────────────────────────────────────────────────────────────────
     if tool == "search":
         query = params.get("query", user_input)
-        raw = tools.web_search(query)
+        raw = _ws.search(query, summarise=False)
         return format_with_mini(
             f"Summarize these search results concisely in Jarvis voice:\n{raw}",
             skill_id=skill_id,
@@ -4438,6 +5212,14 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         )
         click_target = params.get("link_text") or params.get("text") or params.get("label") or _parse_browser_click_target(user_input) or ""
 
+        # Headless URL fetch — no browser window needed
+        _fetch_url = _extract_url(user_input)
+        if action == "fetch" or (_fetch_url and re.search(r"\b(fetch|read|get|show|load|summarize|summarise)\b", lower)):
+            url_to_fetch = _fetch_url or target
+            page_text = browser.web_fetch(url_to_fetch)
+            prompt = f"The user asked: {user_input}\n\nPage content from {url_to_fetch}:\n\n{page_text}"
+            return format_with_mini(prompt, extra_system="Summarize the page content in a clear, concise response. Answer the user's specific question if they asked one."), "Browser"
+
         if any(term in lower for term in ("copy current page url", "copy page url", "copy page link", "send this page", "share this page")):
             return _s(browser.copy_current_page_url()), "Browser"
         if "caption" in action or _is_meeting_captions_query(lower):
@@ -4494,23 +5276,67 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
 
     # ── Operative agent ───────────────────────────────────────────────────────
     if tool == "operative":
-        from operative import run_task
+        from operative import execute_prepared_task, prepare_task
         task = params.get("task", user_input)
+        route_context = (context or RouteContext.desktop()).normalized()
 
         def _operative_stream():
-            yield "Understood. Running the task autonomously now, sir."
-            steps_done = []
+            def _worker(on_progress, cancel):
+                prepared = prepare_task(
+                    task,
+                    context=route_context,
+                    cancel_event=cancel,
+                )
+                if prepared.get("status") == "approval_required":
+                    return prepared
+                result = execute_prepared_task(
+                    prepared["manifest"],
+                    on_progress=on_progress,
+                    cancel_event=cancel,
+                    context=route_context,
+                )
+                from harness.notify import notify as _notify
 
-            def _progress(step_desc, detail):
-                steps_done.append(step_desc)
+                if result.get("ok"):
+                    _notify("Jarvis — Task Complete", result.get("summary", "")[:100])
+                else:
+                    _notify("Jarvis — Task Failed", result.get("summary", "")[:100])
+                return result
 
-            result = run_task(task, on_progress=_progress)
-            yield " " + result["summary"]
-            if not result["ok"]:
-                failed = [s.description for s in result["steps"] if not s.ok]
-                yield f" Note: {len(failed)} step{'s' if len(failed)>1 else ''} encountered issues."
+            yield from _run_task_worker_stream(
+                "Preparing an exact task plan now.",
+                _worker,
+                context=route_context,
+                thread_name="Operative",
+            )
 
         return _operative_stream(), "Operative"
+
+    # ── Code task (write + test + fix loop) ──────────────────────────────────
+    if tool == "code_task":
+        task = params.get("task", user_input)
+
+        def _code_task_stream():
+            from harness.notify import notify as _notify
+            yield "On it. Writing code and running tests locally now."
+            # Reaching this branch means the user explicitly requested a code task.
+            result = coder_workbench.fix_loop(task, execution_approved=True)
+            if result["ok"]:
+                files_list = ", ".join(result.get("files", {}).keys()) or "files"
+                yield f" Done in {result['iterations']} iteration(s). Files: {files_list}."
+                if result.get("output"):
+                    lines = result["output"].strip().splitlines()
+                    summary = "\n".join(lines[-6:]) if len(lines) > 6 else result["output"].strip()
+                    yield f"\n\nTest output:\n{summary}"
+                _notify("Jarvis — Code Task Complete", f"{files_list} — {result['iterations']} iteration(s)")
+            else:
+                yield (
+                    f" Still failing after {result['iterations']} iteration(s)."
+                    f" Last output: {result.get('output', '')[-300:]}"
+                )
+                _notify("Jarvis — Code Task Failed", f"Still failing after {result['iterations']} iteration(s)")
+
+        return _code_task_stream(), "Code Task"
 
     # ── Specialized agents ───────────────────────────────────────────────────
     if tool == "specialized_agent":
@@ -4562,13 +5388,29 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
     if tool == "calendar":
         action = params.get("action", "read")
         if action == "read":
-            return _s(gs.get_todays_events()), "Calendar"
+            try:
+                raw = gs.get_todays_events()
+                return format_with_mini(
+                    f"The user asked: {user_input}\n\nCalendar data:\n{raw}",
+                    extra_system="Summarize the calendar events concisely and directly.",
+                ), "Calendar"
+            except Exception as exc:
+                logging.warning("[Router] Calendar fetch failed: %s", exc)
+                return _s(_GOOGLE_REAUTH_MSG), "Calendar"
         # create — fall through to chat for now
         return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
 
     # ── Email ─────────────────────────────────────────────────────────────────
     if tool == "email":
-        return _s(gs.get_unread_emails()), "Gmail"
+        try:
+            raw = gs.get_unread_emails()
+            return format_with_mini(
+                f"The user asked: {user_input}\n\nEmail data:\n{raw}",
+                extra_system="Summarize the emails concisely and directly.",
+            ), "Gmail"
+        except Exception as exc:
+            logging.warning("[Router] Email fetch failed: %s", exc)
+            return _s(_GOOGLE_REAUTH_MSG), "Gmail"
 
     # ── Weather ───────────────────────────────────────────────────────────────
     if tool == "weather":
@@ -4785,8 +5627,101 @@ def _orchestrate(user_input: str, lower: str, modifier_system: str = "") -> tupl
         import meeting_listener as ml
         return _s(ml.auto_configure_blackhole()), "Meeting"
 
+    # ── File ──────────────────────────────────────────────────────────────────
+    if tool == "file":
+        action = params.get("action", "")
+        path = params.get("path", "")
+        content = params.get("content", "")
+
+        if not path:
+            _parsed_action, path, _parsed_content = _parse_file_request(user_input)
+            if not action:
+                action = _parsed_action
+            if not content:
+                content = _parsed_content
+
+        if not path:
+            return _s("What file path would you like me to work with?"), "File"
+
+        if not action:
+            action = "read"
+
+        if action == "list":
+            dir_result = terminal.list_directory(path)
+            return format_with_mini(
+                f"Directory listing for {path}:\n{dir_result}\nDescribe what files are here briefly.",
+                skill_id=skill_id,
+                tool=tool,
+                extra_system=modifier_system,
+                ground_query=user_input,
+            ), "File"
+
+        if action == "write":
+            if not content:
+                return _s(f"What should I write to {path}?"), "File"
+            write_result = terminal.write_file(path, content)
+            return _s(write_result), "File"
+
+        # read (default)
+        raw = terminal.read_file(path)
+        summarize = any(
+            p in lower
+            for p in ("summarize", "summarise", "what does it say", "tell me about",
+                      "brief", "overview", "explain", "describe")
+        )
+        path_expanded = os.path.expanduser(path)
+        if summarize or path_expanded.lower().endswith(".pdf"):
+            return format_with_mini(
+                f"The user asked: {user_input!r}\n\nFile contents ({path}):\n{raw}"
+                "\n\nSummarize clearly and concisely.",
+                skill_id=skill_id,
+                tool=tool,
+                extra_system=modifier_system,
+                ground_query=user_input,
+            ), "File"
+        return _s(raw), "File"
+
+    # ── File/folder watcher ───────────────────────────────────────────────────
+    if tool == "watch":
+        from harness import watcher as _watcher
+        action = params.get("action", decision.action).lower()
+
+        if action == "unwatch":
+            target = params.get("path", "") or _extract_url(user_input) or ""
+            if not target:
+                # "unwatch" with no path → stop all
+                _, path_str, _ = _parse_file_request(user_input)
+                target = path_str
+            if target:
+                return _s(_watcher.unwatch(target)), "Watcher"
+            n = _watcher.unwatch_all()
+            return _s(f"Stopped {n} active watch{'es' if n != 1 else ''}."), "Watcher"
+
+        if action in ("list", "status"):
+            paths = _watcher.list_watches()
+            if not paths:
+                return _s("No active watches."), "Watcher"
+            return _s("Watching:\n" + "\n".join(f"  • {p}" for p in paths)), "Watcher"
+
+        # watch action — extract path from command
+        _, path_str, _ = _parse_file_request(user_input)
+        if not path_str:
+            # try raw ~/... or /... pattern without extension
+            m = re.search(r"(~/[\w.\-/]+|/[\w.\-/]+)", user_input)
+            path_str = m.group(1) if m else ""
+        if not path_str:
+            return _s("Please specify a path to watch, e.g. /watch ~/Desktop/report.md"), "Watcher"
+        return _s(_watcher.watch(path_str)), "Watcher"
+
     # ── Chat fallback ─────────────────────────────────────────────────────────
-    return smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
+    audit_log("route_decision", tool=tool or "chat", confidence=None)
+    try:
+        result = smart_stream(user_input, skill_id=skill_id, tool=tool, extra_system=modifier_system)
+        return result
+    except Exception as exc:
+        audit_log("model_call", tool=tool or "chat", success=False, error=str(exc))
+        logging.exception("[Router] smart_stream failed")
+        raise
 
 
 def record_turn(user_input: str, assistant_reply: str) -> None:
@@ -4802,13 +5737,15 @@ def record_turn(user_input: str, assistant_reply: str) -> None:
     global _last_assistant_reply
     if not user_input or not assistant_reply:
         return
-    _last_assistant_reply = assistant_reply.strip()
-    turn = _mem0_turn_text(user_input, assistant_reply)
+    safe_user_input = redact_approval_ids(user_input)
+    safe_assistant_reply = redact_approval_ids(assistant_reply)
+    _last_assistant_reply = safe_assistant_reply.strip()
+    turn = _mem0_turn_text(safe_user_input, safe_assistant_reply)
     _m0.add_async(turn)
     # Background fact extraction — silently captures tasks/decisions/preferences
     try:
         import jarvis_extractor as _jex
-        _jex.extract_async(user_input, assistant_reply)
+        _jex.extract_async(safe_user_input, safe_assistant_reply)
     except Exception:
         logging.debug("[Router] background fact extraction (jarvis_extractor) failed to start", exc_info=True)
 

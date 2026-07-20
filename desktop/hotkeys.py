@@ -10,6 +10,7 @@ Default hotkeys:
   Cmd + Shift + ;  →  Toggle Jarvis window visibility (show/hide)
 """
 
+import logging
 import threading
 import os
 import platform
@@ -62,7 +63,7 @@ def _normalize(key):
         if hasattr(key, 'char') and key.char:
             return keyboard.KeyCode.from_char(key.char.lower())
     except Exception:
-        pass
+        logging.debug("[Hotkeys] silent failure in _normalize", exc_info=True)
     return key
 
 
@@ -113,4 +114,4 @@ def stop():
     try:
         listener.stop()
     except Exception:
-        pass
+        logging.debug("[Hotkeys] silent failure in stop", exc_info=True)

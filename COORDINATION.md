@@ -14,6 +14,15 @@ Update this file when picking up or finishing a task. Commit the update so the o
 
 ## Active Tasks
 
+### [DONE] Silent-failure sweep — 87 bare except:pass sites across production code
+**Completed by Antigravity 2026-06-25**
+- Systematically replaced every `except: pass` and `except Exception: pass` in production modules with `logging.debug("...", exc_info=True)` so failures are visible in debug logs.
+- **First batch** (loop-engineer session — `24e3cdb`, `6f0745b`, `ac7bdf3`, `71880a4`): `voice.py`, `jarvis_watcher.py`, `main.py`, `ui.py`, `_bg_agents.py`, `runtime_state.py`, `local_kokoro_subprocess_tts.py`, `hardware.py`, `jarvis_cli.py`, `mem0_layer.py`, `self_improve.py`, `model_router.py`
+- **Second batch** (Antigravity — `9da8797`): `brain_daemon.py`, `desktop/hotkeys.py`, `evals.py`, `learner.py`, `local_runtime/agent_model_eval.py`, `project_manager.py`, `skill_monitor.py`, `tests/conftest.py`, `vault_edit.py`, `voice.py` (2 remaining sites)
+- **Intentionally skipped** (Claude-owned — do not sweep): `api.py` (1 remaining site at L7666), `router.py` (1 remaining site at L4470). Owner: Claude UX lane.
+- All fixes: `py_compile` clean; 132 focused tests pass.
+- **No remaining bare except:pass in non-Claude-owned production files.**
+
 ### [DONE] Mobile web fallback cooldown takeover
 **Completed by Codex 2026-05-28**
 - Took over the in-progress mobile web routing patch after Claude/Antigravity work.
@@ -174,6 +183,15 @@ Ensures Codex always has Claude's latest changes.
   User must: `pip uninstall apfel -y && brew tap Arthur-Ficial/tap && brew install apfel`
   Then `apfel serve &` to activate; `brain_apple_foundation.py` will auto-detect on port 11438.
 
+**Last Antigravity session (2026-06-25):**
+- Silent-failure sweep complete across all unclaimed production modules (commit `9da8797`).
+- 87 total `except: pass` sites converted to `logging.debug(..., exc_info=True)`.
+- **Two remaining sites left for Claude**: `api.py:7666`, `router.py:4470` — in Claude's owned files, intentionally not touched.
+- Verification: `py_compile` clean on all 39 modified files; 132 focused tests pass.
+- Safe to pull and continue work — no files in Claude or Codex active lanes were edited.
+
 **For Codex next session:** Pull latest. Voice AUHAL fix + mem0 Qdrant verification +
 qwen3 model tag still open. See `.claude/skills/jarvis-voice.md` for voice checklist.
 Wire `LOCAL_DEFAULT_DRAFTER` into `brain_ollama.py` when Ollama releases gemma4 MTP tag.
+
+**For Claude next session:** Two silent-failure sites remain in your files (`api.py:7666`, `router.py:4470`). Sweep those when you next touch those files. Silent-failure sweep otherwise DONE for the whole codebase.

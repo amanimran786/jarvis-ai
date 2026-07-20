@@ -15,7 +15,10 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, UTC
+from datetime import datetime, timezone as _tz
+
+# Python 3.11+ exports datetime.UTC; use timezone.utc for 3.10 compatibility.
+UTC = _tz.utc
 from pathlib import Path
 from typing import Any
 

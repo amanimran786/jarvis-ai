@@ -7,6 +7,7 @@ replace sys.modules["config"] with a MagicMock.  This ensures that
 module-level constants (e.g. APPLE_FOUNDATION_BASE_URL) are bound to real
 values and not to MagicMock objects.
 """
+import logging
 import os
 import sys
 
@@ -67,6 +68,17 @@ os.environ.setdefault(
     os.path.join(_tempfile.mkdtemp(prefix="jarvis_test_taskdb_"), "jarvis_tasks.sqlite3"),
 )
 
+# Tests mock the Ollama client directly; the fail-fast liveness probe would
+# otherwise hit the real network (and fail on runners without Ollama).
+# Liveness tests re-enable it per-test via monkeypatch.delenv.
+os.environ.setdefault("JARVIS_OLLAMA_LIVENESS_DISABLED", "1")
+
+# The API's _token_authorized() now fails CLOSED when no token is configured
+# (production safety: `uvicorn api:app` without start() must not be open).
+# TestClient never calls start(), so opt the test session into no-auth access
+# to preserve the empty-token convenience the endpoint tests rely on.
+os.environ.setdefault("JARVIS_API_ALLOW_NO_AUTH", "1")
+
 _EARLY_IMPORTS = [
     "tools",               # must be first: prevents test_backend_engineer from seeing _real_tools=None
     "brains.brain_apple_foundation",
@@ -78,5 +90,5 @@ for _mod in _EARLY_IMPORTS:
         try:
             __import__(_mod)
         except Exception:
-            pass
+            logging.debug("[Conftest] silent failure in unknown", exc_info=True)
 

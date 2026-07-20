@@ -52,6 +52,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from local_runtime.local_mem0 import install_qdrant_search_compat
+
+try:
+    from harness.audit import audit_log as _audit_log
+except Exception:
+    def _audit_log(*a, **kw): pass
+
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 
 # ── Storage paths ──────────────────────────────────────────────────────────────
@@ -182,6 +189,7 @@ def _get_instance() -> Any | None:
         try:
             from mem0 import Memory
             _memory_instance = Memory.from_config(_build_config())
+            install_qdrant_search_compat(_memory_instance)
             _available = True
             _last_error = ""
         except Exception as e:
@@ -221,9 +229,11 @@ def add(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = None) -
         except TypeError:
             m.add(text.strip(), user_id=user_id, metadata=metadata or {})
         _last_error = ""
+        _audit_log("memory_write", operation="mem0_add", preview=text[:120])
         return True
     except Exception as exc:
         _last_error = str(exc)
+        _audit_log("memory_write", operation="mem0_add", success=False, error=str(exc))
         return False
 
 
@@ -238,7 +248,7 @@ def add_async(text: str, user_id: str = _DEFAULT_USER, metadata: dict | None = N
             name="mem0-write",
         ).start()
     except RuntimeError:
-        pass
+        logging.warning("[Mem0] thread start for mem0-write failed (thread limit?)", exc_info=True)
 
 
 # ── Read path ──────────────────────────────────────────────────────────────────
@@ -321,13 +331,13 @@ def close() -> None:
         if callable(client_close):
             client_close()
     except Exception:
-        pass
+        logging.debug("[Mem0] vector store client close failed", exc_info=True)
     try:
         memory_close = getattr(m, "close", None)
         if callable(memory_close):
             memory_close()
     except Exception:
-        pass
+        logging.debug("[Mem0] memory instance close failed", exc_info=True)
     _memory_instance = None
     _release_qdrant_lock()
 

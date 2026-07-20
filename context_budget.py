@@ -93,10 +93,17 @@ def target_tokens_for(
         return max(base, local_override)
     lower = model.lower()
     if "glm" in lower:
-        return max(base, _env_int("JARVIS_GLM_CONTEXT_TARGET_TOKENS") or 48_000)
+        # GLM 4.7 Flash: 128K num_ctx → 96K target leaves 32K for generation
+        return max(base, _env_int("JARVIS_GLM_CONTEXT_TARGET_TOKENS") or 96_000)
     if "qwen3-coder" in lower or "qwen3.6" in lower:
         return max(base, _env_int("JARVIS_QWEN_LONG_CONTEXT_TARGET_TOKENS") or 64_000)
     if "qwen3" in lower:
+        if any(tag in lower for tag in ("30b", "32b", "14b")):
+            # Large Qwen3 variants get the same 96K budget as GLM
+            return max(base, 96_000)
+        # qwen3:8b: 32K window → 24K target leaves 8K for generation
+        return max(base, 24_000)
+    if "devstral" in lower:
         return max(base, 24_000)
     return base
 

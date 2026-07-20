@@ -49,10 +49,11 @@ vault/               — Obsidian brain (read carefully before writing)
 ## Security Rules (before every commit)
 
 ```bash
-grep -n "shell=True" <file>.py
-grep -n "eval\|exec(" <file>.py
-grep -n "SECRET\|API_KEY\|TOKEN" <file>.py | grep -v "os.getenv\|config."
+python -m harness.pre_commit_check
 ```
+
+(replaces the old manual greps — the checker runs all of them plus py_compile
+and affected tests in one pass. Required before every commit.)
 
 - No hardcoded secrets — use `os.getenv()`
 - All subprocess calls: list args, `shell=False`
@@ -112,3 +113,26 @@ This codebase tracks token usage in `usage_log.jsonl`. Fixed prompt overhead is 
 - Exact file paths and commands
 - Absolute timestamps for builds/installed apps
 - If uncertain: say what is known and what is not
+
+---
+
+## Parallel Work with Claude (Cowork)
+
+CI is green as of commit `82b7804`. Claude (Cowork) and Codex work in parallel
+on separate roadmap items. See `CROSS_AGENT_ORCHESTRATION.md` for the full
+protocol. Key rules:
+
+**Codex lane (Items 3, 5, 7, 8):**
+- Item 3 — Orchestrator self-healing (launchd KeepAlive for `orchestrator_loop.py`)
+- Item 5 — Specialist model routing (devstral + qwen3:30b-a3b in Ollama)
+- Item 7 — Test coverage hardening (every harness module has an import-smoke test)
+- Item 8 — Voice pipeline end-to-end (Kokoro/Whisper/say fallback, no zombie mics)
+
+**Branch convention:** `codex/roadmap-N-short-name`, off `main`.
+
+**Merge rule:** CI must be green before any branch merges to `main`. Push, wait
+for the `CI / Test suite` check, then merge.
+
+**Shared files:** If you need to touch `config.py`, `orchestrator.py`, or
+`router.py`, check git log first — Claude may have modified them. Rebase before
+editing.

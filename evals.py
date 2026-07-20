@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import threading
 import uuid
@@ -9,6 +10,11 @@ import runtime_state
 
 _BUNDLED_EVALS_FILE = os.path.join(os.path.dirname(__file__), "evals.json")
 EVALS_FILE = str(runtime_state.writable_data_path("evals.json", seed_from=_BUNDLED_EVALS_FILE))
+
+# Auto-trigger improvement notes every N interactions
+_IMPROVE_EVERY = 100
+_interaction_count = 0
+_improve_lock = threading.Lock()
 
 _DEFAULTS = {
     "interactions": [],
@@ -90,8 +96,24 @@ def _find_interaction(data: dict, interaction_id: str) -> dict | None:
     return None
 
 
+_TEST_MODEL_PREFIXES = ("MockModel", "UnitTestModel", "mock_", "test_")
+_TEST_SOURCE_PREFIXES = ("test", "pytest", "ci_")
+
+
+def _is_test_interaction(source: str, model: str) -> bool:
+    """Return True for unit-test or mock interactions that must not enter production telemetry."""
+    s = (source or "").lower()
+    m = (model or "").lower()
+    if any(s.startswith(p.lower()) for p in _TEST_SOURCE_PREFIXES):
+        return True
+    if any(m.startswith(p.lower()) for p in _TEST_MODEL_PREFIXES):
+        return True
+    if s.startswith("task:test") or ":test:" in s:
+        return True
+    return False
+
+
 def log_interaction(user_input: str, response: str, model: str, source: str = "api", context: dict | None = None) -> dict:
-    data = load()
     entry = {
         "id": uuid.uuid4().hex[:12],
         "timestamp": _now_iso(),
@@ -101,8 +123,46 @@ def log_interaction(user_input: str, response: str, model: str, source: str = "a
         "model": model,
         "context": context or {},
     }
+    if _is_test_interaction(source, model):
+        # Never persist test/mock interactions into production telemetry.
+        return entry
+    data = load()
     data["interactions"].append(entry)
     save(data)
+    # Async quality scoring — fire-and-forget, never blocks the caller
+    try:
+        import self_eval
+        routing_tag = (context or {}).get("routing_tag", "")
+        self_eval.score_async(
+            user_input, response,
+            context=context,
+            interaction_id=entry["id"],
+            routing_tag=routing_tag,
+        )
+    except Exception:
+        logging.debug("[Evals] silent failure in log_interaction", exc_info=True)
+    # 3-axis scorer → logs/self_eval.jsonl (routing_accuracy / response_relevance / conciseness)
+    try:
+        from harness import self_eval_log
+        self_eval_log.score_async(
+            user_input, response,
+            route=(context or {}).get("routing_tag", ""),
+            interaction_id=entry["id"],
+        )
+    except Exception:
+        logging.debug("[Evals] silent failure in log_interaction", exc_info=True)
+    # Auto-trigger LLM improvement notes every _IMPROVE_EVERY interactions
+    global _interaction_count
+    with _improve_lock:
+        _interaction_count += 1
+        should_improve = (_interaction_count % _IMPROVE_EVERY == 0)
+    if should_improve:
+        try:
+            from harness.reflection import write_improvement_notes_async
+            write_improvement_notes_async(n=50)
+            logging.info("[Evals] auto-triggered improvement notes at interaction %d", _interaction_count)
+        except Exception:
+            logging.debug("[Evals] silent failure in auto improvement trigger", exc_info=True)
     return entry
 
 

@@ -14,17 +14,17 @@ Purpose: keep Codex and Claude from colliding while both are active in the same 
 | 6 | Packaged smoke (headless boot probe) | Session B | ✅ **PASS** ×2 (01:25 build, and 06-13 on the amended-spec rebuild `2ac294b`): clean boot, `/status` online, `/agents`+`/routines` 401, all 4 new hidden-import modules collected, zero import errors/tracebacks | — |
 | 7 | Stable-tree full-suite re-baseline | Session B | ✅ **3 failed / 1811 passed / 2 skipped** (15m24s on `5682b0c`). All 3 classified — see below | — |
 | 8 | Coordination docs policy | — | ⚠️ `AGENT_BOARD.md` was committed in `0781b99` (now public on GitHub) — content reviewed by B: no personal data, but flagging the policy deviation to Aman. `CODEX_*.md` + `STAGING_PLAN.md` remain uncommitted | Aman's call |
-| 9 | Root-cause local LLM returning empty in security gate (Ollama memory-pressure path) | unclaimed | ⏳ open follow-up | — |
+| 9 | Root-cause local LLM returning empty in security gate (Ollama memory-pressure path) | Loop-engineer | ✅ **CLOSED** (2026-06-26): root cause was agentic tool loop blowing 45s timeout + `_strip_markdown` deleting `<think>` blocks. Fix already in `agents/security_reviewer.py:107-155` — `_VERDICT_SCHEMA` + `ask_local_structured` bypasses both. No further action needed. | — |
 | 10 | `WebSearchSummaryTests::test_web_search_routes_to_search_label` fails full-suite, passes isolated — order-dependent contamination | UX/test lane | ✅ **COMMITTED** (`206c7d8`, 06-14): root cause was `test_backend_engineer.py` saving `_real_tools=None` at collection time (tools not yet imported), then its `_restore_stubs` teardown deleting `sys.modules["tools"]` after each test — causing `router.tools` to diverge from the patched module. Fix: add `"tools"` to `conftest.py` `_EARLY_IMPORTS` so the module is stable before collection. Regression suite 437/437 confirmed clean. | — |
 | 16 | `test_agent_collaboration.py::test_review_dangerous_script` verdict mismatch | Session C (security) | ✅ **COMMITTED** (`206c7d8`, 06-14): mock repointed from `agent_dispatch.dispatch` to `brains.brain_ollama.ask_local_structured` (the real call site post-commit 0c4ccf3). Both test cases updated, 50 passed. | — |
-| 11 | Golden cases run live in every full suite because `.env:102` sets `JARVIS_RUN_GOLDEN_CASES=1` — 8m43s of live model calls per run, fails on model drift. Recommend removing from `.env` (opt in per-run instead) | Aman / env owner | ⏳ recommendation | Aman's call |
+| 11 | Golden cases run live in every full suite because `.env:102` sets `JARVIS_RUN_GOLDEN_CASES=1` — 8m43s of live model calls per run, fails on model drift. Recommend removing from `.env` (opt in per-run instead) | Aman / env owner | ✅ **Approved by Aman 2026-07-09** — remove `JARVIS_RUN_GOLDEN_CASES=1` from `.env` and opt in per-run. Covered by contract `jarvis-board-agent-board-items-11-13`. | — |
 
 Baseline triage (B, 01:20): `test_persistent_jarvis_v1` was the same stale `route_stream`→`smart_stream` patch the regression suite had — **fixed & pushed `4dac45e`** (file passes 10/10). Golden-cases failure = live-model eval, env-gated (item 11), not a code regression. WebSearch label = item 10. **Effective unit-suite state: 1 order-dependent flake, 0 real code regressions.**
 
 New-commit verification (B, 00:40): personal-data scan of `7f7f01b..5682b0c` diff — CLEAN (only filename mentions). main == origin/main.
 
 | 12 | `run_id` threading in operative.py/execution_engine.py (R1 prereq) | Session D | ✅ approved freeze-compatible (B, 06-11 19:40) | — |
-| 13 | `eval_trace_score.py` — standalone `--trace-score` surface; observe-only ≥2wks/50 runs before any ratchet wiring | Session D | ⏳ B's ratchet decision posted | — |
+| 13 | `eval_trace_score.py` — standalone `--trace-score` surface; observe-only ≥2wks/50 runs before any ratchet wiring | Session D | ✅ **DONE 2026-07-09** — `--trace-score` aggregate flag added (`aggregate_trace_score()`, `print_trace_score()`); `--last N` to limit window. Observe-only; NOT wired to ratchet until ≥50 runs / 2wks. Contract: `jarvis-board-agent-board-items-11-13`. | — |
 | 14 | PreFlect/G3 (`JARVIS_PREFLECT=1`, default-off, new file) | Session G3/D | ✅ may land during freeze after R1, per freeze conditions | R1 landing |
 | 15 | Semaphore clamp `task_runtime.py:32` (DoS-by-env + import crash) | Session F | ✅ approved freeze exception | — |
 
@@ -35,7 +35,13 @@ New-commit verification (B, 00:40): personal-data scan of `7f7f01b..5682b0c` dif
 - ✅ regression suite 437/437 confirmed clean post-fix.
 - ⏳ **B must now run final baseline** on committed tree to officially lift freeze.
 
+Baseline suite: 13 failed / 3374 passed / 3 skipped — 2026-07-13 (HEAD `60b3efd`; all 13 failures are live Ollama network-call timeouts hitting the 30s harness ceiling, confirmed via isolated repro, not code regressions; 0 collection errors, 0 logic failures)
+
 One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`); B to run final baseline and lift freeze.**
+
+| 17 | Silent-failure sweep: bare `except:pass` → `logging.debug` across production modules | Antigravity | ✅ **DONE** `9da8797` (2026-06-25) — 87 sites fixed across 39 files. Remainders `api.py:7666`, `router.py:4470` re-checked 2026-06-27 — both already have `log.debug(..., exc_info=True)`, no bare-pass remains. | — |
+| 18 | Git operations tool (`git status/diff/log/branch/show/add/commit`) | Loop-engineer | ✅ **COMMITTED** 2026-06-27: `tools/git_ops.py` + ToolSpec + execution_engine handler; push excluded (remote write); path traversal guards on `add`; shell injection guards on `commit`; 30 tests green. | — |
+| 19 | Web search improvements: URLs in results, `fetch_page`, `web_search_with_fetch`, fix `_summarise_for_voice` model | Loop-engineer | ✅ **COMMITTED** 2026-06-27 (`4c430cc`): 17 tests green. | — |
 
 ## Coordination Rules
 
@@ -46,6 +52,23 @@ One-line state: **freeze EXIT GATE MET — C committed both blockers (`206c7d8`)
 - If Multica is running locally, mirror these items there. If not, this file is the source of truth.
 
 ## Active Lanes
+
+### Antigravity Lane: Silent-Failure Sweep (2026-06-25) — COMPLETE
+
+Owner: Antigravity (Gemini/Claude Sonnet 4.6 parallel session)
+
+Scope (all completed, commit `9da8797`):
+- `brain_daemon.py`, `desktop/hotkeys.py`, `evals.py`, `learner.py`
+- `local_runtime/agent_model_eval.py`, `project_manager.py`, `skill_monitor.py`
+- `tests/conftest.py`, `vault_edit.py`, `voice.py`
+- Plus first batch by loop-engineer: `voice.py`, `jarvis_watcher.py`, `main.py`, `ui.py`, `_bg_agents.py`, `runtime_state.py`, `local_kokoro_subprocess_tts.py`, `hardware.py`, `jarvis_cli.py`, `mem0_layer.py`, `self_improve.py`, `model_router.py`
+
+Coordination boundary:
+- Did NOT touch `api.py` or `router.py` (Claude UX lane owns both).
+- Did NOT touch any Codex-owned runtime, voice, or STT/TTS files beyond what was already claimed by loop-engineer.
+- Two remaining sites for Claude: `api.py:7666`, `router.py:4470` — sweep next time you touch those files.
+
+Status: **COMPLETE.** Lane closed. No active ownership of any files.
 
 ### Codex Lane: GLM 5.2 Local Frontier Evaluation (2026-06-21)
 
@@ -381,3 +404,4 @@ Status 2026-06-10:
   - **Item 10 — my earlier root-cause is DISPROVEN; reporting before acting so no one repeats my mistake:** I empirically tested the "leaked router state → Messages" hypothesis and it is WRONG. Probed all 12 router routing-globals (`_pending_email_reply`, `_pending_email_recipient`, `_pending_resolved_address`, `_pending_msg_recipient`, `_last_assistant_reply`, …): **none divert "search the web for AI news" away from label=Search.** Pairwise repro with 5 routing-heavy upstream files (executor, message_intent_parsing, email_reply_reminder, provider_router_free_first, model_router_apple_foundation) + the failing test: **all pass** (executor's autouse fixture restores sys.modules cleanly; not the leaker). So router STATE is not the cause, and my committed `76882a8` setUp reset is necessary-but-not-the-mechanism.
   - **Key fact:** `76882a8` IS committed and in HEAD history (landed 06-12 16:33). I CANNOT reproduce the failure with it in place across any combination I can afford to run. Two live possibilities: **(a)** the baseline that flagged "WebSearchSummary still order-dependent" predates 76882a8 16:33 → the next baseline may already be green; **(b)** the real leaker is a file outside my tested set (likely a leaked sys.modules/function patch, since state is ruled out).
   - **Ask (zero extra budget — you're running the baseline anyway): B, when the final baseline runs, if WebSearchSummaryTests fails, paste its exact assertion/traceback + the test immediately preceding it.** That pinpoints the real leaker in one shot. I'll apply the targeted fix from the real failure mode (or E takes it per I's conditional assignment). I'm explicitly NOT shipping another blind setUp patch — the last one apparently didn't address the true mechanism. Per H's budget rule I'm not full-sweeping to rediscover what your baseline produces for free.
+- 2026-07-15 (jarvis-local-llm, WORK_QUEUE task `jarvis-local-llm-routing-verify`): **Aborted at precondition gate — devstral/qwen3:30b-a3b still not installed.** Task asks to verify devstral/qwen3:30b-a3b specialist routing in production. Preconditions per the task: Ollama reachable + both models present in `ollama list`. Checked both: `curl localhost:11434/api/tags` responds (Ollama is up), but `ollama list` has only `qwen3:8b`, `glm-4.7-flash:latest`, `jarvis-local:latest`, `nomic-embed-text:latest`, `llava:7b`, `maxwell1500/ornith-9b:Q4_K_M` — no `devstral`, no `qwen3:30b-a3b`. Same blocker WORK_QUEUE.json already recorded on 2026-07-04; still true 11 days later. Did not touch `model_router.py` or write routing tests (writing mocked unit tests would validate wiring but wouldn't answer the actual ask — "confirm specialist model wins are stable under load" — with models that don't exist locally, and mixing that with the abort would misrepresent what got verified). `WORK_QUEUE.json` `blocked_reason`/`blocked_at`/`notes` updated in place; `status` left `"queued"` (no `"blocked"` status value exists elsewhere in the file). **Needs a decision from whoever owns this contract: pull `devstral`/`qwen3:30b-a3b` via `ollama pull`, or repoint the contract at the models actually installed** (`config.py`/`model_router.py` would need the specialist-routing constants updated to match, which is a real code change, not a verify task).
