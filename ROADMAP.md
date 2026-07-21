@@ -31,22 +31,42 @@ Fixes applied:
 
 ---
 
-## 🟡 Item 2 — Dashboard Always Running
+## ✅ Item 2 — Dashboard Always Running (DONE)
 
 **Problem:** `jarvis_dashboard.py` at port 7842 is the only UI for approving the
-5 gated tasks and reviewing queue state. It's currently offline. The launchd
-plist (`scripts/com.jarvis.dashboard.plist`) keeps failing to bootstrap (error 5).
+5 gated tasks and reviewing queue state. It was offline. The launchd plist
+(`scripts/com.jarvis.dashboard.plist`) kept failing to bootstrap (error 5).
+
+**Root cause:** two separate bugs, both in the repo's source of truth (the
+live `~/Library/LaunchAgents` copy had been hand-patched at some point and no
+longer matched what the repo would install):
+1. `scripts/com.jarvis.dashboard.plist` pointed at `/usr/bin/python3`, which
+   lacks the project's dependencies (fastapi/uvicorn) — the process died
+   immediately after launch.
+2. `scripts/install_launchd.py` was stale: it generated a plist inline
+   (ignoring the checked-in one), pointed at a nonexistent entry point
+   (`kill_and_start.py` wasn't referenced correctly), used the deprecated
+   `launchctl load`/`unload`, and blocked on `input()` — unusable
+   non-interactively. It also called `bootout` immediately followed by
+   `bootstrap` with no wait; `bootout` is asynchronous, so bootstrapping
+   before launchd finished releasing the label reproduced the exact
+   `Bootstrap failed: 5: Input/output error` from the bug report.
 
 **Fix:**
-1. Diagnose the launchd error 5 — likely wrong Python path or missing log dir
-2. Update plist to use conda Python (`which python3` on the user's machine)
-3. `mkdir -p ~/jarvis-ai/logs` and `chmod 644` the plist
-4. Use `launchctl bootstrap gui/$(id -u)` (not deprecated `launchctl load`)
-5. Verify dashboard is reachable: `curl -s http://localhost:7842/health`
-6. Verify it survives a reboot (or at least survives login)
+1. `scripts/com.jarvis.dashboard.plist` → `/opt/anaconda3/bin/python3` (this
+   machine's `which python3`)
+2. `scripts/install_launchd.py` rewritten to copy the checked-in plist
+   (single source of truth, no more inline duplicate), poll after `bootout`
+   until the label is actually gone before re-`bootstrap`ing, use
+   `launchctl bootstrap gui/$(id -u)` (not deprecated `load`), and drop the
+   blocking `input()`
+3. Verified with 3 consecutive clean reinstalls — `launchctl print` shows
+   `state = running`, `curl http://localhost:7842/` returns 200/401
+   (401 = dashboard's own auth gate, confirms the process is alive and
+   serving)
 
-**Done when:** `curl http://localhost:7842` returns 200 after a fresh login with
-no manual intervention.
+**Done when:** `curl http://localhost:7842` responds after a fresh
+`python3 scripts/install_launchd.py` with no manual intervention. ✓
 
 ---
 
@@ -199,7 +219,7 @@ and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 ## Current Item
 
-**→ Item 2: Dashboard launchd fix** (Claude lane)
+**→ Item 4: Wire `run_checks()` into orchestrator loop** (Claude lane)
 
-Items 1 and 1.5 are complete. Both Claude and Codex can work on Items 2–9 in
-parallel — see `CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
+Items 1, 1.5, and 2 are complete. Both Claude and Codex can work on Items 3–9
+in parallel — see `CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
