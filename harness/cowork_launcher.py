@@ -2,7 +2,7 @@
 harness/cowork_launcher.py — Cowork scheduled-task bridge for the autonomous loop.
 
 Reads LAUNCH_QUEUE.json and fires pending session launches.
-Called by a scheduled task every 5 minutes.
+Can run once for manual use or as a supervised daemon under launchd.
 
 Since start_task is a Cowork MCP tool that cannot be called from Python directly,
 this module writes each launch attempt as a self-contained JSON envelope in
@@ -17,17 +17,24 @@ Public API:
         Entry point.  Harvests completions via orchestrator_loop.run_loop(),
         then processes the launch queue.
 
+    run_forever(interval_seconds) -> None
+        Run immediately, then repeat at a fixed cadence until stopped.
+
 CLI:
     python -m harness.cowork_launcher
     python harness/cowork_launcher.py
+    python harness/cowork_launcher.py --daemon --interval 300
 """
 from __future__ import annotations
 
+import argparse
 import datetime
 import json
 import logging
 import os
+import signal
 import sys
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -48,6 +55,7 @@ logging.basicConfig(
 LAUNCH_QUEUE_PATH    = _REPO_ROOT / "LAUNCH_QUEUE.json"
 MASTER_LOG_PATH      = _REPO_ROOT / "MASTER_LOG.md"
 PENDING_SESSIONS_DIR = _REPO_ROOT / "PENDING_SESSIONS"
+DEFAULT_INTERVAL_SECONDS = 300
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -166,6 +174,38 @@ def run() -> None:
         len(processed),
         len(runtime_changes),
     )
+
+
+def run_forever(
+    interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+    stop_event: threading.Event | None = None,
+) -> None:
+    """Run the scheduler until *stop_event* is set.
+
+    Failures are logged and isolated so launchd does not need to restart the
+    process for transient queue, model, or filesystem errors. The interval is a
+    fixed delay after each iteration, so slow work cannot create a hot loop.
+    """
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be greater than zero")
+
+    stop = stop_event or threading.Event()
+    log.info(
+        "[CoworkLauncher] daemon started — interval=%.1fs pid=%d",
+        interval_seconds,
+        os.getpid(),
+    )
+
+    while not stop.is_set():
+        try:
+            run()
+        except Exception:
+            log.exception("[CoworkLauncher] scheduler iteration failed")
+
+        if stop.wait(interval_seconds):
+            break
+
+    log.info("[CoworkLauncher] daemon stopped")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -295,5 +335,42 @@ def _log_master(message: str, queue_path: Path | None = None) -> None:
 
 # ── CLI entrypoint ────────────────────────────────────────────────────────────
 
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Jarvis autonomous-loop scheduler bridge"
+    )
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="run continuously for launchd supervision",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=DEFAULT_INTERVAL_SECONDS,
+        help=f"seconds between daemon iterations (default {DEFAULT_INTERVAL_SECONDS})",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if not args.daemon:
+        run()
+        return 0
+
+    stop_event = threading.Event()
+
+    def _request_stop(signum: int, _frame: Any) -> None:
+        log.info("[CoworkLauncher] received signal %d; stopping", signum)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+    run_forever(args.interval, stop_event)
+    return 0
+
+
 if __name__ == "__main__":
-    run()
+    raise SystemExit(main())

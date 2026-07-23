@@ -70,20 +70,28 @@ longer matched what the repo would install):
 
 ---
 
-## 🟡 Item 3 — Orchestrator Self-Healing
+## ✅ Item 3 — Orchestrator Self-Healing (DONE)
 
 **Problem:** `orchestrator_loop.py` has no process-level watchdog. If it crashes,
-the queue stalls silently. The launchd plist (`scripts/com.jarvis.loop.plist`)
-exists but isn't installed.
+the queue stalls silently. The installed `com.jarvis.loop` job used macOS
+Python 3.9, crashed on modern type syntax, and had accumulated 650 failed runs.
 
 **Fix:**
-1. Update `com.jarvis.loop.plist` to use correct conda Python path
-2. Install and bootstrap it via launchd with KeepAlive=true
-3. Verify it restarts after a kill: `kill <pid>` → process comes back within 30s
-4. Wire `_ensure_dashboard_running()` call into the loop startup so dashboard
-   and loop start together
+1. `cowork_launcher.py` now has a supervised daemon mode with a fixed
+   300-second post-cycle delay, failure isolation, and graceful SIGTERM/SIGINT.
+2. `com.jarvis.loop.plist` uses Conda Python, `KeepAlive=true`, daemon mode,
+   a working directory, throttling, and a bounded exit timeout.
+3. `scripts/install_launchd.py` manages dashboard/loop services, renders the
+   installed plist for the current checkout and Python, requires Python 3.10+,
+   verifies stable running state, and restores the previous job on failure.
+4. Loop startup probes port 7842 before spawning the embedded dashboard, so
+   the existing dashboard launch agent does not cause duplicate bind attempts.
+5. Verified live on July 23, 2026: PID `21392` restarted as `24280` in 2s;
+   after dashboard probe hardening, PID `28274` restarted as `82564`,
+   completed an orchestration cycle, and remained `state = running`.
 
-**Done when:** `kill $(pgrep -f orchestrator_loop)` → process restarts automatically.
+**Done when:** Killing the supervised `cowork_launcher.py --daemon` process
+produces a different running PID within 30 seconds. ✓
 
 ---
 
@@ -221,5 +229,5 @@ and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 **→ Item 4: Wire `run_checks()` into orchestrator loop** (Claude lane)
 
-Items 1, 1.5, and 2 are complete. Both Claude and Codex can work on Items 3–9
-in parallel — see `CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
+Items 1, 1.5, 2, and 3 are complete. Item 4 is the only active roadmap item;
+do not start Item 5 until Item 4 is committed and production-verified.

@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import http.client
 import json
 import logging
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -96,6 +98,27 @@ _DASHBOARD_THREAD: threading.Thread | None = None
 _DASHBOARD_LOCK   = threading.Lock()
 
 
+def _dashboard_port_state(port: int) -> Literal["dashboard", "occupied", "free"]:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+            pass
+    except OSError:
+        return "free"
+
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=0.5)
+    try:
+        connection.request("GET", "/api/status")
+        response = connection.getresponse()
+        body = response.read(512)
+        if response.status == 401 and b"dashboard_auth_required" in body:
+            return "dashboard"
+    except (OSError, http.client.HTTPException):
+        pass
+    finally:
+        connection.close()
+    return "occupied"
+
+
 def _ensure_dashboard_running(port: int = 7842) -> None:
     """Start jarvis_dashboard on *port* in a daemon thread (one per process).
 
@@ -108,6 +131,15 @@ def _ensure_dashboard_running(port: int = 7842) -> None:
     with _DASHBOARD_LOCK:
         if _DASHBOARD_THREAD is not None and _DASHBOARD_THREAD.is_alive():
             return  # already running
+        port_state = _dashboard_port_state(port)
+        if port_state == "dashboard":
+            log.info("[dashboard] already serving on loopback port %d", port)
+            return
+        if port_state == "occupied":
+            log.warning(
+                "[dashboard] port %d is occupied by a non-dashboard process", port
+            )
+            return
 
         def _run() -> None:
             try:
