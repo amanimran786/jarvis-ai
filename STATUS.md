@@ -31,6 +31,16 @@ git config --global user.email "aman.imran@sjsu.edu"
 
 ---
 
-## 🟡 Next: Item 4 — Wire `run_checks()` into orchestrator loop (Claude lane)
+## ✅ Item 4 — Wire `run_checks()` into orchestrator loop — DONE (Claude lane)
+
+- **Files:** `orchestrator_loop.py`, `jarvis_dashboard.py`,
+  `tests/test_orchestrator_pre_commit_gate.py`
+- **What:** The harvest step now runs `harness.pre_commit_check.run_checks()`
+  against the `.py` files in a session's loop-collected evidence before
+  marking a task `done`. Violations route the task to a new `needs_review`
+  status instead and log to `logs/pre_commit_violations.log`.
+- **Verified:** `tests/test_orchestrator_pre_commit_gate.py` — a `shell=True`
+  commit lands on `needs_review` (never `done`); a clean commit still reaches
+  `done`.
 
 See `ROADMAP.md` for details.

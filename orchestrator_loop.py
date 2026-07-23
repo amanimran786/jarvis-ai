@@ -46,6 +46,7 @@ from harness.completion_verifier import (  # noqa: E402
 )
 from harness.retry_policy import RetryAction, RetryDecision, decide_retry  # noqa: E402
 from harness.capability_checker import check_contract_capabilities  # noqa: E402
+from harness.pre_commit_check import run_checks  # noqa: E402
 from harness.approval_workflow import consume_approval, restore_approval  # noqa: E402
 from harness.state_lock import queue_state_lock  # noqa: E402
 from harness.task_contract import (  # noqa: E402
@@ -75,6 +76,7 @@ logging.basicConfig(
 WORK_QUEUE_PATH   = _REPO_ROOT / "WORK_QUEUE.json"
 LAUNCH_QUEUE_PATH = _REPO_ROOT / "LAUNCH_QUEUE.json"
 MASTER_LOG_PATH   = _REPO_ROOT / "MASTER_LOG.md"
+PRE_COMMIT_VIOLATIONS_LOG = _REPO_ROOT / "logs" / "pre_commit_violations.log"
 ATTEMPT_LOG_PATH  = Path(
     os.getenv(
         "JARVIS_ORCHESTRATOR_ATTEMPT_LOG",
@@ -163,6 +165,7 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     Returns a summary dict:
     {
         "harvested":   int,   # tasks marked done
+        "needs_review": int,  # tasks that passed verification but failed the pre-commit gate
         "follow_ups":  int,   # new tasks enqueued
         "launched":    int,   # launch records written
         "blocked":     int,   # launch-time contract/checkpoint failures
@@ -176,6 +179,7 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     now_str = _now()
     summary = {
         "harvested": 0,
+        "needs_review": 0,
         "follow_ups": 0,
         "launched": 0,
         "blocked": 0,
@@ -280,7 +284,34 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                 (f"completion checkpoint write failed: {exc}",),
             )
 
-        if verdict.passed and _mark_task_done(task_id, summary_text):
+        gate_result = None
+        if verdict.passed:
+            gate_files = _pre_commit_gate_files(
+                evidence, session.get("repo_path") or str(_REPO_ROOT)
+            )
+            if gate_files:
+                gate_result = run_checks(gate_files)
+
+        if verdict.passed and gate_result is not None and not gate_result.passed:
+            _log_pre_commit_violations(task_id, sid, gate_result)
+            _mark_task_verification(
+                task_id,
+                "needs_review",
+                "pre_commit_gate_violation",
+                [str(f) for f in gate_result.findings] + list(gate_result.syntax_errors),
+                evidence if isinstance(evidence, dict) else {},
+            )
+            summary["needs_review"] += 1
+            _log_master(
+                f"[orchestrator] {sid} → task {task_id} NEEDS_REVIEW — "
+                f"pre-commit gate found {len(gate_result.findings)} finding(s), "
+                f"{len(gate_result.syntax_errors)} syntax error(s)"
+            )
+            log.warning(
+                "[Loop] Task %s needs_review — pre-commit gate violations (session %s)",
+                task_id, sid,
+            )
+        elif verdict.passed and _mark_task_done(task_id, summary_text):
             newly_done.append(session)
             summary["harvested"] += 1
             _log_master(f"[orchestrator] verified {sid} → task {task_id} DONE")
@@ -583,12 +614,38 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     buffered, _LOG_BUFFER = _LOG_BUFFER or [], None
     did_work = any(
         summary[k]
-        for k in ("harvested", "follow_ups", "launched", "blocked",
+        for k in ("harvested", "needs_review", "follow_ups", "launched", "blocked",
                   "unverified", "rejected", "retried")
     )
     if did_work:
         _write_master_lines(buffered)
     return summary
+
+
+# ── Pre-commit gate (REVIEW.md automated checks) ──────────────────────────────
+
+def _pre_commit_gate_files(evidence: Any, repo_path: str) -> list[str]:
+    """Return absolute paths to changed .py files eligible for the REVIEW.md gate.
+
+    Only runs against loop-collected evidence (``observer == "loop"``) — the
+    same trust boundary ``evaluate_completion`` uses — so a session cannot
+    dodge the gate by self-reporting its own changed-files list.
+    """
+    if not isinstance(evidence, dict) or evidence.get("observer") != "loop":
+        return []
+    changed = evidence.get("changed_files") or []
+    root = Path(repo_path)
+    return [str(root / rel) for rel in changed if str(rel).endswith(".py")]
+
+
+def _log_pre_commit_violations(task_id: str, session_id: str, result: Any) -> None:
+    PRE_COMMIT_VIOLATIONS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(PRE_COMMIT_VIOLATIONS_LOG, "a", encoding="utf-8") as f:
+        f.write(f"[{_now()}] task={task_id} session={session_id}\n")
+        for finding in result.findings:
+            f.write(f"  {finding}\n")
+        for err in result.syntax_errors:
+            f.write(f"  SYNTAX: {err}\n")
 
 
 # ── Stale-session expiry ──────────────────────────────────────────────────────

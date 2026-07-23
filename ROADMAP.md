@@ -87,23 +87,33 @@ exists but isn't installed.
 
 ---
 
-## 🟡 Item 4 — Wire run_checks() Into Orchestrator Loop (Boris Cherny Gap)
+## ✅ Item 4 — Wire run_checks() Into Orchestrator Loop (Boris Cherny Gap) (DONE)
 
 **Problem:** `gate_pre_commit=true` is in every contract but the loop never
-verifies that a session actually ran the checker before marking a task done.
-The gate is defined everywhere, enforced nowhere at runtime.
+verified that a session actually ran the checker before marking a task done.
+The gate was defined everywhere, enforced nowhere at runtime.
 
 **Fix:**
-1. In `orchestrator_loop.py`, after a session completes, call
-   `harness.pre_commit_check.run_checks()` on any `.py` files in the session's
-   commit (get them from `git diff HEAD~1 --name-only -- '*.py'`)
-2. If findings > 0: set task status to `needs_review` instead of `done`,
-   log findings to `logs/pre_commit_violations.log`
-3. Add `needs_review` as a valid status to WORK_QUEUE and dashboard
-4. Test: commit a file with a `shell=True` line, verify loop catches it
+1. `orchestrator_loop.py` harvest step: once a session's completion verdict
+   passes (`evaluate_completion`), `_pre_commit_gate_files()` pulls the
+   `.py` files out of the loop-collected evidence's `changed_files`
+   (`evidence["observer"] == "loop"` only — a session can't dodge the gate
+   by self-reporting its own file list) and runs
+   `harness.pre_commit_check.run_checks()` against them.
+2. Findings or syntax errors → task status becomes `needs_review` (not
+   `done`), reasons are stamped onto the queue row via
+   `_mark_task_verification()`, and the full findings are appended to
+   `logs/pre_commit_violations.log`.
+3. `needs_review` is now a recognized WORK_QUEUE status: `jarvis_dashboard.py`
+   badges it (amber), adds a "Needs Review" stat card, and gives it the same
+   Requeue action as `blocked`/`stalled`/`failed`.
+4. Test: `tests/test_orchestrator_pre_commit_gate.py` — one case commits a
+   `shell=True` line and asserts the task lands on `needs_review` (never
+   `done`) with the violation logged; a second case asserts a clean commit
+   still reaches `done`.
 
 **Done when:** A task that commits `shell=True` code never reaches `status=done`
-without a manual override.
+without a manual override. ✓
 
 ---
 
@@ -219,7 +229,6 @@ and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 ## Current Item
 
-**→ Item 4: Wire `run_checks()` into orchestrator loop** (Claude lane)
-
-Items 1, 1.5, and 2 are complete. Both Claude and Codex can work on Items 3–9
-in parallel — see `CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
+Items 1, 1.5, 2, and 4 are complete. Item 3 (orchestrator self-healing) is in
+progress. Both Claude and Codex can work on Items 5–9 in parallel — see
+`CROSS_AGENT_ORCHESTRATION.md` for lane assignments.
