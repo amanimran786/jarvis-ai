@@ -346,6 +346,13 @@ def _request_macos_permissions():
 
 
 def _run_deferred_startup_tasks() -> None:
+    try:
+        from config import warn_missing_specialist_models
+
+        warn_missing_specialist_models()
+    except Exception:
+        logging.warning("[Main] Specialist model startup check failed", exc_info=True)
+
     # Pre-warm faster-whisper so the first voice query has zero cold-start latency
     try:
         from local_runtime import local_stt

@@ -72,6 +72,28 @@ git config --global user.email "aman.imran@sjsu.edu"
 
 ---
 
-## 🟡 Next: Item 5 — Specialist Model Routing
+## ✅ Item 5 — Specialist Model Routing — DONE
+
+- **Inventory:** `devstral:latest` and `qwen3:30b-a3b` installed; Ollama CLI and
+  app/server aligned on `0.32.1`.
+- **Routing:** Exact model identity replaces substring matching. Configured coder
+  and reasoning roles win over built-in defaults, and privileged specialist paths
+  fail closed instead of substituting an unrelated installed model.
+- **Resource safety:** Planner, workbench, native tool calls, and final synthesis
+  use bounded context/output options.
+- **Startup:** Deferred, non-fatal readiness logging distinguishes ready,
+  missing-model, and Ollama-unreachable states.
+- **Verification:** 76 focused tests passed. Live two-worker probes returned
+  non-empty responses for Devstral 10/10 and Qwen 10/10; Qwen produced a valid
+  bounded plan on its first attempt. Full suite: 3,670 passed, 3 skipped,
+  34 subtests passed.
+- **Packaged app:** Rebuilt and installed on July 23, 2026 at 08:42:59 PDT.
+  The frozen `/local/capabilities` endpoint reported `mode=open-source`,
+  `selected_coder=devstral:latest`, and
+  `selected_reasoning=qwen3:30b-a3b`; Desktop points to the same signed bundle.
+
+---
+
+## 🟡 Next: Item 6 — Security Review (approval required)
 
 See `ROADMAP.md` for details.

@@ -135,17 +135,14 @@ def _build_steps(data: list[dict], *, max_steps: int = 12) -> list[TaskStep]:
 
 def _local_planner_options(model: str) -> dict[str, int]:
     """Return deterministic Ollama limits for JSON planning requests."""
-    from brains.brain_ollama import _ollama_options_for_model
+    from brains.brain_ollama import bounded_local_options
 
-    options = _ollama_options_for_model(model)
-    configured_ctx = int(options.get("num_ctx", _LOCAL_PLANNER_FALLBACK_NUM_CTX))
-    configured_predict = int(options.get("num_predict", _LOCAL_PLANNER_NUM_PREDICT))
-    if configured_ctx <= 0 or configured_predict <= 0:
-        raise ValueError("Local planner token limits must be positive integers")
-    options["num_ctx"] = min(configured_ctx, _LOCAL_PLANNER_NUM_CTX)
-    options["num_predict"] = min(configured_predict, _LOCAL_PLANNER_NUM_PREDICT)
-    options["temperature"] = 0
-    return options
+    return bounded_local_options(
+        model,
+        max_context=_LOCAL_PLANNER_NUM_CTX,
+        max_output=_LOCAL_PLANNER_NUM_PREDICT,
+        default_context=_LOCAL_PLANNER_FALLBACK_NUM_CTX,
+    )
 
 
 def _local_plan_schema(max_steps: int) -> dict:
@@ -197,7 +194,7 @@ def _plan_task_local(task: str) -> list[TaskStep]:
     except ImportError:
         client = _ollama_lib.Client(timeout=_LOCAL_PLANNER_READ_TIMEOUT_SECONDS)
 
-    model = get_best_available(LOCAL_REASONING)
+    model = get_best_available(LOCAL_REASONING, require_preferred=True)
     options = _local_planner_options(model)
     system = _PLAN_SYSTEM_LOCAL.format(
         tool_summaries=tool_registry.callable_tool_summaries()
@@ -277,7 +274,7 @@ def replan_after_failure(
         except ImportError:
             client = _ollama_lib.Client(timeout=_LOCAL_PLANNER_READ_TIMEOUT_SECONDS)
 
-        model = get_best_available(LOCAL_REASONING)
+        model = get_best_available(LOCAL_REASONING, require_preferred=True)
         options = _local_planner_options(model)
         completed_desc = "\n".join(
             f"  Step {s.number} [{s.tool}]: {s.description} — OK"

@@ -70,6 +70,7 @@ import telemetry
 import jarvis_core_brain as _core_brain
 import mem0_layer as _m0
 import repeat_context as _repeat_context
+from local_model_identity import find_exact_ollama_model
 
 _forced_model = ""
 _forced_provider = ""
@@ -413,9 +414,8 @@ def refresh_local_cache() -> None:
 
 
 def _has_model(name: str, available: list[str]) -> bool:
-    """True if a model whose name starts with `name` (before the colon) is in the list."""
-    prefix = name.split(":")[0]
-    return any(prefix in m for m in available)
+    """Return whether the exact configured Ollama model is installed."""
+    return find_exact_ollama_model(name, available) is not None
 
 
 def _best_local(text: str) -> str:
@@ -458,9 +458,9 @@ def _best_local(text: str) -> str:
     # 3. Coding tasks — specialist models first; GLM_FLASH as fallback.
     if is_code_task:
         for coder in (
+            LOCAL_CODER,
             LOCAL_DEVSTRAL,        # purpose-built for code, fastest on M4
             LOCAL_CODER_RECOMMENDED,
-            LOCAL_CODER,
             LOCAL_QWEN3_MID,
             LOCAL_GLM_FLASH,       # general fallback
         ):
@@ -469,7 +469,7 @@ def _best_local(text: str) -> str:
 
     # 4. Deep reasoning — qwen3-strong > GLM_FLASH (larger context + MoE efficiency).
     if is_deep:
-        for deep in (LOCAL_QWEN3_STRONG, LOCAL_GLM_FLASH, LOCAL_REASONING, LOCAL_QWEN3_MID):
+        for deep in (LOCAL_REASONING, LOCAL_QWEN3_STRONG, LOCAL_GLM_FLASH, LOCAL_QWEN3_MID):
             if deep and _has_model(deep, available):
                 return deep
 

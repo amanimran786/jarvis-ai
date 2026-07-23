@@ -140,18 +140,37 @@ through either supported completion path. ✓
 
 ---
 
-## 🟡 Item 5 — Specialist Model Routing
+## ✅ Item 5 — Specialist Model Routing (DONE)
 
-**Problem:** devstral and qwen3:30b-a3b are not installed in Ollama.
-`jarvis-local-llm-routing-verify` keeps aborting. Routing falls back to defaults.
+**Problem:** The roadmap still reported Devstral and Qwen missing even after they
+were installed. Routing used substring model matching, ignored configured role
+overrides when built-in defaults were present, and could silently grant specialist
+work to the first unrelated local model. Direct specialist clients also lacked
+explicit resource ceilings.
 
 **Fix:**
-1. `ollama pull devstral` and `ollama pull qwen3:30b-a3b` on the user's machine
-2. Re-run `jarvis-local-llm-routing-verify` — verify specialist model wins in logs
-3. Add a startup check in `config.py` that warns if expected specialist models
-   are missing (don't fail, but log clearly)
+1. Verified `devstral:latest` and `qwen3:30b-a3b` in the live Ollama inventory.
+2. Added shared exact model-reference matching that normalizes only `:latest`;
+   similarly named models and different Qwen tags no longer qualify.
+3. Configured `LOCAL_CODER` and `LOCAL_REASONING` roles now win routing precedence.
+4. Planner, native tool-loop, and code-workbench selection requires the exact
+   configured specialist instead of silently substituting another model.
+5. Every direct specialist request, including final synthesis, now has explicit
+   context, output, and temperature limits.
+6. Deferred startup reports ready, missing-model, and Ollama-unreachable states
+   distinctly without blocking startup.
+7. Homebrew Ollama CLI and the running app/server are aligned on version `0.32.1`.
 
-**Done when:** `ollama list` shows both models, and routing tests pass.
+**Verification:** Focused routing/planner/workbench/native-loop suite: 76 passed.
+Live two-worker load probe: Devstral 10/10 and Qwen 10/10 non-empty responses;
+cold-load-inclusive P95 was 15.273s and 11.027s respectively. Qwen planning
+produced a valid bounded plan on its first attempt. Full suite: 3,670 passed,
+3 skipped, 34 subtests passed. The rebuilt installed macOS app reported
+`mode=open-source`, `selected_coder=devstral:latest`, and
+`selected_reasoning=qwen3:30b-a3b` through `/local/capabilities`.
+
+**Done when:** `ollama list` shows both exact models, configured specialist routes
+win, strict callers cannot substitute an unrelated model, and routing tests pass. ✓
 
 ---
 
@@ -159,6 +178,11 @@ through either supported completion path. ✓
 
 **Problem:** Full codebase security scan hasn't run. Unknown HIGH severity issues
 may exist. Requires approval before running.
+
+**Pre-scan blockers discovered during Item 5 review:** deterministic manager
+security gating, generated-test confinement, capability enforcement for direct
+specialist function calls, outbound private-data controls, and untrusted repository
+context separation require explicit review. Item 5 does not waive these findings.
 
 **Fix:**
 1. Approve `gemini-lane-security-review` via dashboard (or manually)
@@ -252,7 +276,7 @@ and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 ## Current Item
 
-**→ Item 5: Specialist Model Routing**
+**→ Item 6: Security Review (approval required)**
 
-Items 1, 1.5, 2, 3, and 4 are complete. Item 5 is the only active roadmap
-item; do not start Item 6 until Item 5 is committed and production-verified.
+Items 1, 1.5, 2, 3, 4, and 5 are complete. Item 6 is the only active roadmap
+item and must not run until its human approval gate is satisfied.

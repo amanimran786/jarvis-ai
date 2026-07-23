@@ -1793,14 +1793,23 @@ def _run_native_task_loop(
     or None if Ollama is unavailable — caller falls back to the text-tag path.
     """
     try:
-        from brains.brain_ollama import get_best_available, get_client
+        from brains.brain_ollama import (
+            bounded_local_options,
+            get_best_available,
+            get_client,
+        )
         from config import LOCAL_REASONING
     except ImportError:
         return None
 
     try:
         client = get_client()
-        model = get_best_available(LOCAL_REASONING)
+        model = get_best_available(LOCAL_REASONING, require_preferred=True)
+        model_options = bounded_local_options(
+            model,
+            max_context=32_768,
+            max_output=2_048,
+        )
     except RuntimeError:
         return None
 
@@ -1838,6 +1847,7 @@ def _run_native_task_loop(
                     messages=messages,
                     tools=tool_schemas,
                     stream=False,
+                    options=model_options,
                 )
             except Exception:
                 log.exception("native task loop: ollama call failed (iter %d)", _iter)
@@ -1935,7 +1945,12 @@ def _run_native_task_loop(
     })
 
     try:
-        final_stream = client.chat(model=model, messages=messages, stream=True)
+        final_stream = client.chat(
+            model=model,
+            messages=messages,
+            stream=True,
+            options=model_options,
+        )
         _set_streaming()
         final_parts: list[str] = []
         for chunk in final_stream:

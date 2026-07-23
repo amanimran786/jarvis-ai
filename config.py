@@ -1,11 +1,16 @@
+import logging
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from dotenv import load_dotenv
+
+from local_model_identity import find_exact_ollama_model
 
 
 _SUPPORTED_STT_BACKENDS = ("faster-whisper", "openai")
 _SUPPORTED_TTS_BACKENDS = ("kokoro", "say", "elevenlabs", "openai")
+_log = logging.getLogger(__name__)
 
 def _load_jarvis_dotenv() -> None:
     candidates: list[Path] = []
@@ -217,6 +222,79 @@ LOCAL_PHI4_MINI    = os.getenv("LOCAL_PHI4_MINI", "phi4-mini")     # ollama pull
 
 # Devstral — Mistral's open coder (ollama pull devstral)
 LOCAL_DEVSTRAL     = os.getenv("LOCAL_DEVSTRAL", "devstral")
+EXPECTED_SPECIALIST_MODELS = tuple(
+    dict.fromkeys(
+        model
+        for model in (LOCAL_CODER, LOCAL_REASONING)
+        if model
+    )
+)
+
+
+def missing_specialist_models(
+    installed_models: Iterable[str],
+    expected_models: Iterable[str] = EXPECTED_SPECIALIST_MODELS,
+) -> tuple[str, ...]:
+    """Return configured specialist models absent from the Ollama inventory."""
+    installed = tuple(
+        str(model).strip()
+        for model in installed_models
+        if str(model).strip()
+    )
+    expected = tuple(
+        dict.fromkeys(
+            str(model).strip()
+            for model in expected_models
+            if str(model).strip()
+        )
+    )
+    return tuple(
+        model
+        for model in expected
+        if find_exact_ollama_model(model, installed) is None
+    )
+
+
+def warn_missing_specialist_models(
+    installed_models: Iterable[str] | None = None,
+) -> tuple[str, ...]:
+    """Log specialist model readiness without blocking Jarvis startup."""
+    if installed_models is None:
+        try:
+            from brains.brain_ollama import local_model_inventory
+
+            reachable, installed_models = local_model_inventory()
+        except Exception:
+            _log.warning(
+                "[Startup] Ollama specialist inventory check failed; "
+                "routing will use its normal local fallback chain.",
+                exc_info=True,
+            )
+            return EXPECTED_SPECIALIST_MODELS
+        if not reachable:
+            _log.warning(
+                "[Startup] Ollama is unavailable; specialist model inventory "
+                "could not be checked. Routing will use its normal local "
+                "fallback chain when Ollama recovers."
+            )
+            return EXPECTED_SPECIALIST_MODELS
+
+    missing = missing_specialist_models(installed_models)
+    if missing:
+        pulls = " ".join(f"`ollama pull {model}`" for model in missing)
+        _log.warning(
+            "[Startup] Missing expected Ollama specialist model(s): %s. "
+            "Routing will use installed local fallbacks. Install with: %s",
+            ", ".join(missing),
+            pulls,
+        )
+    else:
+        _log.info(
+            "[Startup] Ollama specialist models ready: coder=%s, reasoning=%s",
+            LOCAL_CODER,
+            LOCAL_REASONING,
+        )
+    return missing
 
 # Ornith-1.0 — DeepReinforce agentic coding family (2026-06, SWE-bench verified 82.4)
 #   Self-scaffolding RL; beats devstral and qwen3.5-35b on Terminal-Bench 2.1 (64.4 vs 53.5).
