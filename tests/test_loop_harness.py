@@ -29,8 +29,18 @@ from harness.prompt_generator import (
     _generate_fallback,
     generate_session_prompt,
 )
-from harness.session_tracker import SessionTracker
-from harness.task_contract import TaskContract, TaskSpec, TaskType
+from harness.commit_review_gate import CommitGateResult
+from harness.completion_verifier import (
+    CompletionAssessment,
+    compact_completion_evidence,
+)
+from harness.session_tracker import SessionTracker, SessionTrackerError
+from harness.task_contract import (
+    TaskContract,
+    TaskSpec,
+    TaskType,
+    evaluate_completion,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,6 +73,23 @@ def _sample_repo_context(**overrides) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def _trusted_assessment(evidence: dict):
+    def verify(spec: TaskSpec, *_args, **_kwargs) -> CompletionAssessment:
+        return CompletionAssessment(
+            base_commit="a" * 40,
+            completion_commit="b" * 40,
+            evidence=evidence,
+            gate=CommitGateResult(
+                passed=True,
+                base_commit="a" * 40,
+                completion_commit="b" * 40,
+            ),
+            verdict=evaluate_completion(spec, evidence),
+        )
+
+    return verify
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -350,7 +377,8 @@ class TestSessionTracker(unittest.TestCase):
             path = Path(d) / "ACTIVE_SESSIONS.json"
             path.write_text("not json!!!", encoding="utf-8")
             t = SessionTracker(path=path)
-            self.assertEqual(t.active_count(), 0)   # graceful recovery
+            with self.assertRaises(SessionTrackerError):
+                t.active_count()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -444,6 +472,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         task_override: dict | None = None,
         repo_path: Path | None = None,
         base_ref: str = "",
+        completion_commit: str = "",
     ) -> tuple[dict, list[dict], list[dict]]:
         import orchestrator_loop as ol
 
@@ -459,10 +488,11 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         ol.MASTER_LOG_PATH = tmp / "MASTER_LOG.md"
         ol.ATTEMPT_LOG_PATH = tmp / "attempts.jsonl"
 
-        task = task_override or _sample_task(
+        task = dict(task_override) if task_override else _sample_task(
             status="in_progress",
             verification_commands=["python -m pytest tests/test_web_search.py -q"],
         )
+        task["assigned_to"] = "session-a"
         spec = TaskSpec.from_queue_task(task)
         ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
 
@@ -480,7 +510,14 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             repo_path=str(repo_path) if repo_path else "",
             base_ref=base_ref,
         )
-        tracker.complete("session-a", "agent says done", evidence=evidence)
+        tracker.complete(
+            "session-a",
+            "agent says done",
+            evidence=evidence,
+            completion_commit=completion_commit or (
+                "b" * 40 if repo_path else ""
+            ),
+        )
         ol.SessionTracker = _TmpTracker
 
         try:
@@ -715,15 +752,22 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             "policy_findings": [],
         }
         with tempfile.TemporaryDirectory() as d:
-            result, queue, attempts = self._run_completed_isolated(
-                Path(d), evidence=evidence
-            )
+            with patch(
+                "orchestrator_loop.verify_completion",
+                side_effect=_trusted_assessment(evidence),
+            ):
+                result, queue, attempts = self._run_completed_isolated(
+                    Path(d),
+                    evidence=evidence,
+                    repo_path=Path(d),
+                    base_ref="a" * 40,
+                )
 
         self.assertEqual(result["harvested"], 1)
         self.assertEqual(queue[0]["status"], "done")
         self.assertEqual(attempts[-1]["status"], "verified")
 
-    def test_harvest_collects_git_and_command_evidence_when_agent_supplies_none(self):
+    def test_harvest_rejects_uncommitted_worktree_completion(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             worktree = tmp / "worktree"
@@ -737,6 +781,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     shell=False,
+                    timeout=30,
                 )
                 return result.stdout.strip()
 
@@ -763,16 +808,20 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
                 task_override=task,
                 repo_path=worktree,
                 base_ref=base_ref,
+                completion_commit=git("rev-parse", "HEAD"),
             )
 
-        self.assertEqual(result["harvested"], 1)
-        self.assertEqual(queue[0]["status"], "done")
-        completion = attempts[-1]
+        self.assertEqual(result["harvested"], 0)
+        self.assertEqual(result["retried"], 1)
+        self.assertEqual(queue[0]["status"], "queued")
+        completion = attempts[-2]
         self.assertEqual(completion["phase"], "completion_gate")
-        self.assertEqual(completion["status"], "verified")
-        self.assertEqual(completion["evidence"]["observer"], "loop")
-        self.assertEqual(completion["evidence"]["changed_files"], ["tracked.txt"])
-        self.assertEqual(completion["evidence"]["commands"][0]["exit_code"], 0)
+        self.assertEqual(completion["status"], "unverified")
+        self.assertEqual(
+            completion["failure_class"],
+            "infrastructure_failure",
+        )
+        self.assertEqual(completion["evidence"]["changed_files"], [])
 
     def test_launch_provenance_replaces_agent_supplied_loop_evidence(self):
         claimed_evidence = {
@@ -799,20 +848,23 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as d:
             with patch(
-                "orchestrator_loop.collect_completion_evidence",
-                return_value=observed_evidence,
+                "orchestrator_loop.verify_completion",
+                side_effect=_trusted_assessment(observed_evidence),
             ):
                 result, queue, attempts = self._run_completed_isolated(
                     Path(d),
                     evidence=claimed_evidence,
                     repo_path=Path(d),
-                    base_ref="base-ref",
+                    base_ref="a" * 40,
                 )
 
         self.assertEqual(result["harvested"], 0)
         self.assertEqual(result["retried"], 1)
         self.assertEqual(queue[0]["status"], "queued")
-        self.assertEqual(attempts[-2]["evidence"], observed_evidence)
+        self.assertEqual(
+            attempts[-2]["evidence"],
+            compact_completion_evidence(observed_evidence),
+        )
 
     def test_failed_loop_verification_queues_retry_within_budget(self):
         evidence = {
@@ -827,9 +879,16 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             "policy_findings": [],
         }
         with tempfile.TemporaryDirectory() as d:
-            result, queue, attempts = self._run_completed_isolated(
-                Path(d), evidence=evidence
-            )
+            with patch(
+                "orchestrator_loop.verify_completion",
+                side_effect=_trusted_assessment(evidence),
+            ):
+                result, queue, attempts = self._run_completed_isolated(
+                    Path(d),
+                    evidence=evidence,
+                    repo_path=Path(d),
+                    base_ref="a" * 40,
+                )
 
         self.assertEqual(result["harvested"], 0)
         self.assertEqual(result["retried"], 1)
@@ -853,9 +912,17 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             "policy_findings": [],
         }
         with tempfile.TemporaryDirectory() as d:
-            result, queue, attempts = self._run_completed_isolated(
-                Path(d), evidence=evidence, attempt_number=3
-            )
+            with patch(
+                "orchestrator_loop.verify_completion",
+                side_effect=_trusted_assessment(evidence),
+            ):
+                result, queue, attempts = self._run_completed_isolated(
+                    Path(d),
+                    evidence=evidence,
+                    attempt_number=3,
+                    repo_path=Path(d),
+                    base_ref="a" * 40,
+                )
 
         self.assertEqual(result["rejected"], 1)
         self.assertEqual(queue[0]["status"], "blocked")

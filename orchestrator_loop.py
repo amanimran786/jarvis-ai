@@ -42,9 +42,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from harness.session_tracker import SessionTracker  # noqa: E402
+from harness.commit_review_gate import CommitGateResult, write_gate_log  # noqa: E402
 from harness.completion_verifier import (  # noqa: E402
     CompletionEvidenceError,
-    collect_completion_evidence,
+    compact_completion_evidence,
+    verify_completion,
 )
 from harness.retry_policy import RetryAction, RetryDecision, decide_retry  # noqa: E402
 from harness.capability_checker import check_contract_capabilities  # noqa: E402
@@ -59,7 +61,6 @@ from harness.task_contract import (  # noqa: E402
     TaskSpec,
     approval_logged,
     contract_for_task,
-    evaluate_completion,
     normalized_task_spec_digest,
     task_contract_digest,
     validate_contract,
@@ -77,6 +78,7 @@ logging.basicConfig(
 WORK_QUEUE_PATH   = _REPO_ROOT / "WORK_QUEUE.json"
 LAUNCH_QUEUE_PATH = _REPO_ROOT / "LAUNCH_QUEUE.json"
 MASTER_LOG_PATH   = _REPO_ROOT / "MASTER_LOG.md"
+PRE_COMMIT_VIOLATIONS_LOG = _REPO_ROOT / "logs" / "pre_commit_violations.log"
 ATTEMPT_LOG_PATH  = Path(
     os.getenv(
         "JARVIS_ORCHESTRATOR_ATTEMPT_LOG",
@@ -195,6 +197,7 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     Returns a summary dict:
     {
         "harvested":   int,   # tasks marked done
+        "needs_review": int,  # tasks that passed verification but failed the pre-commit gate
         "follow_ups":  int,   # new tasks enqueued
         "launched":    int,   # launch records written
         "blocked":     int,   # launch-time contract/checkpoint failures
@@ -208,6 +211,7 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     now_str = _now()
     summary = {
         "harvested": 0,
+        "needs_review": 0,
         "follow_ups": 0,
         "launched": 0,
         "blocked": 0,
@@ -247,15 +251,38 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         if task is None:
             _log_master(f"[orchestrator] completion ignored — task {task_id} not found")
             continue
+        if (
+            task.get("status") != "in_progress"
+            or task.get("assigned_to") != sid
+        ):
+            tracker.purge_completed([sid])
+            summary["rejected"] += 1
+            _log_master(
+                f"[orchestrator] stale completion quarantined — "
+                f"task={task_id} session={sid}"
+            )
+            log.warning(
+                "[Loop] stale completion quarantined for task %s (session %s)",
+                task_id,
+                sid,
+            )
+            continue
         try:
             spec = TaskSpec.from_queue_task(task)
         except ContractError as exc:
-            _mark_task_verification(task_id, "blocked", "invalid_contract", [str(exc)], {})
+            _mark_task_verification(
+                task_id,
+                "blocked",
+                "invalid_contract",
+                [str(exc)],
+                {},
+                expected_assignee=sid,
+            )
             summary["rejected"] += 1
             continue
 
-        claimed_evidence = session.get("completion_evidence") or {}
         evidence: dict[str, Any] = {}
+        gate_result: CommitGateResult | None = None
         runtime_failure = str(session.get("runtime_failure_class") or "")
         if runtime_failure:
             verdict = CompletionVerdict(
@@ -263,56 +290,119 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                 runtime_failure,
                 (summary_text or "runtime execution failed",),
             )
-        elif session.get("repo_path") and session.get("base_ref"):
+        elif (
+            session.get("repo_path")
+            and session.get("base_ref")
+            and session.get("completion_commit")
+        ):
             try:
-                evidence = collect_completion_evidence(
+                assessment = verify_completion(
                     spec,
                     session["repo_path"],
                     session["base_ref"],
+                    completion_ref=session["completion_commit"],
                 )
             except CompletionEvidenceError as exc:
                 _log_master(
                     f"[orchestrator] evidence collection failed for {task_id}: {exc}"
                 )
+                verdict = CompletionVerdict(
+                    "unverified",
+                    "infrastructure_failure",
+                    (str(exc),),
+                )
+            else:
+                evidence = dict(assessment.evidence)
+                gate_result = assessment.gate
+                verdict = assessment.verdict
+                if gate_result.infrastructure_failed:
+                    verdict = CompletionVerdict(
+                        "unverified",
+                        "infrastructure_failure",
+                        tuple(gate_result.reasons()),
+                    )
         else:
-            # Compatibility for sessions created before launch provenance was stored.
-            # Current launches always use loop-collected evidence above.
-            evidence = claimed_evidence
+            verdict = CompletionVerdict(
+                "unverified",
+                "verification_missing",
+                (
+                    "completion provenance is missing repo_path, base_ref, "
+                    "or completion_commit",
+                ),
+            )
 
         stored_hash = str(session.get("contract_sha256") or "")
         if runtime_failure:
             pass
         elif stored_hash and stored_hash != spec.contract_hash:
+            gate_result = None
             verdict = CompletionVerdict(
                 "rejected",
                 "contract_mismatch",
                 ("task contract changed after dispatch",),
             )
-        else:
-            verdict = evaluate_completion(spec, evidence)
 
         attempt_id = str(session.get("attempt_id") or f"untracked_{sid}")
         attempt_number = int(session.get("attempt_number") or 1)
+        persisted_evidence = compact_completion_evidence(evidence)
         completion_checkpoint = AttemptRecord.checkpoint(
             spec,
             sid,
             attempt_id,
             phase="completion_gate",
             status=verdict.status,
-            evidence=evidence,
+            evidence=persisted_evidence,
             failure_class=verdict.failure_class,
             attempt_number=attempt_number,
         )
         try:
             attempt_store.append(completion_checkpoint)
         except OSError as exc:
+            gate_result = None
             verdict = CompletionVerdict(
                 "unverified",
                 "checkpoint_failure",
                 (f"completion checkpoint write failed: {exc}",),
             )
 
-        if verdict.passed and _mark_task_done(task_id, summary_text):
+        if (
+            gate_result is not None
+            and not gate_result.passed
+            and not gate_result.infrastructure_failed
+        ):
+            try:
+                write_gate_log(
+                    PRE_COMMIT_VIOLATIONS_LOG,
+                    task_id,
+                    sid,
+                    gate_result,
+                    timestamp=_now(),
+                )
+            except OSError:
+                log.exception("[Loop] could not write redacted pre-commit violations")
+            _mark_task_verification(
+                task_id,
+                "needs_review",
+                "pre_commit_gate_violation",
+                gate_result.reasons(),
+                persisted_evidence,
+                expected_assignee=sid,
+            )
+            summary["needs_review"] += 1
+            _log_master(
+                f"[orchestrator] {sid} → task {task_id} NEEDS_REVIEW — "
+                f"commit gate found {len(gate_result.findings)} finding(s)"
+            )
+            log.warning(
+                "[Loop] Task %s needs_review — pre-commit gate violations (session %s)",
+                task_id, sid,
+            )
+        elif verdict.passed and _mark_task_done(
+            task_id,
+            summary_text,
+            persisted_evidence,
+            expected_assignee=sid,
+        ):
             newly_done.append(session)
             summary["harvested"] += 1
             _log_master(f"[orchestrator] verified {sid} → task {task_id} DONE")
@@ -347,7 +437,11 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                     f"[orchestrator] retry checkpoint write failed for {task_id}: {exc}"
                 )
             if decision.action is RetryAction.RETRY:
-                _mark_task_retry(task_id, decision)
+                _mark_task_retry(
+                    task_id,
+                    decision,
+                    expected_assignee=sid,
+                )
                 queue_status = "queued"
                 summary["retried"] += 1
             elif decision.action is RetryAction.ROUTE_TO_VERIFIER:
@@ -357,8 +451,9 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                     queue_status,
                     verdict.failure_class,
                     list(verdict.reasons),
-                    evidence,
+                    persisted_evidence,
                     next_action=decision.action.value,
+                    expected_assignee=sid,
                 )
                 summary["unverified"] += 1
             else:
@@ -368,15 +463,19 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
                     queue_status,
                     verdict.failure_class,
                     list(verdict.reasons),
-                    evidence,
+                    persisted_evidence,
                     next_action=decision.action.value,
+                    expected_assignee=sid,
                 )
                 summary["rejected"] += 1
             _log_master(
                 f"[orchestrator] {sid} → task {task_id} {queue_status.upper()} "
                 f"({verdict.failure_class}; {decision.action.value})"
             )
-    tracker.purge_completed()
+    tracker.purge_completed(
+        str(session.get("session_id") or "")
+        for session in completed
+    )
 
     # ── Step 2: Suggest follow-up tasks for completed work ────────────────────
     for session in newly_done:
@@ -615,7 +714,7 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     buffered, _LOG_BUFFER = _LOG_BUFFER or [], None
     did_work = any(
         summary[k]
-        for k in ("harvested", "follow_ups", "launched", "blocked",
+        for k in ("harvested", "needs_review", "follow_ups", "launched", "blocked",
                   "unverified", "rejected", "retried")
     )
     if did_work:
@@ -694,7 +793,8 @@ def _save_queue(queue: list[dict[str, Any]]) -> None:
             json.dump(queue, f, indent=2)
         os.replace(tmp, str(WORK_QUEUE_PATH))
     except Exception as exc:
-        log.error("[Loop] Could not save WORK_QUEUE.json: %s", exc)
+        log.exception("[Loop] Could not save WORK_QUEUE.json")
+        raise OSError(f"could not save {WORK_QUEUE_PATH}") from exc
 
 
 def _find_task(task_id: str) -> dict | None:
@@ -718,16 +818,32 @@ def _pick_next_queued() -> dict | None:
     return queued[0]
 
 
-def _mark_task_done(task_id: str, result_summary: str) -> bool:
+def _mark_task_done(
+    task_id: str,
+    result_summary: str,
+    evidence: dict[str, Any] | None = None,
+    *,
+    expected_assignee: str = "",
+) -> bool:
     """Mark task as done; return True if the task was found and updated."""
     if not task_id:
         return False
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            if expected_assignee and (
+                task.get("status") != "in_progress"
+                or task.get("assigned_to") != expected_assignee
+            ):
+                raise RuntimeError(
+                    f"task assignment changed before completion: {task_id}"
+                )
             task["status"]         = "done"
             task["result_summary"] = result_summary
             task["completed_at"]   = _now()
+            if evidence:
+                task["completion_evidence"] = evidence
+                task["completion_commit"] = evidence.get("completion_commit")
             _save_queue(queue)
             return True
     return False
@@ -752,10 +868,18 @@ def _mark_task_verification(
     evidence: dict[str, Any],
     *,
     next_action: str = "",
+    expected_assignee: str = "",
 ) -> None:
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            if expected_assignee and (
+                task.get("status") != "in_progress"
+                or task.get("assigned_to") != expected_assignee
+            ):
+                raise RuntimeError(
+                    f"task assignment changed before verification: {task_id}"
+                )
             task["status"] = status
             task["verification_failure_class"] = failure_class
             task["verification_reasons"] = reasons
@@ -763,13 +887,27 @@ def _mark_task_verification(
             task["next_action"] = next_action
             task["verified_at"] = _now()
             break
+    else:
+        raise RuntimeError(f"task disappeared before verification update: {task_id}")
     _save_queue(queue)
 
 
-def _mark_task_retry(task_id: str, decision: RetryDecision) -> None:
+def _mark_task_retry(
+    task_id: str,
+    decision: RetryDecision,
+    *,
+    expected_assignee: str = "",
+) -> None:
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            if expected_assignee and (
+                task.get("status") != "in_progress"
+                or task.get("assigned_to") != expected_assignee
+            ):
+                raise RuntimeError(
+                    f"task assignment changed before retry: {task_id}"
+                )
             task["status"] = "queued"
             task["attempt_number"] = decision.attempt_number + 1
             task["retry_failure_class"] = decision.failure_class.value
@@ -777,6 +915,8 @@ def _mark_task_retry(task_id: str, decision: RetryDecision) -> None:
             task["assigned_to"] = None
             task["assigned_at"] = None
             break
+    else:
+        raise RuntimeError(f"task disappeared before retry update: {task_id}")
     _save_queue(queue)
 
 
@@ -966,7 +1106,10 @@ def _build_repo_context() -> dict[str, Any]:
         import subprocess
         result = subprocess.run(
             ["git", "-C", str(_REPO_ROOT), "log", "--oneline", "-5"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            shell=False,
         )
         if result.returncode == 0:
             ctx["recent_commits"] = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
@@ -986,7 +1129,10 @@ def _build_repo_context() -> dict[str, Any]:
         import subprocess
         result = subprocess.run(
             ["git", "-C", str(_REPO_ROOT), "diff", "--name-only", "HEAD~5", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            shell=False,
         )
         if result.returncode == 0:
             ctx["active_files"] = [

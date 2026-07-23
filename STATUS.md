@@ -48,6 +48,30 @@ git config --global user.email "aman.imran@sjsu.edu"
 
 ---
 
-## 🟡 Next: Item 4 — Wire `run_checks()` into orchestrator loop (Claude lane)
+## ✅ Item 4 — Wire `run_checks()` into orchestrator loop — DONE (Claude lane)
+
+- **Files:** `orchestrator_loop.py`, `jarvis_dashboard.py`,
+  `harness/commit_review_gate.py`, `harness/completion_verifier.py`,
+  `harness/agent_coordinator.py`, and focused tests.
+- **What:** Both supported completion paths now scan immutable Python blobs
+  between the lease base and pinned completion commit before repository code
+  executes. Dirty/moved HEADs, unsafe Git modes, new inline suppressions,
+  native execution surfaces, security findings, and syntax failures cannot
+  reach `done`.
+- **Isolation:** Verification runs under a default-deny macOS Seatbelt profile
+  and requires normal structured pytest completion. Repository `conftest.py`,
+  external reads/writes, network access, and ambient credentials are denied.
+- **Durability:** Queue/session locks are owner-only and outside Git; stale
+  completions are selectively quarantined, and tracker write/corruption errors
+  fail closed.
+- **Security:** Queue reasons and owner-only violation logs are redacted; no
+  matching source line or hardcoded secret value is persisted.
+- **Verification:** focused Item 4 coverage `190 passed`; integrated Items 3+4
+  coverage `201 passed`; integrated full suite `3645 passed, 13 skipped,
+  3 warnings, 34 subtests passed`.
+
+---
+
+## 🟡 Next: Item 5 — Specialist Model Routing
 
 See `ROADMAP.md` for details.

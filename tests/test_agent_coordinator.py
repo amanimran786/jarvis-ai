@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from harness import agent_coordinator
 from harness.agent_coordinator import (
     CoordinationError,
     claim_next,
@@ -331,6 +332,242 @@ def test_finish_uses_loop_evidence_before_marking_done(tmp_path: Path):
     assert queue[0]["status"] == "done"
     assert queue[0]["completion_commit"] == _git(repo, "rev-parse", "HEAD")
     assert queue[0]["completion_evidence"]["changed_files"] == ["artifact.txt"]
+
+
+def test_finish_blocks_committed_pre_commit_violation(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore", "base.txt")
+    _git(repo, "commit", "-m", "base")
+
+    task = _task("shared-task")
+    task["allowed_files"] = ["artifact.txt", "tool.py"]
+    paths = _state_files(tmp_path / "state", [task])
+    claim = claim_next("codex", repo_path=repo, **paths)
+    unsafe = "run(command, shell" + "=True)\n"
+    (repo / "tool.py").write_text(unsafe, encoding="utf-8")
+    _git(repo, "add", "tool.py")
+    _git(repo, "commit", "-m", "unsafe tool")
+
+    result = finish(
+        "codex",
+        claim["task_id"],
+        claim["lease_id"],
+        summary="unsafe completion",
+        repo_path=repo,
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+    )
+
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert result["status"] == "needs_review"
+    assert queue[0]["status"] == "needs_review"
+    assert "SHELL_TRUE" in json.dumps(queue[0]["verification_reasons"])
+    assert queue[0]["completion_commit"] == _git(repo, "rev-parse", "HEAD")
+
+
+def test_finish_allows_clean_committed_python(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore", "base.txt")
+    _git(repo, "commit", "-m", "base")
+
+    task = _task("shared-task")
+    task["allowed_files"] = ["artifact.txt", "tool.py"]
+    paths = _state_files(tmp_path / "state", [task])
+    claim = claim_next("codex", repo_path=repo, **paths)
+    (repo / "tool.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "add", "tool.py")
+    _git(repo, "commit", "-m", "clean tool")
+
+    result = finish(
+        "codex",
+        claim["task_id"],
+        claim["lease_id"],
+        summary="clean completion",
+        repo_path=repo,
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+    )
+
+    assert result["status"] == "verified"
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "done"
+    assert queue[0]["completion_evidence"]["commit_gate"]["passed"] is True
+
+
+def test_finish_rejects_expired_lease(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    started = dt.datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
+    claim = claim_next(
+        "codex",
+        repo_path=repo,
+        now=started,
+        lease_seconds=10,
+        **paths,
+    )
+
+    with pytest.raises(CoordinationError, match="expired"):
+        finish(
+            "codex",
+            claim["task_id"],
+            claim["lease_id"],
+            summary="too late",
+            repo_path=repo,
+            queue_path=paths["queue_path"],
+            contracts_path=paths["contracts_path"],
+            state_path=paths["state_path"],
+            now=started + dt.timedelta(seconds=11),
+        )
+
+
+def test_finish_rechecks_lease_expiry_after_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    started = dt.datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
+    claim = claim_next("codex", repo_path=repo, now=started, **paths)
+    (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
+    _git(repo, "add", "artifact.txt")
+    _git(repo, "commit", "-m", "artifact")
+    times = iter([started, started + dt.timedelta(seconds=120)])
+    monkeypatch.setattr(agent_coordinator, "_now", lambda: next(times))
+
+    with pytest.raises(CoordinationError, match="expired during"):
+        finish(
+            "codex",
+            claim["task_id"],
+            claim["lease_id"],
+            summary="verification overran lease",
+            repo_path=repo,
+            queue_path=paths["queue_path"],
+            contracts_path=paths["contracts_path"],
+            state_path=paths["state_path"],
+        )
+
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "in_progress"
+
+
+def test_finish_state_write_failure_does_not_persist_done(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    claim = claim_next("codex", repo_path=repo, **paths)
+    (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
+    _git(repo, "add", "artifact.txt")
+    _git(repo, "commit", "-m", "artifact")
+    original_write = agent_coordinator._atomic_write_json
+
+    def fail_state(path: Path, payload: object) -> None:
+        if Path(path) == paths["state_path"]:
+            raise OSError("state unavailable")
+        original_write(path, payload)
+
+    monkeypatch.setattr(agent_coordinator, "_atomic_write_json", fail_state)
+
+    with pytest.raises(OSError, match="state unavailable"):
+        finish(
+            "codex",
+            claim["task_id"],
+            claim["lease_id"],
+            summary="artifact complete",
+            repo_path=repo,
+            queue_path=paths["queue_path"],
+            contracts_path=paths["contracts_path"],
+            state_path=paths["state_path"],
+        )
+
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "in_progress"
+
+
+def test_finish_queue_commit_failure_does_not_persist_done(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    claim = claim_next("codex", repo_path=repo, **paths)
+    (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
+    _git(repo, "add", "artifact.txt")
+    _git(repo, "commit", "-m", "artifact")
+    original_write = agent_coordinator._atomic_write_json
+    queue_writes = 0
+
+    def fail_queue_commit(path: Path, payload: object) -> None:
+        nonlocal queue_writes
+        if Path(path) == paths["queue_path"]:
+            queue_writes += 1
+            if queue_writes == 2:
+                raise OSError("queue unavailable")
+        original_write(path, payload)
+
+    monkeypatch.setattr(agent_coordinator, "_atomic_write_json", fail_queue_commit)
+
+    with pytest.raises(OSError, match="queue unavailable"):
+        finish(
+            "codex",
+            claim["task_id"],
+            claim["lease_id"],
+            summary="artifact complete",
+            repo_path=repo,
+            queue_path=paths["queue_path"],
+            contracts_path=paths["contracts_path"],
+            state_path=paths["state_path"],
+        )
+
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "in_progress"
+    state = json.loads(paths["state_path"].read_text(encoding="utf-8"))
+    pending = state["agents"]["codex"]["pending_completion"]
+    assert pending["task_id"] == claim["task_id"]
+    assert pending["completion_commit"] == _git(repo, "rev-parse", "HEAD")
 
 
 def test_finish_refuses_uncommitted_shared_checkout_changes(tmp_path: Path):

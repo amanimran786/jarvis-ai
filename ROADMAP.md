@@ -95,23 +95,48 @@ produces a different running PID within 30 seconds. ✓
 
 ---
 
-## 🟡 Item 4 — Wire run_checks() Into Orchestrator Loop (Boris Cherny Gap)
+## ✅ Item 4 — Wire run_checks() Into Orchestrator Loop (Boris Cherny Gap) (DONE)
 
 **Problem:** `gate_pre_commit=true` is in every contract but the loop never
-verifies that a session actually ran the checker before marking a task done.
-The gate is defined everywhere, enforced nowhere at runtime.
+verified that a session actually ran the checker before marking a task done.
+The gate was defined everywhere, enforced nowhere at runtime.
 
 **Fix:**
-1. In `orchestrator_loop.py`, after a session completes, call
-   `harness.pre_commit_check.run_checks()` on any `.py` files in the session's
-   commit (get them from `git diff HEAD~1 --name-only -- '*.py'`)
-2. If findings > 0: set task status to `needs_review` instead of `done`,
-   log findings to `logs/pre_commit_violations.log`
-3. Add `needs_review` as a valid status to WORK_QUEUE and dashboard
-4. Test: commit a file with a `shell=True` line, verify loop catches it
+1. `harness.completion_verifier.verify_completion()` is now the single
+   completion boundary used by both the orchestrator harvest path and
+   `harness.agent_coordinator.finish()`.
+2. `harness.commit_review_gate` resolves the lease base and completion SHAs,
+   requires a clean checkout whose HEAD still matches the completion commit,
+   and scans Python blobs from the immutable Git tree instead of mutable
+   working-tree files.
+3. The gate rejects non-ancestor ranges, Python symlinks/unsupported modes,
+   syntax errors, security findings, hard process exits/replacement, native FFI,
+   and newly introduced `# pre-commit-ok` suppressions. It runs before
+   repository verification code. Persisted reasons and owner-only logs contain
+   rule/path/line metadata, never the matching source line or secret value.
+4. Gate violations become `needs_review`; gate infrastructure failures remain
+   unverified/retryable. Queue persistence now raises on failure so completed
+   sessions are not purged after a failed state transition.
+5. The coordinator validates unexpired lease ownership and contract digests
+   before and after verification, then writes advisory agent state before the
+   authoritative queue commit so a state-write failure cannot persist `done`.
+6. `needs_review` is a recognized WORK_QUEUE status: `jarvis_dashboard.py`
+   badges it (amber), adds a "Needs Review" stat card, and gives it the same
+   Requeue action as `blocked`/`stalled`/`failed`.
+7. Verification commands run in a default-deny macOS Seatbelt profile with no
+   network, ambient credentials, external reads, or external writes. Pytest
+   disables repository `conftest.py` and must report normal structured
+   completion for every collected test.
+8. Session/queue locks live outside Git in an owner-only directory, reject
+   symlinks, and protect selective completion purges. Stale completions are
+   quarantined without overwriting the current task owner or jamming later
+   harvests.
+9. Tests cover both completion paths, real unsafe/clean commits, dirty-tree
+   replacement, symlink and suppression bypasses, test-result forgery, secret
+   redaction, lease expiry, and queue/state write failures.
 
 **Done when:** A task that commits `shell=True` code never reaches `status=done`
-without a manual override.
+through either supported completion path. ✓
 
 ---
 
@@ -227,7 +252,7 @@ and is fused + loaded without a crash. ✓ Pipeline unblocked.
 
 ## Current Item
 
-**→ Item 4: Wire `run_checks()` into orchestrator loop** (Claude lane)
+**→ Item 5: Specialist Model Routing**
 
-Items 1, 1.5, 2, and 3 are complete. Item 4 is the only active roadmap item;
-do not start Item 5 until Item 4 is committed and production-verified.
+Items 1, 1.5, 2, 3, and 4 are complete. Item 5 is the only active roadmap
+item; do not start Item 6 until Item 5 is committed and production-verified.

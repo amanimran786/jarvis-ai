@@ -58,7 +58,7 @@ def loop_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         def list_completed(self) -> list[dict[str, Any]]:
             return []
 
-        def purge_completed(self) -> None:
+        def purge_completed(self, _session_ids=None) -> None:
             return None
 
         def active_count(self) -> int:
