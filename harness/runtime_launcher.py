@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from harness.commit_review_gate import CommitGateError, capture_clean_head
 from harness.runtime_adapter import (
     RuntimeMissingOutcome,
     RuntimePendingOutcome,
@@ -104,8 +105,31 @@ def process_runtime_queue(
                     entry["approval_reason"] = outcome.approval_reason
             elif isinstance(outcome, RuntimeTerminalOutcome):
                 if outcome.status is RuntimeTerminalStatus.SUCCEEDED:
-                    session_tracker.complete(correlation.runtime_task_id, outcome.result)
-                    entry["status"] = "completion_claimed"
+                    try:
+                        completion_commit = capture_clean_head(
+                            correlation.worktree_path
+                        )
+                    except (CommitGateError, OSError, RuntimeError, ValueError) as exc:
+                        session_tracker.fail(
+                            correlation.runtime_task_id,
+                            f"completion commit unavailable: {type(exc).__name__}",
+                            failure_class="infrastructure_failure",
+                        )
+                        entry["status"] = "runtime_error"
+                        entry["runtime_error"] = "completion commit unavailable"
+                    else:
+                        completion_persisted = session_tracker.complete(
+                            correlation.runtime_task_id,
+                            outcome.result,
+                            completion_commit=completion_commit,
+                        )
+                        if not completion_persisted:
+                            entry["status"] = "runtime_error"
+                            entry["runtime_error"] = (
+                                "completion session was not found"
+                            )
+                        else:
+                            entry["status"] = "completion_claimed"
                 else:
                     message = outcome.error or outcome.result or outcome.status.value
                     session_tracker.fail(correlation.runtime_task_id, message)

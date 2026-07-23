@@ -94,26 +94,41 @@ verified that a session actually ran the checker before marking a task done.
 The gate was defined everywhere, enforced nowhere at runtime.
 
 **Fix:**
-1. `orchestrator_loop.py` harvest step: once a session's completion verdict
-   passes (`evaluate_completion`), `_pre_commit_gate_files()` pulls the
-   `.py` files out of the loop-collected evidence's `changed_files`
-   (`evidence["observer"] == "loop"` only — a session can't dodge the gate
-   by self-reporting its own file list) and runs
-   `harness.pre_commit_check.run_checks()` against them.
-2. Findings or syntax errors → task status becomes `needs_review` (not
-   `done`), reasons are stamped onto the queue row via
-   `_mark_task_verification()`, and the full findings are appended to
-   `logs/pre_commit_violations.log`.
-3. `needs_review` is now a recognized WORK_QUEUE status: `jarvis_dashboard.py`
+1. `harness.completion_verifier.verify_completion()` is now the single
+   completion boundary used by both the orchestrator harvest path and
+   `harness.agent_coordinator.finish()`.
+2. `harness.commit_review_gate` resolves the lease base and completion SHAs,
+   requires a clean checkout whose HEAD still matches the completion commit,
+   and scans Python blobs from the immutable Git tree instead of mutable
+   working-tree files.
+3. The gate rejects non-ancestor ranges, Python symlinks/unsupported modes,
+   syntax errors, security findings, hard process exits/replacement, native FFI,
+   and newly introduced `# pre-commit-ok` suppressions. It runs before
+   repository verification code. Persisted reasons and owner-only logs contain
+   rule/path/line metadata, never the matching source line or secret value.
+4. Gate violations become `needs_review`; gate infrastructure failures remain
+   unverified/retryable. Queue persistence now raises on failure so completed
+   sessions are not purged after a failed state transition.
+5. The coordinator validates unexpired lease ownership and contract digests
+   before and after verification, then writes advisory agent state before the
+   authoritative queue commit so a state-write failure cannot persist `done`.
+6. `needs_review` is a recognized WORK_QUEUE status: `jarvis_dashboard.py`
    badges it (amber), adds a "Needs Review" stat card, and gives it the same
    Requeue action as `blocked`/`stalled`/`failed`.
-4. Test: `tests/test_orchestrator_pre_commit_gate.py` — one case commits a
-   `shell=True` line and asserts the task lands on `needs_review` (never
-   `done`) with the violation logged; a second case asserts a clean commit
-   still reaches `done`.
+7. Verification commands run in a default-deny macOS Seatbelt profile with no
+   network, ambient credentials, external reads, or external writes. Pytest
+   disables repository `conftest.py` and must report normal structured
+   completion for every collected test.
+8. Session/queue locks live outside Git in an owner-only directory, reject
+   symlinks, and protect selective completion purges. Stale completions are
+   quarantined without overwriting the current task owner or jamming later
+   harvests.
+9. Tests cover both completion paths, real unsafe/clean commits, dirty-tree
+   replacement, symlink and suppression bypasses, test-result forgery, secret
+   redaction, lease expiry, and queue/state write failures.
 
 **Done when:** A task that commits `shell=True` code never reaches `status=done`
-without a manual override. ✓
+through either supported completion path. ✓
 
 ---
 

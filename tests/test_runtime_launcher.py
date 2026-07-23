@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from harness.runtime_launcher import process_runtime_queue
 from harness.session_tracker import SessionTracker
 from harness.task_contract import TaskSpec
@@ -76,7 +78,15 @@ def test_handoff_submits_isolated_runtime_and_claims_real_id(tmp_path: Path):
     assert tracker.list_active()[0]["repo_path"] == "/tmp/worktree"
 
 
-def test_runtime_success_becomes_completed_session(tmp_path: Path):
+def test_runtime_success_becomes_completed_session(
+    tmp_path: Path,
+    monkeypatch,
+):
+    completion_commit = "b" * 40
+    monkeypatch.setattr(
+        "harness.runtime_launcher.capture_clean_head",
+        lambda _path: completion_commit,
+    )
     runtime = FakeRuntime()
     _, entry, tracker = _run(tmp_path, runtime, _entry())
     runtime.tasks["runtime-1"].update(status="succeeded", result="done")
@@ -84,7 +94,41 @@ def test_runtime_success_becomes_completed_session(tmp_path: Path):
     _, entry, tracker = _run(tmp_path, runtime, entry)
 
     assert entry["status"] == "completion_claimed"
-    assert tracker.list_completed()[0]["result_summary"] == "done"
+    completed = tracker.list_completed()[0]
+    assert completed["result_summary"] == "done"
+    assert completed["completion_commit"] == completion_commit
+
+
+def test_runtime_does_not_advance_when_completion_persistence_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completion_commit = "b" * 40
+    monkeypatch.setattr(
+        "harness.runtime_launcher.capture_clean_head",
+        lambda _path: completion_commit,
+    )
+    runtime = FakeRuntime()
+    _, entry, _ = _run(tmp_path, runtime, _entry())
+    runtime.tasks["runtime-1"].update(status="succeeded", result="done")
+
+    def fail_save(_self, _data):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(SessionTracker, "_save", fail_save)
+    queue_path = tmp_path / "LAUNCH_QUEUE.json"
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        process_runtime_queue(
+            queue_path,
+            task_runtime_module=runtime,
+            tracker=SessionTracker(
+                path=tmp_path / "ACTIVE_SESSIONS.json"
+            ),
+        )
+
+    persisted = json.loads(queue_path.read_text(encoding="utf-8"))[0]
+    assert persisted["status"] == "queued"
 
 
 def test_runtime_failure_is_classified_for_retry(tmp_path: Path):
@@ -96,6 +140,26 @@ def test_runtime_failure_is_classified_for_retry(tmp_path: Path):
 
     assert entry["status"] == "failed"
     assert tracker.list_completed()[0]["runtime_failure_class"] == "agent_error"
+
+
+def test_runtime_success_without_clean_commit_is_infrastructure_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "harness.runtime_launcher.capture_clean_head",
+        lambda _path: (_ for _ in ()).throw(RuntimeError("dirty worktree")),
+    )
+    runtime = FakeRuntime()
+    _, entry, tracker = _run(tmp_path, runtime, _entry())
+    runtime.tasks["runtime-1"].update(status="succeeded", result="done")
+
+    _, entry, tracker = _run(tmp_path, runtime, entry)
+
+    assert entry["status"] == "runtime_error"
+    completed = tracker.list_completed()[0]
+    assert completed["runtime_failure_class"] == "infrastructure_failure"
+    assert completed["completion_commit"] is None
 
 
 def test_waiting_approval_is_not_auto_approved(tmp_path: Path):

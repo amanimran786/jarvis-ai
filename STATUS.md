@@ -34,13 +34,22 @@ git config --global user.email "aman.imran@sjsu.edu"
 ## ✅ Item 4 — Wire `run_checks()` into orchestrator loop — DONE (Claude lane)
 
 - **Files:** `orchestrator_loop.py`, `jarvis_dashboard.py`,
-  `tests/test_orchestrator_pre_commit_gate.py`
-- **What:** The harvest step now runs `harness.pre_commit_check.run_checks()`
-  against the `.py` files in a session's loop-collected evidence before
-  marking a task `done`. Violations route the task to a new `needs_review`
-  status instead and log to `logs/pre_commit_violations.log`.
-- **Verified:** `tests/test_orchestrator_pre_commit_gate.py` — a `shell=True`
-  commit lands on `needs_review` (never `done`); a clean commit still reaches
-  `done`.
+  `harness/commit_review_gate.py`, `harness/completion_verifier.py`,
+  `harness/agent_coordinator.py`, and focused tests.
+- **What:** Both supported completion paths now scan immutable Python blobs
+  between the lease base and pinned completion commit before repository code
+  executes. Dirty/moved HEADs, unsafe Git modes, new inline suppressions,
+  native execution surfaces, security findings, and syntax failures cannot
+  reach `done`.
+- **Isolation:** Verification runs under a default-deny macOS Seatbelt profile
+  and requires normal structured pytest completion. Repository `conftest.py`,
+  external reads/writes, network access, and ambient credentials are denied.
+- **Durability:** Queue/session locks are owner-only and outside Git; stale
+  completions are selectively quarantined, and tracker write/corruption errors
+  fail closed.
+- **Security:** Queue reasons and owner-only violation logs are redacted; no
+  matching source line or hardcoded secret value is persisted.
+- **Verification:** focused Item 4 coverage `190 passed`; full suite
+  `3634 passed, 13 skipped, 3 warnings, 34 subtests passed`.
 
 See `ROADMAP.md` for details.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -10,13 +11,26 @@ from pathlib import Path
 
 import pytest
 
+from harness import completion_verifier
 from harness.completion_verifier import (
     MAX_CAPTURE_BYTES,
     PREVIEW_BYTES,
     CompletionEvidenceError,
+    compact_completion_evidence,
     collect_completion_evidence,
+    verify_completion,
 )
 from harness.task_contract import TaskSpec, evaluate_completion
+
+
+@pytest.fixture(autouse=True)
+def _portable_verification_sandbox(monkeypatch: pytest.MonkeyPatch):
+    if sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file():
+        monkeypatch.setattr(
+            completion_verifier,
+            "_sandboxed_argv",
+            lambda argv, _repo, _root: list(argv),
+        )
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -26,6 +40,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=30,
         shell=False,
     )
     return result.stdout.strip()
@@ -54,6 +69,7 @@ def _spec(*commands: str, wall_time_seconds: int = 30) -> TaskSpec:
                 "committed.txt",
                 "untracked.txt",
                 "generated.txt",
+                "tool.py",
             ],
             "verification_commands": list(commands),
             "budget": {"wall_time_seconds": wall_time_seconds},
@@ -86,12 +102,90 @@ def test_collects_committed_worktree_and_untracked_changes(repo: tuple[Path, str
 
     expected = ["committed.txt", "tracked.txt", "untracked.txt"]
     assert evidence["observer"] == "loop"
+    assert evidence["base_commit"] == base
+    assert evidence["completion_commit_before_commands"] == _git(
+        worktree, "rev-parse", "HEAD"
+    )
+    assert evidence["completion_commit"] == _git(worktree, "rev-parse", "HEAD")
     assert evidence["changed_files"] == expected
     assert evidence["changed_files_before_commands"] == expected
     assert evidence["changed_files_after_commands"] == expected
     assert evidence["commands"] == []
     assert evidence["policy_findings"] == []
-    assert evidence["evidence_policy"]["full_sandbox"] is False
+    assert evidence["evidence_policy"]["full_sandbox"] is (
+        sys.platform == "darwin"
+        and Path("/usr/bin/sandbox-exec").is_file()
+    )
+
+
+def test_verify_completion_enforces_immutable_commit_gate(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    unsafe = "run(command, shell" + "=True)\n"
+    (worktree / "tool.py").write_text(unsafe, encoding="utf-8")
+    _git(worktree, "add", "tool.py")
+    _git(worktree, "commit", "-m", "unsafe completion")
+    completion = _git(worktree, "rev-parse", "HEAD")
+
+    assessment = verify_completion(
+        _spec(),
+        worktree,
+        base,
+        completion_ref=completion,
+    )
+
+    assert assessment.gate.passed is False
+    assert assessment.verdict.passed is False
+    assert assessment.verdict.failure_class == "policy_failure"
+    assert "SHELL_TRUE" in {
+        finding.rule for finding in assessment.gate.findings
+    }
+
+
+def test_verify_completion_rejects_head_after_pinned_commit(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    unsafe = "run(command, shell" + "=True)\n"
+    (worktree / "tool.py").write_text(unsafe, encoding="utf-8")
+    _git(worktree, "add", "tool.py")
+    _git(worktree, "commit", "-m", "unsafe completion")
+    pinned = _git(worktree, "rev-parse", "HEAD")
+    (worktree / "tool.py").write_text("run(command, shell=False)\n", encoding="utf-8")
+    _git(worktree, "add", "tool.py")
+    _git(worktree, "commit", "-m", "later clean replacement")
+
+    with pytest.raises(CompletionEvidenceError, match="no longer matches"):
+        verify_completion(
+            _spec(),
+            worktree,
+            base,
+            completion_ref=pinned,
+        )
+
+
+def test_compact_evidence_drops_command_output_previews() -> None:
+    secret = "credential-" + "must-not-persist"
+    compact = compact_completion_evidence(
+        {
+            "observer": "loop",
+            "commands": [
+                {
+                    "command": "python -m pytest -q",
+                    "exit_code": 1,
+                    "stdout_preview": secret,
+                    "stderr_preview": secret,
+                    "stdout_sha256": "a" * 64,
+                    "stderr_sha256": "b" * 64,
+                }
+            ],
+        }
+    )
+
+    assert secret not in str(compact)
+    assert "stdout_preview" not in compact["commands"][0]
+    assert "stderr_preview" not in compact["commands"][0]
 
 
 def test_command_evidence_is_hard_capped_with_hash_and_preview(
@@ -137,11 +231,157 @@ def test_failed_command_records_output_and_is_rejected(repo: tuple[Path, str]):
     assert verdict.failure_class == "test_failure"
 
 
+def test_repository_module_cannot_shadow_pytest(repo: tuple[Path, str]) -> None:
+    worktree, base = repo
+    (worktree / "pytest.py").write_text(
+        "raise SystemExit(0)\n",
+        encoding="utf-8",
+    )
+    (worktree / "verify_test.py").write_text(
+        "def test_failure():\n    raise AssertionError('real failure')\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "pytest.py", "verify_test.py")
+    _git(worktree, "commit", "-m", "add shadow attempt")
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 1
+    assert "real failure" in evidence["commands"][0]["stdout_preview"]
+
+
+def test_repository_conftest_cannot_forge_success(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    (worktree / "conftest.py").write_text(
+        "def pytest_sessionfinish(session, exitstatus):\n"
+        "    session.exitstatus = 0\n",
+        encoding="utf-8",
+    )
+    (worktree / "verify_test.py").write_text(
+        "def test_failure():\n    raise AssertionError('must fail')\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "conftest.py", "verify_test.py")
+    _git(worktree, "commit", "-m", "add forged status hook")
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 1
+    assert "must fail" in evidence["commands"][0]["stdout_preview"]
+
+
+def test_abrupt_pytest_exit_cannot_forge_success(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    (worktree / "verify_test.py").write_text(
+        "import os\n"
+        "os._exit(0)\n\n"
+        "def test_failure():\n"
+        "    raise AssertionError('must not be skipped')\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "verify_test.py")
+    _git(worktree, "commit", "-m", "add abrupt exit attempt")
+    command = _pytest_command()
+    spec = _spec(command)
+
+    evidence = collect_completion_evidence(spec, worktree, base)
+
+    assert evidence["commands"][0]["exit_code"] == 86
+    assert evaluate_completion(spec, evidence).passed is False
+
+
+def test_native_exit_forgery_is_gated_before_test_execution(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    forged_record = (
+        '{"collected": 1, "failed": 0, "passed": 1, '
+        '"pytest_exit_code": 0, "terminal": 1}'
+    )
+    (worktree / "verify_test.py").write_text(
+        "import ctypes\n"
+        "import os\n"
+        f"os.write(1, {('JARVIS_PYTEST_RESULT ' + forged_record + chr(10)).encode()!r})\n"
+        "ctypes.CDLL(None)._exit(0)\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "verify_test.py")
+    _git(worktree, "commit", "-m", "add native exit forgery")
+    completion = _git(worktree, "rev-parse", "HEAD")
+
+    assessment = verify_completion(
+        _spec(_pytest_command("-s")),
+        worktree,
+        base,
+        completion_ref=completion,
+    )
+
+    assert assessment.gate.passed is False
+    assert "NATIVE_FFI" in {
+        finding.rule for finding in assessment.gate.findings
+    }
+    assert assessment.evidence["commands"] == []
+    assert assessment.verdict.passed is False
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
+    reason="requires macOS Seatbelt",
+)
+def test_verifier_cannot_read_or_write_outside_sandbox(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    external = worktree.parent / "outside-verifier.txt"
+    shared = Path("/Users/Shared") / (
+        f"jarvis-verifier-test-{os.getpid()}.txt"
+    )
+    external.write_text("private\n", encoding="utf-8")
+    shared.write_text("shared-private\n", encoding="utf-8")
+    source = (
+        "from pathlib import Path\n"
+        "import pytest\n\n"
+        "def test_external_access_is_denied():\n"
+        f"    target = Path({str(external)!r})\n"
+        f"    shared = Path({str(shared)!r})\n"
+        "    with pytest.raises(PermissionError):\n"
+        "        target.read_text()\n"
+        "    with pytest.raises(PermissionError):\n"
+        "        target.write_text('changed')\n"
+        "    with pytest.raises(PermissionError):\n"
+        "        shared.read_text()\n"
+    )
+    _install_test(worktree, source)
+
+    try:
+        evidence = collect_completion_evidence(
+            _spec(_pytest_command()),
+            worktree,
+            base,
+        )
+    finally:
+        shared.unlink(missing_ok=True)
+
+    assert evidence["commands"][0]["exit_code"] == 0
+    assert external.read_text(encoding="utf-8") == "private\n"
+
+
 @pytest.mark.parametrize(
     "command",
     [
         "python -c 'print(1)'",
-        "python verify_test.py",
         "/usr/bin/true",
         "python -m os",
         "python -m ruff check --fix .",
@@ -159,6 +399,51 @@ def test_untrusted_commands_fail_without_execution(
     assert result["exit_code"] == 126
     assert result["policy_validated"] is False
     assert result["stderr_preview"]
+
+
+def test_direct_repository_python_script_is_sandboxed_and_allowed(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, base = repo
+    (worktree / "verify_script.py").write_text(
+        "import sys\n"
+        "raise SystemExit(0 if sys.argv[1:] == ['--help'] else 2)\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "verify_script.py")
+    _git(worktree, "commit", "-m", "add verification script")
+    command = shlex.join(
+        [sys.executable, "verify_script.py", "--help"]
+    )
+
+    evidence = collect_completion_evidence(
+        _spec(command),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 0
+    assert evidence["commands"][0]["policy_validated"] is True
+
+
+def test_current_contract_entry_points_are_policy_valid() -> None:
+    repo = Path(__file__).resolve().parents[1]
+    payload = json.loads(
+        (repo / "TASK_CONTRACTS.json").read_text(encoding="utf-8")
+    )
+    contracts = (
+        payload if isinstance(payload, list) else payload.get("contracts", [])
+    )
+    rejected = {}
+    for contract in contracts:
+        command = contract.get("entry_point")
+        if not command:
+            continue
+        _argv, error = completion_verifier._trusted_argv(command, repo)
+        if error:
+            rejected[str(contract.get("task_id") or "<unknown>")] = error
+
+    assert rejected == {}
 
 
 def test_shell_syntax_rejects_entire_command_without_side_effect(
@@ -280,6 +565,42 @@ def test_mutation_of_already_changed_file_is_detected(repo: tuple[Path, str]):
     assert evidence["changed_files_before_commands"] == ["tracked.txt"]
     assert evidence["changed_files_after_commands"] == ["tracked.txt"]
     assert evidence["policy_findings"][0]["modified"] == ["tracked.txt"]
+
+
+def test_verification_command_cannot_move_completion_head(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worktree, base = repo
+
+    def commit_during_verification(
+        command: str,
+        command_repo: Path,
+        _timeout: float,
+    ) -> dict[str, object]:
+        (command_repo / "generated.txt").write_text("created\n", encoding="utf-8")
+        _git(command_repo, "add", "generated.txt")
+        _git(command_repo, "commit", "-m", "verifier mutation")
+        return {"command": command, "exit_code": 0}
+
+    monkeypatch.setattr(
+        completion_verifier,
+        "_execute_command",
+        commit_during_verification,
+    )
+
+    evidence = collect_completion_evidence(
+        _spec("git status --short"),
+        worktree,
+        base,
+    )
+
+    finding_ids = {finding["id"] for finding in evidence["policy_findings"]}
+    assert "verifier_head_mutation" in finding_ids
+    assert (
+        evidence["completion_commit_before_commands"]
+        != evidence["completion_commit"]
+    )
 
 
 def test_rejects_unknown_base_ref(repo: tuple[Path, str]):

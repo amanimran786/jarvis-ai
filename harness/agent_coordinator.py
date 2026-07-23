@@ -11,6 +11,7 @@ import argparse
 import copy
 import datetime as dt
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -23,7 +24,8 @@ from typing import Any
 from harness.approval_workflow import consume_approval, restore_approval
 from harness.completion_verifier import (
     CompletionEvidenceError,
-    collect_completion_evidence,
+    compact_completion_evidence,
+    verify_completion,
 )
 from harness.state_lock import queue_state_lock
 from harness.task_contract import (
@@ -38,7 +40,6 @@ from harness.task_contract import (
     normalized_task_spec_digest,
     task_contract_digest,
     validate_contract,
-    evaluate_completion,
 )
 from runtime_state import app_data_dir
 
@@ -50,6 +51,7 @@ ACTIVE_STATUSES = frozenset({"active", "in_progress", "running"})
 COORDINATION_VERSION = 1
 DEFAULT_LEASE_SECONDS = 3600
 LEASE_EXPIRY_COOLDOWN_SECONDS = 1200
+log = logging.getLogger(__name__)
 
 _LEASE_FIELDS = (
     "lease_owner",
@@ -683,26 +685,7 @@ def release(
 
 
 def _compact_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
-    commands = []
-    for item in evidence.get("commands", []):
-        if not isinstance(item, Mapping):
-            continue
-        commands.append(
-            {
-                "command": item.get("command"),
-                "exit_code": item.get("exit_code"),
-                "stdout_sha256": item.get("stdout_sha256"),
-                "stderr_sha256": item.get("stderr_sha256"),
-                "timed_out": item.get("timed_out"),
-            }
-        )
-    return {
-        "observer": evidence.get("observer"),
-        "changed_files": evidence.get("changed_files", []),
-        "commands": commands,
-        "policy_findings": evidence.get("policy_findings", []),
-        "collected_at": evidence.get("collected_at"),
-    }
+    return compact_completion_evidence(evidence)
 
 
 def finish(
@@ -720,6 +703,7 @@ def finish(
     """Collect loop-owned evidence and close a lease only when it verifies."""
     agent = _normalize_agent(agent)
     state_path = Path(state_path or default_state_path())
+    now_was_provided = now is not None
     now = now or _now()
     head = _clean_repo_head(Path(repo_path))
 
@@ -730,6 +714,11 @@ def finish(
             raise CoordinationError(f"task not found: {task_id}")
         if task.get("lease_owner") != agent or task.get("lease_id") != lease_id:
             raise CoordinationError("lease ownership does not match")
+        if task.get("status") != "in_progress":
+            raise CoordinationError("task is not in progress")
+        lease_expiry = _parse_time(task.get("lease_expires_at"))
+        if lease_expiry is None or lease_expiry <= now:
+            raise CoordinationError("lease expired before completion verification")
         base_ref = str(task.get("lease_base_ref") or "")
         contracts = load_contracts(Path(contracts_path))
         contract, spec, contract_digest, spec_digest = _contract_for_queue_task(
@@ -740,6 +729,8 @@ def finish(
             or task.get("lease_task_spec_sha256") != spec_digest
         ):
             raise CoordinationError("task contract changed after the lease was claimed")
+        leased_contract_digest = str(task.get("lease_contract_sha256") or "")
+        leased_spec_digest = str(task.get("lease_task_spec_sha256") or "")
         verification_deadline = now + dt.timedelta(
             seconds=spec.budget.wall_time_seconds + 60
         )
@@ -747,18 +738,46 @@ def finish(
         _atomic_write_json(Path(queue_path), queue)
 
     try:
-        evidence = collect_completion_evidence(spec, Path(repo_path), base_ref)
-        verdict = evaluate_completion(spec, evidence)
+        assessment = verify_completion(
+            spec,
+            Path(repo_path),
+            base_ref,
+            completion_ref=head,
+        )
+        evidence = dict(assessment.evidence)
+        verdict = assessment.verdict
     except CompletionEvidenceError as exc:
         evidence = {"observer": "loop", "error": str(exc)}
         verdict_status = "unverified"
-        failure_class = "verification_infrastructure"
+        failure_class = "infrastructure_failure"
         reasons = (str(exc),)
     else:
-        verdict_status = verdict.status
-        failure_class = verdict.failure_class
-        reasons = verdict.reasons
+        if not assessment.gate.passed:
+            if assessment.gate.infrastructure_failed:
+                verdict_status = "unverified"
+                failure_class = "infrastructure_failure"
+            else:
+                verdict_status = "needs_review"
+                failure_class = "pre_commit_gate_violation"
+            reasons = tuple(assessment.gate.reasons())
+        else:
+            verdict_status = verdict.status
+            failure_class = verdict.failure_class
+            reasons = verdict.reasons
 
+    try:
+        current_head = _clean_repo_head(Path(repo_path))
+    except CoordinationError as exc:
+        verdict_status = "unverified"
+        failure_class = "infrastructure_failure"
+        reasons = (str(exc),)
+    else:
+        if current_head != head:
+            verdict_status = "unverified"
+            failure_class = "infrastructure_failure"
+            reasons = ("repository HEAD changed during completion verification",)
+
+    finished_at = now if now_was_provided else _now()
     with queue_state_lock(Path(queue_path)):
         queue = _load_json_list(Path(queue_path))
         task = next((item for item in queue if _task_id(item) == task_id), None)
@@ -766,6 +785,29 @@ def finish(
             raise CoordinationError(f"task disappeared during verification: {task_id}")
         if task.get("lease_owner") != agent or task.get("lease_id") != lease_id:
             raise CoordinationError("lease changed during verification")
+        if task.get("status") != "in_progress":
+            raise CoordinationError("task status changed during verification")
+        if str(task.get("lease_base_ref") or "") != base_ref:
+            raise CoordinationError("task base commit changed during verification")
+        final_expiry = _parse_time(task.get("lease_expires_at"))
+        if final_expiry is None or final_expiry <= finished_at:
+            raise CoordinationError("lease expired during completion verification")
+        if (
+            task.get("lease_contract_sha256") != leased_contract_digest
+            or task.get("lease_task_spec_sha256") != leased_spec_digest
+        ):
+            raise CoordinationError("lease digests changed during verification")
+        contracts = load_contracts(Path(contracts_path))
+        _, _, current_contract_digest, current_spec_digest = _contract_for_queue_task(
+            task, contracts
+        )
+        if (
+            leased_contract_digest != current_contract_digest
+            or leased_spec_digest != current_spec_digest
+        ):
+            raise CoordinationError("task contract changed during verification")
+        if _clean_repo_head(Path(repo_path)) != head:
+            raise CoordinationError("repository HEAD changed before queue promotion")
         passed = verdict_status == "verified"
         if passed:
             task.update(
@@ -784,22 +826,52 @@ def finish(
             _clear_lease(task, restore_assignee=False)
             task.update(
                 {
-                    "status": "unverified" if verdict_status == "unverified" else "blocked",
+                    "status": (
+                        "unverified"
+                        if verdict_status == "unverified"
+                        else "needs_review"
+                        if verdict_status == "needs_review"
+                        else "blocked"
+                    ),
                     "assigned_to": previous,
                     "assigned_at": None,
                     "verification_failure_class": failure_class,
                     "verification_reasons": list(reasons),
                     "completion_evidence": _compact_evidence(evidence),
+                    "completion_commit": head,
                     "verified_at": _iso(now),
                 }
             )
         state = _load_state(state_path)
         record = _agent_record(state, agent)
-        record.update({"status": "available", "updated_at": _iso(now)})
+        record.update(
+            {
+                "status": "finalizing",
+                "updated_at": _iso(finished_at),
+                "pending_completion": {
+                    "task_id": task_id,
+                    "lease_id": lease_id,
+                    "completion_commit": head,
+                    "verdict_status": verdict_status,
+                    "failure_class": failure_class,
+                    "reasons": list(reasons),
+                    "evidence": _compact_evidence(evidence),
+                },
+            }
+        )
+        _atomic_write_json(state_path, state)
+        _atomic_write_json(Path(queue_path), queue)
+        record.update({"status": "available", "updated_at": _iso(finished_at)})
         record.pop("task_id", None)
         record.pop("lease_id", None)
-        _atomic_write_json(Path(queue_path), queue)
-        _atomic_write_json(state_path, state)
+        record.pop("pending_completion", None)
+        try:
+            _atomic_write_json(state_path, state)
+        except OSError:
+            log.exception(
+                "queue promotion committed but agent state cleanup failed for %s",
+                task_id,
+            )
     return {
         "status": "verified" if passed else verdict_status,
         "agent": agent,
