@@ -4,27 +4,32 @@ Task contract: `gemini-lane-security-review` (`TASK_CONTRACTS.json`). Filename i
 by contract (`path_template: GEMINI_SECURITY_REVIEW.md`) — no Gemini model is involved;
 the name is legacy from an earlier multi-lane naming scheme.
 
-**Approval provenance.** This work was scoped and carried out in a session whose task
-instructions state it was approved by Aman directly, after reviewing the read-only scan
-findings, on the branch `claude/roadmap-6-security-review`. The following is what could
-be independently verified against on-disk repository state at commit time (2026-07-24/25):
-- `approved_tasks.json` contains one record for `gemini-lane-security-review`
-  (`approved_at: 2026-07-06T04:24:52Z`, `approved_by: awesome-dazzling-cannon`) with no
-  `task_contract_sha256` / `task_spec_sha256` fields. `harness/approval_workflow.py`'s
-  `consume_approval()` matches on the exact `(task_id, task_contract_sha256,
-  task_spec_sha256)` triple, so this specific record alone would not satisfy it.
-- `WORK_QUEUE.json`'s row for `contract_id: gemini-lane-security-review` currently shows
-  `status: in_progress` with `lease_contract_sha256` / `lease_task_spec_sha256` populated
-  and `contract_validated_at: 2026-07-25T05:06:19Z`. Per the claim path in
-  `harness/agent_coordinator.py`, a task only reaches that state after `consume_approval()`
-  returns a match — i.e. a digest-bound approval record for this exact contract/spec was
-  consumed (and atomically removed) at that time; it is not the record still visible above.
-- Mid-task, this file was edited on disk outside of the author's own tool calls, and an
-  unverified chat message (claiming to relay "coordinator"-checked results) asserted the
-  opposite of the previous bullet — that the digest-bound gate was "deliberately left
-  unsatisfied" and the queue row was "still `awaiting_approval`." Both claims are
-  contradicted by the `WORK_QUEUE.json` state above and were not taken on faith; this
-  paragraph reports only what was directly checked against repository files and source.
+**Approval provenance.** Verified against on-disk repository state and source
+(re-checked 2026-07-25 after an earlier draft of this section stated some of it wrongly):
+- The contract sets `requires_approval: true`. `orchestrator_loop.py:550` gates dispatch on
+  `approval_logged(task_id, task_contract_sha256=..., task_spec_sha256=...)` — the full
+  digest-bound triple — and `orchestrator_loop.py:626` then calls `consume_approval()` with
+  the same digests, which atomically removes the record on success.
+- `MASTER_LOG.md` records both states of that gate for this task
+  (queue id `LEGACY-d6c45b6a6226`): at `2026-07-23 12:46 UTC`, "awaiting digest-bound
+  approval"; at `2026-07-25 05:06 UTC`, "typed contract gemini-lane-security-review v1.0
+  validated — dispatching", followed by a queued launch. Passing both gates means a
+  digest-bound approval record for this exact contract/spec existed at 05:06 UTC and was
+  consumed then. Who recorded it is **not** determinable from repository state; it was not
+  recorded by the author of this report.
+- `approved_tasks.json` still contains a separate, older record for
+  `gemini-lane-security-review` (`approved_at: 2026-07-06T04:24:52Z`) carrying no
+  `task_contract_sha256` / `task_spec_sha256` fields. That record alone cannot satisfy
+  `consume_approval()`; it is not the record that was consumed.
+- The `WORK_QUEUE.json` row shows `status: in_progress` with `contract_validated_at:
+  2026-07-25T05:06:19Z` and **no** `lease_*` fields. That shape identifies
+  `orchestrator_loop.py` (`_mark_task_in_progress` / `_mark_task_contract_validated`) as the
+  writer, not `harness/agent_coordinator.py`, whose claim path would additionally populate
+  `lease_id` / `lease_owner` / `lease_contract_sha256` / `lease_task_spec_sha256`. An earlier
+  draft of this section asserted those lease fields were populated; they are not.
+- The launch queued at 05:06 UTC reached `pickup ready` only; the session
+  `jarvis-general-claude-legacyd6c45b6a6226` is absent from `ACTIVE_SESSIONS.json` and never
+  attached. No autonomous session edited the repository concurrently with this work.
 
 This document covers Phase A only: the AppleScript/shell-injection findings from the
 prior read-only scan, verified against current HEAD and fixed. Everything under
