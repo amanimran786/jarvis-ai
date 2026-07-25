@@ -112,6 +112,27 @@ class TestRemoteControls(unittest.TestCase):
         self.assertTrue(resp.json()["ok"])
         mock_lock.assert_called_once()
 
+    @patch("subprocess.run")
+    def test_remote_type_escapes_quotes_and_backslashes_in_order(self, mock_run):
+        """Regression: escaping must be backslash-first, then quotes, so a body
+        containing both stays balanced in the AppleScript `keystroke` literal
+        (previously quotes were escaped first, re-doubling the backslash and
+        leaving an unescaped quote that could terminate the string early)."""
+        mock_run.return_value = MagicMock(returncode=0)
+        headers = {"Authorization": "Bearer jarvis-test-remote-token"}
+        resp = self.client.post(
+            "/remote/type",
+            json={"text": 'He said "hi" \\ bye', "submit": False},
+            headers=headers,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
+
+        script_call = mock_run.call_args_list[0]
+        script_args = script_call.args[0]
+        script = script_args[script_args.index("-e") + 1]
+        self.assertIn('keystroke "He said \\"hi\\" \\\\ bye"', script)
+
 
 if __name__ == "__main__":
     unittest.main()

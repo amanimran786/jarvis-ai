@@ -77,6 +77,57 @@ class MessagesContactTests(unittest.TestCase):
             result = messages.send_imessage("Aman Imran", "hello")
         self.assertIn("none of them have a phone number or email", result.lower())
 
+    def test_send_imessage_rejects_applescript_injection_recipient(self):
+        """A recipient shaped like `x@" & (do shell script "...") & "` must never be
+        interpolated raw into the AppleScript buddy literal. It doesn't match the
+        strict phone/email allowlist, so it must fall through to contact lookup
+        (which fails here) instead of being treated as a direct address."""
+        malicious = 'x@" & (do shell script "id") & "'
+        with patch("messages.lookup_contact", return_value=None), \
+             patch("messages._run_applescript") as mock_applescript:
+            result = messages.send_imessage(malicious, "hello")
+        mock_applescript.assert_not_called()
+        self.assertIn("couldn't find a contact", result.lower())
+
+    def test_send_imessage_escapes_quotes_and_backslashes_in_body(self):
+        """Body containing both a quote and a backslash must escape backslash
+        first so the resulting AppleScript string stays balanced (regression
+        for the reversed-escape-order bug)."""
+        captured = {}
+
+        def _fake_run_applescript(script):
+            captured["script"] = script
+            return "", ""
+
+        with patch("messages._run_applescript", side_effect=_fake_run_applescript):
+            messages.send_imessage("+15105550123", 'He said "hi" \\ bye')
+
+        script = captured["script"]
+        # The send "..." literal must contain a properly escaped body: the
+        # backslash is doubled first, then the quotes are escaped, so no raw
+        # unescaped quote terminates the string early.
+        self.assertIn('send "He said \\"hi\\" \\\\ bye" to targetBuddy', script)
+
+    def test_send_imessage_escapes_valid_direct_address_before_interpolation(self):
+        """Even an address that passes the strict allowlist is still run through
+        the AppleScript escaper before interpolation (defense in depth)."""
+        captured = {}
+
+        def _fake_run_applescript(script):
+            captured["script"] = script
+            return "", ""
+
+        with patch("messages._run_applescript", side_effect=_fake_run_applescript):
+            messages.send_imessage("+1 (510) 555-0123", "hi")
+
+        self.assertIn('buddy "+1 (510) 555-0123" of targetService', captured["script"])
+
+    def test_is_valid_direct_address_rejects_injection_shapes(self):
+        self.assertFalse(messages._is_valid_direct_address('x@" & (do shell script "id") & "'))
+        self.assertFalse(messages._is_valid_direct_address('555" & (do shell script "id") & "'))
+        self.assertTrue(messages._is_valid_direct_address("+15105550123"))
+        self.assertTrue(messages._is_valid_direct_address("user@example.com"))
+
     def test_describe_contact_handles_formats_phone_and_email_labels(self):
         with patch(
             "messages._collect_contact_rows",
