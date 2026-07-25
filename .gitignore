@@ -122,6 +122,7 @@ training/execution_traces/
 logs/*.jsonl
 logs/*.log
 logs/*.json
+logs/archive/
 logs/circuit_breaker.json
 ACTIVE_SESSIONS.json
 LAUNCH_QUEUE.json
