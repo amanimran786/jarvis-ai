@@ -129,6 +129,7 @@ ORCHESTRATOR_STATUS.json
 RESUME_SIGNAL.json
 PENDING_SESSIONS/
 approved_tasks.json
+.approved_tasks.json.lock
 evals/
 
 # Daemon-rewritten coordination/queue state — runtime data, not source.
