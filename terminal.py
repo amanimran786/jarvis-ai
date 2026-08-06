@@ -192,6 +192,9 @@ def list_directory(path: str = "~") -> str:
 
 def run_python(code: str) -> str:
     """Execute Python code and return output."""
+    gate = perms.can_run_shell(code, admin=False)
+    if not gate["ok"]:
+        return gate["reason"]
     path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
