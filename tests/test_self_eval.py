@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -186,10 +187,12 @@ class PerformanceReportTests(unittest.TestCase):
         self.assertIn("No self-eval scores", report)
 
     def test_with_data_returns_metrics(self):
-        # Seed a few score records
+        # Seed a few score records, timestamped relative to now so they always
+        # fall inside the query window regardless of when the test runs.
+        recent_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         records = [
             {
-                "id": f"test{i}", "ts": "2026-06-24T00:00:00+00:00",
+                "id": f"test{i}", "ts": recent_ts,
                 "routing_tag": "TechAssist",
                 "composite": 0.75,
                 "dimensions": {"specificity": 0.6, "voice_fidelity": 0.9},
@@ -223,9 +226,12 @@ class JarvisReflectionTests(unittest.TestCase):
         self.assertEqual(note, "")
 
     def test_reflection_generated_with_enough_data(self):
+        # Timestamped relative to now so the fixture never ages out of the
+        # query window (see test_with_data_returns_metrics for the same fix).
+        recent_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         records = [
             {
-                "id": f"r{i}", "ts": "2026-06-24T00:00:00+00:00",
+                "id": f"r{i}", "ts": recent_ts,
                 "routing_tag": "TechAssist",
                 "composite": 0.55,
                 "dimensions": {"specificity": 0.3, "voice_fidelity": 0.6, "memory_util": 0.4},
