@@ -555,6 +555,34 @@ class TerminalCommandGatingTests(unittest.TestCase):
             result = terminal.run_admin_command("rm -rf /etc")
         self.assertIn("Blocked", result)
 
+    def test_run_python_blocked_by_hook(self):
+        import terminal
+        with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Policy blocked."}) as gate_mock, \
+             patch("terminal.subprocess.run") as run_mock:
+            result = terminal.run_python("print('should never run')")
+        self.assertEqual(result, "Policy blocked.")
+        gate_mock.assert_called_once()
+        run_mock.assert_not_called()
+
+    def test_run_python_denial_matches_run_command_denial_shape(self):
+        import terminal
+        with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Policy blocked."}):
+            command_result = terminal.run_command("ls -la")
+        with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Policy blocked."}):
+            python_result = terminal.run_python("print(1)")
+        self.assertEqual(command_result, python_result)
+
+    def test_run_python_executes_when_authorized(self):
+        import terminal
+        completed = SimpleNamespace(returncode=0, stdout="42\n", stderr="")
+        with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}), \
+             patch("terminal.subprocess.run", return_value=completed) as run_mock:
+            result = terminal.run_python("print(42)")
+        self.assertEqual(result, "42")
+        run_mock.assert_called_once()
+        args, kwargs = run_mock.call_args
+        self.assertEqual(args[0][0], "python3")
+
 
 class TerminalWriteTests(unittest.TestCase):
 
