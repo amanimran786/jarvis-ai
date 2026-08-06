@@ -230,7 +230,8 @@ def _schedule_osascript_alarm(title: str, dt) -> str:
     import subprocess
     now = datetime.datetime.now()
     delay_secs = max(0, int((dt - now).total_seconds()))
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+    flat_title = title.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    safe_title = browser._escape_applescript(flat_title)
     script = f'delay {delay_secs}\ndisplay notification "{safe_title}" with title "Jarvis Reminder" sound name "Glass"'
     subprocess.Popen(["osascript", "-e", script])
     return f"Reminder set for {dt.strftime('%-I:%M %p')}: {title}."
@@ -2578,6 +2579,13 @@ def _looks_like_non_recipient_command(lower: str) -> bool:
     )
 
 
+# Conservative email shape used to gate _looks_like_contact_name -- deliberately
+# excludes quotes/spaces/parens/"&" so a crafted string like `x@" & (do shell
+# script "...") & "` is rejected instead of being treated as a bare contact
+# address downstream (see messages.py send_imessage).
+_CONTACT_EMAIL_SHAPE_RE = re.compile(r"^[\w.\-+%]+@[\w.\-]+\.[A-Za-z]{2,}$")
+
+
 def _looks_like_contact_name(name: str) -> bool:
     cleaned = (name or "").strip()
     if not cleaned:
@@ -2585,7 +2593,7 @@ def _looks_like_contact_name(name: str) -> bool:
     if len(cleaned) > 64:
         return False
     if "@" in cleaned:
-        return True
+        return bool(_CONTACT_EMAIL_SHAPE_RE.match(cleaned))
     if re.search(r"[0-9]", cleaned):
         letters = [tok.lower() for tok in re.findall(r"[A-Za-z]+", cleaned)]
         filler = {"this", "that", "the", "number", "phone", "mobile", "cell", "at"}

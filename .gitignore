@@ -122,6 +122,7 @@ training/execution_traces/
 logs/*.jsonl
 logs/*.log
 logs/*.json
+logs/archive/
 logs/circuit_breaker.json
 ACTIVE_SESSIONS.json
 LAUNCH_QUEUE.json
@@ -129,6 +130,7 @@ ORCHESTRATOR_STATUS.json
 RESUME_SIGNAL.json
 PENDING_SESSIONS/
 approved_tasks.json
+.approved_tasks.json.lock
 evals/
 
 # Daemon-rewritten coordination/queue state — runtime data, not source.

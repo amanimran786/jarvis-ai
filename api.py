@@ -3517,7 +3517,7 @@ def remote_type(request: Request, req: RemoteTypeRequest):
         raise HTTPException(status_code=401, detail="Unauthorized")
     try:
         import subprocess
-        safe_text = req.text.replace('"', '\\"').replace('\\', '\\\\')[:500]
+        safe_text = req.text.replace('\\', '\\\\').replace('"', '\\"')[:500]
         script = f'tell application "System Events" to keystroke "{safe_text}"'
         subprocess.run(["osascript", "-e", script], capture_output=True, timeout=5)
         if req.submit:

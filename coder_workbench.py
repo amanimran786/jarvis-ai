@@ -443,8 +443,8 @@ def fix_loop(
         }
     """
     import ollama as _ollama_lib
-    from brains.brain_ollama import get_best_available
-    from config import LOCAL_CODER, LOCAL_ORNITH_35B
+    from brains.brain_ollama import bounded_local_options, get_best_available
+    from config import LOCAL_CODER
 
     cwd = (workspace or ROOT / "workspace").resolve()
     cwd.mkdir(parents=True, exist_ok=True)
@@ -469,17 +469,12 @@ def fix_loop(
     except ImportError:
         _ollama_client = _ollama_lib.Client(timeout=300.0)
 
-    # Prefer ornith-35b (agentic coding specialist, SWE-bench 82.4); fall back to LOCAL_CODER.
-    # The check avoids get_best_available's default-to-first-model behaviour when the
-    # preferred model isn't pulled — we want an explicit presence test.
-    try:
-        _avail = {m.model for m in _ollama_client.list().models}
-        if any(LOCAL_ORNITH_35B in m for m in _avail):
-            model = LOCAL_ORNITH_35B
-        else:
-            model = get_best_available(LOCAL_CODER)
-    except Exception:
-        model = get_best_available(LOCAL_CODER)
+    model = get_best_available(LOCAL_CODER, require_preferred=True)
+    model_options = bounded_local_options(
+        model,
+        max_context=32_768,
+        max_output=4_096,
+    )
     log.info("[fix_loop] Starting — model=%s cwd=%s task=%s", model, cwd, task[:80])
 
     for iteration in range(1, max_iterations + 1):
@@ -511,7 +506,7 @@ def fix_loop(
                     {"role": "user", "content": prompt},
                 ],
                 stream=False,
-                options={"temperature": 0},
+                options=model_options,
             )
             raw = (response.message.content or "").strip()
             parsed = _parse_coder_json(raw)

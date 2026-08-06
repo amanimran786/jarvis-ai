@@ -19,6 +19,10 @@ import context_budget
 import memory as mem
 import conversation_context as ctx
 import usage_tracker
+from local_model_identity import (
+    find_exact_ollama_model,
+    normalize_ollama_model_ref,
+)
 
 log = logging.getLogger(__name__)
 
@@ -457,34 +461,72 @@ def _ollama_options_for_model(model: str) -> dict[str, int]:
     return options
 
 
+def bounded_local_options(
+    model: str,
+    *,
+    max_context: int,
+    max_output: int,
+    default_context: int | None = None,
+    temperature: int | float = 0,
+) -> dict[str, int | float]:
+    """Apply explicit upper bounds to direct Ollama specialist requests."""
+    fallback_context = max_context if default_context is None else default_context
+    if max_context <= 0 or max_output <= 0 or fallback_context <= 0:
+        raise ValueError("Local model request limits must be positive")
+    configured = _ollama_options_for_model(model)
+    context = int(configured.get("num_ctx", fallback_context))
+    output = int(configured.get("num_predict", max_output))
+    if context <= 0 or output <= 0:
+        raise ValueError("Configured local model request limits must be positive")
+    configured["num_ctx"] = min(context, max_context)
+    configured["num_predict"] = min(output, max_output)
+    configured["temperature"] = temperature
+    return configured
+
+
 def _is_available(model: str) -> bool:
     """Check if a model is pulled and available."""
     try:
         models = [m.model for m in _client().list().models]
-        return any(model in m for m in models)
+        return find_exact_ollama_model(model, models) is not None
     except Exception:
         return False
 
 
-def get_best_available(preferred: str) -> str:
-    """Return preferred model if available, else fall back to first available."""
+def get_best_available(
+    preferred: str = LOCAL_DEFAULT,
+    *,
+    require_preferred: bool = False,
+) -> str:
+    """Resolve an installed local model, optionally requiring an exact match."""
+    if _is_cloud_tagged_model(preferred):
+        raise RuntimeError(
+            f"Cloud-tagged model is not allowed in local runtime: {preferred}"
+        )
     try:
-        if _is_cloud_tagged_model(preferred):
-            raise RuntimeError(f"Cloud-tagged model is not allowed in local runtime: {preferred}")
         models = [
             m.model for m in _client().list().models
             if not _is_cloud_tagged_model(m.model)
         ]
-        if not models:
-            raise RuntimeError("No Ollama models found. Run: ollama pull llama3.1:8b")
-        if LOCAL_PREFER_TUNED and LOCAL_TUNED and any(LOCAL_TUNED in m for m in models):
-            if preferred == LOCAL_DEFAULT:
-                return LOCAL_TUNED
-        if any(preferred in m for m in models):
-            return preferred
-        return models[0]
     except Exception as e:
-        raise RuntimeError(f"Ollama not running. Start it with: ollama serve\n{e}")
+        raise RuntimeError(
+            f"Ollama not running. Start it with: ollama serve\n{e}"
+        ) from e
+    if not models:
+        raise RuntimeError("No Ollama models found. Run: ollama pull llama3.1:8b")
+    tuned = find_exact_ollama_model(LOCAL_TUNED, models)
+    if LOCAL_PREFER_TUNED and LOCAL_TUNED and tuned and not require_preferred:
+        if preferred == LOCAL_DEFAULT:
+            return tuned
+    selected = find_exact_ollama_model(preferred, models)
+    if selected:
+        return selected
+    if require_preferred:
+        raise RuntimeError(
+            f"Exact local model is unavailable: {preferred}. "
+            f"Run: ollama pull {preferred}"
+        )
+    return models[0]
 
 
 def _is_cloud_tagged_model(model: str) -> bool:
@@ -501,8 +543,7 @@ def _is_cloud_tagged_model(model: str) -> bool:
 
 
 def _normalize_model_tag(model: str) -> str:
-    value = (model or "").strip()
-    return value[:-7] if value.endswith(":latest") else value
+    return normalize_ollama_model_ref(model)
 
 
 def _exact_available_model(model: str) -> str:
@@ -513,9 +554,9 @@ def _exact_available_model(model: str) -> str:
         item.model for item in _client().list().models
         if not _is_cloud_tagged_model(item.model)
     ]
-    for available in models:
-        if _normalize_model_tag(available) == requested:
-            return available
+    available = find_exact_ollama_model(requested, models)
+    if available:
+        return available
     raise RuntimeError(f"Exact local model is unavailable: {model}")
 
 
@@ -816,6 +857,20 @@ def list_local_models() -> list[str]:
         ]
     except Exception:
         return []
+
+
+def local_model_inventory() -> tuple[bool, list[str]]:
+    """Return Ollama reachability separately from its pulled-model inventory."""
+    if not _check_ollama_liveness():
+        return False, []
+    try:
+        models = [
+            model.model for model in _client().list().models
+            if not _is_cloud_tagged_model(model.model)
+        ]
+    except Exception:
+        return False, []
+    return True, models
 
 
 # ── Agentic tool-calling loop ──────────────────────────────────────────────────
@@ -1682,11 +1737,19 @@ def local_capabilities() -> dict:
         except Exception:
             return None
 
+    def _selected_specialist(preferred: str) -> str | None:
+        if not models:
+            return None
+        try:
+            return get_best_available(preferred, require_preferred=True)
+        except Exception:
+            return None
+
     return {
         "models": models,
         "selected_default": _selected(LOCAL_DEFAULT),
-        "selected_coder": _selected(LOCAL_CODER),
-        "selected_reasoning": _selected(LOCAL_REASONING),
+        "selected_coder": _selected_specialist(LOCAL_CODER),
+        "selected_reasoning": _selected_specialist(LOCAL_REASONING),
         "vision_model": _best_vision_model(),
         "vision_preferred": _LOCAL_VISION_MODEL or None,
         "vision_candidates": _vision_candidates(),

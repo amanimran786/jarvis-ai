@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from harness.session_tracker import SessionTracker
+from harness.session_tracker import SessionTracker, SessionTrackerError
 
 
 def _make_tracker(tmp_path: Path) -> SessionTracker:
@@ -144,3 +144,53 @@ class TestActiveCountAfterExpiry:
         ])
         tracker.expire_stalled(timeout_minutes=90)
         assert tracker.active_count() == 1  # only "a" remains active
+
+
+def test_selective_purge_preserves_later_completion(tmp_path: Path) -> None:
+    tracker = _make_tracker(tmp_path)
+    tracker.claim("TASK-1", "session-1")
+    tracker.complete("session-1", "first")
+    harvested = tracker.list_completed()
+    tracker.claim("TASK-2", "session-2")
+    tracker.complete("session-2", "second")
+
+    removed = tracker.purge_completed(
+        session["session_id"] for session in harvested
+    )
+
+    assert removed == 1
+    assert [
+        session["session_id"] for session in tracker.list_completed()
+    ] == ["session-2"]
+
+
+def test_completion_persistence_failure_is_not_suppressed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _make_tracker(tmp_path)
+    tracker.claim("TASK-1", "session-1")
+
+    def fail_replace(_source, _destination):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr("harness.session_tracker.os.replace", fail_replace)
+
+    with pytest.raises(OSError, match="could not persist session tracker"):
+        tracker.complete("session-1", "done")
+
+    assert tracker.list_active()[0]["session_id"] == "session-1"
+
+
+def test_corrupt_tracker_fails_closed_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "ACTIVE_SESSIONS.json"
+    corrupt = "{not valid json"
+    path.write_text(corrupt, encoding="utf-8")
+    tracker = SessionTracker(path=path)
+
+    with pytest.raises(SessionTrackerError):
+        tracker.claim("TASK-1", "session-1")
+
+    assert path.read_text(encoding="utf-8") == corrupt

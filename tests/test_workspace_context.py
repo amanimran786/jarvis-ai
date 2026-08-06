@@ -1,6 +1,7 @@
 """Tests for workspace_context.snapshot() and format_for_prompt()."""
 from __future__ import annotations
 
+import subprocess
 import threading
 import time
 from unittest.mock import patch
@@ -54,6 +55,36 @@ class TestSnapshot:
             snap = workspace_context.snapshot()
         assert snap["git_status"] == ""
         assert snap["recent_commits"] == ""
+
+    def test_git_status_uses_no_optional_locks(self):
+        """_git_status() is a read-only query and must never take
+        .git/index.lock. A plain `git status` can opportunistically refresh
+        and rewrite the on-disk index (briefly taking the lock); if that
+        subprocess is ever killed on timeout mid-write, the lock is
+        orphaned and blocks every later git command in the repo.
+        --no-optional-locks keeps this call a pure read.
+        """
+        with patch(
+            "workspace_context.subprocess.check_output", return_value=""
+        ) as mock_check_output:
+            workspace_context._git_status()
+        argv = mock_check_output.call_args.args[0]
+        assert argv[0] == "git"
+        assert "--no-optional-locks" in argv
+        assert argv.index("--no-optional-locks") < argv.index("status")
+
+    def test_run_logs_failures_instead_of_swallowing_silently(self):
+        """_run() must not swallow subprocess failures with no trace at
+        all — that hid the fact this code path was ever failing/timing
+        out. A debug log line is enough since not-a-git-repo is a benign,
+        expected failure mode for this helper."""
+        with patch(
+            "workspace_context.subprocess.check_output",
+            side_effect=subprocess.TimeoutExpired(cmd=["git", "status"], timeout=8),
+        ), patch("workspace_context.log.debug") as mock_debug:
+            result = workspace_context._run(["git", "status"])
+        assert result == ""
+        mock_debug.assert_called_once()
 
     def test_key_files_only_existing(self, tmp_path, monkeypatch):
         """_key_files() must skip files that don't exist in the root."""

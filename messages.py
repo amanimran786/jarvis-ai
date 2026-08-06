@@ -10,9 +10,24 @@ import sqlite3
 import json
 from pathlib import Path
 
+from browser import _escape_applescript
+
 _AMBIGUOUS_CONTACT = "__AMBIGUOUS_CONTACT__"
 _FUZZY_MATCHES = "__FUZZY_MATCHES__"
 _CONTACT_WITHOUT_HANDLE = "__CONTACT_WITHOUT_HANDLE__"
+
+# Strict allowlist for a recipient that is used directly as an AppleScript
+# buddy address (i.e. not resolved via Contacts lookup). Anything that
+# doesn't match one of these shapes must go through lookup_contact() instead
+# of being interpolated into the AppleScript string.
+_PHONE_ADDRESS_RE = re.compile(r"^\+?[0-9()\-.\s]{7,}$")
+_EMAIL_ADDRESS_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+
+
+def _is_valid_direct_address(value: str) -> bool:
+    """True only if value is a plausible phone number or email address."""
+    candidate = value.strip()
+    return bool(_PHONE_ADDRESS_RE.match(candidate) or _EMAIL_ADDRESS_RE.match(candidate))
 
 # Module-level store populated whenever a fuzzy search is triggered
 _last_fuzzy_matches: list[str] = []
@@ -645,9 +660,13 @@ def send_imessage(recipient: str, message: str) -> str:
     Send an iMessage. recipient can be a name, phone number, or email.
     If a name is given, looks up the contact first.
     """
-    # If it looks like a name (not a number/email), look up the contact
-    is_address = bool(re.search(r"[\d@\+]", recipient))
-    address = recipient
+    # If it looks like a name (not a number/email), look up the contact.
+    # A recipient is only treated as a direct address (skipping Contacts
+    # lookup) if it strictly matches a phone number or email shape -- this
+    # closes an AppleScript injection where a crafted string containing
+    # "@" or a digit would otherwise be interpolated into the script raw.
+    is_address = bool(re.search(r"[\d@\+]", recipient)) and _is_valid_direct_address(recipient)
+    address = recipient.strip() if is_address else recipient
 
     if not is_address:
         found = lookup_contact(recipient)
@@ -689,12 +708,13 @@ def send_imessage(recipient: str, message: str) -> str:
 
         address = found
 
-    safe_msg = message.replace('"', '\\"').replace("\\", "\\\\")
+    safe_address = _escape_applescript(address)
+    safe_msg = _escape_applescript(message)
 
     script = f"""
     tell application "Messages"
         set targetService to 1st service whose service type = iMessage
-        set targetBuddy to buddy "{address}" of targetService
+        set targetBuddy to buddy "{safe_address}" of targetService
         send "{safe_msg}" to targetBuddy
     end tell
     """
@@ -704,7 +724,7 @@ def send_imessage(recipient: str, message: str) -> str:
         # Fallback: try SMS service
         script_sms = f"""
         tell application "Messages"
-            send "{safe_msg}" to buddy "{address}" of 1st service
+            send "{safe_msg}" to buddy "{safe_address}" of 1st service
         end tell
         """
         out2, err2 = _run_applescript(script_sms)

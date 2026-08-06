@@ -99,6 +99,70 @@ class NativeLoopDirectAnswerTests(unittest.TestCase):
         self.assertEqual(transcript, "")
         self.assertGreater(index, 0)  # at least one chunk event emitted
 
+    def test_specialist_request_is_exact_and_resource_bounded(self):
+        task_id = self._setup_task("inspect the service")
+        with task_runtime._LOCK:
+            task_runtime._TASKS[task_id]["status"] = "running"
+
+        mock_client = MagicMock()
+        mock_client.chat.return_value = _make_ollama_response(content="Done.")
+
+        with patch("brains.brain_ollama.get_client", return_value=mock_client), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b") as select:
+            result = task_runtime._run_native_task_loop(
+                task_id=task_id,
+                prompt="inspect the service",
+                agent_ctx="system ctx",
+            )
+
+        self.assertIsNotNone(result)
+        select.assert_called_once_with(
+            "qwen3:30b-a3b",
+            require_preferred=True,
+        )
+        self.assertEqual(
+            mock_client.chat.call_args.kwargs["options"],
+            {
+                "num_ctx": 32_768,
+                "num_predict": 2_048,
+                "temperature": 0,
+            },
+        )
+
+    def test_final_synthesis_keeps_specialist_resource_bounds(self):
+        task_id = self._setup_task("inspect one command")
+        with task_runtime._LOCK:
+            task_runtime._TASKS[task_id]["status"] = "running"
+
+        tool_call = _make_tool_call("bash_exec", {"command": "echo ready"})
+        mock_client = MagicMock()
+        mock_client.chat.side_effect = [
+            _make_ollama_response(tool_calls=[tool_call]),
+            [_make_ollama_response(content="Final answer.")],
+        ]
+
+        with patch("brains.brain_ollama.get_client", return_value=mock_client), \
+             patch("brains.brain_ollama.get_best_available", return_value="qwen3:30b-a3b"), \
+             patch.object(task_runtime, "_NATIVE_LOOP_MAX_ITERS", 1), \
+             patch("task_runtime._tool_bash", return_value="ready"):
+            result = task_runtime._run_native_task_loop(
+                task_id=task_id,
+                prompt="inspect one command",
+                agent_ctx="system ctx",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(mock_client.chat.call_count, 2)
+        for request in mock_client.chat.call_args_list:
+            self.assertEqual(
+                request.kwargs["options"],
+                {
+                    "num_ctx": 32_768,
+                    "num_predict": 2_048,
+                    "temperature": 0,
+                },
+            )
+
     def test_direct_answer_emits_sse_chunks(self):
         task_id = self._setup_task("tell me something")
         with task_runtime._LOCK:

@@ -136,6 +136,7 @@ def _badge(s):
         "done": "#66bb6a", "completed": "#66bb6a",
         "blocked": "#ef5350", "failed": "#ef5350", "stalled": "#ef5350",
         "fired": "#ab47bc", "awaiting_approval": "#f0a000",
+        "needs_review": "#ffa726",
     }
     c = colors.get(str(s).lower(), "#888")
     return f"<span style='background:{c};color:#111;padding:2px 8px;border-radius:4px;font-size:.82em;white-space:nowrap'>{escape(str(s))}</span>"
@@ -252,7 +253,7 @@ def _work_queue_table() -> str:
         notes = t.get("notes", "") or t.get("result", "")
         detail = f"<div style='color:#555;font-size:.78em;margin-top:2px'>{escape(str(notes)[:120])}</div>" if notes else ""
         actions = ""
-        if status in ("blocked", "stalled", "failed"):
+        if status in ("blocked", "stalled", "failed", "needs_review"):
             actions = _btn("Requeue", f"/requeue/{idx}", "#f0c040")
         elif status == "in_progress":
             actions = _btn("Reset", f"/requeue/{idx}", "#ef5350",
@@ -363,6 +364,7 @@ def index():
     in_prog = sum(1 for t in tasks if t.get("status") == "in_progress")
     done    = sum(1 for t in tasks if t.get("status") == "done")
     blocked = sum(1 for t in tasks if t.get("status") == "blocked")
+    needs_review = sum(1 for t in tasks if t.get("status") == "needs_review")
     queued  = sum(1 for t in tasks if t.get("status") == "queued")
     waiting = sum(1 for t in tasks if t.get("status") == "awaiting_approval")
     active  = sum(1 for s in sessions if s.get("status") == "active")
@@ -396,6 +398,7 @@ def index():
   {card("In Progress", in_prog, "#f0c040" if in_prog else "#888")}
   {card("Done", done, "#66bb6a")}
   {card("Blocked", blocked, "#ef5350" if blocked else "#888")}
+  {card("Needs Review", needs_review, "#ffa726" if needs_review else "#888")}
   {card("Approval", waiting, "#f0a000" if waiting else "#888")}
   {card("Active", active, "#4fc3f7" if active else "#888")}
   {card("Stalled", stalled, "#ef5350" if stalled else "#888")}

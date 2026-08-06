@@ -122,6 +122,28 @@ class TestFixLoop:
         assert len(result["history"]) == 1
         assert result["history"][0]["ok"] is True
 
+    def test_specialist_request_is_exact_and_resource_bounded(self, tmp_path):
+        payload = _coder_response(
+            files=[{"path": "test_ready.py", "content": "def test_ready(): assert True"}],
+            test_command="python -m pytest test_ready.py -q",
+        )
+        with patch("ollama.Client.chat", return_value=_ollama_response(payload)) as chat, \
+             patch("brains.brain_ollama.get_best_available", return_value="devstral") as select, \
+             patch("coder_workbench._run_shell", return_value=(0, "1 passed", 0.1)):
+            result = coder_workbench.fix_loop(
+                "write a test",
+                workspace=tmp_path,
+                execution_approved=True,
+            )
+
+        assert result["ok"] is True
+        select.assert_called_with("devstral", require_preferred=True)
+        assert chat.call_args.kwargs["options"] == {
+            "num_ctx": 32_768,
+            "num_predict": 4_096,
+            "temperature": 0,
+        }
+
     def test_fix_on_second_iteration(self, tmp_path):
         payload1 = _coder_response(
             files=[

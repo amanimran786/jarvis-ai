@@ -11,8 +11,9 @@ precondition. Until then, treat it as a hard contract enforced by the session it
 ## Step 1 — Identify changed files
 
 ```bash
-# List Python files staged for commit (or changed since last commit)
-git diff --name-only HEAD -- '*.py'
+# List tracked and untracked Python files changed since HEAD.
+{ git diff --name-only HEAD -- '*.py' '*.pyw'; \
+  git ls-files --others --exclude-standard -- '*.py' '*.pyw'; } | sort -u
 ```
 
 Record the list. Every subsequent step runs against **this list only**, not the whole
@@ -22,23 +23,16 @@ repo. If the list is empty, skip to Step 7.
 
 ## Step 2 — Security scan (automated, zero-tolerance)
 
-Run each grep. **Any match = stop and fix before continuing.**
+Run the repository checker against every changed Python file:
 
 ```bash
-# 2a. shell=True in subprocess (RCE risk)
-grep -n "shell=True" <changed_files>
-
-# 2b. eval / exec (arbitrary code execution)
-grep -n "eval\|exec(" <changed_files>
-
-# 2c. Hardcoded secrets (not via os.getenv or config.)
-grep -n "SECRET\|API_KEY\|TOKEN\|PASSWORD" <changed_files> | grep -v "os\.getenv\|config\."
-
-# 2d. Unsafe deserialization
-grep -n "pickle\.load\|yaml\.load" <changed_files>
+python -m harness.pre_commit_check <changed_files>
 ```
 
-Each grep should return zero matches. Document which files you checked.
+The command must exit `0`. It checks subprocess shell use, `eval`/`exec`,
+hardcoded secret assignments, unsafe deserialization, and Python syntax without
+the substring false positives produced by raw grep. Document which files were
+checked.
 
 ---
 
@@ -133,7 +127,7 @@ task ID that will close the gap.
 
 | Concern | Here | jarvis-security.md |
 |---|---|---|
-| Runnable grep commands | ✅ | advisory only |
+| Runnable automated security rules | ✅ | advisory only |
 | py_compile gate | ✅ | not covered |
 | Test run requirement | ✅ | not covered |
 | Git plumbing reminder | ✅ | not covered |
