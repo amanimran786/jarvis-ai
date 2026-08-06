@@ -33,12 +33,18 @@ def _run(args: list[str], cwd: Path | None = None, timeout: int = 8) -> str:
             args, cwd=str(cwd or _ROOT), stderr=subprocess.DEVNULL,
             text=True, timeout=timeout,
         ).strip()
-    except Exception:
+    except Exception as exc:
+        log.debug("workspace_context command failed: %s: %s", args, exc)
         return ""
 
 
 def _git_status() -> str:
-    return _run(["git", "status", "--short"])
+    # --no-optional-locks: a plain `git status` can opportunistically refresh
+    # and rewrite the on-disk index, which briefly takes .git/index.lock. If
+    # this call is killed on timeout mid-refresh, that lock is orphaned and
+    # blocks every later git command in the repo. This call only needs to
+    # read status, so skip the write entirely.
+    return _run(["git", "--no-optional-locks", "status", "--short"])
 
 
 def _recent_commits(n: int = 5) -> str:

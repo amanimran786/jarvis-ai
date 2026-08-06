@@ -177,9 +177,20 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
 
 
 def _run_git(repo_path: Path, *args: str) -> str:
+    """Run a read-only git query against the shared checkout.
+
+    ``--no-optional-locks`` stops git from opportunistically refreshing and
+    rewriting the on-disk index (the operation that briefly takes
+    .git/index.lock). Without it, a timeout here kills git with SIGKILL
+    mid-write and leaves an orphaned, zero-byte index.lock behind that blocks
+    every future git command in the shared checkout until a human deletes it.
+    _run_git is only ever used for read-only queries (status --porcelain,
+    rev-parse) — do not add a write subcommand here without revisiting this
+    flag.
+    """
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", "--no-optional-locks", *args],
             cwd=str(repo_path),
             capture_output=True,
             text=True,

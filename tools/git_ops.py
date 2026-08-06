@@ -32,11 +32,18 @@ def _run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str
 
 
 def git_status() -> str:
-    """Return `git status --short` for the repo root."""
+    """Return `git status --short` for the repo root.
+
+    --no-optional-locks keeps this a pure read: a plain `git status` can
+    opportunistically rewrite the on-disk index, which briefly takes
+    .git/index.lock, and a killed/timed-out process can leave that lock
+    orphaned. This call only needs to read status.
+    """
     try:
-        out = _run(["git", "status", "--short"])
+        out = _run(["git", "--no-optional-locks", "status", "--short"])
         return out if out else "Working tree is clean."
     except Exception as exc:
+        log.warning("git status failed: %s", exc)
         return f"git status failed: {exc}"
 
 
