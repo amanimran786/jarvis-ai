@@ -38,6 +38,22 @@ class TestGitStatus:
             out = git_ops.git_status()
         assert "failed" in out.lower() or "not found" in out.lower()
 
+    def test_uses_no_optional_locks(self):
+        """git_status() is read-only and must never take .git/index.lock.
+
+        A plain `git status` can opportunistically refresh and rewrite the
+        on-disk index (briefly taking .git/index.lock). If that subprocess
+        is ever killed mid-write (timeout, crash), the lock is orphaned and
+        blocks every later git command in the repo. --no-optional-locks
+        keeps this call a pure read.
+        """
+        with patch("subprocess.run", return_value=_mock_run("clean")) as mock_run:
+            git_ops.git_status()
+        argv = mock_run.call_args.args[0]
+        assert argv[0] == "git"
+        assert "--no-optional-locks" in argv
+        assert argv.index("--no-optional-locks") < argv.index("status")
+
 
 class TestGitDiff:
     def test_returns_diff_output(self):
