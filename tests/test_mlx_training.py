@@ -152,6 +152,38 @@ def test_run_sft_dry_run_returns_command_string():
             assert result["adapter_path"] is None  # dry_run doesn't create
 
 
+def test_run_sft_command_supports_completion_only_seed_and_resume():
+    """Guarded runs mask prompts and can resume deterministic checkpoints."""
+    from local_runtime import local_mlx_training
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        train_file = root / "train.jsonl"
+        train_file.write_text(
+            json.dumps({
+                "messages": [
+                    {"role": "user", "content": "test"},
+                    {"role": "assistant", "content": "response"},
+                ]
+            }) + "\n"
+        )
+        resume = root / "adapters.safetensors"
+        resume.write_text("fixture")
+        with patch("local_runtime.local_mlx_training.is_available", return_value=True):
+            result = local_mlx_training.run_sft(
+                "qwen3:8b",
+                train_jsonl=train_file,
+                seed=123,
+                completion_only=True,
+                resume_adapter_file=resume,
+                dry_run=True,
+            )
+        assert result["ok"] is True
+        assert "--mask-prompt" in result["command"]
+        assert "--seed 123" in result["command"]
+        assert f"--resume-adapter-file {resume.resolve()}" in result["command"]
+
+
 def test_convert_to_mlx_format_transforms_jsonl():
     """_convert_to_mlx_format converts Jarvis JSONL to mlx format."""
     from local_runtime import local_mlx_training

@@ -315,6 +315,9 @@ def run_sft(
     learning_rate: float | None = None,
     lora_rank: int | None = None,
     batch_size: int | None = None,
+    seed: int = 42,
+    completion_only: bool = False,
+    resume_adapter_file: str | Path | None = None,
     dry_run: bool = False,
 ) -> dict:
     """
@@ -329,6 +332,9 @@ def run_sft(
         learning_rate: LR. Defaults to config.MLX_LEARNING_RATE
         lora_rank: LoRA rank. Defaults to config.MLX_LORA_RANK
         batch_size: Batch size. Defaults to config.MLX_BATCH_SIZE
+        seed: Deterministic MLX-LM training seed.
+        completion_only: Mask user/system prompt tokens from the loss.
+        resume_adapter_file: Existing adapter weights to resume from.
         dry_run: If True, return the command without executing.
 
     Returns:
@@ -409,6 +415,17 @@ def run_sft(
     learning_rate = learning_rate or config.MLX_LEARNING_RATE
     lora_rank = lora_rank or config.MLX_LORA_RANK
     batch_size = batch_size or config.MLX_BATCH_SIZE
+    if seed < 0:
+        return {
+            "ok": False,
+            "adapter_path": None,
+            "model_tag": ollama_tag,
+            "iters": num_iters,
+            "duration_sec": None,
+            "error": "seed must be non-negative",
+            "command": "",
+            "dry_run": dry_run,
+        }
 
     # Output directory
     if output_dir is None:
@@ -418,7 +435,8 @@ def run_sft(
     else:
         output_dir = Path(output_dir)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     # Convert training data to mlx format (in temp directory)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -463,9 +481,29 @@ def run_sft(
             "--learning-rate", str(learning_rate),
             "--batch-size", str(batch_size),
             "--adapter-path", str(output_dir),
+            "--seed", str(seed),
+            "--save-every", str(max(1, min(100, num_iters))),
+            "--steps-per-eval", str(max(1, min(50, num_iters))),
             "-c", str(lora_config_path),
             "--grad-checkpoint",  # reduce Metal memory usage with minimal speed penalty
         ]
+
+        if completion_only:
+            cmd.append("--mask-prompt")
+        if resume_adapter_file is not None:
+            resume_path = Path(resume_adapter_file).expanduser().resolve()
+            if not resume_path.is_file():
+                return {
+                    "ok": False,
+                    "adapter_path": None,
+                    "model_tag": ollama_tag,
+                    "iters": num_iters,
+                    "duration_sec": None,
+                    "error": f"Resume adapter file not found: {resume_path}",
+                    "command": "",
+                    "dry_run": dry_run,
+                }
+            cmd.extend(["--resume-adapter-file", str(resume_path)])
 
         if val_jsonl:
             val_path = Path(val_jsonl)

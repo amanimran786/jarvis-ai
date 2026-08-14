@@ -392,47 +392,20 @@ def promote_candidate(
     min_pass_rate: float = PROMOTION_MIN_PASS_RATE,
     min_score_delta: float = PROMOTION_MIN_SCORE_DELTA,
 ) -> dict:
+    """Reject legacy direct promotion; guarded promotion owns mutable aliases."""
     if candidate_model and _normalize_model_tag(candidate_model) == _normalize_model_tag(LOCAL_GLM52_MODEL):
         return {
             "ok": False,
             "error": "Generic promotion is disabled for GLM 5.2. Use the dedicated evaluation workflow.",
         }
 
-    result = _load_eval_result(eval_path)
-    if not result:
-        return {"ok": False, "error": "No local model eval result found to promote from."}
-
-    if candidate_model and result.get("candidate_model") != candidate_model:
-        return {"ok": False, "error": f"Latest eval is for {result.get('candidate_model')}, not {candidate_model}."}
-
-    candidate = result["candidate_model"]
-    pass_rate = float(result.get("candidate_summary", {}).get("pass_rate", 0.0))
-    score_delta = float(result.get("score_delta", 0.0))
-
-    if pass_rate < min_pass_rate or score_delta < min_score_delta:
-        return {
-            "ok": False,
-            "error": (
-                f"Promotion refused. Candidate {candidate} scored pass_rate={pass_rate} and delta={score_delta}, "
-                f"which is below the required thresholds of pass_rate>={min_pass_rate} and delta>={min_score_delta}."
-            ),
-            "eval_path": result.get("path") or eval_path or "",
-        }
-
-    state = _load_state()
-    state.update(
-        {
-            "preferred_model": candidate,
-            "last_promotion": _timestamp(),
-            "source_eval": result.get("path") or eval_path or "",
-            "baseline_model": result.get("baseline_model", ""),
-            "score_delta": score_delta,
-            "pass_rate": pass_rate,
-        }
-    )
-    _save_state(state)
-    return {"ok": True, "preferred_model": candidate, "state": state}
-
+    return {
+        "ok": False,
+        "error": (
+            "Legacy direct promotion is disabled. Use scripts/local_improvement.py "
+            "approve, canary, and promote with exact digest confirmations."
+        ),
+    }
 
 def status() -> dict:
     _ensure_dirs()

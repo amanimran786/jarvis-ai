@@ -10,6 +10,7 @@ Automate the local-model improvement cycle:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,7 +48,13 @@ def _safe_slug(text: str) -> str:
 def _run_ollama_create(target_name: str, modelfile_path: str) -> dict:
     cmd = ["ollama", "create", target_name, "-f", modelfile_path]
     try:
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
     except Exception as exc:
         return {"ok": False, "error": f"Failed to launch ollama create: {exc}"}
 
@@ -60,7 +67,16 @@ def _run_ollama_create(target_name: str, modelfile_path: str) -> dict:
 
 def _run_ollama_rm(model_name: str) -> dict:
     cmd = ["ollama", "rm", model_name]
-    completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "error": f"Failed to remove Ollama model: {type(exc).__name__}"}
     output = ((completed.stdout or "") + "\n" + (completed.stderr or "")).strip()
     if completed.returncode != 0:
         return {"ok": False, "error": f"ollama rm failed for {model_name}: {output}"}
@@ -77,10 +93,22 @@ def run_cycle(
     candidate_name: str = "",
     teacher_model: str = LOCAL_REASONING,
     judge_model: str = LOCAL_REASONING,
-    promote_if_ready: bool = True,
+    promote_if_ready: bool = False,
     cleanup_failed: bool = False,
     force: bool = False,
 ) -> dict:
+    if os.getenv("JARVIS_LEGACY_LOCAL_AUTOMATION_ENABLED", "").strip().lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        return {
+            "ok": False,
+            "skipped": True,
+            "error": (
+                "Legacy local-model automation is disabled because it can source ordinary "
+                "interactions. Use scripts/local_improvement.py and the guarded approval flow."
+            ),
+        }
+
     _ensure_dirs()
     stamp = _timestamp()
     candidate = candidate_name.strip() or f"{LOCAL_TUNED}-candidate-{stamp}"
@@ -118,7 +146,13 @@ def run_cycle(
     promotion_result = None
     cleanup_result = None
     if promote_if_ready and eval_result.get("promotion_ready"):
-        promotion_result = local_model_eval.promote_candidate(candidate_model=candidate, eval_path=eval_result["path"])
+        promotion_result = {
+            "ok": False,
+            "error": (
+                "Automatic promotion is disabled. Use the guarded human approval and "
+                "zero-tool canary workflow."
+            ),
+        }
     elif cleanup_failed:
         cleanup_result = _run_ollama_rm(candidate)
 

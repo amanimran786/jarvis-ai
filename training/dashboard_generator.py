@@ -12,9 +12,17 @@ Open:           open training/dashboard.html
 from __future__ import annotations
 
 import json
+import html as html_lib
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from local_runtime import local_improvement
 
 TRAINING_ROOT = Path(__file__).parent
 OVERNIGHT_LOG = TRAINING_ROOT / "overnight_log.jsonl"
@@ -226,6 +234,10 @@ def generate() -> Path:
     overnight_runs = _load_jsonl(OVERNIGHT_LOG)
     benchmarks = _load_jsonl(BENCHMARK_LOG)
     state = _load_json(STATE_FILE, {})
+    improvement = local_improvement.status()
+    improvement_counts = improvement["dataset_counts"]
+    improvement_candidate = improvement.get("candidate_model", {})
+    improvement_baseline = improvement.get("baseline_model", {})
 
     # ── Summary stats ──────────────────────────────────────────────────────────
     total_runs = len(overnight_runs)
@@ -731,6 +743,24 @@ def generate() -> Path:
         </tbody>
       </table>
       <div style="margin-top:10px;font-size:9px;color:var(--text-dim)">Pack grows as real interactions accumulate in verbatim log.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">GUARDED LOCAL IMPROVEMENT — APPROVAL STATUS</div>
+    <table>
+      <thead><tr><th>STAGE</th><th>DATASET</th><th>QUARANTINE</th><th>CANDIDATE / BASELINE</th><th>APPROVAL</th><th>ROLLBACK</th></tr></thead>
+      <tbody><tr>
+        <td style="color:var(--cyan)">{html_lib.escape(str(improvement['stage']))}</td>
+        <td>{improvement_counts['train']} train / {improvement_counts['validation']} val / {improvement_counts['test']} held-out</td>
+        <td>{improvement['quarantined_examples']}</td>
+        <td>{html_lib.escape(str(improvement_candidate.get('tag', '—')))} / {html_lib.escape(str(improvement_baseline.get('tag', '—')))}</td>
+        <td>{html_lib.escape(str(improvement['approval_state']))}</td>
+        <td>{html_lib.escape(str(improvement.get('rollback_target') or '—'))}</td>
+      </tr></tbody>
+    </table>
+    <div style="margin-top:10px;font-size:9px;color:var(--text-dim)">
+      Local-only · immutable held-out test split · no raw-conversation training · no automatic promotion · candidate digest {html_lib.escape(str(improvement_candidate.get('digest', '—')))}
     </div>
   </div>
 

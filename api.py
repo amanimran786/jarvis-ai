@@ -54,6 +54,7 @@ import memory as mem
 import model_router
 import hardware as hw
 import evals
+import self_eval
 import conversation_context as ctx
 import vault
 import source_ingest
@@ -62,6 +63,7 @@ import extension_registry
 from local_runtime import local_training
 from local_runtime import local_model_eval
 from local_runtime import local_model_automation
+from local_runtime import local_improvement
 from local_runtime import local_beta
 from local_runtime import model_fleet
 from config import LOCAL_REASONING, HAIKU
@@ -550,6 +552,12 @@ class FeedbackRequest(BaseModel):
     response: str = ""
     model: str = ""
     source: str = "user_feedback"
+    approve_for_training: bool = False
+    model_digest: str = ""
+    task_type: str = ""
+    training_score: float = Field(0.0, ge=0.0, le=1.0)
+    correction: str = ""
+    contains_private_file_content: bool = False
 
 
 class VaultIngestRequest(BaseModel):
@@ -640,6 +648,27 @@ class LocalTrainingTeachRequest(BaseModel):
     meta: dict | None = None
 
 
+class LocalImprovementCaptureRequest(BaseModel):
+    kind: str
+    task_type: str
+    score: float = Field(..., ge=0.0, le=1.0)
+    approval_state: str = "pending"
+    provenance: dict
+    model: dict
+    content: dict
+
+
+class LocalImprovementApprovalRequest(BaseModel):
+    eval_id: str
+    confirmation: str
+    approver: str
+
+
+class LocalImprovementCanaryRequest(BaseModel):
+    eval_id: str
+    prompts: list[str] = Field(..., min_length=1, max_length=20)
+
+
 class LocalModelEvalRunRequest(BaseModel):
     candidate_model: str
     baseline_model: str = ""
@@ -663,7 +692,7 @@ class LocalModelAutomationRunRequest(BaseModel):
     candidate_name: str = ""
     teacher_model: str = LOCAL_REASONING
     judge_model: str = LOCAL_REASONING
-    promote_if_ready: bool = True
+    promote_if_ready: bool = False
     cleanup_failed: bool = False
     force: bool = False
 
@@ -1027,7 +1056,45 @@ def feedback(req: FeedbackRequest):
         model=req.model,
         source=req.source,
     )
-    return {"ok": True, "failure": entry}
+    training_capture = None
+    if req.approve_for_training:
+        score_record = next(
+            (
+                record
+                for record in reversed(self_eval.load_scores())
+                if req.interaction_id and record.get("id") == req.interaction_id
+            ),
+            None,
+        )
+        provenance = {
+            "source": "explicit_live_feedback",
+            "event_id": entry["id"],
+            "interaction_id": req.interaction_id or "",
+            "contains_private_file_content": req.contains_private_file_content,
+        }
+        if score_record:
+            provenance["self_eval"] = {
+                "composite": score_record.get("composite"),
+                "dimensions": score_record.get("dimensions", {}),
+            }
+        correction = req.correction.strip() or req.expected.strip()
+        training_capture = local_improvement.default_pipeline().capture(
+            {
+                "kind": "corrected_answer" if correction else "thumbs_down",
+                "provenance": provenance,
+                "model": {"tag": entry.get("model", ""), "digest": req.model_digest},
+                "task_type": req.task_type.strip() or entry.get("category", "general_quality"),
+                "timestamp": entry.get("timestamp", ""),
+                "score": req.training_score,
+                "approval_state": "user_approved",
+                "content": {
+                    "prompt": entry.get("user_input", ""),
+                    "answer": entry.get("response", ""),
+                    "correction": correction,
+                },
+            }
+        )
+    return {"ok": True, "failure": entry, "training_capture": training_capture}
 
 
 @app.get("/evals/summary")
@@ -3662,6 +3729,35 @@ def promote_skills(req: SkillPromoteRequest):
 @app.get("/local/training/status")
 def get_local_training_status():
     return {"ok": True, "status": local_training.status()}
+
+
+@app.get("/local/improvement/status")
+def get_local_improvement_status():
+    return {"ok": True, "status": local_improvement.status()}
+
+
+@app.get("/local/improvement/dry-run")
+def get_local_improvement_dry_run():
+    return local_improvement.default_pipeline().dry_run()
+
+
+@app.post("/local/improvement/capture")
+def capture_local_improvement(req: LocalImprovementCaptureRequest):
+    return local_improvement.default_pipeline().capture(req.model_dump())
+
+
+@app.post("/local/improvement/approve")
+def approve_local_improvement(req: LocalImprovementApprovalRequest):
+    return local_improvement.default_pipeline().approve(
+        req.eval_id,
+        req.confirmation,
+        approver=req.approver,
+    )
+
+
+@app.post("/local/improvement/canary")
+def canary_local_improvement(req: LocalImprovementCanaryRequest):
+    return local_improvement.default_pipeline().canary(req.eval_id, req.prompts)
 
 
 @app.get("/local/evals/status")

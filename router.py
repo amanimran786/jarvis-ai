@@ -44,6 +44,7 @@ import skill_factory
 from local_runtime import local_training
 from local_runtime import local_model_eval
 from local_runtime import local_model_automation
+from local_runtime import local_improvement
 from local_runtime import local_beta
 from local_runtime import local_model_benchmark
 from local_runtime import model_fleet
@@ -4614,7 +4615,11 @@ def route_stream(
         return _s("Restarting now."), "Self-Improve"
 
     # Local vault
-    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "preference export", "preference pairs", "reinforcement learning", "reinforced learning", "preference rl", "rl colab", "dpo handoff", "rl handoff", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model", "benchmark local model", "benchmark local models", "compare local models", "local model benchmark", "best local model for apple silicon")):
+    if any(p in lower for p in ("train local model", "train local models", "improve local model", "improve local models", "tune local model", "distill local model", "distill local examples", "export training dataset", "export local training data", "build local modelfile", "fine tune handoff", "axolotl", "unsloth", "lora config", "preference export", "preference pairs", "reinforcement learning", "reinforced learning", "preference rl", "rl colab", "dpo handoff", "rl handoff", "evaluate local model", "eval local model", "promote local model", "promote adapter", "local eval status", "local model status", "local improvement status", "model improvement status", "continuous improvement status", "local improvement dry run", "automate local model", "local model autopilot", "local model cycle", "beta test jarvis", "run local beta", "beta test local model", "beta test engineering", "run engineering beta", "coach local model", "coach engineering model", "benchmark local model", "benchmark local models", "compare local models", "local model benchmark", "best local model for apple silicon")):
+        if any(p in lower for p in ("local improvement dry run",)):
+            return _s(str(local_improvement.default_pipeline().dry_run())), "Local Model"
+        if any(p in lower for p in ("local improvement status", "model improvement status", "continuous improvement status")):
+            return _s(str(local_improvement.status())), "Local Model"
         if any(p in lower for p in ("local eval status", "local model status")):
             return _s(f"Local training status: {local_training.status()}. Local eval status: {local_model_eval.status()}. Local automation status: {local_model_automation.status()}. Local beta status: {local_beta.status()}"), "Local Model"
         if any(p in lower for p in ("beta test jarvis", "run local beta", "beta test local model")):

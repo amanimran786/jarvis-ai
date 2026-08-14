@@ -260,6 +260,21 @@ class PackagedAppSmokeTests(unittest.TestCase):
             self.assertTrue(payload.get("api_urls"))
 
     @packaged_smoke_only
+    def test_packaged_app_serves_guarded_improvement_status(self):
+        headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
+        with packaged_app_process() as (proc, port):
+            wait_for_packaged_json("/status", port=port, proc=proc)
+            payload = wait_for_packaged_json(
+                "/local/improvement/status",
+                port=port,
+                headers=headers,
+                proc=proc,
+            )
+            self.assertTrue(payload["ok"])
+            self.assertFalse(payload["status"]["automatic_promotion"])
+            self.assertFalse(payload["status"]["cloud_teachers_enabled"])
+
+    @packaged_smoke_only
     def test_packaged_app_chat_serves_vault_curator_read(self):
         headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
         payload = {

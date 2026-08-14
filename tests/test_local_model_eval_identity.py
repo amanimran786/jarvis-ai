@@ -82,6 +82,12 @@ def test_glm52_generic_promotion_is_always_denied():
     save_state.assert_not_called()
 
 
+def test_legacy_direct_promotion_is_denied_for_all_candidates():
+    result = local_model_eval.promote_candidate(candidate_model="jarvis-local:candidate-20260814")
+    assert result["ok"] is False
+    assert "Legacy direct promotion is disabled" in result["error"]
+
+
 def test_glm52_quality_eval_requires_matching_digest_before_inference():
     client = type("Client", (), {
         "list": lambda self: type("Response", (), {
