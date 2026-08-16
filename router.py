@@ -54,6 +54,7 @@ import specialized_agents
 import behavior_hooks
 import capability_evals
 import capability_parity
+import capability_report
 import cost_policy
 import context_budget
 import coder_workbench
@@ -350,22 +351,7 @@ def _is_capabilities_query(lower: str) -> bool:
 
 
 def _capabilities_reply() -> str:
-    return (
-        "Here's what I can do:\n"
-        "• Calendar — check events, add meetings, set reminders\n"
-        "• Gmail — read inbox, email summary/digest, compose and send emails\n"
-        "• iMessage — compose and send messages, track conversation threads\n"
-        "• Tasks — show open items from your vault task hub\n"
-        "• Weather — current conditions for any location\n"
-        "• Web search — live search results\n"
-        "• Memory — remember facts, recall context across sessions\n"
-        "• Notes — read and write Obsidian vault notes\n"
-        "• System — open apps, control volume/brightness, take screenshots\n"
-        "• Reminders — 'remind me at 3pm to ...' → Calendar event\n"
-        "• Proactive alerts — calendar and urgent email notifications\n"
-        "• Voice — wake word detection, STT, TTS\n"
-        "Just ask naturally — I'll route to the right tool."
-    )
+    return capability_report.capabilities_reply()
 
 
 def _is_model_status_query(lower: str) -> bool:

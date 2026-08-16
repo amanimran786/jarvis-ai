@@ -70,6 +70,7 @@ from config import LOCAL_REASONING, HAIKU
 import behavior_hooks
 import capability_evals
 import capability_parity
+import capability_report
 import cost_policy
 import context_budget
 import coder_workbench
@@ -807,10 +808,7 @@ _CLAUDE_MOBILE_COOLDOWN = 600.0  # seconds
 
 _MOBILE_SYSTEM_EXTRA = (
     "You are Jarvis running on the user's MacBook, accessed via mobile web. "
-    "You have access to: Calendar (read/add events), Gmail (read inbox, send email), "
-    "iMessage (read/send messages), Web search, Reminders, Notes, Weather, "
-    "System controls (volume, brightness, screenshots), and Memory (remember facts). "
-    "When asked what you can do, list these capabilities confidently. "
+    f"{capability_report.mobile_system_guidance()}"
     "When asked for your security token or API token, respond: "
     "The Jarvis API token is in Settings > API Token on the desktop app, "
     "or check the .env file for JARVIS_API_TOKEN. "

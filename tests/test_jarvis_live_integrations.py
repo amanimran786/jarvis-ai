@@ -296,6 +296,30 @@ class PackagedAppSmokeTests(unittest.TestCase):
             self.assertIn("Jarvis Roadmap", response["response"])
 
     @packaged_smoke_only
+    def test_packaged_app_chat_reports_runtime_aware_capabilities(self):
+        headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
+        payload = {
+            "message": "what can you do now?",
+            "stream": False,
+            "source": "packaged_smoke",
+        }
+        with packaged_app_process() as (proc, port):
+            wait_for_packaged_json("/status", port=port, proc=proc)
+            response = wait_for_packaged_json(
+                "/chat",
+                port=port,
+                headers=headers,
+                payload=payload,
+                request_timeout=20.0,
+                proc=proc,
+            )
+            self.assertEqual(response["model"], "Status")
+            self.assertIn("Implemented capabilities", response["response"])
+            self.assertIn("Current readiness", response["response"])
+            self.assertIn("Agentic execution", response["response"])
+            self.assertIn("Python code loop", response["response"])
+
+    @packaged_smoke_only
     def test_packaged_app_chat_parses_text_message_draft(self):
         headers = {"Authorization": "Bearer jarvis-packaged-smoke-token"}
         payload = {
