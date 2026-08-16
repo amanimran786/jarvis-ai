@@ -145,7 +145,15 @@ def _ensure_supported_gui_runtime() -> None:
         print("[Startup] GUI launch requested from conda Python. Re-launching Jarvis with the project venv to avoid Qt plugin crashes...")
         env = os.environ.copy()
         env["_JARVIS_GUI_REEXEC_ATTEMPTED"] = "1"
-        os.execve(target_real, [target_real] + sys.argv, env)
+        subprocess.Popen(
+            [target_real, *sys.argv],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            env=env,
+            shell=False,
+            close_fds=True,
+            start_new_session=True,
+        )
+        raise SystemExit(0)
 
     if not target_real:
         raise SystemExit(

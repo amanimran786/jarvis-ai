@@ -2813,7 +2813,7 @@ class SemanticMemoryRetrievalTests(unittest.TestCase):
 
 
 class MainStartupGuardTests(unittest.TestCase):
-    def test_gui_launch_reexecs_from_conda_into_project_venv(self):
+    def test_gui_launch_spawns_project_venv_and_exits_conda_parent(self):
         import main
 
         with patch("main._is_conda_python", return_value=True), \
@@ -2822,13 +2822,18 @@ class MainStartupGuardTests(unittest.TestCase):
              patch("main.os.path.exists", return_value=True), \
              patch("main.os.path.realpath", side_effect=lambda p: p), \
              patch.dict("main.os.environ", {}, clear=True), \
-             patch("main.os.execve") as execve_mock:
-            main._ensure_supported_gui_runtime()
+             patch("main.subprocess.Popen") as popen_mock:
+            with self.assertRaises(SystemExit) as exc:
+                main._ensure_supported_gui_runtime()
 
-        execve_mock.assert_called_once_with(
-            "/tmp/jarvis-venv/bin/python",
+        self.assertEqual(exc.exception.code, 0)
+        popen_mock.assert_called_once_with(
             ["/tmp/jarvis-venv/bin/python", "main.py"],
-            {"_JARVIS_GUI_REEXEC_ATTEMPTED": "1"},
+            cwd=os.path.dirname(os.path.abspath(main.__file__)),
+            env={"_JARVIS_GUI_REEXEC_ATTEMPTED": "1"},
+            shell=False,
+            close_fds=True,
+            start_new_session=True,
         )
 
     def test_gui_launch_from_conda_without_venv_exits_cleanly(self):
