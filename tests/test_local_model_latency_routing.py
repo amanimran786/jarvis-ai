@@ -19,6 +19,14 @@ def _structured_response(content: str = '{"tool":"notes","confidence":0.9,"actio
     )
 
 
+def test_hermetic_runtime_can_disable_dotenv_loading():
+    with patch.dict("os.environ", {"JARVIS_SKIP_DOTENV": "1"}), \
+         patch.object(config, "load_dotenv") as load_dotenv:
+        config._load_jarvis_dotenv()
+
+    load_dotenv.assert_not_called()
+
+
 def test_classifier_uses_dedicated_exact_model_and_bounded_request():
     expected_model = getattr(config, "LOCAL_CLASSIFIER", "qwen3.5:4b")
 

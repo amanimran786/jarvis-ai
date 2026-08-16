@@ -337,8 +337,10 @@ def test_native_exit_forgery_is_gated_before_test_execution(
 
 
 @pytest.mark.skipif(
-    sys.platform != "darwin" or not Path("/usr/bin/sandbox-exec").is_file(),
-    reason="requires macOS Seatbelt",
+    sys.platform != "darwin"
+    or not Path("/usr/bin/sandbox-exec").is_file()
+    or os.getenv("JARVIS_VERIFIER_SANDBOX") == "1",
+    reason="requires a non-nested macOS Seatbelt process",
 )
 def test_verifier_cannot_read_or_write_outside_sandbox(
     repo: tuple[Path, str],
@@ -646,11 +648,47 @@ def test_verification_environment_sets_safe_runtime_isolation(
         "def test_safe_runtime_isolation():\n"
         "    assert os.environ['JARVIS_AUTO_VERIFY'] == '0'\n"
         "    assert os.environ['JARVIS_NATIVE_TOOL_LOOP'] == '0'\n"
+        "    assert os.environ['JARVIS_SKIP_DOTENV'] == '1'\n"
         "    assert os.environ['JARVIS_OLLAMA_LIVENESS_DISABLED'] == '1'\n"
         "    assert os.environ['JARVIS_API_ALLOW_NO_AUTH'] == '1'\n"
+        "    assert os.environ['JARVIS_VERIFIER_SANDBOX'] == '1'\n"
+        "    assert os.environ['JARVIS_RUN_LIVE_INTEGRATION_TESTS'] == '0'\n"
+        "    assert os.environ['JARVIS_ALLOW_SIDE_EFFECTS'] == '0'\n"
+        "    assert os.environ['JARVIS_RUN_PACKAGED_SMOKE'] == '0'\n"
         "    sandbox = Path(os.environ['HOME']).parent\n"
         "    assert Path(os.environ['JARVIS_SECURITY_AUDIT_PATH']).parent == sandbox\n"
         "    assert Path(os.environ['JARVIS_TASK_DB_PATH']).parent == sandbox\n",
+    )
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    result = evidence["commands"][0]
+    assert result["exit_code"] == 0, (
+        result["stdout_preview"],
+        result["stderr_preview"],
+    )
+
+
+def test_nested_verifier_reuses_kernel_enforced_outer_sandbox(
+    repo: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree, _ = repo
+    base = _install_test(worktree, "def test_ok():\n    assert True\n")
+    monkeypatch.setattr(
+        completion_verifier,
+        "_already_in_verification_sandbox",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        completion_verifier,
+        "_sandboxed_argv",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("nested Seatbelt must not be applied")
+        ),
     )
 
     evidence = collect_completion_evidence(

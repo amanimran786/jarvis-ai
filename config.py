@@ -13,6 +13,14 @@ _SUPPORTED_TTS_BACKENDS = ("kokoro", "say", "elevenlabs", "openai")
 _log = logging.getLogger(__name__)
 
 def _load_jarvis_dotenv() -> None:
+    if os.getenv("JARVIS_SKIP_DOTENV", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
+
     candidates: list[Path] = []
     cwd = Path.cwd()
     here = Path(__file__).resolve().parent

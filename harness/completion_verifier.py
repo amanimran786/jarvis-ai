@@ -288,17 +288,25 @@ def _verification_env(sandbox_root: Path) -> dict[str, str]:
         "HOME": str(home),
         "TMPDIR": str(temp),
         "XDG_CACHE_HOME": str(cache),
-        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "PATH": (
+            f"{Path(_GIT_EXECUTABLE).parent}:"
+            "/usr/bin:/bin:/usr/sbin:/sbin"
+        ),
         "LANG": "C",
         "LC_ALL": "C",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
         "JARVIS_AUTO_VERIFY": "0",
         "JARVIS_NATIVE_TOOL_LOOP": "0",
+        "JARVIS_SKIP_DOTENV": "1",
         "JARVIS_SECURITY_AUDIT_PATH": str(sandbox_root / "security_audit.jsonl"),
         "JARVIS_TASK_DB_PATH": str(sandbox_root / "jarvis_tasks.sqlite3"),
         "JARVIS_OLLAMA_LIVENESS_DISABLED": "1",
         "JARVIS_API_ALLOW_NO_AUTH": "1",
+        "JARVIS_VERIFIER_SANDBOX": "1",
+        "JARVIS_RUN_LIVE_INTEGRATION_TESTS": "0",
+        "JARVIS_ALLOW_SIDE_EFFECTS": "0",
+        "JARVIS_RUN_PACKAGED_SMOKE": "0",
     }
 
 
@@ -394,6 +402,34 @@ def _sandboxed_argv(
         _verification_sandbox_profile(repo, sandbox_root),
         *argv,
     ]
+
+
+def _already_in_verification_sandbox() -> bool:
+    """Return True only when the kernel rejects nested Seatbelt application."""
+    if (
+        os.getenv("JARVIS_VERIFIER_SANDBOX") != "1"
+        or sys.platform != "darwin"
+        or not _SANDBOX_EXEC.is_file()
+    ):
+        return False
+    try:
+        probe = subprocess.run(
+            [
+                str(_SANDBOX_EXEC),
+                "-p",
+                "(version 1)\n(allow default)\n",
+                "/usr/bin/true",
+            ],
+            capture_output=True,
+            timeout=2,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return (
+        probe.returncode != 0
+        and b"Operation not permitted" in (probe.stderr or b"")
+    )
 
 
 def _spawn(
@@ -909,16 +945,24 @@ def _execute_command(command: str, repo: Path, timeout: float) -> dict[str, Any]
         return result
 
     try:
-        with tempfile.TemporaryDirectory(
-            prefix="jarvis-verifier-sandbox-"
-        ) as sandbox_dir:
+        if _already_in_verification_sandbox():
             exit_code, stdout, stderr, timed_out, output_overflow = _spawn(
                 argv,
                 repo,
                 timeout,
                 git=argv[0] == _GIT_EXECUTABLE,
-                sandbox_root=Path(sandbox_dir),
             )
+        else:
+            with tempfile.TemporaryDirectory(
+                prefix="jarvis-verifier-sandbox-"
+            ) as sandbox_dir:
+                exit_code, stdout, stderr, timed_out, output_overflow = _spawn(
+                    argv,
+                    repo,
+                    timeout,
+                    git=argv[0] == _GIT_EXECUTABLE,
+                    sandbox_root=Path(sandbox_dir),
+                )
     except FileNotFoundError as exc:
         return _failed_command(command, 127, str(exc))
     except OSError as exc:
