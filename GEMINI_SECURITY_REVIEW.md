@@ -33,11 +33,11 @@ the name is legacy from an earlier multi-lane naming scheme.
 
 **Scope.** The "Findings" section below is Phase A: the AppleScript/shell-injection
 findings from the prior read-only scan, verified against current HEAD and fixed. The
-"Not yet addressed" section tracks everything deferred to Phase B; one of those items
-(`run_python`) has since been partially addressed and is annotated in place with its
-current, measured status. **Item 6 is not complete** — the `run_python`
-arbitrary-code-execution surface is still open and awaits a decision on the recommended
-sandbox fix.
+"Phase B status" section tracks everything deferred from Phase A. The dormant
+`run_python` arbitrary-code-execution surface has since been closed by deprecating and
+fail-closing that API; it had no production caller, while Jarvis's bounded code workbench
+remains the supported code-execution path. **Item 6 is not complete** because the other
+Phase B controls listed below remain open.
 
 ## Findings
 
@@ -178,57 +178,26 @@ report or in the test fixtures (test bearer token `jarvis-test-remote-token` is 
 pre-existing, repo-wide test-only sentinel, not a real credential — it is unrelated to
 this change and predates it).
 
-## Not yet addressed (deferred to Phase B)
+## Phase B status
 
-Per the approved scope for this pass, the following are explicitly **not** fixed here
-and require separate, dedicated review:
+### Closed
+
+- `terminal.py` (`run_python`) — repository-wide call-site inspection found no
+  production caller. The function now preserves the existing behavior-policy denial
+  response but refuses all otherwise-authorized source without creating a file or
+  process. Jarvis's isolated, allowlisted code workbench remains the supported execution
+  path. This removes the arbitrary-code-execution surface instead of relying on a
+  source-code denylist or a partial in-process sandbox.
+
+### Not yet addressed
+
+The following controls require separate, dedicated review:
 
 - Deterministic manager security gating.
 - Generated-test confinement.
 - Capability enforcement for direct specialist function calls.
 - Outbound private-data controls.
 - Untrusted repository-context separation.
-- `terminal.py` (`run_python`) — **partially addressed in Phase B; the underlying
-  arbitrary-code-execution gap remains OPEN.** Phase A found the function writing `code`
-  to a temp file and running it via `subprocess.run(["python3", path], ...)` with no gate
-  at all. Phase B added one:
-  ```python
-  gate = perms.can_run_shell(code, admin=False)
-  if not gate["ok"]:
-      return gate["reason"]
-  ```
-  This matches the gating already applied to `run_command`, and it is a strict
-  improvement — but it does **not** close the gap, for two independent reasons:
-  1. `safety_permissions.authorize_tool_call()` — the digest-bound execution grant — is
-     structurally unavailable here. It requires `run_id`, `required_capabilities`, and an
-     `_ACTIVE_EXECUTION_GRANT` ContextVar set by `execution_engine.py`; `run_python(code)`
-     receives none of these and is reachable outside any execution run. Calling it would
-     deny unconditionally, not gate meaningfully.
-  2. `can_run_shell()` delegates to `behavior_hooks.pre_shell_command()`, which is a
-     **substring denylist** over lowercased text (`BLOCKED_COMMAND_PATTERNS`: `rm -rf`,
-     `mkfs`, `dd if=`, `shutdown`, …). Those patterns describe *shell* syntax. Python
-     reaches the same effects without matching any of them.
-
-  Measured, not assumed. Payloads passed through `can_run_shell()` directly:
-
-  | payload | verdict |
-  |---|---|
-  | `os.system("rm -rf …")` (shell-shaped) | BLOCKED |
-  | `shutil.rmtree("/Users/truthseeker/jarvis-ai")` | **ALLOWED** |
-  | `pathlib` recursive `.unlink()` sweep over `/Users/truthseeker` | **ALLOWED** |
-  | append attacker key to `~/.ssh/authorized_keys` via `open(...,"a")` | **ALLOWED** |
-  | reverse shell (`socket` + `dup2` + `subprocess.call(["/bin/sh"])`) | **ALLOWED** |
-  | `print("hello")` (benign) | ALLOWED |
-
-  So the Phase B gate blocks only the case where Python source happens to embed a
-  denylisted *shell* string. Every Python-native equivalent passes. Treat `run_python`
-  as an unmitigated arbitrary-code-execution surface.
-
-  Recommended fix (not implemented — requires a decision, see below): execute the temp
-  file under the default-deny macOS Seatbelt profile already used by
-  `harness/completion_verifier.py`, rather than extending the denylist. A denylist over
-  a Turing-complete language cannot be made complete; a sandbox bounds the effect
-  regardless of how the code is written.
 - `behavior_hooks.py:212-225` — uses a denylist rather than an allowlist for path
   policy. Flagged as a product-design question for Phase B discussion, not treated as
   a bug in this report.

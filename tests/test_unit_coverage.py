@@ -558,11 +558,13 @@ class TerminalCommandGatingTests(unittest.TestCase):
     def test_run_python_blocked_by_hook(self):
         import terminal
         with patch("terminal.perms.can_run_shell", return_value={"ok": False, "reason": "Policy blocked."}) as gate_mock, \
-             patch("terminal.subprocess.run") as run_mock:
+             patch("terminal.subprocess.run") as run_mock, \
+             patch("terminal.tempfile.NamedTemporaryFile") as tempfile_mock:
             result = terminal.run_python("print('should never run')")
         self.assertEqual(result, "Policy blocked.")
         gate_mock.assert_called_once()
         run_mock.assert_not_called()
+        tempfile_mock.assert_not_called()
 
     def test_run_python_denial_matches_run_command_denial_shape(self):
         import terminal
@@ -572,16 +574,20 @@ class TerminalCommandGatingTests(unittest.TestCase):
             python_result = terminal.run_python("print(1)")
         self.assertEqual(command_result, python_result)
 
-    def test_run_python_executes_when_authorized(self):
+    def test_run_python_is_disabled_when_authorized(self):
         import terminal
-        completed = SimpleNamespace(returncode=0, stdout="42\n", stderr="")
         with patch("terminal.perms.can_run_shell", return_value={"ok": True, "reason": ""}), \
-             patch("terminal.subprocess.run", return_value=completed) as run_mock:
-            result = terminal.run_python("print(42)")
-        self.assertEqual(result, "42")
-        run_mock.assert_called_once()
-        args, kwargs = run_mock.call_args
-        self.assertEqual(args[0][0], "python3")
+             patch("terminal.subprocess.run") as run_mock, \
+             patch("terminal.subprocess.Popen") as popen_mock, \
+             patch("terminal.tempfile.NamedTemporaryFile") as tempfile_mock:
+            result = terminal.run_python(
+                "import shutil; shutil.rmtree('/Users/truthseeker/jarvis-ai')"
+            )
+        self.assertIn("direct Python execution is disabled", result)
+        self.assertIn("bounded code workbench", result)
+        run_mock.assert_not_called()
+        popen_mock.assert_not_called()
+        tempfile_mock.assert_not_called()
 
 
 class TerminalWriteTests(unittest.TestCase):

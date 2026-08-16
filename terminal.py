@@ -191,27 +191,14 @@ def list_directory(path: str = "~") -> str:
 
 
 def run_python(code: str) -> str:
-    """Execute Python code and return output."""
+    """Reject direct Python execution; use the bounded code workbench instead."""
     gate = perms.can_run_shell(code, admin=False)
     if not gate["ok"]:
         return gate["reason"]
-    path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
-            f.write(code)
-            path = f.name
-        result = subprocess.run(
-            ["python3", path], capture_output=True, text=True, timeout=15
-        )
-        output = (result.stdout.strip() or result.stderr.strip())[:4000]
-        return output if output else "Code ran with no output."
-    except subprocess.TimeoutExpired:
-        return "Code timed out."
-    except Exception as e:
-        return f"Error: {e}"
-    finally:
-        if path and os.path.exists(path):
-            os.unlink(path)
+    return (
+        "Blocked: direct Python execution is disabled. "
+        "Use Jarvis's bounded code workbench for code tasks."
+    )
 
 
 def get_clipboard() -> str:
