@@ -37,17 +37,20 @@ def test_missing_specialist_models_normalizes_and_deduplicates_configuration():
 
 def test_startup_check_warns_without_failing_when_models_are_missing(caplog):
     with caplog.at_level(logging.WARNING, logger=config.__name__):
-        missing = config.warn_missing_specialist_models(["devstral:latest"])
+        missing = config.warn_missing_specialist_models([config.LOCAL_CODER])
 
-    assert missing == ("qwen3:30b-a3b",)
-    assert "Missing expected Ollama specialist model(s): qwen3:30b-a3b" in caplog.text
+    assert missing == (config.LOCAL_REASONING,)
+    assert (
+        f"Missing expected Ollama specialist model(s): {config.LOCAL_REASONING}"
+        in caplog.text
+    )
     assert "Routing will use installed local fallbacks" in caplog.text
 
 
 def test_startup_check_logs_ready_inventory(caplog):
     with caplog.at_level(logging.INFO, logger=config.__name__):
         missing = config.warn_missing_specialist_models(
-            ["devstral:latest", "qwen3:30b-a3b"]
+            [config.LOCAL_CODER, config.LOCAL_REASONING]
         )
 
     assert missing == ()

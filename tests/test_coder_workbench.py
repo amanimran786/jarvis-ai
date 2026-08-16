@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import coder_workbench
+import config
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -128,7 +129,10 @@ class TestFixLoop:
             test_command="python -m pytest test_ready.py -q",
         )
         with patch("ollama.Client.chat", return_value=_ollama_response(payload)) as chat, \
-             patch("brains.brain_ollama.get_best_available", return_value="devstral") as select, \
+             patch(
+                 "brains.brain_ollama.get_best_available",
+                 return_value=config.LOCAL_CODER,
+             ) as select, \
              patch("coder_workbench._run_shell", return_value=(0, "1 passed", 0.1)):
             result = coder_workbench.fix_loop(
                 "write a test",
@@ -137,7 +141,10 @@ class TestFixLoop:
             )
 
         assert result["ok"] is True
-        select.assert_called_with("devstral", require_preferred=True)
+        select.assert_called_with(
+            config.LOCAL_CODER,
+            require_preferred=True,
+        )
         assert chat.call_args.kwargs["options"] == {
             "num_ctx": 32_768,
             "num_predict": 4_096,
