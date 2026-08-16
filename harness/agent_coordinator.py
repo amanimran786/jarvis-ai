@@ -151,7 +151,15 @@ def _load_state(path: Path) -> dict[str, Any]:
         raise CoordinationError(f"could not read {path}: {exc}") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("agents", {}), dict):
         raise CoordinationError(f"{path} must contain an agent coordination object")
-    payload.setdefault("version", COORDINATION_VERSION)
+    try:
+        version = int(payload.get("version", 1))
+    except (TypeError, ValueError) as exc:
+        raise CoordinationError(f"{path} has an invalid coordination version") from exc
+    if version > COORDINATION_VERSION:
+        raise CoordinationError(
+            f"{path} uses unsupported coordination version {version}"
+        )
+    payload["version"] = COORDINATION_VERSION
     payload.setdefault("agents", {})
     return payload
 

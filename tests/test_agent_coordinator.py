@@ -46,6 +46,29 @@ def test_runtime_queue_lock_is_gitignored():
     assert result.returncode == 0
 
 
+def test_coordination_state_migrates_to_current_version(tmp_path: Path):
+    state_path = tmp_path / "agent_coordination.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "agents": {"claude": {"status": "available"}}}),
+        encoding="utf-8",
+    )
+
+    state = agent_coordinator._load_state(state_path)
+
+    assert state["version"] == agent_coordinator.COORDINATION_VERSION
+
+
+def test_future_coordination_state_version_fails_closed(tmp_path: Path):
+    state_path = tmp_path / "agent_coordination.json"
+    state_path.write_text(
+        json.dumps({"version": 999, "agents": {}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CoordinationError, match="unsupported coordination version"):
+        agent_coordinator._load_state(state_path)
+
+
 def _task(
     task_id: str,
     *,
