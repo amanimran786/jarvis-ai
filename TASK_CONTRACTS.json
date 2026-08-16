@@ -1622,6 +1622,18 @@
         "type": "file",
         "path_template": "tests/test_jarvis_regression_suite.py",
         "description": "Web search regression patches the imported runtime symbol so hermetic verification never depends on live network access"
+      },
+      {
+        "name": "memory_persistence_fixture",
+        "type": "file",
+        "path_template": "tests/test_memory_persistence.py",
+        "description": "Mem0 persistence regressions use an initialized temporary SQLite store instead of personal home-directory state"
+      },
+      {
+        "name": "nested_sandbox_regression",
+        "type": "file",
+        "path_template": "tests/test_task_runtime_sandbox.py",
+        "description": "Live Seatbelt enforcement tests declare nested kernel-sandbox execution inapplicable while policy tests remain active"
       }
     ],
     "side_effects": [
