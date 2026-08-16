@@ -14,7 +14,15 @@ import time
 import uuid
 from urllib.parse import urlparse
 from typing import Any, Generator
-from config import SYSTEM_PROMPT, LOCAL_DEFAULT, LOCAL_CODER, LOCAL_REASONING, LOCAL_TUNED, LOCAL_PREFER_TUNED
+from config import (
+    SYSTEM_PROMPT,
+    LOCAL_DEFAULT,
+    LOCAL_CLASSIFIER,
+    LOCAL_CODER,
+    LOCAL_REASONING,
+    LOCAL_TUNED,
+    LOCAL_PREFER_TUNED,
+)
 import context_budget
 import memory as mem
 import conversation_context as ctx
@@ -1829,6 +1837,7 @@ def local_capabilities() -> dict:
 
     return {
         "models": models,
+        "selected_classifier": _selected_specialist(LOCAL_CLASSIFIER),
         "selected_default": _selected(LOCAL_DEFAULT),
         "selected_coder": _selected_specialist(LOCAL_CODER),
         "selected_reasoning": _selected_specialist(LOCAL_REASONING),

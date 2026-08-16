@@ -41,6 +41,27 @@ def test_classifier_uses_dedicated_exact_model_and_bounded_request():
     assert kwargs["keep_alive"] == "5m"
 
 
+def test_local_capabilities_reports_exact_classifier_role():
+    classifier = config.LOCAL_CLASSIFIER
+
+    with patch.object(
+        brain_ollama,
+        "list_local_models",
+        return_value=[classifier],
+    ), patch.object(
+        brain_ollama,
+        "get_best_available",
+        side_effect=lambda preferred, **_kwargs: preferred,
+    ), patch.object(
+        brain_ollama,
+        "_vision_runtime_status",
+        return_value={"state": "unavailable", "detail": "not installed"},
+    ):
+        capabilities = brain_ollama.local_capabilities()
+
+    assert capabilities["selected_classifier"] == classifier
+
+
 def test_timed_classifier_delegates_timeout_to_transport_without_worker_thread():
     expected = orchestrator.ToolDecision("notes", 0.9, "read")
 
