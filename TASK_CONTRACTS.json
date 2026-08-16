@@ -1529,7 +1529,7 @@
     "task_type": "code",
     "description": "Reduce shared local-LLM latency with benchmark-gated role routing, bounded structured classification, and startup warming.",
     "contract_version": "1.0",
-    "task_spec_sha256": "066adae8537bd0117febcc3aa50f4e2250f82040bc375a9422da78793f078587",
+    "task_spec_sha256": "30cbdb090c78e3aacba2f761ca90cf891680466184d327fe6afc69e2bc374076",
     "inputs": [
       {
         "name": "ollama_inventory",
@@ -1592,6 +1592,12 @@
         "type": "file",
         "path_template": "tests/test_local_model_latency_routing.py",
         "description": "Classifier bounds, routing order, and startup warm regression coverage"
+      },
+      {
+        "name": "coder_role_regression",
+        "type": "file",
+        "path_template": "tests/test_coder_workbench.py",
+        "description": "Coder workbench assertions follow the configured exact local coder role"
       }
     ],
     "side_effects": [
