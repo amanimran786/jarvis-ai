@@ -5842,7 +5842,7 @@ class WebSearchSummaryTests(unittest.TestCase):
 
     def test_web_search_returns_non_empty(self):
         """web_search with summarise=False should return a non-empty string."""
-        with patch("ddgs.DDGS") as mock_ddgs_cls:
+        with patch("tools.DDGS") as mock_ddgs_cls:
             mock_ddgs = mock_ddgs_cls.return_value.__enter__.return_value
             mock_ddgs.text.return_value = [
                 {"title": "AI News", "body": "Artificial intelligence continues to evolve rapidly in 2026."}

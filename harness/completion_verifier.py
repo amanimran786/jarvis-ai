@@ -86,6 +86,8 @@ if module == "pytest":
             self.collected = len(session.items)
 
         def pytest_runtest_logreport(self, report):
+            if report.__class__.__name__ == "SubtestReport":
+                return
             terminal = report.when == "call"
             terminal = terminal or (
                 report.when == "setup"

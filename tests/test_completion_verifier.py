@@ -700,6 +700,29 @@ def test_nested_verifier_reuses_kernel_enforced_outer_sandbox(
     assert evidence["commands"][0]["exit_code"] == 0
 
 
+def test_pytest_observer_counts_parent_tests_not_subtest_reports(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, _ = repo
+    base = _install_test(
+        worktree,
+        "import unittest\n\n"
+        "class TestSubtests(unittest.TestCase):\n"
+        "    def test_examples(self):\n"
+        "        for value in range(3):\n"
+        "            with self.subTest(value=value):\n"
+        "                self.assertLess(value, 3)\n",
+    )
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 0
+
+
 def test_verifier_preloads_stable_runtime_modules_before_collection(
     repo: tuple[Path, str],
 ) -> None:
