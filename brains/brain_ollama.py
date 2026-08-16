@@ -18,7 +18,9 @@ from config import (
     SYSTEM_PROMPT,
     LOCAL_DEFAULT,
     LOCAL_CLASSIFIER,
+    LOCAL_CLASSIFIER_CONTEXT_TOKENS,
     LOCAL_CODER,
+    LOCAL_FAST_CHAT_CONTEXT_TOKENS,
     LOCAL_REASONING,
     LOCAL_TUNED,
     LOCAL_PREFER_TUNED,
@@ -114,6 +116,10 @@ def _check_ollama_liveness() -> bool:
 _OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
 _OLLAMA_VISION_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_VISION_TIMEOUT_SECONDS", "30"))
 _OLLAMA_STRUCTURED_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_STRUCTURED_TIMEOUT_SECONDS", "20"))
+_OLLAMA_KEEPALIVE_TIMEOUT_SECONDS = max(
+    1.0,
+    min(float(os.getenv("OLLAMA_KEEPALIVE_TIMEOUT_SECONDS", "5")), 15.0),
+)
 _CLIENT_SINGLETON = None
 _CLIENT_LOCK = threading.Lock()
 
@@ -228,6 +234,19 @@ def _structured_client(timeout_seconds: float | None = None):
     return _ollama.Client(timeout=timeout)
 
 
+def _keepalive_client():
+    _enforce_ollama_host_policy()
+    if httpx is None:
+        return _ollama.Client(timeout=_OLLAMA_KEEPALIVE_TIMEOUT_SECONDS)
+    timeout = httpx.Timeout(
+        connect=min(2.0, _OLLAMA_KEEPALIVE_TIMEOUT_SECONDS),
+        read=_OLLAMA_KEEPALIVE_TIMEOUT_SECONDS,
+        write=min(5.0, _OLLAMA_KEEPALIVE_TIMEOUT_SECONDS),
+        pool=min(2.0, _OLLAMA_KEEPALIVE_TIMEOUT_SECONDS),
+    )
+    return _ollama.Client(timeout=timeout)
+
+
 def _close_client():
     client = _CLIENT_SINGLETON
     if client is None:
@@ -250,9 +269,14 @@ atexit.register(_close_client)
 # and eliminates the 20–40 second cold-reload on the next real query.
 
 _KEEPALIVE_INTERVAL = 180  # seconds — well inside Ollama's 5-min eviction window
-_keepalive_model: str | None = None
+_keepalive_models: dict[str, int | None] = {}
+_keepalive_models_lock = threading.Lock()
 _keepalive_thread: threading.Thread | None = None
 _keepalive_stop = threading.Event()
+_keepalive_shutdown = threading.Event()
+_resident_warm_lock = threading.Lock()
+_resident_warm_complete = False
+_resident_warm_in_progress = False
 
 # Memory pressure threshold — skip keepalive ping (allow eviction) when available
 # RAM drops below this fraction. Prevents model weights from being pinned while
@@ -283,38 +307,64 @@ def _system_has_headroom() -> bool:
 
 def _keepalive_loop() -> None:
     while not _keepalive_stop.wait(_KEEPALIVE_INTERVAL):
-        model = _keepalive_model
-        if not model:
+        with _keepalive_models_lock:
+            targets = tuple(_keepalive_models.items())
+        if not targets:
             continue
         if not _system_has_headroom():
             # RAM is tight — let Ollama evict the model naturally rather than
             # pinging to keep it loaded. A cold reload (~20s) is far better
             # than a 120s timeout caused by swapping under memory pressure.
             continue
-        try:
-            # keep_alive="5m" resets Ollama's internal eviction timer without generating tokens
-            _client().generate(model=model, prompt="", keep_alive="5m")
-        except Exception:
-            pass  # Ollama may be temporarily unavailable — just try again next cycle
+        for model, max_context in targets:
+            try:
+                # Reset Ollama's eviction timer without expanding the context
+                # allocation established by the bounded startup warm.
+                _keepalive_client().generate(
+                    model=model,
+                    prompt="",
+                    keep_alive="5m",
+                    options=_bounded_warm_options(model, max_context),
+                )
+            except Exception:
+                log.debug(
+                    "[Ollama] keepalive ping failed for %s",
+                    model,
+                    exc_info=True,
+                )
 
 
-def start_keepalive(model: str) -> None:
-    """Pin `model` in Ollama RAM. Safe to call multiple times — updates the target model."""
-    global _keepalive_model, _keepalive_thread
-    _keepalive_model = model
-    if _keepalive_thread is not None and _keepalive_thread.is_alive():
+def start_keepalive(model: str, *, max_context: int | None = None) -> None:
+    """Keep a bounded text model resident without replacing existing roles."""
+    global _keepalive_thread
+    if not model or not model.strip():
+        raise ValueError("Ollama keepalive model is required")
+    if max_context is not None and max_context <= 0:
+        raise ValueError("Ollama keepalive context limit must be positive")
+    if _keepalive_shutdown.is_set():
         return
-    _keepalive_stop.clear()
-    _keepalive_thread = threading.Thread(
-        target=_keepalive_loop,
-        daemon=True,
-        name="OllamaKeepalive",
-    )
-    _keepalive_thread.start()
+    with _keepalive_models_lock:
+        if _keepalive_shutdown.is_set():
+            return
+        _keepalive_models[model] = max_context
+        if _keepalive_thread is None or not _keepalive_thread.is_alive():
+            _keepalive_thread = threading.Thread(
+                target=_keepalive_loop,
+                daemon=True,
+                name="OllamaKeepalive",
+            )
+            _keepalive_thread.start()
 
 
 def stop_keepalive() -> None:
+    global _resident_warm_complete, _resident_warm_in_progress
+    _keepalive_shutdown.set()
     _keepalive_stop.set()
+    with _keepalive_models_lock:
+        _keepalive_models.clear()
+    with _resident_warm_lock:
+        _resident_warm_complete = False
+        _resident_warm_in_progress = False
 
 
 atexit.register(stop_keepalive)
@@ -566,6 +616,15 @@ def _normalize_model_tag(model: str) -> str:
     return normalize_ollama_model_ref(model)
 
 
+def _default_text_keep_alive(model: str) -> str:
+    normalized = _normalize_model_tag(model)
+    resident = {
+        _normalize_model_tag(LOCAL_CLASSIFIER),
+        _normalize_model_tag(LOCAL_DEFAULT),
+    }
+    return "5m" if normalized in resident else "0"
+
+
 def _exact_available_model(model: str) -> str:
     requested = _normalize_model_tag(model)
     if not requested or _is_cloud_tagged_model(requested):
@@ -657,8 +716,11 @@ def ask_local_structured(
         }
         if think is not None:
             request["think"] = think
-        if keep_alive is not None:
-            request["keep_alive"] = keep_alive
+        request["keep_alive"] = (
+            keep_alive
+            if keep_alive is not None
+            else _default_text_keep_alive(model)
+        )
         response = _structured_client(timeout_seconds).chat(
             **request,
         )
@@ -843,8 +905,11 @@ def ask_local_stream(
             think = False
         if think is not None:
             request["think"] = think
-        if keep_alive:
-            request["keep_alive"] = keep_alive
+        request["keep_alive"] = (
+            keep_alive
+            if keep_alive is not None
+            else _default_text_keep_alive(model)
+        )
 
         stream = _client().chat(**request)
         raw_buffer = ""
@@ -1664,13 +1729,19 @@ def _vision_runtime_status() -> dict[str, str | None]:
     if healthy and not health:
         return {
             "state": "ready",
-            "detail": f"Local vision ready via {healthy[0]}.",
+            "detail": (
+                f"Local vision is installed via {healthy[0]}; "
+                "it loads on first use when not resident."
+            ),
             "preferred": healthy[0],
         }
 
     if healthy:
         cooled = [model for model in candidates if model not in healthy]
-        detail = f"Local vision ready via {healthy[0]}."
+        detail = (
+            f"Local vision is installed via {healthy[0]}; "
+            "it loads on first use when not resident."
+        )
         if cooled:
             detail += f" {cooled[0]} is cooling down after a recent failure."
         return {
@@ -1752,12 +1823,27 @@ def embed(text: str) -> list[float] | None:
         return None
 
 
+def _bounded_warm_options(
+    model: str,
+    max_context: int | None,
+) -> dict[str, int | float]:
+    options: dict[str, int | float] = _ollama_options_for_model(model)
+    if max_context is not None:
+        if max_context <= 0:
+            raise ValueError("Ollama warm context limit must be positive")
+        configured_context = int(options.get("num_ctx", max_context))
+        options["num_ctx"] = min(configured_context, int(max_context))
+    options["num_predict"] = 1
+    options["temperature"] = 0
+    return options
+
+
 def warm_model_cache(
     model: str = LOCAL_DEFAULT,
     *,
     require_preferred: bool = False,
     max_context: int | None = None,
-) -> None:
+) -> str | None:
     """Pre-load a model into Ollama's GPU/RAM so the first real query is instant.
 
     Runs a trivial generation — discards output. Safe to call from a background
@@ -1765,30 +1851,80 @@ def warm_model_cache(
     """
     quiet = os.getenv("JARVIS_QUIET_BOOT", "").lower() in {"1", "true", "yes"}
     try:
+        if not _check_ollama_liveness():
+            raise OllamaUnavailableError("Ollama is unavailable during cache warm")
         target = get_best_available(model, require_preferred=require_preferred)
         if not quiet:
             print(f"[Ollama] Warming model cache for {target}...")
-        options = _ollama_options_for_model(target)
-        if max_context is not None:
-            if max_context <= 0:
-                raise ValueError("Ollama warm context limit must be positive")
-            configured_context = int(options.get("num_ctx", max_context))
-            options["num_ctx"] = min(configured_context, int(max_context))
-        options["num_predict"] = 1
-        options["temperature"] = 0
-        _client().chat(
+        _structured_client().chat(
             model=target,
             messages=[{"role": "user", "content": "Hi"}],
             stream=False,
             think=False,
-            options=options,
+            options=_bounded_warm_options(target, max_context),
             keep_alive="5m",
         )
         if not quiet:
             print(f"[Ollama] {target} loaded and ready.")
+        return target
     except Exception as e:
+        log.warning("[Ollama] Cache warm failed for %s: %s", model, e)
         if not quiet:
             print(f"[Ollama] Cache warm failed (non-fatal): {e}")
+        return None
+
+
+def warm_resident_text_fleet() -> bool:
+    """Warm and retain the classifier and general text roles exactly once."""
+    global _resident_warm_complete, _resident_warm_in_progress
+    with _resident_warm_lock:
+        if (
+            _keepalive_shutdown.is_set()
+            or _resident_warm_complete
+            or _resident_warm_in_progress
+        ):
+            return False
+        _resident_warm_in_progress = True
+
+    targets = tuple(dict.fromkeys((
+        (LOCAL_CLASSIFIER, LOCAL_CLASSIFIER_CONTEXT_TOKENS),
+        (LOCAL_DEFAULT, LOCAL_FAST_CHAT_CONTEXT_TOKENS),
+    )))
+    warmed: list[tuple[str, int]] = []
+    registrations: list[tuple[str, int]] = []
+    try:
+        for preferred, max_context in targets:
+            if _keepalive_shutdown.is_set():
+                break
+            target = warm_model_cache(
+                preferred,
+                require_preferred=True,
+                max_context=max_context,
+            )
+            if target:
+                warmed.append((target, max_context))
+            registrations.append((target or preferred, max_context))
+
+        if not _keepalive_shutdown.is_set():
+            for target, max_context in registrations:
+                start_keepalive(target, max_context=max_context)
+    finally:
+        with _resident_warm_lock:
+            _resident_warm_in_progress = False
+            _resident_warm_complete = (
+                not _keepalive_shutdown.is_set()
+                and len(warmed) == len(targets)
+            )
+
+    if len(warmed) != len(targets) and not _keepalive_shutdown.is_set():
+        log.warning(
+            "[Ollama] Resident text fleet partially warmed (%d/%d); "
+            "bounded keepalive retries remain scheduled",
+            len(warmed),
+            len(targets),
+        )
+    with _resident_warm_lock:
+        return _resident_warm_complete
 
 
 def warm_vision_cache() -> None:

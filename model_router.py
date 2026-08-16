@@ -423,7 +423,11 @@ def _has_model(name: str, available: list[str]) -> bool:
 def _use_fast_local_context(*, model: str, tool: str | None, local: bool) -> bool:
     """Keep routine default-model chat responsive without weakening specialist lanes."""
     lane = (tool or "chat").strip().lower()
-    return bool(local and lane == "chat" and _has_model(LOCAL_DEFAULT, [model]))
+    return bool(
+        local
+        and lane in {"chat", "extraction"}
+        and _has_model(LOCAL_DEFAULT, [model])
+    )
 
 
 def _best_local(text: str) -> str:
@@ -1268,17 +1272,24 @@ def smart_stream(
 
     def _candidate_stream(candidate):
         if candidate.provider == "ollama":
-            # Update keepalive target so the next query finds this model already warm
-            try:
-                from brains.brain_ollama import start_keepalive
-                start_keepalive(candidate.model)
-            except Exception:
-                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             fast_chat = fast_local_context and _use_fast_local_context(
                 model=candidate.model,
                 tool=tool,
                 local=True,
             )
+            resident_default = _has_model(LOCAL_DEFAULT, [candidate.model])
+            if resident_default:
+                try:
+                    from brains.brain_ollama import start_keepalive
+                    start_keepalive(
+                        candidate.model,
+                        max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+                    )
+                except Exception:
+                    logging.debug(
+                        "[ModelRouter] local keepalive registration failed",
+                        exc_info=True,
+                    )
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1287,10 +1298,14 @@ def smart_stream(
                 raise_on_error=True,
                 context_budget_report=compiled_context,
                 include_memory=False,
-                max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS if fast_chat else None,
+                max_context=(
+                    LOCAL_FAST_CHAT_CONTEXT_TOKENS
+                    if resident_default
+                    else None
+                ),
                 max_output=LOCAL_FAST_CHAT_MAX_TOKENS if fast_chat else None,
                 think=False if fast_chat else None,
-                keep_alive="5m" if fast_chat else None,
+                keep_alive="5m" if resident_default else "0",
             )
         if candidate.provider == "apple_foundation":
             from brains.brain_apple_foundation import ask_apple_foundation_stream
@@ -1455,16 +1470,24 @@ def _execute_forced_stream(
 ):
     def _candidate_stream(candidate):
         if candidate.provider == "ollama":
-            try:
-                from brains.brain_ollama import start_keepalive
-                start_keepalive(candidate.model)
-            except Exception:
-                logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
             fast_chat = fast_local_context and _use_fast_local_context(
                 model=candidate.model,
                 tool=tool,
                 local=True,
             )
+            resident_default = _has_model(LOCAL_DEFAULT, [candidate.model])
+            if resident_default:
+                try:
+                    from brains.brain_ollama import start_keepalive
+                    start_keepalive(
+                        candidate.model,
+                        max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+                    )
+                except Exception:
+                    logging.debug(
+                        "[ModelRouter] local keepalive registration failed",
+                        exc_info=True,
+                    )
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1473,10 +1496,14 @@ def _execute_forced_stream(
                 raise_on_error=True,
                 context_budget_report=context_budget_report,
                 include_memory=False,
-                max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS if fast_chat else None,
+                max_context=(
+                    LOCAL_FAST_CHAT_CONTEXT_TOKENS
+                    if resident_default
+                    else None
+                ),
                 max_output=LOCAL_FAST_CHAT_MAX_TOKENS if fast_chat else None,
                 think=False if fast_chat else None,
-                keep_alive="5m" if fast_chat else None,
+                keep_alive="5m" if resident_default else "0",
             )
         if candidate.provider == "openai":
             return ask_stream(

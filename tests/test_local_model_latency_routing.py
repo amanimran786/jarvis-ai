@@ -1,8 +1,11 @@
+import os
+import threading
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import pytest
 
+import api
 import config
 import main
 import model_router
@@ -192,10 +195,15 @@ def test_long_routine_prompt_does_not_evict_default_for_reasoning_model():
     assert explicit_deep == "qwen3:30b-a3b"
 
 
-def test_fast_context_is_limited_to_local_default_chat_lane():
+def test_fast_context_is_limited_to_routine_local_default_lanes():
     assert model_router._use_fast_local_context(
         model=config.LOCAL_DEFAULT,
         tool="chat",
+        local=True,
+    ) is True
+    assert model_router._use_fast_local_context(
+        model=config.LOCAL_DEFAULT,
+        tool="extraction",
         local=True,
     ) is True
     assert model_router._use_fast_local_context(
@@ -229,7 +237,7 @@ def test_default_chat_uses_compact_memory_and_bounded_non_reasoning_stream():
          patch.object(model_router._gctx, "context_for_query") as graph_context, \
          patch.object(model_router._smem, "retrieve") as semantic_context, \
          patch.object(model_router._m0, "search") as episodic_context, \
-         patch("brains.brain_ollama.start_keepalive"), \
+         patch("brains.brain_ollama.start_keepalive") as keepalive, \
          patch.object(model_router, "ask_local_stream", return_value=iter(["Fast answer."])) as ask_local:
         stream, _label = model_router.smart_stream(
             "Define database indexing.",
@@ -253,6 +261,10 @@ def test_default_chat_uses_compact_memory_and_bounded_non_reasoning_stream():
     assert kwargs["max_output"] == config.LOCAL_FAST_CHAT_MAX_TOKENS
     assert kwargs["think"] is False
     assert kwargs["keep_alive"] == "5m"
+    keepalive.assert_called_once_with(
+        config.LOCAL_DEFAULT,
+        max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+    )
 
 
 def test_stream_call_applies_fast_chat_transport_options():
@@ -293,6 +305,46 @@ def test_stream_call_applies_fast_chat_transport_options():
     assert calls[0]["keep_alive"] == "5m"
 
 
+def test_non_chat_default_route_preserves_resident_context_allocation():
+    candidate = model_router.provider_router.RouteCandidate(
+        provider="ollama",
+        model=config.LOCAL_DEFAULT,
+        local=True,
+        label="Local",
+    )
+    plan = model_router.provider_router.RoutePlan(
+        mode="open-source",
+        tier="local",
+        candidates=(candidate,),
+        reason="test",
+    )
+
+    with patch("brains.brain_ollama.start_keepalive") as keepalive, \
+         patch.object(
+             model_router,
+             "ask_local_stream",
+             return_value=iter(["Done."]),
+         ) as ask_local, \
+         patch.object(model_router.telemetry, "log_route_decision"):
+        stream = model_router._execute_forced_stream(
+            plan,
+            "Recall the project context.",
+            "",
+            tool="memory",
+            fast_local_context=False,
+        )
+        assert list(stream) == ["Done."]
+
+    keepalive.assert_called_once_with(
+        config.LOCAL_DEFAULT,
+        max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+    )
+    kwargs = ask_local.call_args.kwargs
+    assert kwargs["max_context"] == config.LOCAL_FAST_CHAT_CONTEXT_TOKENS
+    assert kwargs["max_output"] is None
+    assert kwargs["keep_alive"] == "5m"
+
+
 @pytest.mark.parametrize("bound", ["max_context", "max_output"])
 def test_stream_call_rejects_nonpositive_request_bounds(bound):
     kwargs = {bound: 0}
@@ -322,7 +374,11 @@ def test_warm_model_cache_uses_exact_role_and_bounded_context():
         brain_ollama,
         "get_best_available",
         return_value="qwen3.5:4b",
-    ) as get_best, patch.object(brain_ollama, "_client", return_value=Client()):
+    ) as get_best, patch.object(
+        brain_ollama,
+        "_structured_client",
+        return_value=Client(),
+    ), patch.object(brain_ollama, "_check_ollama_liveness", return_value=True):
         brain_ollama.warm_model_cache(
             "qwen3.5:4b",
             require_preferred=True,
@@ -346,37 +402,262 @@ def test_warm_model_cache_defaults_to_general_role():
         brain_ollama,
         "get_best_available",
         return_value=config.LOCAL_DEFAULT,
-    ) as get_best, patch.object(brain_ollama, "_client", return_value=Client()):
+    ) as get_best, patch.object(
+        brain_ollama,
+        "_structured_client",
+        return_value=Client(),
+    ), patch.object(brain_ollama, "_check_ollama_liveness", return_value=True):
         brain_ollama.warm_model_cache()
 
     get_best.assert_called_once_with(config.LOCAL_DEFAULT, require_preferred=False)
 
 
-def test_deferred_startup_prewarms_classifier_and_default_before_keepalive():
-    classifier = getattr(config, "LOCAL_CLASSIFIER", "qwen3.5:4b")
-    default = config.LOCAL_DEFAULT
+def test_resident_text_fleet_warms_each_role_once_with_bounded_keepalive():
+    with patch.object(brain_ollama, "_keepalive_shutdown", threading.Event()), \
+         patch.object(brain_ollama, "_resident_warm_complete", False), \
+         patch.object(brain_ollama, "_resident_warm_in_progress", False), \
+         patch.object(
+             brain_ollama,
+             "warm_model_cache",
+             side_effect=lambda model, **_kwargs: model,
+         ) as warm_model, \
+         patch.object(brain_ollama, "start_keepalive") as keepalive:
+        assert brain_ollama.warm_resident_text_fleet() is True
+        assert brain_ollama.warm_resident_text_fleet() is False
 
+    assert warm_model.call_args_list == [
+        call(
+            config.LOCAL_CLASSIFIER,
+            require_preferred=True,
+            max_context=config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        ),
+        call(
+            config.LOCAL_DEFAULT,
+            require_preferred=True,
+            max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+        ),
+    ]
+    assert keepalive.call_args_list == [
+        call(
+            config.LOCAL_CLASSIFIER,
+            max_context=config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        ),
+        call(
+            config.LOCAL_DEFAULT,
+            max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+        ),
+    ]
+
+
+def test_keepalive_ping_preserves_each_resident_models_context_bound():
+    calls = []
+    client = SimpleNamespace(generate=lambda **kwargs: calls.append(kwargs))
+
+    with patch.object(brain_ollama, "_keepalive_models", {
+             config.LOCAL_CLASSIFIER: config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+             config.LOCAL_DEFAULT: config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+         }), \
+         patch.object(brain_ollama, "_keepalive_stop") as stop, \
+         patch.object(brain_ollama, "_system_has_headroom", return_value=True), \
+         patch.object(brain_ollama, "_keepalive_client", return_value=client):
+        stop.wait.side_effect = [False, True]
+        brain_ollama._keepalive_loop()
+
+    assert [entry["model"] for entry in calls] == [
+        config.LOCAL_CLASSIFIER,
+        config.LOCAL_DEFAULT,
+    ]
+    assert [entry["options"]["num_ctx"] for entry in calls] == [
+        config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+    ]
+    assert all(entry["options"]["num_predict"] == 1 for entry in calls)
+
+
+def test_start_keepalive_serializes_thread_creation_and_preserves_both_roles():
+    created = []
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self._alive = False
+            created.append(self)
+
+        def is_alive(self):
+            return self._alive
+
+        def start(self):
+            self._alive = True
+
+    models = {}
+    with patch.object(brain_ollama, "_keepalive_shutdown", threading.Event()), \
+         patch.object(brain_ollama, "_keepalive_stop", threading.Event()), \
+         patch.object(brain_ollama, "_keepalive_models", models), \
+         patch.object(brain_ollama, "_keepalive_thread", None), \
+         patch.object(brain_ollama.threading, "Thread", FakeThread):
+        brain_ollama.start_keepalive(
+            config.LOCAL_CLASSIFIER,
+            max_context=config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        )
+        brain_ollama.start_keepalive(
+            config.LOCAL_DEFAULT,
+            max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+        )
+
+    assert len(created) == 1
+    assert created[0].kwargs["name"] == "OllamaKeepalive"
+    assert models == {
+        config.LOCAL_CLASSIFIER: config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        config.LOCAL_DEFAULT: config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+    }
+
+
+def test_shutdown_during_warm_aborts_remaining_models_and_never_restarts_keepalive():
+    shutdown = threading.Event()
+    stop = threading.Event()
+    models = {}
+
+    def stop_during_first_warm(model, **_kwargs):
+        brain_ollama.stop_keepalive()
+        return model
+
+    with patch.object(brain_ollama, "_keepalive_shutdown", shutdown), \
+         patch.object(brain_ollama, "_keepalive_stop", stop), \
+         patch.object(brain_ollama, "_keepalive_models", models), \
+         patch.object(brain_ollama, "_resident_warm_complete", False), \
+         patch.object(brain_ollama, "_resident_warm_in_progress", False), \
+         patch.object(
+             brain_ollama,
+             "warm_model_cache",
+             side_effect=stop_during_first_warm,
+         ) as warm_model, \
+         patch.object(brain_ollama, "start_keepalive") as keepalive:
+        assert brain_ollama.warm_resident_text_fleet() is False
+
+    assert shutdown.is_set()
+    assert stop.is_set()
+    assert models == {}
+    assert warm_model.call_count == 1
+    keepalive.assert_not_called()
+
+
+def test_partial_warm_failure_registers_bounded_recovery_without_claiming_ready():
+    with patch.object(brain_ollama, "_keepalive_shutdown", threading.Event()), \
+         patch.object(brain_ollama, "_resident_warm_complete", False), \
+         patch.object(brain_ollama, "_resident_warm_in_progress", False), \
+         patch.object(
+             brain_ollama,
+             "warm_model_cache",
+             side_effect=[None, config.LOCAL_DEFAULT],
+         ), patch.object(brain_ollama, "start_keepalive") as keepalive:
+        assert brain_ollama.warm_resident_text_fleet() is False
+
+    assert keepalive.call_args_list == [
+        call(
+            config.LOCAL_CLASSIFIER,
+            max_context=config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        ),
+        call(
+            config.LOCAL_DEFAULT,
+            max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+        ),
+    ]
+
+
+def test_total_warm_failure_still_registers_bounded_recovery():
+    with patch.object(brain_ollama, "_keepalive_shutdown", threading.Event()), \
+         patch.object(brain_ollama, "_resident_warm_complete", False), \
+         patch.object(brain_ollama, "_resident_warm_in_progress", False), \
+         patch.object(brain_ollama, "warm_model_cache", side_effect=[None, None]), \
+         patch.object(brain_ollama, "start_keepalive") as keepalive:
+        assert brain_ollama.warm_resident_text_fleet() is False
+
+    assert keepalive.call_args_list == [
+        call(
+            config.LOCAL_CLASSIFIER,
+            max_context=config.LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+        ),
+        call(
+            config.LOCAL_DEFAULT,
+            max_context=config.LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+        ),
+    ]
+
+
+def test_specialist_stream_unloads_after_request_by_default():
+    calls = []
+
+    class Client:
+        def chat(self, **kwargs):
+            calls.append(kwargs)
+            return iter([
+                SimpleNamespace(
+                    message=SimpleNamespace(content="Done."),
+                    prompt_eval_count=20,
+                    eval_count=4,
+                )
+            ])
+
+    with patch.object(brain_ollama, "_check_ollama_liveness", return_value=True), \
+         patch.object(brain_ollama, "_client", return_value=Client()), \
+         patch.object(brain_ollama, "_fits_local", side_effect=lambda _prompt, model: model), \
+         patch.object(brain_ollama, "get_best_available", side_effect=lambda model: model), \
+         patch.object(brain_ollama.context_budget, "target_tokens_for", return_value=4096), \
+         patch.object(brain_ollama.usage_tracker, "record"):
+        assert list(brain_ollama.ask_local_stream(
+            "Implement a bounded function.",
+            model=config.LOCAL_CODER,
+            include_memory=False,
+        )) == ["Done."]
+
+    assert calls[0]["keep_alive"] == "0"
+
+
+def test_deferred_startup_delegates_to_idempotent_resident_text_warmup():
     with patch("config.warn_missing_specialist_models"), \
          patch("local_runtime.local_stt.preload"), \
          patch("local_runtime.local_kokoro_subprocess_tts.prewarm_phrase_cache"), \
-         patch("brains.brain_ollama.get_best_available", side_effect=lambda model, **_kwargs: model), \
-         patch("brains.brain_ollama.warm_model_cache") as warm_model, \
-         patch("brains.brain_ollama.start_keepalive") as keepalive, \
+         patch("brains.brain_ollama.warm_resident_text_fleet") as warm_fleet, \
          patch.dict("os.environ", {
              "JARVIS_REQUEST_STARTUP_PERMISSIONS": "0",
              "JARVIS_REQUEST_STARTUP_ADMIN": "0",
          }):
         main._run_deferred_startup_tasks()
 
-    assert warm_model.call_args_list == [
-        call(
-            classifier,
-            require_preferred=True,
-            max_context=getattr(config, "LOCAL_CLASSIFIER_CONTEXT_TOKENS", 4096),
-        ),
-        call(default, require_preferred=True, max_context=None),
-    ]
-    keepalive.assert_called_once_with(default)
+    warm_fleet.assert_called_once_with()
+
+
+def test_api_startup_keeps_vision_lazy_by_default():
+    with patch.dict(
+        os.environ,
+        {"JARVIS_LOCAL_WARMUP_DELAY_SECONDS": "0"},
+        clear=False,
+    ):
+        os.environ.pop("JARVIS_WARM_VISION_ON_BOOT", None)
+        with patch(
+            "brains.brain_ollama.warm_resident_text_fleet"
+        ) as warm_fleet, patch(
+            "brains.brain_ollama.warm_vision_cache"
+        ) as warm_vision:
+            api._warm_local_model_caches()
+
+    warm_fleet.assert_called_once_with()
+    warm_vision.assert_not_called()
+
+
+def test_api_startup_warms_vision_only_when_explicitly_enabled():
+    with patch.dict(os.environ, {
+             "JARVIS_LOCAL_WARMUP_DELAY_SECONDS": "0",
+             "JARVIS_WARM_VISION_ON_BOOT": "1",
+         }), \
+         patch.object(api.time, "sleep") as sleep, \
+         patch("brains.brain_ollama.warm_resident_text_fleet") as warm_fleet, \
+         patch("brains.brain_ollama.warm_vision_cache") as warm_vision:
+        api._warm_local_model_caches()
+
+    warm_fleet.assert_called_once_with()
+    sleep.assert_called_once_with(3)
+    warm_vision.assert_called_once_with()
 
 
 def test_local_benchmark_uses_fixed_context_and_output_for_requested_models():

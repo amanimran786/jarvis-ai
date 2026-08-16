@@ -8220,6 +8220,30 @@ async def pm_project_events_stream(project_id: str, since_id: int = 0, request: 
     return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
+def _warm_local_model_caches() -> None:
+    try:
+        delay = float(os.getenv("JARVIS_LOCAL_WARMUP_DELAY_SECONDS", "8"))
+    except ValueError:
+        delay = 8.0
+    if delay > 0:
+        time.sleep(delay)
+
+    try:
+        from brains.brain_ollama import warm_resident_text_fleet, warm_vision_cache
+
+        warm_resident_text_fleet()
+        if os.getenv("JARVIS_WARM_VISION_ON_BOOT", "0").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            time.sleep(3)
+            warm_vision_cache()
+    except Exception as exc:
+        log.warning("[Ollama] deferred cache warm failed (non-fatal): %s", exc)
+
+
 def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     """Start the API server in a background daemon thread."""
     global _host, _port, _API_TOKEN, _API_STARTED
@@ -8249,23 +8273,11 @@ def start(host: str = "127.0.0.1", port: int = 8765) -> threading.Thread:
     # sequential so boot does not try to load text, vision, STT, and TTS at once.
     import model_router as _mr
     if _mr.is_open_source_mode():
-        def _warm_local_caches():
-            try:
-                delay = float(os.getenv("JARVIS_LOCAL_WARMUP_DELAY_SECONDS", "8"))
-            except ValueError:
-                delay = 8.0
-            if delay > 0:
-                time.sleep(delay)
-            try:
-                from brains.brain_ollama import warm_model_cache, warm_vision_cache
-                warm_model_cache()
-                if os.getenv("JARVIS_WARM_VISION_ON_BOOT", "1").lower() not in {"0", "false", "no", "off"}:
-                    time.sleep(3)
-                    warm_vision_cache()
-            except Exception as exc:
-                log.warning("[Ollama] deferred cache warm failed (non-fatal): %s", exc)
-
-        warm_thread = threading.Thread(target=_warm_local_caches, daemon=True, name="OllamaWarm")
+        warm_thread = threading.Thread(
+            target=_warm_local_model_caches,
+            daemon=True,
+            name="OllamaWarm",
+        )
         warm_thread.start()
 
     sched_thread = threading.Thread(target=_routines_scheduler, daemon=True, name="RoutinesScheduler")

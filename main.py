@@ -360,39 +360,12 @@ def _run_deferred_startup_tasks() -> None:
     except Exception:
         logging.debug("[Main] STT preload failed", exc_info=True)
 
-    # Preload the small resident fleet, then keep the general model pinned.
+    # Preload and retain the bounded classifier/general text fleet.
     # This runs on the deferred startup thread, so UI startup remains non-blocking.
     try:
-        from brains.brain_ollama import (
-            get_best_available,
-            start_keepalive,
-            warm_model_cache,
-        )
-        from config import (
-            LOCAL_CLASSIFIER,
-            LOCAL_CLASSIFIER_CONTEXT_TOKENS,
-            LOCAL_DEFAULT,
-        )
+        from brains.brain_ollama import warm_resident_text_fleet
 
-        warm_targets = (
-            (LOCAL_CLASSIFIER, LOCAL_CLASSIFIER_CONTEXT_TOKENS),
-            (LOCAL_DEFAULT, None),
-        )
-        for preferred, max_context in dict.fromkeys(warm_targets):
-            try:
-                warm_model_cache(
-                    preferred,
-                    require_preferred=True,
-                    max_context=max_context,
-                )
-            except Exception:
-                logging.warning(
-                    "[Main] Ollama startup warm failed for %s",
-                    preferred,
-                    exc_info=True,
-                )
-        default_model = get_best_available(LOCAL_DEFAULT, require_preferred=True)
-        start_keepalive(default_model)
+        warm_resident_text_fleet()
     except Exception:
         logging.debug("[Main] Ollama keepalive startup failed", exc_info=True)
 
