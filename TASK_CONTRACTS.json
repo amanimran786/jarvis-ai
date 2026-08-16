@@ -1616,6 +1616,12 @@
         "type": "file",
         "path_template": "tests/test_completion_verifier.py",
         "description": "Safe environment and early-import bootstrap regression coverage"
+      },
+      {
+        "name": "web_search_mock_regression",
+        "type": "file",
+        "path_template": "tests/test_jarvis_regression_suite.py",
+        "description": "Web search regression patches the imported runtime symbol so hermetic verification never depends on live network access"
       }
     ],
     "side_effects": [
