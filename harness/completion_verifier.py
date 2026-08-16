@@ -61,6 +61,20 @@ module, repo, *args = sys.argv[1:]
 if module == "pytest":
     import pytest
 
+    sys.path.insert(0, repo)
+
+    class JarvisPytestBootstrap:
+        def pytest_configure(self, config):
+            for module_name in (
+                "tools",
+                "brains.brain_apple_foundation",
+                "brains.brain_ollama",
+            ):
+                try:
+                    __import__(module_name)
+                except Exception:
+                    pass
+
     class JarvisPytestObserver:
         def __init__(self):
             self.collected = 0
@@ -85,9 +99,11 @@ if module == "pytest":
                 self.failed += 1
 
     observer = JarvisPytestObserver()
-    sys.path.insert(0, repo)
     result = int(
-        pytest.main(["--noconftest", *args], plugins=[observer])
+        pytest.main(
+            ["--noconftest", *args],
+            plugins=[JarvisPytestBootstrap(), observer],
+        )
     )
     record = {
         "collected": observer.collected,
@@ -277,6 +293,12 @@ def _verification_env(sandbox_root: Path) -> dict[str, str]:
         "LC_ALL": "C",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "JARVIS_AUTO_VERIFY": "0",
+        "JARVIS_NATIVE_TOOL_LOOP": "0",
+        "JARVIS_SECURITY_AUDIT_PATH": str(sandbox_root / "security_audit.jsonl"),
+        "JARVIS_TASK_DB_PATH": str(sandbox_root / "jarvis_tasks.sqlite3"),
+        "JARVIS_OLLAMA_LIVENESS_DISABLED": "1",
+        "JARVIS_API_ALLOW_NO_AUTH": "1",
     }
 
 

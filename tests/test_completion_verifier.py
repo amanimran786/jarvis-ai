@@ -633,3 +633,71 @@ def test_verification_environment_scrubs_secret_variables(
     evidence = collect_completion_evidence(_spec(_pytest_command()), worktree, base)
 
     assert evidence["commands"][0]["exit_code"] == 0
+
+
+def test_verification_environment_sets_safe_runtime_isolation(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, _ = repo
+    base = _install_test(
+        worktree,
+        "import os\n"
+        "from pathlib import Path\n\n"
+        "def test_safe_runtime_isolation():\n"
+        "    assert os.environ['JARVIS_AUTO_VERIFY'] == '0'\n"
+        "    assert os.environ['JARVIS_NATIVE_TOOL_LOOP'] == '0'\n"
+        "    assert os.environ['JARVIS_OLLAMA_LIVENESS_DISABLED'] == '1'\n"
+        "    assert os.environ['JARVIS_API_ALLOW_NO_AUTH'] == '1'\n"
+        "    sandbox = Path(os.environ['HOME']).parent\n"
+        "    assert Path(os.environ['JARVIS_SECURITY_AUDIT_PATH']).parent == sandbox\n"
+        "    assert Path(os.environ['JARVIS_TASK_DB_PATH']).parent == sandbox\n",
+    )
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 0
+
+
+def test_verifier_preloads_stable_runtime_modules_before_collection(
+    repo: tuple[Path, str],
+) -> None:
+    worktree, _ = repo
+    (worktree / "brains").mkdir()
+    (worktree / "brains" / "__init__.py").write_text("", encoding="utf-8")
+    (worktree / "tools.py").write_text(
+        "import builtins\n"
+        "builtins.jarvis_preload_order = ['tools']\n",
+        encoding="utf-8",
+    )
+    (worktree / "brains" / "brain_apple_foundation.py").write_text(
+        "import builtins\n"
+        "builtins.jarvis_preload_order.append('apple')\n",
+        encoding="utf-8",
+    )
+    (worktree / "brains" / "brain_ollama.py").write_text(
+        "import builtins\n"
+        "builtins.jarvis_preload_order.append('ollama')\n",
+        encoding="utf-8",
+    )
+    (worktree / "verify_test.py").write_text(
+        "import builtins\n\n"
+        "def test_preload_order():\n"
+        "    assert builtins.jarvis_preload_order == "
+        "['tools', 'apple', 'ollama']\n",
+        encoding="utf-8",
+    )
+    _git(worktree, "add", "brains", "tools.py", "verify_test.py")
+    _git(worktree, "commit", "-m", "add preload fixtures")
+    base = _git(worktree, "rev-parse", "HEAD")
+
+    evidence = collect_completion_evidence(
+        _spec(_pytest_command()),
+        worktree,
+        base,
+    )
+
+    assert evidence["commands"][0]["exit_code"] == 0
