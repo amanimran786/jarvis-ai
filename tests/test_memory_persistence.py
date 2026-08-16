@@ -10,12 +10,11 @@ Proves that memory survives a simulated process restart:
    - Confirm the entry comes back in search results
 
 2. Mem0Layer (SQLite history.db):
-   - Verify the history.db at its real location has entries
+   - Initialize a disposable history.db with the production schema
    - Open a fresh SQLite connection (simulating a new process)
    - Confirm the schema and entry count are stable across re-reads
 
-No real mem0 LLM calls are made — all writes use mocked or pre-existing
-on-disk data.
+No real mem0 LLM calls or personal on-disk data are used.
 """
 from __future__ import annotations
 
@@ -163,8 +162,40 @@ class TestMem0HistoryDbPersistence(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from pathlib import Path
-        cls.db_path = Path.home() / ".mem0" / "jarvis" / "history.db"
+        cls._tmp = tempfile.TemporaryDirectory(prefix="mem0_history_test_")
+        cls.db_path = Path(cls._tmp.name) / "history.db"
+        with sqlite3.connect(str(cls.db_path)) as conn:
+            conn.execute(
+                """CREATE TABLE history (
+                    id TEXT PRIMARY KEY,
+                    memory_id TEXT,
+                    old_memory TEXT,
+                    new_memory TEXT,
+                    event TEXT,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    is_deleted INTEGER,
+                    actor_id TEXT,
+                    role TEXT
+                )"""
+            )
+            conn.execute(
+                """INSERT INTO history
+                   (id, memory_id, new_memory, event, created_at, is_deleted)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    "history-fixture-1",
+                    "memory-fixture-1",
+                    "Persistence fixture",
+                    "ADD",
+                    "2026-01-01T00:00:00Z",
+                    0,
+                ),
+            )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
 
     def test_history_db_exists_on_disk(self):
         """history.db must exist — it's the cross-session provenance store."""

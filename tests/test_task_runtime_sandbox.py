@@ -50,6 +50,10 @@ class SandboxWrapTests(unittest.TestCase):
     sys.platform == "darwin" and os.path.exists("/usr/bin/sandbox-exec"),
     "requires macOS sandbox-exec",
 )
+@unittest.skipIf(
+    os.getenv("JARVIS_VERIFIER_SANDBOX") == "1",
+    "Seatbelt cannot be nested inside the verifier sandbox",
+)
 class SandboxLiveEnforcementTests(unittest.TestCase):
     def test_repo_root_commands_are_kernel_read_only(self):
         # cat is allowlisted and sandboxed; reads succeed under the profile
