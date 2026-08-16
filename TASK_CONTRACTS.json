@@ -1671,8 +1671,8 @@
     "task_id": "jarvis-resident-model-warmup-budget",
     "task_type": "code",
     "description": "Keep the bounded classifier and general Ollama roles resident without duplicate or vision startup warming.",
-    "contract_version": "1.0",
-    "task_spec_sha256": "107f4708578d10d473e85256c8573fc521d9a0c2d56863e4064c10775b897adb",
+    "contract_version": "1.1",
+    "task_spec_sha256": "59d4e05571451a7c1f86b5e608fabe9ee2556aa72e4aa10cf74d272b8b2f52ae",
     "inputs": [
       {
         "name": "packaged_ollama_ps",
@@ -1723,6 +1723,12 @@
         "type": "file",
         "path_template": "tests/test_local_model_latency_routing.py",
         "description": "Context-preserving, idempotence, residency, and vision opt-in regression coverage"
+      },
+      {
+        "name": "startup_handoff_regression",
+        "type": "file",
+        "path_template": "tests/test_unit_coverage.py",
+        "description": "Shell-free conda-to-project-venv GUI handoff regression coverage"
       }
     ],
     "side_effects": [
@@ -1750,6 +1756,7 @@
       "duplicate startup callers execute one resident-fleet warm sequence",
       "keepalive retains both text roles without pinning coding or reasoning specialists",
       "vision warming is opt-in while first-use vision remains available",
+      "conda GUI runtime handoff launches the trusted project interpreter without process replacement",
       "packaged hot ordinary chat reaches first text within 3 seconds",
       "focused tests, full pytest, and installed Jarvis.app verification pass"
     ],
