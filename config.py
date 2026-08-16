@@ -199,11 +199,32 @@ KIMI_PRICE_OUT_PER_M = _env_float("JARVIS_KIMI_PRICE_OUT_PER_M", 4.00)
 LOCAL_TUNED     = os.getenv("LOCAL_TUNED", "jarvis-local")
 LOCAL_PREFER_TUNED = os.getenv("LOCAL_PREFER_TUNED", "0").strip().lower() in {"1", "true", "yes", "on"}
 LOCAL_GLM_FLASH = os.getenv("LOCAL_GLM_FLASH_MODEL", "glm-4.7-flash")
-LOCAL_DEFAULT = os.getenv("LOCAL_DEFAULT_MODEL", LOCAL_GLM_FLASH)
+LOCAL_DEFAULT = os.getenv("LOCAL_DEFAULT_MODEL", "qwen3:8b")
+LOCAL_CLASSIFIER = os.getenv("LOCAL_CLASSIFIER_MODEL", "qwen3.5:4b")
+LOCAL_CLASSIFIER_CONTEXT_TOKENS = max(
+    512,
+    min(_env_int("LOCAL_CLASSIFIER_CONTEXT_TOKENS", 4096), 8192),
+)
+LOCAL_CLASSIFIER_MAX_TOKENS = max(
+    32,
+    min(_env_int("LOCAL_CLASSIFIER_MAX_TOKENS", 96), 256),
+)
+LOCAL_CLASSIFIER_TIMEOUT_SECONDS = max(
+    0.5,
+    min(_env_float("LOCAL_CLASSIFIER_TIMEOUT_SECONDS", 3.0), 10.0),
+)
+LOCAL_FAST_CHAT_CONTEXT_TOKENS = max(
+    2048,
+    min(_env_int("LOCAL_FAST_CHAT_CONTEXT_TOKENS", 4096), 8192),
+)
+LOCAL_FAST_CHAT_MAX_TOKENS = max(
+    64,
+    min(_env_int("LOCAL_FAST_CHAT_MAX_TOKENS", 384), 1024),
+)
 # Speculative decoding drafter. Leave empty unless a compatible drafter is
 # installed for the selected default model.
 LOCAL_DEFAULT_DRAFTER = os.getenv("LOCAL_DEFAULT_DRAFTER", "")
-LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", "devstral")
+LOCAL_CODER = os.getenv("LOCAL_CODER_MODEL", "qwen3.6:35b")
 LOCAL_CODER_RECOMMENDED = os.getenv("LOCAL_CODER_RECOMMENDED_MODEL", "qwen2.5-coder:32b")
 LOCAL_REASONING = os.getenv("LOCAL_REASONING_MODEL", "qwen3:30b-a3b")
 

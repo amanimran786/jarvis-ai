@@ -200,11 +200,23 @@ def _vision_client():
     return _ollama.Client(timeout=timeout)
 
 
-def _structured_client():
+def _structured_client(timeout_seconds: float | None = None):
     _enforce_ollama_host_policy()
+    timeout_seconds = (
+        _OLLAMA_STRUCTURED_TIMEOUT_SECONDS
+        if timeout_seconds is None
+        else float(timeout_seconds)
+    )
+    if timeout_seconds <= 0:
+        raise ValueError("Structured Ollama timeout must be positive")
     if httpx is None:
-        return _ollama.Client(timeout=_OLLAMA_STRUCTURED_TIMEOUT_SECONDS)
-    timeout = httpx.Timeout(connect=3.0, read=_OLLAMA_STRUCTURED_TIMEOUT_SECONDS, write=10.0, pool=3.0)
+        return _ollama.Client(timeout=timeout_seconds)
+    timeout = httpx.Timeout(
+        connect=min(3.0, timeout_seconds),
+        read=timeout_seconds,
+        write=min(10.0, timeout_seconds),
+        pool=min(3.0, timeout_seconds),
+    )
     return _ollama.Client(timeout=timeout)
 
 
@@ -586,15 +598,30 @@ def ask_local_structured(
     model: str = LOCAL_DEFAULT,
     system: str = "",
     raise_on_error: bool = True,
+    *,
+    strict_model: bool = False,
+    max_context: int | None = None,
+    max_output: int | None = None,
+    timeout_seconds: float | None = None,
+    think: bool | None = None,
+    keep_alive: str | None = None,
 ) -> str:
     """Return one non-streamed local response constrained by an Ollama JSON schema."""
     if not _check_ollama_liveness():
         if raise_on_error:
             raise OllamaUnavailableError("Ollama is not responding (liveness check failed)")
         return ""
+    if max_context is not None and max_context <= 0:
+        raise ValueError("Structured Ollama context limit must be positive")
+    if max_output is not None and max_output <= 0:
+        raise ValueError("Structured Ollama output limit must be positive")
+
     prompt_for_fit = f"{system}\n\n{user_input}" if system else user_input
-    model = _fits_local(prompt_for_fit, model)
-    model = get_best_available(model)
+    if strict_model:
+        model = _exact_available_model(model)
+    else:
+        model = _fits_local(prompt_for_fit, model)
+        model = get_best_available(model)
 
     messages = []
     if system:
@@ -607,14 +634,25 @@ def ask_local_structured(
             "num_ctx",
             int(context_budget.target_tokens_for("chat", model=model, local=True)),
         )
+        if max_context is not None:
+            options["num_ctx"] = min(int(options["num_ctx"]), int(max_context))
         options["temperature"] = 0
         options["num_predict"] = int(os.getenv("OLLAMA_STRUCTURED_MAX_TOKENS", "256"))
-        response = _structured_client().chat(
-            model=model,
-            messages=messages,
-            stream=False,
-            format=schema,
-            options=options,
+        if max_output is not None:
+            options["num_predict"] = min(int(options["num_predict"]), int(max_output))
+        request = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "format": schema,
+            "options": options,
+        }
+        if think is not None:
+            request["think"] = think
+        if keep_alive is not None:
+            request["keep_alive"] = keep_alive
+        response = _structured_client(timeout_seconds).chat(
+            **request,
         )
         content = (response.message.content or "").strip()
         prompt_eval_count = getattr(response, "prompt_eval_count", None)
@@ -699,6 +737,10 @@ def ask_local_stream(
     context_budget_report: dict[str, Any] | None = None,
     strict_model: bool = False,
     include_memory: bool = True,
+    max_context: int | None = None,
+    max_output: int | None = None,
+    think: bool | None = None,
+    keep_alive: str | None = None,
 ):
     """Stream a response from a local Ollama model."""
     # Fail fast when Ollama is down — don't wait out the request timeout.
@@ -729,13 +771,24 @@ def ask_local_stream(
 
     pruned_prompt = _prune_prompt(user_input, SYSTEM_PROMPT, system_extra)
     system_base = pruned_prompt + (mem.get_context() if include_memory else "")
+    request_context_target = context_budget.target_tokens_for(
+        "chat",
+        model=model,
+        local=True,
+    )
+    if max_context is not None:
+        if max_context <= 0:
+            raise ValueError("max_context must be positive")
+        request_context_target = min(request_context_target, int(max_context))
+    if max_output is not None and max_output <= 0:
+        raise ValueError("max_output must be positive")
     if track_context:
         ctx.begin_turn(user_input)
         system, messages, _ = ctx.build_prompt_state(system_base, system_extra=system_extra)
         messages = [{"role": "system", "content": system}] + messages
         messages, conversation_budget_report = _cap_track_context_messages(
             messages,
-            target_tokens=context_budget.target_tokens_for("chat", model=model, local=True),
+            target_tokens=request_context_target,
         )
     else:
         system = system_base
@@ -764,15 +817,28 @@ def ask_local_stream(
         # silently truncate prompts the budget capper sized for 24-96K.
         options.setdefault(
             "num_ctx",
-            int(context_budget.target_tokens_for("chat", model=model, local=True)),
+            int(request_context_target),
         )
+        if max_context is not None:
+            options["num_ctx"] = min(int(options["num_ctx"]), int(max_context))
+        if max_output is not None:
+            configured_output = int(options.get("num_predict", max_output))
+            options["num_predict"] = min(configured_output, int(max_output))
 
-        stream = _client().chat(
-            model=model,
-            messages=messages,
-            stream=True,
-            options=options,
-        )
+        request = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "options": options,
+        }
+        if think is None and _normalize_model_tag(model) == _normalize_model_tag(LOCAL_DEFAULT):
+            think = False
+        if think is not None:
+            request["think"] = think
+        if keep_alive:
+            request["keep_alive"] = keep_alive
+
+        stream = _client().chat(**request)
         raw_buffer = ""
         in_think = False  # track local reasoning blocks
         for chunk in stream:
@@ -1678,7 +1744,12 @@ def embed(text: str) -> list[float] | None:
         return None
 
 
-def warm_model_cache(model: str = LOCAL_REASONING) -> None:
+def warm_model_cache(
+    model: str = LOCAL_DEFAULT,
+    *,
+    require_preferred: bool = False,
+    max_context: int | None = None,
+) -> None:
     """Pre-load a model into Ollama's GPU/RAM so the first real query is instant.
 
     Runs a trivial generation — discards output. Safe to call from a background
@@ -1686,13 +1757,24 @@ def warm_model_cache(model: str = LOCAL_REASONING) -> None:
     """
     quiet = os.getenv("JARVIS_QUIET_BOOT", "").lower() in {"1", "true", "yes"}
     try:
-        target = get_best_available(model)
+        target = get_best_available(model, require_preferred=require_preferred)
         if not quiet:
             print(f"[Ollama] Warming model cache for {target}...")
+        options = _ollama_options_for_model(target)
+        if max_context is not None:
+            if max_context <= 0:
+                raise ValueError("Ollama warm context limit must be positive")
+            configured_context = int(options.get("num_ctx", max_context))
+            options["num_ctx"] = min(configured_context, int(max_context))
+        options["num_predict"] = 1
+        options["temperature"] = 0
         _client().chat(
             model=target,
             messages=[{"role": "user", "content": "Hi"}],
             stream=False,
+            think=False,
+            options=options,
+            keep_alive="5m",
         )
         if not quiet:
             print(f"[Ollama] {target} loaded and ready.")

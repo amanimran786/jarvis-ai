@@ -47,6 +47,8 @@ from config import (
     LOCAL_GEMMA4_STRONG,
     LOCAL_GEMMA4_MOE,
     LOCAL_QWEN3_6,
+    LOCAL_FAST_CHAT_CONTEXT_TOKENS,
+    LOCAL_FAST_CHAT_MAX_TOKENS,
     HAIKU,
     SONNET,
     OPUS,
@@ -418,22 +420,27 @@ def _has_model(name: str, available: list[str]) -> bool:
     return find_exact_ollama_model(name, available) is not None
 
 
+def _use_fast_local_context(*, model: str, tool: str | None, local: bool) -> bool:
+    """Keep routine default-model chat responsive without weakening specialist lanes."""
+    lane = (tool or "chat").strip().lower()
+    return bool(local and lane == "chat" and _has_model(LOCAL_DEFAULT, [model]))
+
+
 def _best_local(text: str) -> str:
     """Pick the best available local model for the task.
 
     Priority order (highest → lowest):
       1. Eval-promoted model (if not a coding task)
       2. LOCAL_TUNED (jarvis-local) if PREFER_TUNED set
-      3. Coding tasks → Devstral > Qwen3.6 > Qwen3-coder > Qwen2.5-coder
-      4. Deep reasoning → DeepSeek R1 > Gemma4 workstation/Qwen3.6 eval lanes
-      5. General tasks → Qwen3-strong > Qwen3-mid, not heavyweight eval models
+      3. Coding tasks → configured coder > specialist fallbacks
+      4. Explicit deep reasoning → configured reasoner > strong fallbacks
+      5. General tasks → resident default > heavyweight fallback
       6. Fast/simple → Phi4-mini > Qwen3-fast > gemma4
       7. Fallback: first available model
     """
     available = _cached_local_models()
     lower = text.lower()
     promoted = local_model_eval.promoted_model()
-    word_count = len(lower.split())
 
     _CODE_TERMS = ("code", "debug", "function", "script", "refactor", "build", "fix",
                    "implement", "class", "test", "pytest", "unittest", "diff", "patch")
@@ -445,7 +452,10 @@ def _best_local(text: str) -> str:
     )
 
     is_code_task = any(t in lower for t in _CODE_TERMS)
-    is_deep = any(t in lower for t in _DEEP_REASONING_TRIGGERS) or word_count >= 25
+    # Prompt length alone is not a complexity signal. Internal extraction and
+    # formatting prompts are long but routine; escalating them evicts the
+    # resident chat model and creates a cold-load penalty on the next turn.
+    is_deep = any(t in lower for t in _DEEP_REASONING_TRIGGERS)
 
     # 1. Promoted model (from eval loop) — skip for coding
     if promoted and _has_model(promoted, available) and not is_code_task:
@@ -459,10 +469,10 @@ def _best_local(text: str) -> str:
     if is_code_task:
         for coder in (
             LOCAL_CODER,
-            LOCAL_DEVSTRAL,        # purpose-built for code, fastest on M4
+            LOCAL_DEVSTRAL,        # legacy specialist fallback
             LOCAL_CODER_RECOMMENDED,
-            LOCAL_QWEN3_MID,
             LOCAL_GLM_FLASH,       # general fallback
+            LOCAL_QWEN3_MID,
         ):
             if coder and _has_model(coder, available):
                 return coder
@@ -473,8 +483,9 @@ def _best_local(text: str) -> str:
             if deep and _has_model(deep, available):
                 return deep
 
-    # 5. General tasks — use GLM first, with Qwen3:8B as the lean fallback.
-    for general in (LOCAL_GLM_FLASH, LOCAL_DEFAULT, LOCAL_QWEN3_MID):
+    # 5. General tasks — keep the measured small default resident; GLM is the
+    # heavyweight fallback for requests that do not need a specialist lane.
+    for general in (LOCAL_DEFAULT, LOCAL_QWEN3_MID, LOCAL_GLM_FLASH):
         if general and _has_model(general, available):
             return general
 
@@ -947,8 +958,28 @@ def smart_stream(
             bypass_local=True,
         ), GPT_MINI
 
-    # ── Always-on identity snapshot (replaces per-query vault search for identity facts) ──
-    _brain_ctx = _core_brain.core_context()
+    runtime_voice_query = tool == "chat" and _is_runtime_voice_query(user_input)
+    mode = _current_mode
+    local_available = _has_local()
+    local_model = _best_local(user_input) if local_available else ""
+    forced = forced_model_status()
+    context_model = ""
+    context_is_local = False
+    if forced.get("active") and forced.get("provider") == "ollama":
+        context_model = forced.get("model") or ""
+        context_is_local = True
+    elif (local_only or mode != "cloud") and local_available:
+        context_model = local_model
+        context_is_local = True
+    fast_local_context = _use_fast_local_context(
+        model=context_model,
+        tool=tool,
+        local=context_is_local,
+    )
+
+    # The fast lane uses the compact user snapshot below. Specialist lanes keep
+    # the expanded operating profile for deeper project and reasoning context.
+    _brain_ctx = "" if fast_local_context else _core_brain.core_context()
     grounding_extra = (
         "Grounding rules:\n"
         "- Treat the current user message as primary truth.\n"
@@ -960,8 +991,7 @@ def smart_stream(
     )
     if _brain_ctx:
         grounding_extra = _brain_ctx + "\n\n" + grounding_extra
-    runtime_voice_query = tool == "chat" and _is_runtime_voice_query(user_input)
-    mode = _current_mode
+    user_snapshot = ""
     if runtime_voice_query:
         system_extra, resolved_skills = "", []
     else:
@@ -984,18 +1014,6 @@ def smart_stream(
                 system_extra = coding_grounding + ("\n\n" + system_extra if system_extra else "")
     if extra_system:
         system_extra = extra_system + ("\n\n" + system_extra if system_extra else "")
-
-    local_available = _has_local()
-    local_model = _best_local(user_input) if local_available else ""
-    forced = forced_model_status()
-    context_model = ""
-    context_is_local = False
-    if forced.get("active") and forced.get("provider") == "ollama":
-        context_model = forced.get("model") or ""
-        context_is_local = True
-    elif (local_only or mode != "cloud") and local_available:
-        context_model = local_model
-        context_is_local = True
 
     # ── Parallel context assembly ──────────────────────────────────────────────
     # vault, graph, and semantic memory are all read-only and independent.
@@ -1043,7 +1061,20 @@ def smart_stream(
 
     repeat_extra = vault_extra = graph_extra = smem_ctx = mem0_extra = working_mem_extra = ""
     smem_hits: list[dict] = []
-    if not skip_dynamic_context:
+    if fast_local_context:
+        # The compact user snapshot already carries identity, preferences, and
+        # active projects. Fall back to working memory only when it is absent.
+        if not user_snapshot:
+            try:
+                working_mem_extra = _get_working_mem() or ""
+            except Exception as _exc:
+                logging.debug("[Context] working_memory retrieval failed: %s", _exc)
+    elif skip_dynamic_context:
+        try:
+            working_mem_extra = _get_working_mem() or ""
+        except Exception as _exc:
+            logging.debug("[Context] working_memory retrieval failed: %s", _exc)
+    else:
         # Deliberately NOT a `with` block: ThreadPoolExecutor.__exit__ joins
         # the worker threads, so one getter hung on a network call without a
         # socket timeout would block this request forever despite the result()
@@ -1184,7 +1215,14 @@ def smart_stream(
             candidates=(candidate,),
             reason="Forced model override.",
         )
-        return _execute_forced_stream(plan, user_input, system_extra), candidate.label
+        return _execute_forced_stream(
+            plan,
+            user_input,
+            system_extra,
+            tool=tool,
+            context_budget_report=compiled_context,
+            fast_local_context=fast_local_context,
+        ), candidate.label
 
     if local_only:
         tier = "local"
@@ -1236,6 +1274,11 @@ def smart_stream(
                 start_keepalive(candidate.model)
             except Exception:
                 logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
+            fast_chat = fast_local_context and _use_fast_local_context(
+                model=candidate.model,
+                tool=tool,
+                local=True,
+            )
             return ask_local_stream(
                 user_input,
                 candidate.model,
@@ -1243,6 +1286,11 @@ def smart_stream(
                 track_context=True,
                 raise_on_error=True,
                 context_budget_report=compiled_context,
+                include_memory=False,
+                max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS if fast_chat else None,
+                max_output=LOCAL_FAST_CHAT_MAX_TOKENS if fast_chat else None,
+                think=False if fast_chat else None,
+                keep_alive="5m" if fast_chat else None,
             )
         if candidate.provider == "apple_foundation":
             from brains.brain_apple_foundation import ask_apple_foundation_stream
@@ -1396,7 +1444,15 @@ def smart_stream(
     return _execute_plan_stream(), primary_label
 
 
-def _execute_forced_stream(plan: provider_router.RoutePlan, user_input: str, system_extra: str):
+def _execute_forced_stream(
+    plan: provider_router.RoutePlan,
+    user_input: str,
+    system_extra: str,
+    *,
+    tool: str | None = "chat",
+    context_budget_report: dict | None = None,
+    fast_local_context: bool = False,
+):
     def _candidate_stream(candidate):
         if candidate.provider == "ollama":
             try:
@@ -1404,12 +1460,23 @@ def _execute_forced_stream(plan: provider_router.RoutePlan, user_input: str, sys
                 start_keepalive(candidate.model)
             except Exception:
                 logging.debug("[ModelRouter] silent failure in _candidate_stream", exc_info=True)
+            fast_chat = fast_local_context and _use_fast_local_context(
+                model=candidate.model,
+                tool=tool,
+                local=True,
+            )
             return ask_local_stream(
                 user_input,
                 candidate.model,
                 system_extra=system_extra,
                 track_context=True,
                 raise_on_error=True,
+                context_budget_report=context_budget_report,
+                include_memory=False,
+                max_context=LOCAL_FAST_CHAT_CONTEXT_TOKENS if fast_chat else None,
+                max_output=LOCAL_FAST_CHAT_MAX_TOKENS if fast_chat else None,
+                think=False if fast_chat else None,
+                keep_alive="5m" if fast_chat else None,
             )
         if candidate.provider == "openai":
             return ask_stream(

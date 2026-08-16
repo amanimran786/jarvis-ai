@@ -21,7 +21,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from brains.brain_claude import ask_claude
-from config import HAIKU, LOCAL_DEFAULT, LOCAL_STRUCTURED_CLASSIFIER_ENABLED
+from config import (
+    HAIKU,
+    LOCAL_CLASSIFIER,
+    LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+    LOCAL_CLASSIFIER_MAX_TOKENS,
+    LOCAL_CLASSIFIER_TIMEOUT_SECONDS,
+    LOCAL_STRUCTURED_CLASSIFIER_ENABLED,
+)
 import skill_monitor
 import skills
 import model_router
@@ -327,6 +334,16 @@ def _local_short_query_classify(lower: str) -> ToolDecision | None:
         return ToolDecision("browser", 0.88, "browse")
     if re.search(r"\b(what do you remember|what do you know about me|briefing|catch me up|what did i miss)\b", lower):
         return ToolDecision("memory", 0.86, "recall")
+    # Unmistakable knowledge questions do not need a model call. Keep this
+    # narrow: personal/current/tool nouns remain on the structured classifier.
+    obvious_chat = re.match(r"^(define|explain)\b", lower)
+    tool_or_personal_markers = re.search(
+        r"\b(my|latest|current|email|inbox|calendar|schedule|note|message|file|"
+        r"page|website|weather|reminder|task|vault)\b",
+        lower,
+    )
+    if obvious_chat and not tool_or_personal_markers:
+        return ToolDecision("chat", 0.94, "converse")
     return None
 
 
@@ -409,7 +426,11 @@ def _auto_specialized_classify(lower: str) -> ToolDecision | None:
     return None
 
 
-def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
+def _classify_with_local_structured(
+    user_input: str,
+    *,
+    timeout_seconds: float | None = None,
+) -> ToolDecision | None:
     """Classify with Ollama structured outputs when cloud classification is disabled."""
     if not LOCAL_STRUCTURED_CLASSIFIER_ENABLED:
         return None
@@ -419,8 +440,18 @@ def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
         raw = ask_local_structured(
             user_input,
             schema=_TOOL_DECISION_SCHEMA,
-            model=LOCAL_DEFAULT,
+            model=LOCAL_CLASSIFIER,
             system=_build_system(user_input),
+            strict_model=True,
+            max_context=LOCAL_CLASSIFIER_CONTEXT_TOKENS,
+            max_output=LOCAL_CLASSIFIER_MAX_TOKENS,
+            timeout_seconds=(
+                LOCAL_CLASSIFIER_TIMEOUT_SECONDS
+                if timeout_seconds is None
+                else timeout_seconds
+            ),
+            think=False,
+            keep_alive="5m",
         )
         if not raw.strip():
             return None
@@ -431,26 +462,21 @@ def _classify_with_local_structured(user_input: str) -> ToolDecision | None:
 
 
 def _classify_with_local_structured_timed(user_input: str, timeout: float = 3.0) -> ToolDecision | None:
-    """Classify with a hard wall-clock timeout (default 3s).
+    """Classify with a bounded local transport timeout (default 3s).
 
-    Returns None on timeout or error so the caller can fall back to chat
-    rather than waiting on a slow local model for a short query.
+    The timeout is applied to the Ollama request itself so a fallback cannot
+    leave an overlapping classifier request running in a worker thread.
     """
     if not LOCAL_STRUCTURED_CLASSIFIER_ENABLED:
         return None
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
-    _pool = ThreadPoolExecutor(max_workers=1)
     try:
-        future = _pool.submit(_classify_with_local_structured, user_input)
-        return future.result(timeout=timeout)
-    except _FutTimeout:
-        logging.debug("[Orchestrator] Short-query classifier timed out (%.1fs)", timeout)
-        return None
+        return _classify_with_local_structured(
+            user_input,
+            timeout_seconds=timeout,
+        )
     except Exception as exc:
         logging.debug("[Orchestrator] Short-query classifier error: %s", exc)
         return None
-    finally:
-        _pool.shutdown(wait=False)
 
 
 def _parse(raw: str) -> ToolDecision:
