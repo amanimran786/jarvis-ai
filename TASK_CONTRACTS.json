@@ -1666,5 +1666,93 @@
       "focused tests, full pytest, and installed Jarvis.app verification pass"
     ],
     "gate_pre_commit": true
+  },
+  {
+    "task_id": "jarvis-resident-model-warmup-budget",
+    "task_type": "code",
+    "description": "Keep the bounded classifier and general Ollama roles resident without duplicate or vision startup warming.",
+    "contract_version": "1.0",
+    "task_spec_sha256": "107f4708578d10d473e85256c8573fc521d9a0c2d56863e4064c10775b897adb",
+    "inputs": [
+      {
+        "name": "packaged_ollama_ps",
+        "type": "str",
+        "required": true,
+        "description": "Installed-app model residency and explicit context allocation evidence"
+      },
+      {
+        "name": "packaged_chat_latency",
+        "type": "json",
+        "required": true,
+        "description": "Authenticated installed-app first-chunk and total latency measurements"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "environment_template",
+        "type": "file",
+        "path_template": ".env.example",
+        "description": "Documented opt-in vision warm setting"
+      },
+      {
+        "name": "api_warmup",
+        "type": "file",
+        "path_template": "api.py",
+        "description": "Idempotent text-fleet warm and lazy-by-default vision behavior"
+      },
+      {
+        "name": "resident_fleet",
+        "type": "file",
+        "path_template": "brains/brain_ollama.py",
+        "description": "Bounded multi-model keepalive and resident text-fleet warm helper"
+      },
+      {
+        "name": "desktop_startup",
+        "type": "file",
+        "path_template": "main.py",
+        "description": "Desktop startup delegates to the idempotent resident-fleet warm helper"
+      },
+      {
+        "name": "routing_keepalive",
+        "type": "file",
+        "path_template": "model_router.py",
+        "description": "Specialist requests do not replace persistent resident text roles"
+      },
+      {
+        "name": "warmup_regressions",
+        "type": "file",
+        "path_template": "tests/test_local_model_latency_routing.py",
+        "description": "Context-preserving, idempotence, residency, and vision opt-in regression coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_local_model_latency_routing.py tests/test_qwen3_routing.py tests/test_local_model_routing.py tests/test_brain_ollama.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 5000,
+    "max_duration_seconds": 5400,
+    "preconditions": [
+      "Ollama is reachable on the local loopback endpoint",
+      "the selected classifier and default tags resolve exactly",
+      "no cloud fallback is used for verification"
+    ],
+    "postconditions": [
+      "classifier and general warm requests preserve their configured 4K context bounds",
+      "duplicate startup callers execute one resident-fleet warm sequence",
+      "keepalive retains both text roles without pinning coding or reasoning specialists",
+      "vision warming is opt-in while first-use vision remains available",
+      "packaged hot ordinary chat reaches first text within 3 seconds",
+      "focused tests, full pytest, and installed Jarvis.app verification pass"
+    ],
+    "gate_pre_commit": true
   }
 ]
