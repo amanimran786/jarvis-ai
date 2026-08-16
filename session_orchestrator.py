@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from harness.state_lock import queue_state_lock
+
 # ── paths ────────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).parent
@@ -119,6 +121,7 @@ def _write_json(path: Path, data: Any) -> None:
         tmp.replace(path)
     except OSError as exc:
         log.error("Failed to write %s: %s", path.name, exc)
+        raise
 
 
 def _append_master_log(session: str, event: str) -> None:
@@ -466,19 +469,28 @@ def cmd_dashboard() -> None:
 
 
 def cmd_add_task(session_name: str, task: str, priority: int) -> None:
-    queue = load_queue()
     entry: dict = {
         "session_name": session_name,
         "task": task,
         "priority": priority,
-        "status": "queued",
+        "status": "proposed",
+        "proposed_by": "human_cli",
+        "requires_codex_assignment": True,
+        "assigned_ai": None,
         "assigned_at": None,
         "completed_at": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    queue.append(entry)
-    queue.sort(key=lambda x: (x.get("priority", 99), x.get("created_at", "")))
-    _write_json(WORK_QUEUE, queue)
+    with queue_state_lock(WORK_QUEUE):
+        if WORK_QUEUE.exists():
+            queue = json.loads(WORK_QUEUE.read_text(encoding="utf-8"))
+            if not isinstance(queue, list):
+                raise RuntimeError("WORK_QUEUE.json must contain a JSON list")
+        else:
+            queue = []
+        queue.append(entry)
+        queue.sort(key=lambda x: (x.get("priority", 99), x.get("created_at", "")))
+        _write_json(WORK_QUEUE, queue)
     _append_master_log(session_name, f"Task added (p{priority}): {task}")
     log.info("Task added — session=%s priority=%s task=%s", session_name, priority, task)
     if RICH:

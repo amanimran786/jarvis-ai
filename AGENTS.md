@@ -47,11 +47,14 @@ tests, and the git plumbing commit pattern. No exceptions.
 
 ### Cross-Agent Queue
 
-Claude and Codex coordinate queue work through `harness.agent_coordinator`.
-Before autonomous `WORK_QUEUE.json` work, claim exactly one lease with the
-appropriate `--agent` value and `--takeover-cooling`. Do not edit queue status
-directly. Renew long-running work with `heartbeat`, and submit clean committed
-work through `finish` so the loop-owned verifier decides completion. See
+Codex is the sole engineering control plane. It selects one roadmap item,
+approves any required POC, and creates a digest-bound assignment through
+`harness.agent_coordinator assign`. Claude and Codex worker sessions may claim
+only their exact assignment; they never select or take over queue work. Renew
+long-running work with `heartbeat`, then submit clean committed work through
+`finish`. A non-Codex worker submission remains `awaiting_codex_review` until
+Codex accepts or rejects it with `review`. Local-model follow-ups are proposals,
+not executable queue entries. Never edit queue status directly. See
 `CROSS_AGENT_ORCHESTRATION.md`.
 
 ### Domain-Specific Rules

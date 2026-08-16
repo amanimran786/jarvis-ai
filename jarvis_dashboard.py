@@ -247,17 +247,16 @@ def _work_queue_table() -> str:
     if not tasks:
         return "<p style='color:#888'>No tasks in WORK_QUEUE.json</p>"
     rows = []
-    for idx, t in enumerate(tasks):
+    for t in tasks:
         status = t.get("status", "")
         task_text = escape(str(t.get("task", ""))[:80])
         notes = t.get("notes", "") or t.get("result", "")
         detail = f"<div style='color:#555;font-size:.78em;margin-top:2px'>{escape(str(notes)[:120])}</div>" if notes else ""
-        actions = ""
-        if status in ("blocked", "stalled", "failed", "needs_review"):
-            actions = _btn("Requeue", f"/requeue/{idx}", "#f0c040")
-        elif status == "in_progress":
-            actions = _btn("Reset", f"/requeue/{idx}", "#ef5350",
-                           "Reset this in-progress task back to queued?")
+        actions = (
+            "<span style='color:#888;font-size:.78em'>Codex review</span>"
+            if status in {"blocked", "failed", "needs_review", "unverified"}
+            else ""
+        )
         rows.append(
             f"<tr>"
             f"<td style='padding:7px 10px;border-bottom:1px solid #1e1e1e;color:#aaa;font-size:.82em;white-space:nowrap'>{escape(str(t.get('session_name','')))}</td>"
@@ -466,16 +465,11 @@ def clear_stalled():
 
 @app.post("/requeue/{idx:int}")
 def requeue_task(idx: int):
-    """Reset a task at position idx back to queued status."""
-    with queue_state_lock(BASE / "WORK_QUEUE.json"):
-        tasks = _load("WORK_QUEUE.json", [])
-        if 0 <= idx < len(tasks):
-            tasks[idx]["status"] = "queued"
-            tasks[idx].pop("blocked_reason", None)
-            tasks[idx].pop("blocked_at", None)
-            tasks[idx].pop("assigned_at", None)
-            _save("WORK_QUEUE.json", tasks)
-    return RedirectResponse(url="/", status_code=303)
+    """Reject legacy dashboard mutation; Codex owns reassignment."""
+    return JSONResponse(
+        {"error": "codex_assignment_required", "task_index": idx},
+        status_code=409,
+    )
 
 
 @app.post("/approve/{task_id:path}")
@@ -529,19 +523,8 @@ def expire_session(session_id: str):
                     s["last_updated"] = now
                     s["stall_reason"] = "manually expired via dashboard"
             tracker._save(data)
-            # Requeue any task linked to this session.
-            tasks = _load("WORK_QUEUE.json", [])
-            changed = False
-            for t in tasks:
-                assigned_session = t.get("assigned_to") or t.get("session_id")
-                if (
-                    t.get("status") == "in_progress"
-                    and str(assigned_session or "") == session_id
-                ):
-                    t["status"] = "queued"
-                    changed = True
-            if changed:
-                _save("WORK_QUEUE.json", tasks)
+            # Queue recovery is coordinator-owned; lease expiry or an explicit
+            # Codex release handles any linked engineering assignment.
     except Exception as exc:
         print(f"[dashboard] expire-session error: {exc}")
         return JSONResponse({"error": "expire_session_failed"}, status_code=500)

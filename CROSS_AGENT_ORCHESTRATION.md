@@ -1,172 +1,174 @@
-# Claude/Codex Queue Coordination
+# Codex-Controlled Engineering Orchestration
 
-Jarvis uses one atomic lease protocol for Claude and Codex. The protocol is
-implemented by `harness.agent_coordinator` and operates on `WORK_QUEUE.json`
-under the existing cross-process queue lock.
+Codex is the sole Jarvis engineering control plane. It chooses the roadmap
+item, defines the contract, approves any POC, assigns a worker, reviews the
+result, and decides when work is complete. Claude and local models are bounded
+workers or proposal generators. They do not select, assign, approve, or
+complete work.
 
-## Why this exists
+`harness.agent_coordinator` is the only supported writer for coordination
+transitions in `WORK_QUEUE.json`. The shared checkout permits one active
+engineering lease. True parallel implementation requires isolated worktrees
+and a Codex-owned merge arbiter.
 
-The Cowork scheduled runtime does not expose `start_code_task`. Repeated
-scheduled runs therefore logged activity but dispatched no work. The scheduled
-Claude session now executes one leased task itself instead of trying to spawn a
-missing subtask.
+## Lifecycle
 
-The shared repository checkout permits one active engineering lease. Running
-two coding agents in the same directory would allow overlapping edits and Git
-index races. Parallel execution must use isolated worktrees and a merge arbiter;
-that is intentionally outside this first failover implementation.
+```text
+local suggestion -> proposed
+                       |
+                       v
+Codex selection -> assigned -> in_progress -> awaiting_codex_review -> done
+                       |             |                  |
+                       |             |                  +-> needs_review
+                       |             +-> unverified / blocked
+                       +-> awaiting_approval (independent human safety gate)
+```
 
-## Agent lifecycle
+Every coordination-v2 assignment binds the worker, orchestration stage, clean
+base commit, task-spec digest, and safety-contract digest. An implementation
+that depends on a POC also binds the accepted POC digest. Mutation after
+assignment invalidates the assignment.
 
-Claim the highest-priority eligible task:
+## Codex Controller Commands
+
+Assign exactly one selected task:
+
+```bash
+./venv/bin/python -m harness.agent_coordinator assign \
+  --task-id TASK_ID \
+  --worker claude \
+  --stage implementation \
+  --rationale "Why this is the next roadmap item" \
+  --json
+```
+
+Use `--stage poc` for a bounded proof of concept. For an implementation whose
+contract has `constraints.poc_required: true`, pass the accepted POC with
+`--parent-task-id POC_TASK_ID`. POC acceptance is a Codex engineering decision;
+it is not a substitute for the human side-effect approval gate.
+
+Review a verified worker submission:
+
+```bash
+./venv/bin/python -m harness.agent_coordinator review \
+  --task-id TASK_ID \
+  --decision accept \
+  --summary "Why the evidence and implementation satisfy the contract" \
+  --json
+```
+
+Use `--decision reject` when the candidate needs more work. Only an accepted
+Codex review can move any worker result to `done`.
+
+## Worker Commands
+
+A worker claims only its exact Codex assignment:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator claim \
-  --agent codex \
-  --takeover-cooling \
+  --agent claude \
   --lease-seconds 3600 \
   --json
 ```
 
-Use `--agent claude` from Cowork. A claim succeeds only when:
+The claim fails closed when the assignment worker, base commit, task digest,
+contract digest, POC digest, safety approval, or lease state no longer matches.
+Workers cannot inspect the queue and choose a different item.
 
-- the shared checkout is clean;
-- no other active lease exists;
-- the task has a valid, matching typed contract;
-- any required approval is bound to the exact contract and task digests;
-- the task is unassigned, assigned to the caller, or assigned to an agent that
-  is explicitly cooling down.
-
-The lease stores both digests. Completion combines queue scope with contract
-output paths and combines queue verification commands with the contract entry
-point, so sparse legacy queue rows cannot weaken the verifier.
-
-Renew a lease before a long test or commit:
+Renew a long-running lease:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator heartbeat \
-  --agent codex \
+  --agent claude \
   --task-id TASK_ID \
   --lease-id LEASE_ID \
   --lease-seconds 3600 \
   --json
 ```
 
-After committing and returning the checkout to a clean state, submit completion:
+Submit clean, committed work:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator finish \
-  --agent codex \
+  --agent claude \
   --task-id TASK_ID \
   --lease-id LEASE_ID \
   --summary "What changed and which tests passed" \
   --json
 ```
 
-`finish` collects deterministic evidence through `completion_verifier` and only
-marks the queue row done when scope and verification checks pass. Agents do not
-mark their own tasks done directly.
+`finish` runs deterministic verification. Every successful worker submission,
+including a Codex implementation session, moves to `awaiting_codex_review`, not
+`done`. The separate Codex review transition is the only completion path.
 
-Release unfinished work:
+Release unfinished work without selecting a replacement:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator release \
-  --agent codex \
+  --agent claude \
   --task-id TASK_ID \
   --lease-id LEASE_ID \
-  --reason "Blocked by missing dependency" \
+  --reason "Concrete blocking condition" \
   --json
 ```
 
-## Cooldown handoff
-
-When an agent receives a rate-limit, credit, or session-limit error, record it:
+Record rate-limit cooldown:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator cooldown \
   --agent claude \
   --seconds 3600 \
-  --reason "Claude credit or session limit" \
+  --reason "Claude session limit" \
   --json
 ```
 
-This releases the agent's active lease and makes an assigned task eligible for
-the other agent when it claims with `--takeover-cooling`. If an agent disappears
-without recording cooldown, lease expiry requeues the task and starts a
-conservative 20-minute cooldown automatically.
+Cooldown releases the assignment back to Codex. Another worker cannot take it
+over without a fresh Codex assignment.
 
-Clear a recovered agent early:
+## Local Model Policy
 
-```bash
-./venv/bin/python -m harness.agent_coordinator clear-cooldown \
-  --agent claude \
-  --json
-```
+- Local LLM output may propose a POC, task, patch, or follow-up.
+- Codex must convert an accepted proposal into a typed, digest-bound assignment.
+- Local models may generate code inside an already assigned Claude or Codex
+  work session, but their output receives the same review and test gates.
+- Paid cloud fallback is disabled unless Aman explicitly authorizes it.
+- Unsupported legacy provider-named task IDs remain only as audit history.
 
-Inspect current state:
+## Hard Invariants
+
+- Codex is the only roadmap selector and assignment authority.
+- A worker submission never implies acceptance or completion.
+- Local-model suggestions never become executable queue entries automatically.
+- Human side-effect approval and Codex POC approval are separate digest-bound
+  decisions.
+- Active rows without a valid lease are quarantined instead of consuming
+  capacity forever.
+- One locked writer owns every queue transition; direct JSON edits are
+  unsupported.
+- Completion records preserve `executed_by` separately from `completed_by`.
+
+## Trust Boundary
+
+The current CLI enforces workflow roles and auditability, not hostile-process
+isolation. `--agent codex` is self-asserted by any process with shell and file
+access. Production isolation requires a local broker that holds controller
+credentials, gives workers capability-scoped assignment tokens, and prevents
+workers from writing authoritative queue files directly. Until that broker is
+built, scheduled Claude workers must use the deployed assignment-only skill and
+must not receive controller instructions or credentials.
+
+Inspect coordination state with:
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator status --json
 ```
 
-Coordination state lives at:
+Runtime state lives at:
 
 ```text
 ~/Library/Application Support/Jarvis/orchestrator/agent_coordination.json
 ```
 
-The canonical Cowork task prompt is
+The canonical Claude worker contract is
 `scripts/jarvis-autonomous-orchestrator.SKILL.md`. Its deployed copy is
 `~/Claude/Scheduled/jarvis-autonomous-orchestrator/SKILL.md`.
-
----
-
-## Parallel Claude + Codex — Branch Strategy
-
-CI is now green (Item 1 complete). Both agents can work simultaneously by using
-**isolated branches** and merging via pull-request after CI passes.
-
-### Branch naming
-
-```
-claude/roadmap-N-short-name    # Claude sessions
-codex/roadmap-N-short-name     # Codex sessions
-```
-
-Examples:
-```
-claude/roadmap-15-selflearn-fix
-codex/roadmap-3-orchestrator-watchdog
-```
-
-### Merge protocol
-
-1. Create branch off `main`
-2. Make changes, commit (following REVIEW.md gate)
-3. Push branch — GitHub Actions runs CI
-4. **CI must be green before merge** — never merge a red branch
-5. Merge via `git merge --no-ff` (preserves branch history)
-6. Delete merged branch
-
-### Lane assignments (current)
-
-Claude owns:
-- Item 1.5 — self-learning pipeline fix (fusion bug, promotion, telemetry)
-- Item 2 — Dashboard launchd fix
-- Item 4 — Wire `run_checks()` into orchestrator loop
-- Item 6 — Security review
-- Item 9 — Full 24/7 autonomous operation
-
-Codex owns:
-- Item 3 — Orchestrator self-healing via launchd KeepAlive
-- Item 5 — Specialist model routing (devstral, qwen3:30b-a3b)
-- Item 7 — Test coverage hardening
-- Item 8 — Voice pipeline production ready
-
-### Conflict avoidance rules
-
-- Items in the same lane do not overlap — each agent works one item at a time
-- Shared files (`config.py`, `orchestrator.py`, `router.py`): coordinate in
-  commit messages; the second agent to touch a shared file must rebase first
-- Do not edit the other agent's in-progress branch
-- Both agents: run `python -m harness.pre_commit_check` before every commit

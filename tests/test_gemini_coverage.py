@@ -108,12 +108,11 @@ def test_build_parser_parses_claim_command():
     parser = build_parser()
 
     # Act
-    args = parser.parse_args(["claim", "--agent", "claude", "--takeover-cooling", "--json"])
+    args = parser.parse_args(["claim", "--agent", "claude", "--json"])
 
     # Assert
     assert args.command == "claim"
     assert args.agent == "claude"
-    assert args.takeover_cooling is True
     assert args.json is True
 
 

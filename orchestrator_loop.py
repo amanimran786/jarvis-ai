@@ -1,19 +1,9 @@
-"""
-orchestrator_loop.py — Single-iteration autonomous orchestration loop.
+"""Legacy Jarvis orchestration telemetry and proposal loop.
 
-Designed to be called on a schedule (every 3-5 minutes) by a Cowork scheduled
-task.  Each call does ONE iteration of the loop:
-
-    1. Harvest completed sessions → mark tasks done in WORK_QUEUE.json
-    2. For each newly-completed task, ask local LLM to suggest follow-ups
-    3. If active_count < max_concurrent: pick next QUEUED task
-    4. Generate a full session prompt (via harness/prompt_generator.py)
-    5. Write a launch record to LAUNCH_QUEUE.json
-    6. Log all activity to MASTER_LOG.md
-
-NOTE: Actual session launching (start_task) requires the Dispatch MCP which
-only works inside Cowork.  This module writes to LAUNCH_QUEUE.json; a
-companion Cowork scheduled task reads that file and fires start_task.
+Coordination v2 makes Codex and ``harness.agent_coordinator`` authoritative for
+engineering assignment, leasing, verification, and completion. This module may
+observe legacy sessions and generate non-executable proposals, but it must not
+dispatch engineering tasks or transition coordination-v2 queue rows.
 
 Entry point:
     python orchestrator_loop.py [--dry-run] [--max-concurrent N]
@@ -251,6 +241,14 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
         if task is None:
             _log_master(f"[orchestrator] completion ignored — task {task_id} not found")
             continue
+        if int(task.get("coordination_version") or 0) >= 2:
+            tracker.purge_completed([sid])
+            summary["rejected"] += 1
+            _log_master(
+                f"[orchestrator] coordination-v2 completion ignored — "
+                f"task={task_id}; submit through harness.agent_coordinator"
+            )
+            continue
         if (
             task.get("status") != "in_progress"
             or task.get("assigned_to") != sid
@@ -481,13 +479,16 @@ def _run_loop(max_concurrent: int = 3, dry_run: bool = False) -> dict[str, Any]:
     for session in newly_done:
         task_id = session.get("task_id", "")
         task    = _find_task(task_id)
-        if task is None:
+        if task is None or task.get("status") != "done":
             continue
         follow_ups = _suggest_follow_ups(task, dry_run=dry_run)
         for ft in follow_ups:
             _enqueue_task(ft)
             summary["follow_ups"] += 1
-            _log_master(f"[orchestrator] follow-up enqueued: {ft.get('id')} — {ft.get('title')}")
+            _log_master(
+                f"[orchestrator] follow-up proposed for Codex review: "
+                f"{ft.get('id')} — {ft.get('title')}"
+            )
 
     # ── Step 3: Check headroom and pick next task ─────────────────────────────
     active_now = tracker.active_count()
@@ -743,17 +744,23 @@ def _expire_stalled_sessions(tracker: SessionTracker, timeout_minutes: int = 90)
     stalled_session_ids = {s["session_id"] for s in stalled}
     requeued: list[str] = []
     for task in queue:
+        if int(task.get("coordination_version") or 0) >= 2:
+            continue
         if (
             task.get("status") == "in_progress"
             and task.get("assigned_to") in stalled_session_ids
         ):
-            task["status"] = "queued"
+            task["status"] = "unverified"
             task["assigned_to"] = None
             task["assigned_at"] = None
+            task["verification_failure_class"] = "legacy_stalled_session"
+            task["verification_reasons"] = [
+                "legacy session stalled; Codex must review before reassignment"
+            ]
             notes = str(task.get("notes") or "")
             task["notes"] = (
                 notes
-                + f" | auto-requeued {_now()[:10]}: session stalled (>{timeout_minutes}min)"
+                + f" | quarantined {_now()[:10]}: session stalled (>{timeout_minutes}min)"
             )
             requeued.append(str(task.get("id") or task.get("session_name") or "?"))
 
@@ -762,10 +769,10 @@ def _expire_stalled_sessions(tracker: SessionTracker, timeout_minutes: int = 90)
 
     _log_master(
         f"[orchestrator] auto-expired {len(stalled)} stalled session(s)"
-        + (f" — requeued: {', '.join(requeued)}" if requeued else " (no in_progress tasks)")
+        + (f" — quarantined: {', '.join(requeued)}" if requeued else " (no in_progress tasks)")
     )
     log.info(
-        "[Loop] Auto-expired %d stalled session(s); requeued tasks: %s",
+        "[Loop] Auto-expired %d stalled session(s); quarantined tasks: %s",
         len(stalled),
         requeued or "none",
     )
@@ -808,14 +815,16 @@ def _task_identity(task: dict[str, Any]) -> str:
         return str(task.get("id") or "")
 
 
+def _require_legacy_task(task: dict[str, Any], operation: str) -> None:
+    if int(task.get("coordination_version") or 0) >= 2:
+        raise RuntimeError(
+            f"coordination-v2 task requires harness.agent_coordinator: {operation}"
+        )
+
+
 def _pick_next_queued() -> dict | None:
-    queue = _load_queue()
-    # Respect explicit priority field if present (lower = higher priority)
-    queued = [t for t in queue if t.get("status") == "queued"]
-    if not queued:
-        return None
-    queued.sort(key=lambda t: (t.get("priority", 99), t.get("created_at", "")))
-    return queued[0]
+    """Return no work; Codex assignments are claimed through the coordinator."""
+    return None
 
 
 def _mark_task_done(
@@ -825,12 +834,17 @@ def _mark_task_done(
     *,
     expected_assignee: str = "",
 ) -> bool:
-    """Mark task as done; return True if the task was found and updated."""
+    """Store verified worker output for Codex review without completing it."""
     if not task_id:
         return False
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            _require_legacy_task(task, "completion")
+            if task.get("orchestrated_by") != "codex":
+                raise RuntimeError(
+                    f"task was not assigned by Codex: {task_id}"
+                )
             if expected_assignee and (
                 task.get("status") != "in_progress"
                 or task.get("assigned_to") != expected_assignee
@@ -838,9 +852,10 @@ def _mark_task_done(
                 raise RuntimeError(
                     f"task assignment changed before completion: {task_id}"
                 )
-            task["status"]         = "done"
-            task["result_summary"] = result_summary
-            task["completed_at"]   = _now()
+            task["status"] = "awaiting_codex_review"
+            task["candidate_result_summary"] = result_summary
+            task["candidate_completed_at"] = _now()
+            task["orchestration_state"] = "awaiting_codex_review"
             if evidence:
                 task["completion_evidence"] = evidence
                 task["completion_commit"] = evidence.get("completion_commit")
@@ -853,9 +868,16 @@ def _mark_task_in_progress(task_id: str, session_id: str) -> None:
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            _require_legacy_task(task, "lease")
+            if (
+                task.get("orchestrated_by") != "codex"
+                or task.get("orchestration_state") != "assigned"
+            ):
+                raise RuntimeError(f"task is not assigned by Codex: {task_id}")
             task["status"]      = "in_progress"
             task["assigned_to"] = session_id
             task["assigned_at"] = _now()
+            task["orchestration_state"] = "leased"
             break
     _save_queue(queue)
 
@@ -873,6 +895,7 @@ def _mark_task_verification(
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            _require_legacy_task(task, "verification")
             if expected_assignee and (
                 task.get("status") != "in_progress"
                 or task.get("assigned_to") != expected_assignee
@@ -901,6 +924,7 @@ def _mark_task_retry(
     queue = _load_queue()
     for task in queue:
         if _task_identity(task) == task_id:
+            _require_legacy_task(task, "retry")
             if expected_assignee and (
                 task.get("status") != "in_progress"
                 or task.get("assigned_to") != expected_assignee
@@ -925,6 +949,7 @@ def _mark_task_blocked(task_to_block: dict[str, Any], reason: str) -> None:
     identity = _task_identity(task_to_block)
     for task in queue:
         if task == task_to_block or (identity and _task_identity(task) == identity):
+            _require_legacy_task(task, "block")
             task["status"] = "blocked"
             task["blocked_reason"] = reason
             task["blocked_at"] = _now()
@@ -951,6 +976,7 @@ def _mark_task_awaiting_approval(task_to_mark: dict[str, Any]) -> None:
     identity = _task_identity(task_to_mark)
     for task in queue:
         if task == task_to_mark or (identity and _task_identity(task) == identity):
+            _require_legacy_task(task, "approval")
             task["status"] = "awaiting_approval"
             task["blocked_reason"] = "requires human approval before execution"
             task["blocked_at"] = _now()
@@ -963,6 +989,7 @@ def _mark_task_contract_validated(task_to_mark: dict[str, Any], contract: TaskCo
     identity = _task_identity(task_to_mark)
     for task in queue:
         if task == task_to_mark or (identity and _task_identity(task) == identity):
+            _require_legacy_task(task, "contract validation")
             task["contract_validated_at"] = _now()
             task["contract_version"] = contract.contract_version
             break
@@ -974,7 +1001,10 @@ def _enqueue_task(task: dict[str, Any]) -> None:
     # Deduplicate by id
     if any(t.get("id") == task.get("id") for t in queue):
         return
-    task.setdefault("status", "queued")
+    task["status"] = "proposed"
+    task["requires_codex_assignment"] = True
+    task["assigned_ai"] = None
+    task["assigned_to"] = None
     task.setdefault("created_at", _now())
     queue.append(task)
     _save_queue(queue)
@@ -1023,12 +1053,12 @@ def _write_launch_record(
 # ── Follow-up task generation ─────────────────────────────────────────────────
 
 _FOLLOWUP_SYSTEM = """\
-You are an engineering lead at Jarvis AI.  Given a completed task, suggest 0-3 \
-logical follow-up tasks that would naturally come next.  Respond with a JSON array \
-only, no explanation.  Each element: \
+You generate non-executable engineering proposals for Codex review. Given a \
+completed Jarvis task, suggest 0-3 logical follow-up proposals. Respond with a \
+JSON array only, no explanation. Each element: \
 {"id": "TASK-NNN", "title": "...", "description": "...", \
-"files_hint": [...], "acceptance_criteria": [...], "domain": "...", \
-"assigned_ai": "claude", "priority": 2}.  \
+"files_hint": [...], "acceptance_criteria": [...], "domain": "...", "priority": 2}. \
+Do not choose a worker or claim that a proposal is approved. \
 If no follow-ups are needed, return an empty array [].
 """
 
@@ -1074,6 +1104,11 @@ def _suggest_follow_ups(task: dict[str, Any], dry_run: bool = False) -> list[dic
                 continue
             if not ft.get("id") or ft["id"] in existing_ids:
                 ft["id"] = _new_task_id()
+            ft["status"] = "proposed"
+            ft["proposed_by"] = "local"
+            ft["requires_codex_assignment"] = True
+            ft["assigned_ai"] = None
+            ft["assigned_to"] = None
             result.append(ft)
         return result
     except Exception as exc:

@@ -135,7 +135,7 @@ class TaskSpec:
     constraints: Mapping[str, Any] = field(default_factory=dict)
     budget: TaskBudget = field(default_factory=TaskBudget)
     domain: str = "general"
-    assigned_ai: str = "claude"
+    assigned_ai: str = ""
     legacy_adapter: bool = False
 
     @classmethod
@@ -169,6 +169,24 @@ class TaskSpec:
         except (TypeError, ValueError) as exc:
             raise ContractError("constraints must contain JSON-serializable values") from exc
 
+        assigned_ai = str(task.get("assigned_ai") or "").strip().lower()
+        if not assigned_ai:
+            if not legacy_adapter:
+                raise ContractError("task requires explicit assigned_ai")
+            assigned_ai = "claude"
+        if assigned_ai not in {"claude", "codex", "local"}:
+            raise ContractError(
+                "assigned_ai must be one of: claude, codex, local"
+            )
+        if (
+            assigned_ai == "local"
+            and not legacy_adapter
+            and constraints.get("isolated_runtime") is not True
+        ):
+            raise ContractError(
+                "assigned_ai local requires constraints.isolated_runtime=true"
+            )
+
         return cls(
             task_id=task_id,
             title=title,
@@ -184,7 +202,7 @@ class TaskSpec:
             constraints=dict(constraints),
             budget=TaskBudget.from_value(task.get("budget")),
             domain=str(task.get("domain") or "general").strip() or "general",
-            assigned_ai=str(task.get("assigned_ai") or "claude").strip() or "claude",
+            assigned_ai=assigned_ai,
             legacy_adapter=legacy_adapter,
         )
 

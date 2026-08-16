@@ -45,6 +45,7 @@ def _entry() -> dict[str, Any]:
         "allowed_files": ["x.py"],
         "verification_commands": ["python -m compileall -q x.py"],
         "assigned_ai": "local",
+        "constraints": {"local_first": True, "isolated_runtime": True},
     })
     return {
         "task_id": spec.task_id,

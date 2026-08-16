@@ -3,6 +3,8 @@ import json
 import stat
 import threading
 
+import pytest
+
 import jarvis_dashboard
 
 
@@ -163,6 +165,85 @@ def test_dashboard_prevents_overlapping_orchestrator_loops(monkeypatch):
     assert second.json() == {"error": "orchestrator_loop_already_running"}
 
 
+def test_dashboard_requeue_is_rejected_for_codex_control(
+    monkeypatch,
+    tmp_path,
+):
+    (tmp_path / "WORK_QUEUE.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "TASK-001",
+                    "status": "blocked",
+                    "assigned_to": "claude",
+                    "assigned_at": "2026-08-15T00:00:00+00:00",
+                    "blocked_reason": "dependency unavailable",
+                    "blocked_at": "2026-08-15T00:01:00+00:00",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(jarvis_dashboard, "BASE", tmp_path)
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/requeue/0",
+        headers={"Authorization": "Bearer test-dashboard-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "codex_assignment_required",
+        "task_index": 0,
+    }
+    task = json.loads(
+        (tmp_path / "WORK_QUEUE.json").read_text(encoding="utf-8")
+    )[0]
+    assert task["status"] == "blocked"
+    assert task["assigned_to"] == "claude"
+    assert task["blocked_reason"] == "dependency unavailable"
+
+
+@pytest.mark.parametrize("active_status", ["active", "in_progress", "running"])
+def test_dashboard_does_not_requeue_active_task(
+    monkeypatch,
+    tmp_path,
+    active_status,
+):
+    queue_path = tmp_path / "WORK_QUEUE.json"
+    queue_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "TASK-001",
+                    "status": active_status,
+                    "assigned_to": "claude",
+                    "lease_id": "lease-001",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    original = queue_path.read_bytes()
+    monkeypatch.setattr(jarvis_dashboard, "BASE", tmp_path)
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/requeue/0",
+        headers={"Authorization": "Bearer test-dashboard-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "codex_assignment_required",
+        "task_index": 0,
+    }
+    assert queue_path.read_bytes() == original
+
+
 def test_dashboard_rolls_back_new_approval_when_requeue_fails(monkeypatch, tmp_path):
     record = {
         "task_id": "TASK-001",
@@ -198,20 +279,23 @@ def test_dashboard_rolls_back_new_approval_when_requeue_fails(monkeypatch, tmp_p
     assert consumed == [True]
 
 
-def test_dashboard_expire_requeues_task_by_assigned_session(monkeypatch, tmp_path):
-    (tmp_path / "WORK_QUEUE.json").write_text(
+def test_dashboard_expire_session_does_not_mutate_work_queue(monkeypatch, tmp_path):
+    queue_path = tmp_path / "WORK_QUEUE.json"
+    queue_path.write_text(
         json.dumps(
             [{"id": "TASK-001", "status": "in_progress", "assigned_to": "session-1"}]
         ),
         encoding="utf-8",
     )
+    original = queue_path.read_bytes()
+    saved = []
 
     class FakeTracker:
         def _load(self):
             return {"sessions": [{"session_id": "session-1", "status": "active"}]}
 
-        def _save(self, _data):
-            return None
+        def _save(self, data):
+            saved.append(data)
 
     monkeypatch.setattr(jarvis_dashboard, "BASE", tmp_path)
     monkeypatch.setattr("harness.session_tracker.SessionTracker", FakeTracker)
@@ -224,8 +308,8 @@ def test_dashboard_expire_requeues_task_by_assigned_session(monkeypatch, tmp_pat
     )
 
     assert response.status_code == 303
-    queue = json.loads((tmp_path / "WORK_QUEUE.json").read_text(encoding="utf-8"))
-    assert queue[0]["status"] == "queued"
+    assert queue_path.read_bytes() == original
+    assert saved[0]["sessions"][0]["status"] == "stalled"
 
 
 def test_dashboard_expire_reports_mutation_failure(monkeypatch, tmp_path):

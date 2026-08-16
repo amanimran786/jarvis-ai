@@ -10,9 +10,11 @@ import pytest
 from harness import agent_coordinator
 from harness.agent_coordinator import (
     CoordinationError,
+    assign_task,
     claim_next,
     finish,
     heartbeat,
+    review_completion,
     set_cooldown,
     status_snapshot,
 )
@@ -23,6 +25,7 @@ from harness.task_contract import (
     TaskContract,
     TaskType,
     normalized_task_spec_digest,
+    task_contract_digest,
 )
 
 
@@ -47,8 +50,8 @@ def _task(
     task_id: str,
     *,
     priority: int = 1,
-    assigned_to: str | None = None,
-    status: str = "queued",
+    assigned_ai: str = "claude",
+    status: str = "proposed",
 ) -> dict:
     return {
         "id": task_id,
@@ -65,11 +68,11 @@ def _task(
             "tool_calls": 10,
         },
         "domain": "general",
-        "assigned_ai": assigned_to or "claude",
+        "assigned_ai": assigned_ai,
         "legacy_adapter": False,
         "priority": priority,
         "status": status,
-        "assigned_to": assigned_to,
+        "assigned_to": None,
         "created_at": "2026-07-16T00:00:00+00:00",
     }
 
@@ -132,6 +135,30 @@ def _claim(paths: dict[str, Path], agent: str, **kwargs):
     )
 
 
+def _assign(
+    paths: dict[str, Path],
+    task_id: str,
+    worker: str,
+    *,
+    stage: str = "implementation",
+    repo_path: Path | None = None,
+    base_ref: str = "a" * 40,
+    **kwargs,
+):
+    return assign_task(
+        task_id,
+        worker,
+        stage=stage,
+        rationale="Selected by Codex for focused verification",
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+        repo_path=repo_path,
+        base_ref=base_ref,
+        **kwargs,
+    )
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", *args],
@@ -145,28 +172,28 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def test_claim_respects_agent_ownership_and_records_lease(tmp_path: Path):
-    tasks = [
-        _task("claude-task", priority=0, assigned_to="Claude (Cowork)"),
-        _task("codex-task", priority=1, assigned_to="Codex"),
-        _task("shared-task", priority=2),
-    ]
+def test_claim_requires_exact_codex_assignment_and_records_lease(tmp_path: Path):
+    tasks = [_task("claude-task"), _task("codex-task")]
     paths = _state_files(tmp_path, tasks)
+    _assign(paths, "claude-task", "claude")
 
-    result = _claim(paths, "codex")
+    wrong_worker = _claim(paths, "codex")
+    result = _claim(paths, "claude")
 
+    assert wrong_worker["status"] == "idle"
     assert result["status"] == "claimed"
-    assert result["task_id"] == "codex-task"
+    assert result["task_id"] == "claude-task"
     queue = json.loads(paths["queue_path"].read_text())
-    claimed = next(task for task in queue if task["contract_id"] == "codex-task")
+    claimed = next(task for task in queue if task["contract_id"] == "claude-task")
     assert claimed["status"] == "in_progress"
-    assert claimed["lease_owner"] == "codex"
+    assert claimed["lease_owner"] == "claude"
     assert claimed["lease_id"] == result["lease_id"]
 
 
 def test_cooldown_blocks_agent_claim(tmp_path: Path):
     paths = _state_files(tmp_path, [_task("shared-task")])
     now = dt.datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    _assign(paths, "shared-task", "claude", now=now)
     set_cooldown("claude", seconds=600, reason="rate limit", now=now, **{
         "queue_path": paths["queue_path"],
         "state_path": paths["state_path"],
@@ -178,26 +205,31 @@ def test_cooldown_blocks_agent_claim(tmp_path: Path):
     assert result["cooldown_until"] == "2026-07-16T12:10:00+00:00"
 
 
-def test_takeover_requires_assigned_agent_to_be_cooling(tmp_path: Path):
-    paths = _state_files(
-        tmp_path,
-        [_task("claude-task", assigned_to="jarvis-general-claude-123")],
-    )
+def test_cooling_worker_cannot_be_taken_over_without_codex_reassignment(tmp_path: Path):
+    paths = _state_files(tmp_path, [_task("claude-task")])
     now = dt.datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    _assign(paths, "claude-task", "claude", now=now)
 
-    assert _claim(paths, "codex", takeover_cooling=True, now=now)["status"] == "idle"
+    assert _claim(paths, "codex", now=now)["status"] == "idle"
 
     set_cooldown("claude", seconds=600, reason="credit exhausted", now=now, **{
         "queue_path": paths["queue_path"],
         "state_path": paths["state_path"],
     })
-    result = _claim(
+    still_idle = _claim(
         paths,
         "codex",
-        takeover_cooling=True,
         now=now + dt.timedelta(seconds=1),
     )
+    _assign(
+        paths,
+        "claude-task",
+        "codex",
+        now=now + dt.timedelta(seconds=2),
+    )
+    result = _claim(paths, "codex", now=now + dt.timedelta(seconds=3))
 
+    assert still_idle["status"] == "idle"
     assert result["status"] == "claimed"
     assert result["task_id"] == "claude-task"
 
@@ -205,6 +237,7 @@ def test_takeover_requires_assigned_agent_to_be_cooling(tmp_path: Path):
 def test_approval_task_waits_for_exact_digest_bound_approval(tmp_path: Path):
     task = _task("approval-task")
     paths = _state_files(tmp_path, [task], approval_ids={"approval-task"})
+    _assign(paths, "approval-task", "codex")
 
     first = _claim(paths, "codex")
 
@@ -230,6 +263,7 @@ def test_one_active_shared_checkout_lease_blocks_another_claim(tmp_path: Path):
         tmp_path,
         [_task("first-task"), _task("second-task")],
     )
+    _assign(paths, "first-task", "codex")
     first = _claim(paths, "codex")
 
     second = _claim(paths, "claude")
@@ -239,9 +273,10 @@ def test_one_active_shared_checkout_lease_blocks_another_claim(tmp_path: Path):
     assert second["task_ids"] == ["first-task"]
 
 
-def test_cooldown_releases_owned_lease_for_failover(tmp_path: Path):
+def test_cooldown_releases_owned_lease_for_codex_reassignment(tmp_path: Path):
     paths = _state_files(tmp_path, [_task("shared-task")])
     now = dt.datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    _assign(paths, "shared-task", "claude", now=now)
     first = _claim(paths, "claude", now=now)
 
     cooldown = set_cooldown(
@@ -252,32 +287,32 @@ def test_cooldown_releases_owned_lease_for_failover(tmp_path: Path):
         queue_path=paths["queue_path"],
         state_path=paths["state_path"],
     )
-    second = _claim(
-        paths,
-        "codex",
-        takeover_cooling=True,
-        now=now + dt.timedelta(seconds=11),
-    )
+    assert _claim(paths, "codex", now=now + dt.timedelta(seconds=11))["status"] == "idle"
+    _assign(paths, "shared-task", "codex", now=now + dt.timedelta(seconds=12))
+    second = _claim(paths, "codex", now=now + dt.timedelta(seconds=13))
 
     assert cooldown["released_tasks"] == ["shared-task"]
     assert second["status"] == "claimed"
     assert second["task_id"] == first["task_id"]
 
 
-def test_expired_lease_starts_owner_cooldown_and_is_reclaimed(tmp_path: Path):
+def test_expired_lease_starts_owner_cooldown_and_requires_reassignment(tmp_path: Path):
     paths = _state_files(tmp_path, [_task("shared-task")])
     now = dt.datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+    _assign(paths, "shared-task", "claude", now=now)
     _claim(paths, "claude", now=now, lease_seconds=10)
 
-    result = _claim(
+    expired = _claim(
         paths,
         "codex",
-        takeover_cooling=True,
         now=now + dt.timedelta(seconds=11),
     )
+    _assign(paths, "shared-task", "codex", now=now + dt.timedelta(seconds=12))
+    result = _claim(paths, "codex", now=now + dt.timedelta(seconds=13))
 
     assert result["status"] == "claimed"
-    assert result["expired_leases"] == ["shared-task"]
+    assert expired["status"] == "idle"
+    assert expired["expired_leases"] == ["shared-task"]
     snapshot = status_snapshot(
         queue_path=paths["queue_path"],
         state_path=paths["state_path"],
@@ -287,6 +322,7 @@ def test_expired_lease_starts_owner_cooldown_and_is_reclaimed(tmp_path: Path):
 
 def test_heartbeat_rejects_wrong_agent(tmp_path: Path):
     paths = _state_files(tmp_path, [_task("shared-task")])
+    _assign(paths, "shared-task", "claude")
     claim = _claim(paths, "claude")
 
     with pytest.raises(CoordinationError, match="ownership"):
@@ -299,7 +335,7 @@ def test_heartbeat_rejects_wrong_agent(tmp_path: Path):
         )
 
 
-def test_finish_uses_loop_evidence_before_marking_done(tmp_path: Path):
+def test_finish_waits_for_codex_review_before_marking_done(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-b", "main")
@@ -311,13 +347,14 @@ def test_finish_uses_loop_evidence_before_marking_done(tmp_path: Path):
     _git(repo, "commit", "-m", "base")
 
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
-    claim = claim_next("codex", repo_path=repo, **paths)
+    _assign(paths, "shared-task", "claude", repo_path=repo)
+    claim = claim_next("claude", repo_path=repo, **paths)
     (repo / "artifact.txt").write_text("done\n")
     _git(repo, "add", "artifact.txt")
     _git(repo, "commit", "-m", "add artifact")
 
     result = finish(
-        "codex",
+        "claude",
         claim["task_id"],
         claim["lease_id"],
         summary="artifact complete",
@@ -327,11 +364,28 @@ def test_finish_uses_loop_evidence_before_marking_done(tmp_path: Path):
         state_path=paths["state_path"],
     )
 
-    assert result["status"] == "verified"
+    assert result["status"] == "awaiting_codex_review"
     queue = json.loads(paths["queue_path"].read_text())
-    assert queue[0]["status"] == "done"
+    assert queue[0]["status"] == "awaiting_codex_review"
+    assert queue[0]["executed_by"] == "claude"
+    assert "completed_by" not in queue[0]
     assert queue[0]["completion_commit"] == _git(repo, "rev-parse", "HEAD")
     assert queue[0]["completion_evidence"]["changed_files"] == ["artifact.txt"]
+
+    reviewed = review_completion(
+        "shared-task",
+        decision="accept",
+        summary="Codex accepted verified artifact",
+        repo_path=repo,
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+    )
+
+    assert reviewed["status"] == "done"
+    queue = json.loads(paths["queue_path"].read_text())
+    assert queue[0]["status"] == "done"
+    assert queue[0]["completed_by"] == "codex"
 
 
 def test_finish_blocks_committed_pre_commit_violation(tmp_path: Path):
@@ -348,6 +402,7 @@ def test_finish_blocks_committed_pre_commit_violation(tmp_path: Path):
     task = _task("shared-task")
     task["allowed_files"] = ["artifact.txt", "tool.py"]
     paths = _state_files(tmp_path / "state", [task])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     unsafe = "run(command, shell" + "=True)\n"
     (repo / "tool.py").write_text(unsafe, encoding="utf-8")
@@ -386,6 +441,7 @@ def test_finish_allows_clean_committed_python(tmp_path: Path):
     task = _task("shared-task")
     task["allowed_files"] = ["artifact.txt", "tool.py"]
     paths = _state_files(tmp_path / "state", [task])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     (repo / "tool.py").write_text("VALUE = 1\n", encoding="utf-8")
     _git(repo, "add", "tool.py")
@@ -402,9 +458,9 @@ def test_finish_allows_clean_committed_python(tmp_path: Path):
         state_path=paths["state_path"],
     )
 
-    assert result["status"] == "verified"
+    assert result["status"] == "awaiting_codex_review"
     queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
-    assert queue[0]["status"] == "done"
+    assert queue[0]["status"] == "awaiting_codex_review"
     assert queue[0]["completion_evidence"]["commit_gate"]["passed"] is True
 
 
@@ -419,6 +475,7 @@ def test_finish_rejects_expired_lease(tmp_path: Path):
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
     started = dt.datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
+    _assign(paths, "shared-task", "codex", repo_path=repo, now=started)
     claim = claim_next(
         "codex",
         repo_path=repo,
@@ -455,6 +512,7 @@ def test_finish_rechecks_lease_expiry_after_verification(
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
     started = dt.datetime(2026, 7, 23, 12, 0, tzinfo=UTC)
+    _assign(paths, "shared-task", "codex", repo_path=repo, now=started)
     claim = claim_next("codex", repo_path=repo, now=started, **paths)
     (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
     _git(repo, "add", "artifact.txt")
@@ -491,6 +549,7 @@ def test_finish_state_write_failure_does_not_persist_done(
     _git(repo, "add", "base.txt")
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
     _git(repo, "add", "artifact.txt")
@@ -533,6 +592,7 @@ def test_finish_queue_commit_failure_does_not_persist_done(
     _git(repo, "add", "base.txt")
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     (repo / "artifact.txt").write_text("done\n", encoding="utf-8")
     _git(repo, "add", "artifact.txt")
@@ -580,6 +640,7 @@ def test_finish_refuses_uncommitted_shared_checkout_changes(tmp_path: Path):
     _git(repo, "add", "base.txt")
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     (repo / "artifact.txt").write_text("dirty\n")
 
@@ -603,6 +664,7 @@ def test_contract_outputs_and_entry_point_strengthen_legacy_queue_spec(
     task["allowed_files"] = []
     task["verification_commands"] = []
     paths = _state_files(tmp_path, [task])
+    _assign(paths, "legacy-task", "claude")
 
     result = _claim(paths, "claude")
 
@@ -622,6 +684,7 @@ def test_finish_rejects_contract_changed_after_claim(tmp_path: Path):
     _git(repo, "add", "base.txt")
     _git(repo, "commit", "-m", "base")
     paths = _state_files(tmp_path / "state", [_task("shared-task")])
+    _assign(paths, "shared-task", "codex", repo_path=repo)
     claim = claim_next("codex", repo_path=repo, **paths)
     (repo / "artifact.txt").write_text("done\n")
     _git(repo, "add", "artifact.txt")
@@ -641,3 +704,200 @@ def test_finish_rejects_contract_changed_after_claim(tmp_path: Path):
             contracts_path=paths["contracts_path"],
             state_path=paths["state_path"],
         )
+
+
+def test_active_row_without_valid_lease_is_quarantined(tmp_path: Path):
+    task = _task("legacy-deadlock", status="in_progress")
+    task["assigned_to"] = "orchestrator_loop.py"
+    paths = _state_files(tmp_path, [task])
+
+    result = _claim(paths, "codex")
+
+    assert result["status"] == "idle"
+    assert result["expired_leases"] == ["legacy-deadlock"]
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "unverified"
+    assert queue[0]["orchestration_state"] == "legacy_quarantined"
+    assert queue[0]["verification_failure_class"] == "invalid_active_lease"
+
+
+def test_forged_future_lease_is_quarantined(tmp_path: Path):
+    task = _task("forged-lease", status="in_progress")
+    task.update(
+        {
+            "assigned_to": "claude",
+            "lease_owner": "claude",
+            "lease_id": "lease_forged",
+            "lease_expires_at": "2099-01-01T00:00:00+00:00",
+        }
+    )
+    paths = _state_files(tmp_path, [task])
+
+    result = _claim(paths, "codex")
+
+    assert result["expired_leases"] == ["forged-lease"]
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "unverified"
+
+
+def test_heartbeat_cannot_resurrect_expired_lease(tmp_path: Path):
+    paths = _state_files(tmp_path, [_task("expired-heartbeat")])
+    started = dt.datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    _assign(paths, "expired-heartbeat", "claude", now=started)
+    claim = _claim(paths, "claude", now=started, lease_seconds=10)
+
+    with pytest.raises(CoordinationError, match="expired before heartbeat"):
+        heartbeat(
+            "claude",
+            claim["task_id"],
+            claim["lease_id"],
+            now=started + dt.timedelta(seconds=11),
+            queue_path=paths["queue_path"],
+            state_path=paths["state_path"],
+        )
+
+
+def test_only_one_codex_assignment_can_be_open(tmp_path: Path):
+    paths = _state_files(tmp_path, [_task("first"), _task("second")])
+    _assign(paths, "first", "claude")
+
+    with pytest.raises(CoordinationError, match="another Codex assignment is open"):
+        _assign(paths, "second", "codex")
+
+
+def test_codex_assignment_promotes_unassigned_proposal(tmp_path: Path):
+    paths = _state_files(tmp_path, [_task("proposal")])
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    queue[0]["assigned_ai"] = None
+    paths["queue_path"].write_text(json.dumps(queue), encoding="utf-8")
+
+    result = _assign(paths, "proposal", "claude")
+
+    assert result["status"] == "assigned"
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["assigned_ai"] == "claude"
+    assert queue[0]["worker_type"] == "claude"
+    assert queue[0]["orchestration_state"] == "assigned"
+
+
+def test_claim_invalidates_assignment_when_base_commit_changes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("base-bound")])
+    _assign(paths, "base-bound", "claude", repo_path=repo)
+    (repo / "other.txt").write_text("new head\n", encoding="utf-8")
+    _git(repo, "add", "other.txt")
+    _git(repo, "commit", "-m", "move head")
+
+    result = claim_next("claude", repo_path=repo, **paths)
+
+    assert result["status"] == "idle"
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "blocked"
+    assert queue[0]["orchestration_state"] == "invalidated"
+
+
+def test_assignment_rechecks_head_before_persisting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    paths = _state_files(tmp_path / "state", [_task("moving-head")])
+    heads = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(agent_coordinator, "_clean_repo_head", lambda _repo: next(heads))
+
+    with pytest.raises(CoordinationError, match="HEAD changed"):
+        _assign(paths, "moving-head", "claude", repo_path=tmp_path)
+
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["status"] == "proposed"
+    assert "orchestration_id" not in queue[0]
+
+
+def test_poc_is_approved_only_after_codex_acceptance(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Coordinator Test")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+    paths = _state_files(tmp_path / "state", [_task("poc-task")])
+    _assign(paths, "poc-task", "claude", stage="poc", repo_path=repo)
+    claim = claim_next("claude", repo_path=repo, **paths)
+    (repo / "artifact.txt").write_text("proof\n", encoding="utf-8")
+    _git(repo, "add", "artifact.txt")
+    _git(repo, "commit", "-m", "prove concept")
+
+    result = finish(
+        "claude",
+        claim["task_id"],
+        claim["lease_id"],
+        summary="POC verified",
+        repo_path=repo,
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+    )
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert result["status"] == "awaiting_codex_review"
+    assert "poc_approval_sha256" not in queue[0]
+
+    review_completion(
+        "poc-task",
+        decision="accept",
+        summary="POC evidence supports implementation",
+        repo_path=repo,
+        queue_path=paths["queue_path"],
+        contracts_path=paths["contracts_path"],
+        state_path=paths["state_path"],
+    )
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    assert queue[0]["poc_approved_by"] == "codex"
+    assert len(queue[0]["poc_approval_sha256"]) == 64
+
+
+def test_parent_poc_digest_is_recomputed_before_child_claim(tmp_path: Path):
+    parent = _task("poc-parent", status="done")
+    parent.update(
+        {
+            "orchestrated_by": "codex",
+            "orchestration_stage": "poc",
+            "orchestration_state": "completed",
+            "completion_commit": "b" * 40,
+            "poc_approved_by": "codex",
+        }
+    )
+    parent_contract = _contract(parent)
+    parent["poc_approval_sha256"] = agent_coordinator._poc_approval_digest(
+        "poc-parent",
+        task_contract_digest(parent_contract),
+        normalized_task_spec_digest(parent),
+        parent["completion_commit"],
+    )
+    child = _task("poc-child")
+    child["constraints"] = {"local_first": True, "poc_required": True}
+    paths = _state_files(tmp_path, [parent, child])
+    _assign(
+        paths,
+        "poc-child",
+        "claude",
+        parent_task_id="poc-parent",
+    )
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    queue[0]["completion_commit"] = "c" * 40
+    paths["queue_path"].write_text(json.dumps(queue), encoding="utf-8")
+
+    result = _claim(paths, "claude")
+
+    assert result["status"] == "idle"
+    queue = json.loads(paths["queue_path"].read_text(encoding="utf-8"))
+    child_row = next(item for item in queue if item["id"] == "poc-child")
+    assert child_row["status"] == "blocked"
+    assert child_row["orchestration_state"] == "invalidated"

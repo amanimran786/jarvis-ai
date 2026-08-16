@@ -57,6 +57,9 @@ def _sample_task(**overrides) -> dict:
         "domain": "harness",
         "assigned_ai": "claude",
         "status": "queued",
+        "orchestrated_by": "codex",
+        "orchestration_state": "assigned",
+        "worker_type": "claude",
     }
     base.update(overrides)
     return base
@@ -493,6 +496,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             verification_commands=["python -m pytest tests/test_web_search.py -q"],
         )
         task["assigned_to"] = "session-a"
+        task["orchestration_state"] = "leased"
         spec = TaskSpec.from_queue_task(task)
         ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
 
@@ -549,110 +553,62 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
                 self.assertEqual(lq, [])
             self.assertEqual(result["dry_run"], True)
 
-    def test_dry_run_reports_launched_count(self):
+    def test_dry_run_never_reports_a_launch(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             result = self._run_loop_isolated(tmp, dry_run=True, max_concurrent=3)
-            # In dry_run mode the loop still counts the "would launch" action
-            self.assertGreaterEqual(result["launched"], 1)
+            self.assertEqual(result["launched"], 0)
 
-    def test_non_dry_run_writes_launch_queue(self):
+    def test_codex_assigned_task_is_never_launched_by_legacy_loop(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
                 result = self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            lq_path = tmp / "LAUNCH_QUEUE.json"
-            self.assertTrue(lq_path.exists())
-            lq = json.loads(lq_path.read_text())
-            self.assertEqual(len(lq), 1)
-            self.assertEqual(lq[0]["task_id"], "TASK-001")
-            self.assertEqual(lq[0]["status"], "pending")
+            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
 
-    def test_launch_record_contains_prompt(self):
+            self.assertEqual(result["launched"], 0)
+            self.assertEqual(queue[0]["status"], "queued")
+            self.assertEqual(queue[0]["orchestrated_by"], "codex")
+            self.assertEqual(queue[0]["orchestration_state"], "assigned")
+            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
+            self.assertFalse((tmp / "ACTIVE_SESSIONS.json").exists())
+            self.assertFalse((tmp / "attempts.jsonl").exists())
+
+    def test_unassigned_queued_work_is_never_launched(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
+            unassigned = _sample_task(status="queued", priority=1)
+            unassigned.pop("orchestrated_by")
+            unassigned.pop("orchestration_state")
+            unassigned.pop("worker_type")
             with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            lq = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())
-            self.assertIn("prompt", lq[0])
-            self.assertTrue(len(lq[0]["prompt"]) > 10)
-
-    def test_launch_record_contains_session_id(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            lq = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())
-            self.assertIn("session_id", lq[0])
-            self.assertTrue(lq[0]["session_id"].startswith("jarvis-"))
-
-    def test_launch_record_contains_contract_and_checkpoint(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-
-            launch = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())[0]
-            attempts = [json.loads(line) for line in (tmp / "attempts.jsonl").read_text().splitlines()]
-
-            self.assertEqual(launch["task_spec"]["id"], "TASK-001")
-            self.assertEqual(launch["contract_sha256"], attempts[0]["contract_sha256"])
-            self.assertEqual(launch["attempt_id"], attempts[0]["attempt_id"])
-            self.assertEqual(attempts[0]["phase"], "dispatch")
-
-    def test_legacy_queue_task_is_blocked_from_autonomous_execution(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            legacy = {
-                "task": "Run focused regression tests",
-                "notes": "Capture the failing cases",
-                "status": "queued",
-                "priority": 1,
-                "session_name": "legacy-lane",
-            }
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(
+                result = self._run_loop_isolated(
                     tmp,
-                    seed_task=legacy,
+                    seed_task=unassigned,
                     dry_run=False,
                     max_concurrent=1,
                 )
 
             queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
 
-            self.assertEqual(queue[0]["status"], "blocked")
-            self.assertIn("explicit typed task contract", queue[0]["blocked_reason"])
+            self.assertEqual(result["launched"], 0)
+            self.assertEqual(queue[0]["status"], "queued")
             self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
 
-    def test_no_duplicate_pending_entries(self):
-        """Running the loop twice should not create duplicate pending records."""
+    def test_repeated_legacy_polls_never_create_pending_launches(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-                # Task is now in_progress → second run should not re-launch it
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            lq = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())
-            pending = [r for r in lq if r.get("status") == "pending"]
-            self.assertEqual(len(pending), 1)
+                first = self._run_loop_isolated(
+                    tmp, dry_run=False, max_concurrent=3
+                )
+                second = self._run_loop_isolated(
+                    tmp, dry_run=False, max_concurrent=3
+                )
 
-    def test_launch_queue_json_is_valid(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            # Parsing should not raise
-            data = json.loads((tmp / "LAUNCH_QUEUE.json").read_text())
-            self.assertIsInstance(data, list)
-
-    def test_master_log_appended(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch("orchestrator_loop._suggest_follow_ups", return_value=[]):
-                self._run_loop_isolated(tmp, dry_run=False, max_concurrent=3)
-            log_text = (tmp / "MASTER_LOG.md").read_text()
-            self.assertIn("[orchestrator]", log_text)
-            self.assertIn("loop start", log_text)
+            self.assertEqual(first["launched"], 0)
+            self.assertEqual(second["launched"], 0)
+            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
 
     def test_max_concurrent_respected(self):
         """With max_concurrent=0 nothing should be launched."""
@@ -661,69 +617,53 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
             result = self._run_loop_isolated(tmp, dry_run=False, max_concurrent=0)
             self.assertEqual(result["launched"], 0)
 
-    def test_active_count_does_not_double_count_new_launches(self):
+    def test_codex_assignment_does_not_create_a_legacy_active_session(self):
         with tempfile.TemporaryDirectory() as d:
             tmp = Path(d)
             result = self._run_loop_isolated(tmp, dry_run=False, max_concurrent=1)
 
-            self.assertEqual(result["launched"], 1)
-            self.assertEqual(result["active_now"], 1)
-
-    def test_contract_render_failure_blocks_instead_of_launching_fallback(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch(
-                "harness.prompt_generator.generate_session_prompt",
-                side_effect=RuntimeError("renderer failed"),
-            ):
-                result = self._run_loop_isolated(
-                    tmp, dry_run=False, max_concurrent=1
-                )
-
-            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
             self.assertEqual(result["launched"], 0)
-            self.assertEqual(result["blocked"], 1)
-            self.assertEqual(queue[0]["status"], "blocked")
-            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
-
-    def test_checkpoint_failure_blocks_before_launch(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch(
-                "orchestrator_loop.AttemptStore.append",
-                side_effect=OSError("disk full"),
-            ):
-                result = self._run_loop_isolated(
-                    tmp, dry_run=False, max_concurrent=1
-                )
-
-            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
-            self.assertEqual(result["launched"], 0)
-            self.assertEqual(result["blocked"], 1)
-            self.assertEqual(queue[0]["status"], "blocked")
-            self.assertFalse((tmp / "LAUNCH_QUEUE.json").exists())
-
-    def test_launch_queue_write_failure_does_not_claim_session(self):
-        with tempfile.TemporaryDirectory() as d:
-            tmp = Path(d)
-            with patch("orchestrator_loop._write_launch_record", return_value="failed"):
-                result = self._run_loop_isolated(
-                    tmp, dry_run=False, max_concurrent=1
-                )
-
-            queue = json.loads((tmp / "WORK_QUEUE.json").read_text())
-            sessions_path = tmp / "ACTIVE_SESSIONS.json"
-            attempts = [
-                json.loads(line)
-                for line in (tmp / "attempts.jsonl").read_text().splitlines()
-            ]
-            self.assertEqual(result["launched"], 0)
-            self.assertEqual(result["blocked"], 1)
             self.assertEqual(result["active_now"], 0)
-            self.assertEqual(queue[0]["status"], "blocked")
-            self.assertFalse(sessions_path.exists())
-            self.assertEqual(attempts[-1]["phase"], "dispatch_delivery")
-            self.assertEqual(attempts[-1]["failure_class"], "infrastructure_failure")
+
+    def test_stalled_legacy_session_is_quarantined_as_unverified(self):
+        import orchestrator_loop as ol
+
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            queue_path = tmp / "WORK_QUEUE.json"
+            tracker = SessionTracker(path=tmp / "ACTIVE_SESSIONS.json")
+            tracker.claim("TASK-001", "legacy-session")
+            sessions = tracker._load()
+            sessions["sessions"][0]["last_updated"] = (
+                datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(minutes=60)
+            ).isoformat()
+            tracker._save(sessions)
+            queue_path.write_text(json.dumps([
+                {
+                    "id": "TASK-001",
+                    "title": "Legacy work",
+                    "description": "A pre-coordinator task",
+                    "assigned_ai": "claude",
+                    "status": "in_progress",
+                    "assigned_to": "legacy-session",
+                }
+            ]), encoding="utf-8")
+
+            with patch.object(ol, "WORK_QUEUE_PATH", queue_path), \
+                 patch.object(ol, "MASTER_LOG_PATH", tmp / "MASTER_LOG.md"):
+                expired = ol._expire_stalled_sessions(
+                    tracker, timeout_minutes=30
+                )
+
+            task = json.loads(queue_path.read_text())[0]
+            self.assertEqual(expired, 1)
+            self.assertEqual(task["status"], "unverified")
+            self.assertIsNone(task["assigned_to"])
+            self.assertEqual(
+                task["verification_failure_class"], "legacy_stalled_session"
+            )
+            self.assertNotEqual(task["status"], "queued")
 
     def test_agent_summary_without_loop_evidence_is_unverified(self):
         with tempfile.TemporaryDirectory() as d:
@@ -739,7 +679,7 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
         self.assertEqual(attempts[-1]["phase"], "retry_policy")
         self.assertEqual(attempts[-1]["status"], "route_to_verifier")
 
-    def test_loop_evidence_promotes_verified_task_to_done(self):
+    def test_verified_worker_output_awaits_codex_review_instead_of_done(self):
         evidence = {
             "observer": "loop",
             "changed_files": ["harness/web_search.py"],
@@ -764,8 +704,65 @@ class TestLaunchQueueRoundtrip(unittest.TestCase):
                 )
 
         self.assertEqual(result["harvested"], 1)
-        self.assertEqual(queue[0]["status"], "done")
+        self.assertEqual(queue[0]["status"], "awaiting_codex_review")
+        self.assertEqual(
+            queue[0]["orchestration_state"], "awaiting_codex_review"
+        )
+        self.assertEqual(queue[0]["candidate_result_summary"], "agent says done")
+        self.assertNotIn("completed_at", queue[0])
         self.assertEqual(attempts[-1]["status"], "verified")
+
+    def test_local_followups_stay_unassigned_proposals(self):
+        import orchestrator_loop as ol
+
+        model_output = json.dumps([
+            {
+                "id": "TASK-002",
+                "title": "Harden retry telemetry",
+                "description": "Add focused retry telemetry coverage.",
+                "files_hint": ["harness/web_search.py"],
+                "acceptance_criteria": ["retry telemetry is covered"],
+                "domain": "harness",
+                "priority": 2,
+            }
+        ])
+        mock_ask = MagicMock(return_value=model_output)
+
+        with tempfile.TemporaryDirectory() as d, \
+             patch.object(ol, "WORK_QUEUE_PATH", Path(d) / "WORK_QUEUE.json"), \
+             patch.dict("sys.modules", {
+                 "brains": MagicMock(),
+                 "brains.brain_ollama": MagicMock(ask_local=mock_ask),
+                 "config": MagicMock(LOCAL_REASONING="qwen3:30b-a3b"),
+             }):
+            proposals = ol._suggest_follow_ups(_sample_task(status="done"))
+
+        self.assertEqual(len(proposals), 1)
+        proposal = proposals[0]
+        self.assertEqual(proposal["status"], "proposed")
+        self.assertEqual(proposal["proposed_by"], "local")
+        self.assertTrue(proposal["requires_codex_assignment"])
+        self.assertIsNone(proposal["assigned_ai"])
+        self.assertIsNone(proposal["assigned_to"])
+        self.assertNotIn("worker_type", proposal)
+
+    def test_legacy_mutators_reject_coordination_v2_tasks(self):
+        import orchestrator_loop as ol
+
+        with tempfile.TemporaryDirectory() as d:
+            original = ol.WORK_QUEUE_PATH
+            ol.WORK_QUEUE_PATH = Path(d) / "WORK_QUEUE.json"
+            task = _sample_task(
+                status="queued",
+                coordination_version=2,
+                orchestration_state="assigned",
+            )
+            ol.WORK_QUEUE_PATH.write_text(json.dumps([task]), encoding="utf-8")
+            try:
+                with self.assertRaisesRegex(RuntimeError, "agent_coordinator"):
+                    ol._mark_task_in_progress("TASK-001", "legacy-session")
+            finally:
+                ol.WORK_QUEUE_PATH = original
 
     def test_harvest_rejects_uncommitted_worktree_completion(self):
         with tempfile.TemporaryDirectory() as d:

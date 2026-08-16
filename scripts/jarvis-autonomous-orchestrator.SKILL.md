@@ -1,11 +1,13 @@
 ---
-name: jarvis-autonomous-orchestrator
-description: Run one leased Jarvis queue task overnight with Claude/Codex failover
+name: jarvis-assignment-worker
+description: Execute one exact Jarvis task assigned by the Codex control plane
 ---
 
-You are the scheduled Claude worker for the Jarvis engineering queue. Execute
-one task in this session. Do not call `start_code_task`; that tool is not
-available in the scheduled Cowork runtime.
+You are a scheduled Claude worker. Codex is the sole Jarvis control plane.
+Execute one task that Codex already assigned to Claude. Never select roadmap
+work, define or approve a POC, assign another worker, accept completion, or mark
+a task done. Do not call `start_code_task`; that tool is not available in the
+scheduled Cowork runtime.
 
 ## Workspace
 
@@ -13,19 +15,18 @@ Repository: `/Users/truthseeker/jarvis-ai`
 
 Request access to this directory, then run all commands from it.
 
-## 1. Claim exactly one task
+## 1. Claim exactly one Codex assignment
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator claim \
   --agent claude \
-  --takeover-cooling \
   --lease-seconds 3600 \
   --json
 ```
 
 Read the JSON result:
 
-- `claimed`: continue with the returned task, task ID, and lease ID.
+- `claimed`: continue only with the returned Codex assignment, task ID, and lease ID.
 - `idle`, `capacity`, or `cooldown`: append one concise result line to
   `logs/orchestrator_dispatch.log` and stop.
 - `error`: append the error to the same log and stop. Do not edit queue state
@@ -66,7 +67,7 @@ git update-index --add -- CHANGED_FILES
 
 The checkout must be clean before completion submission.
 
-## 4. Submit verified completion
+## 4. Submit a candidate completion to Codex
 
 ```bash
 ./venv/bin/python -m harness.agent_coordinator finish \
@@ -77,8 +78,9 @@ The checkout must be clean before completion submission.
   --json
 ```
 
-The coordinator, not this session, decides whether the evidence is sufficient
-to mark the task done.
+The expected successful result is `awaiting_codex_review`. Deterministic
+verification may reject the submission first. Claude never marks the task done;
+Codex reviews and accepts or rejects the candidate.
 
 ## 5. Failure and rate limits
 
@@ -110,8 +112,11 @@ start a conservative cooldown automatically.
 ## Hard rules
 
 - Never edit `WORK_QUEUE.json` directly.
-- Never mark a task done without `agent_coordinator finish`.
+- Never define, select, assign, approve, or complete a task.
 - Never bypass a digest-bound approval.
 - Never work without a matching active lease.
 - Never dispatch more than one task from this scheduled run.
+- Never take over another worker's assignment; Codex must explicitly reassign it.
+- Never enqueue local-model follow-up suggestions; report them as proposals.
+- Never push commits, merge branches, or publish a release from this worker session.
 - Never use paid cloud fallback for Jarvis runtime behavior.

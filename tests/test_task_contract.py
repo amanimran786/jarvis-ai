@@ -65,6 +65,32 @@ def test_legacy_task_gets_stable_compatibility_id():
     assert first.legacy_adapter is True
 
 
+def test_modern_task_requires_explicit_worker_hint():
+    task = _task()
+    task.pop("assigned_ai")
+
+    with pytest.raises(ContractError, match="explicit assigned_ai"):
+        TaskSpec.from_queue_task(task)
+
+
+def test_task_spec_rejects_gemini_execution_identity():
+    with pytest.raises(ContractError, match="assigned_ai must be one of"):
+        TaskSpec.from_queue_task(_task(assigned_ai="gemini"))
+
+
+def test_modern_local_task_requires_isolated_runtime_constraint():
+    with pytest.raises(ContractError, match="isolated_runtime"):
+        TaskSpec.from_queue_task(_task(assigned_ai="local"))
+
+    spec = TaskSpec.from_queue_task(
+        _task(
+            assigned_ai="local",
+            constraints={"local_first": True, "isolated_runtime": True},
+        )
+    )
+    assert spec.assigned_ai == "local"
+
+
 def test_serialized_legacy_contract_preserves_identity_and_hash():
     original = TaskSpec.from_queue_task(
         {"task": "Run the focused regression suite", "notes": "Capture failures"}

@@ -1,37 +1,37 @@
-# WORK_QUEUE.json — Enriched Task Spec Schema
+# WORK_QUEUE.json Coordination V2 Schema
 
-`WORK_QUEUE.json` is the single source of truth for all pending, active, and
-completed work.  The orchestrator loop reads it every iteration; the Cowork
-companion reads `LAUNCH_QUEUE.json` to fire sessions.
+`WORK_QUEUE.json` is the durable engineering ledger. Codex is the sole control
+plane; workers interact with it only through `harness.agent_coordinator`.
+Direct status edits and worker-driven queue selection are unsupported.
 
----
+## Typed Task
 
-## Full task object
+Codex authors the task and its matching entry in `TASK_CONTRACTS.json` before
+assignment:
 
 ```json
 {
   "id": "TASK-042",
   "title": "Add rate limiting to web_fetch",
-  "description": "harness/web_search.py calls fetch_page() with no retry logic. On 429 or transient network errors the whole search fails silently. Add exponential backoff (3 retries, base 1s) and surface the error clearly when all retries are exhausted.",
+  "description": "Retry transient fetch failures and surface final errors.",
+  "goal": "Make web fetching resilient without hiding failures.",
   "allowed_files": [
     "harness/web_search.py",
-    "harness/adaptive_router.py",
     "tests/test_web_search.py"
   ],
   "forbidden_files": [".env", "config/credentials.json"],
   "acceptance_criteria": [
-    "fetch_page retries 3× on 429 with exponential backoff",
-    "on final failure raises WebFetchError (not swallows)",
-    "all existing tests still pass",
-    "new unit tests: mock 429 response × 3 → success on 4th; mock 429 × 4 → raises"
+    "Retries transient failures with bounded exponential backoff",
+    "Raises WebFetchError after the retry budget is exhausted",
+    "Focused and full test suites pass"
   ],
   "verification_commands": [
-    "python -m pytest tests/test_web_search.py -q",
-    "python -m ruff check harness/web_search.py tests/test_web_search.py"
+    "python -m pytest tests/test_web_search.py -q"
   ],
   "constraints": {
     "local_first": true,
-    "network": false
+    "network": false,
+    "poc_required": false
   },
   "budget": {
     "max_attempts": 3,
@@ -41,123 +41,115 @@ companion reads `LAUNCH_QUEUE.json` to fire sessions.
   "domain": "harness",
   "assigned_ai": "claude",
   "priority": 1,
-  "status": "queued",
-  "created_at": "2026-06-28T00:00:00Z",
-  "assigned_to": null,
-  "assigned_at": null,
-  "completed_at": null,
-  "result_summary": null
+  "status": "proposed",
+  "created_at": "2026-08-15T00:00:00Z"
 }
 ```
 
----
+Modern executable task rows require explicit `assigned_ai`. It is a normalized
+planning hint retained in the task digest; `worker_type` in the Codex assignment
+is the actual execution identity. A proposal may leave `assigned_ai` null, in
+which case `agent_coordinator assign` binds it to the selected worker before
+validating the contract. Valid values are `claude` and `codex`; `local` remains
+accepted only when `constraints.isolated_runtime` is explicitly `true`.
+Unsupported providers are rejected. Old completed rows keep their original
+values for audit history.
 
-## Field reference
+## Codex Assignment Metadata
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `id` | string | ✅ | Unique identifier. Format: `TASK-NNN` (zero-padded, e.g. `TASK-042`). |
-| `title` | string | ✅ | Short imperative phrase (≤ 60 chars). Used as the session heading. |
-| `description` | string | ✅ | Full description of what needs to be done. Include the *why*, the *what*, and any known edge cases. The more detail here, the better the generated prompt. |
-| `allowed_files` | string[] | ✅ | Relative paths the execution agent may modify. Enforced by the loop contract. Legacy `files_hint` is accepted as an adapter only. |
-| `forbidden_files` | string[] | — | Relative paths that must never be modified, even if they appear in context. |
-| `acceptance_criteria` | string[] | ✅ | Concrete, verifiable conditions that define "done". Used verbatim in the generated prompt checklist. |
-| `verification_commands` | string[] | ✅ for code | Deterministic commands the loop runs and records. Agent claims do not satisfy this field. |
-| `constraints` | object | — | Machine-readable policy such as `local_first`, network access, packaging, or security review requirements. |
-| `budget` | object | — | Loop-owned `max_attempts`, `wall_time_seconds`, and `tool_calls` limits. |
-| `domain` | string | ✅ | Coarse area of the codebase. Used for session naming and prompt routing. Values: `harness`, `brains`, `ui`, `tests`, `infra`, `orchestration`, `general`. |
-| `assigned_ai` | string | ✅ | Which agent should pick this up. Values: `claude`, `codex`, `gemini`, `local`. |
-| `priority` | int | — | 1 = highest. Lower numbers run first. Default 99 if omitted. |
-| `status` | string | ✅ | Lifecycle state (see below). |
-| `created_at` | ISO 8601 | — | Set automatically by `_enqueue_task`. |
-| `assigned_to` | string\|null | — | Session ID that claimed the task (`jarvis-board`, etc.). Set by the orchestrator on launch. |
-| `assigned_at` | ISO 8601\|null | — | Timestamp when the task was claimed. |
-| `completed_at` | ISO 8601\|null | — | Timestamp when `status` moved to `done`. |
-| `result_summary` | string\|null | — | Free-text summary written by the completing session. Harvested by the orchestrator. |
-
----
-
-## Status lifecycle
-
-```
-queued
-  │
-  ▼ (orchestrator picks up and writes a durable launch handoff)
-in_progress
-  │
-  ▼ (session reports completion through SessionTracker.complete())
-completion gate
-  ├── missing loop evidence ──▶ unverified
-  ├── failed/scope/policy ────▶ blocked
-  └── verified evidence
-  │
-  ▼
-done
-```
-
-Possible statuses:
-
-| Status | Meaning |
-|--------|---------|
-| `queued` | Waiting to be picked up by the orchestrator |
-| `in_progress` | A session has been launched for this task |
-| `unverified` | Agent reported completion, but loop-observed evidence is missing or incomplete. No follow-ups are generated. |
-| `done` | Completed and harvested |
-| `blocked` | Cannot proceed (dependency not met). Orchestrator skips blocked tasks. |
-| `cancelled` | Dropped intentionally. Stays in file for audit trail. |
-
----
-
-## LAUNCH_QUEUE.json format
-
-Written by `orchestrator_loop.py`; read and cleared by the Cowork scheduled task.
+`agent_coordinator assign` adds immutable assignment bindings:
 
 ```json
-[
-  {
-    "task_id":    "TASK-042",
-    "session_id": "jarvis-harness-claude-task042",
-    "attempt_id": "attempt_9e7e5c...",
-    "contract_sha256": "...",
-    "task_spec":  {"...": "validated contract snapshot"},
-    "prompt":     "...<full generated prompt>...",
-    "queued_at":  "2026-06-28T01:00:00+00:00",
-    "status":     "pending",
-    "domain":     "harness",
-    "assigned_ai": "claude"
-  }
-]
+{
+  "status": "queued",
+  "assigned_to": "claude",
+  "worker_type": "claude",
+  "orchestrated_by": "codex",
+  "orchestration_id": "orch_0123456789abcdef",
+  "orchestration_stage": "implementation",
+  "orchestration_state": "assigned",
+  "orchestration_rationale": "Highest-priority verified roadmap gap",
+  "orchestration_assigned_at": "2026-08-15T00:05:00Z",
+  "orchestration_contract_sha256": "<sha256>",
+  "orchestration_task_spec_sha256": "<sha256>",
+  "orchestration_base_ref": "<git commit>",
+  "coordination_version": 2
+}
 ```
 
-The Cowork companion currently:
-1. Reads `LAUNCH_QUEUE.json`
-2. Materializes an attempt-specific JSON envelope under `PENDING_SESSIONS/`
-3. Updates `status` to `"handoff_ready"` only after that artifact is durable
-4. On error: sets `status` to `"launch_error"` so the same attempt can retry
+Allowed orchestration stages are `poc`, `implementation`, `hardening`, and
+`release`. An implementation that requires an accepted POC also stores
+`orchestration_parent_task_id` and `orchestration_parent_poc_sha256`.
 
-`handoff_ready` does not mean an agent is running. Actual local execution is a
-separate transition owned by the `task_runtime` adapter.
+The assignment is invalid when its worker, task, contract, base commit, or POC
+binding changes before claim.
 
----
+## Status Lifecycle
 
-## Contract authoring rules
+```text
+proposed
+   |
+   v (Codex selects and assigns)
+queued / awaiting_approval
+   |
+   v (exact worker claims)
+in_progress
+   |
+   v (deterministic verification passes)
+awaiting_codex_review
+   |                 |
+   | accept          | reject
+   v                 v
+done             needs_review
+```
 
-`harness.task_contract.TaskSpec` validates the queue row and
-`harness.prompt_generator` deterministically renders the agent packet. The model
-does not write or reinterpret the contract. A launch is blocked when the contract
-is invalid or its dispatch checkpoint cannot be persisted.
+| Status | Meaning |
+|---|---|
+| `proposed` | Non-executable task or POC suggestion awaiting Codex selection. |
+| `queued` | Digest-bound Codex assignment waiting for its exact worker. |
+| `awaiting_approval` | Assignment also requires independent human side-effect approval. |
+| `in_progress` | Exact worker holds a valid lease. |
+| `awaiting_codex_review` | Verification passed; Codex has not accepted the result. |
+| `needs_review` | Codex rejected the candidate or verification needs intervention. |
+| `unverified` | Evidence is incomplete or a legacy active row was quarantined. |
+| `blocked` | A contract, approval, digest, or dependency precondition failed. |
+| `done` | Deterministically verified and accepted by Codex. |
+| `cancelled` | Intentionally retained as non-executable audit history. |
 
-- Write an observable goal, not implementation theater.
-- Declare allowed and forbidden paths; do not rely on "touch no other file" prose.
-- Pair every acceptance criterion with loop-owned verification evidence.
-- Set explicit budgets for expensive or risky work.
-- Treat the generated prompt as a view of the contract, never the source of truth.
+Only Codex review writes `completed_by: "codex"`. The worker identity is stored
+separately as `executed_by`.
 
-Every non-dry launch appends an `AttemptRecord` checkpoint to
-`~/Library/Application Support/Jarvis/orchestrator/attempts.jsonl` before the
-session is claimed.
+## POC And Human Approval
 
-Completion uses the same attempt ID and requires an evidence envelope:
+POC approval is an engineering-governance decision recorded by Codex after a
+POC task passes verification and review. Its digest binds downstream work to the
+accepted proof.
+
+`requires_approval` in `TASK_CONTRACTS.json` is a separate human authorization
+for risky side effects. A POC approval cannot satisfy that safety gate, and a
+human side-effect approval cannot approve an architecture or POC.
+
+## Local Model Proposals
+
+`orchestrator_loop.py` may ask a local model for follow-up ideas. Every result
+must be stored as:
+
+```json
+{
+  "status": "proposed",
+  "proposed_by": "local",
+  "requires_codex_assignment": true,
+  "assigned_ai": null,
+  "assigned_to": null
+}
+```
+
+Proposal generation cannot choose a worker, create a lease, launch execution,
+or mark work complete.
+
+## Completion Evidence
+
+Worker summaries are context, not proof. `finish` collects loop-owned evidence:
 
 ```json
 {
@@ -173,4 +165,15 @@ Completion uses the same attempt ID and requires an evidence envelope:
 }
 ```
 
-`result_summary` remains useful context, but it cannot promote a task to `done`.
+The verifier enforces allowed paths, required commands, policy findings, and a
+clean committed checkout. Passing evidence produces a candidate for Codex
+review; it does not by itself produce `done`.
+
+## Legacy Migration
+
+- Preserve terminal v1 rows without rewriting historical digests.
+- Quarantine active rows that have no valid owner, lease ID, or expiry.
+- Redefine nonterminal provider-named work under neutral v2 task IDs.
+- Do not allow a v1 row to execute through a v2 claim.
+- Archive terminal `LAUNCH_QUEUE.json` records before enabling a replacement
+  transport.

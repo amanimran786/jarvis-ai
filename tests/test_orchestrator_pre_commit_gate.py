@@ -83,6 +83,7 @@ def _task(**overrides: Any) -> dict[str, Any]:
         "domain": "orchestrator",
         "assigned_ai": "codex",
         "assigned_to": "test-session",
+        "orchestrated_by": "codex",
     }
     task.update(overrides)
     return task
@@ -202,7 +203,7 @@ def test_shell_true_commit_blocks_task_from_reaching_done(gate_harness) -> None:
     assert "GATE-001" in gate_harness.violations_text()
 
 
-def test_clean_commit_reaches_done(gate_harness) -> None:
+def test_clean_legacy_commit_waits_for_codex_review(gate_harness) -> None:
     gate_harness.commit_tool(
         "import subprocess\n"
         "def run(cmd):\n"
@@ -216,7 +217,8 @@ def test_clean_commit_reaches_done(gate_harness) -> None:
     assert result["harvested"] == 1
     assert result["needs_review"] == 0
     task = gate_harness.queue_task()
-    assert task["status"] == "done"
+    assert task["status"] == "awaiting_codex_review"
+    assert "completed_at" not in task
 
 
 def test_hardcoded_secret_value_is_not_persisted(gate_harness) -> None:

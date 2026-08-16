@@ -181,141 +181,45 @@ def loop_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return harness
 
 
-def test_explicit_id_task_without_task_contract_is_blocked(loop_harness) -> None:
+def test_legacy_loop_leaves_uncontracted_task_for_codex(loop_harness) -> None:
     task = _explicit_task()
     loop_harness.seed(task)
 
     result = loop_harness.run()
 
     assert result["launched"] == 0
-    assert result["blocked"] == 1
+    assert result["blocked"] == 0
     assert loop_harness.launches == []
-    assert loop_harness.queue_task()["status"] == "blocked"
+    assert loop_harness.queue_task() == task
 
 
-def test_approval_gated_explicit_id_requires_digest_bound_approval(loop_harness) -> None:
-    task = _explicit_task()
-    contract = _contract()
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.approvals.append({"task_id": contract.task_id})
-    loop_harness.seed(task)
-
-    result = loop_harness.run()
-
-    assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert loop_harness.launches == []
-    assert loop_harness.queue_task()["status"] == "awaiting_approval"
-
-
-def test_contract_binding_rejects_task_content_changes(loop_harness) -> None:
-    original_task = _explicit_task()
-    contract = _contract()
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.approve(original_task, contract)
-    changed_task = _explicit_task(
-        description="Write the findings and publish them to an external service."
-    )
-    loop_harness.seed(changed_task)
-
-    result = loop_harness.run()
-
-    assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert loop_harness.launches == []
-    assert loop_harness.queue_task()["status"] == "blocked"
-    assert "does not match" in loop_harness.queue_task()["blocked_reason"]
-
-
-def test_contract_id_cannot_substitute_an_unrelated_valid_contract(loop_harness) -> None:
-    authorized_task = _explicit_task()
-    substituted_task = _explicit_task(
-        id="AUTH-002",
-        contract_id="AUTH-001",
-        description="Publish repository contents to an external service.",
-        constraints={"local_first": False, "network": True},
-    )
-    contract = _contract(task=authorized_task)
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.seed(substituted_task)
-
-    result = loop_harness.run()
-
-    assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert loop_harness.launches == []
-    assert loop_harness.queue_task()["status"] == "blocked"
-
-
-def test_successful_launch_consumes_approval_so_replay_is_blocked(loop_harness) -> None:
+def test_legacy_loop_does_not_consume_digest_bound_approval(loop_harness) -> None:
     task = _explicit_task()
     contract = _contract()
     loop_harness.contracts[contract.task_id] = contract
     loop_harness.approve(task, contract)
+    approval = dict(loop_harness.approvals[0])
     loop_harness.seed(task)
 
-    first_result = loop_harness.run()
+    result = loop_harness.run()
 
-    assert first_result["launched"] == 1
-    assert loop_harness.queue_task()["status"] == "in_progress"
-    assert loop_harness.approvals == []
-
-    replay_task = loop_harness.queue_task()
-    replay_task["status"] = "queued"
-    replay_task.pop("assigned_to", None)
-    replay_task.pop("assigned_at", None)
-    loop_harness.seed(replay_task)
-    loop_harness.active_sessions.clear()
-    loop_harness.launches.clear()
-
-    replay_result = loop_harness.run()
-
-    assert replay_result["launched"] == 0
-    assert replay_result["blocked"] == 1
+    assert result["launched"] == 0
+    assert result["blocked"] == 0
     assert loop_harness.launches == []
-    assert loop_harness.queue_task()["status"] == "awaiting_approval"
+    assert loop_harness.approvals == [approval]
+    assert loop_harness.queue_task() == task
 
 
-def test_checkpoint_failure_restores_consumed_approval(loop_harness) -> None:
-    task = _explicit_task()
-    contract = _contract()
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.approve(task, contract)
-    loop_harness.checkpoint_failure.append(True)
+@pytest.mark.parametrize("status", ["queued", "awaiting_approval", "proposed"])
+def test_legacy_loop_never_dispatches_engineering_statuses(
+    loop_harness,
+    status: str,
+) -> None:
+    task = _explicit_task(status=status)
     loop_harness.seed(task)
 
     result = loop_harness.run()
 
     assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert len(loop_harness.approvals) == 1
-
-
-def test_launch_delivery_failure_restores_consumed_approval(loop_harness) -> None:
-    task = _explicit_task()
-    contract = _contract()
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.approve(task, contract)
-    loop_harness.launch_delivery_result[0] = "failed"
-    loop_harness.seed(task)
-
-    result = loop_harness.run()
-
-    assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert len(loop_harness.approvals) == 1
-
-
-def test_duplicate_launch_does_not_restore_consumed_approval(loop_harness) -> None:
-    task = _explicit_task()
-    contract = _contract()
-    loop_harness.contracts[contract.task_id] = contract
-    loop_harness.approve(task, contract)
-    loop_harness.launch_delivery_result[0] = "duplicate"
-    loop_harness.seed(task)
-
-    result = loop_harness.run()
-
-    assert result["launched"] == 0
-    assert result["blocked"] == 1
-    assert loop_harness.approvals == []
+    assert loop_harness.launches == []
+    assert loop_harness.queue_task() == task
