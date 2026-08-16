@@ -9,6 +9,7 @@ import json
 from collections.abc import Iterable
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -147,6 +148,8 @@ def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monk
     with (
         patch.object(manager, "decompose", return_value=_agent_tasks()),
         patch("agent_dispatch.dispatch", side_effect=_fake_dispatch),
+        patch("core.manager._run_security_gate", return_value=True) as gate_mock,
+        patch.object(task_runtime, "_start_task_thread") as background_start,
         patch(
             "api._run_eval",
             return_value={
@@ -178,6 +181,23 @@ def test_manager_stream_assigns_each_core_agent_and_records_dashboard_tasks(monk
         "devops_release",
         "memory_librarian",
     }
+    review_flags = {
+        task["agent"]: task["needs_security_review"]
+        for task in plan_events[0]["tasks"]
+    }
+    assert gate_mock.call_count == 5
+    assert all(
+        review_flags[agent]
+        for agent in {
+            "backend_engineer",
+            "frontend_designer",
+            "qa_tester",
+            "devops_release",
+            "memory_librarian",
+        }
+    )
+    assert not review_flags["researcher"]
+    background_start.assert_not_called()
 
     starts = [event for event in events if event.get("type") == "start"]
     evals = [event for event in events if event.get("type") == "eval"]
@@ -219,6 +239,7 @@ def test_manager_stream_leaves_low_confidence_tasks_waiting_for_approval(monkeyp
 
     with (
         patch.object(manager, "decompose", return_value=[gated_task]),
+        patch("core.manager._run_security_gate", return_value=True),
         patch("agent_dispatch.dispatch") as dispatch_mock,
         patch("api._run_eval") as eval_mock,
     ):
@@ -243,6 +264,102 @@ def test_manager_stream_leaves_low_confidence_tasks_waiting_for_approval(monkeyp
     task = tasks[0]
     assert task["status"] == "waiting_approval"
     assert task["approval_required"] is True
+    assert task["start_deferred"] is False
     assert task["result"] == ""
     assert task["assigned_agent_id"] == "backend-engineer"
+    task_runtime.reset_for_tests()
+
+
+def test_manager_stream_keeps_concurrent_approval_deferred_until_review_passes(monkeypatch):
+    from core.manager import AgentTask, manager
+
+    api, task_runtime = _patch_runtime_for_canary(monkeypatch, approval_required=True)
+    client = TestClient(api.app)
+    task = AgentTask(
+        title="Approval race",
+        description="Inspect one local backend function.",
+        agent="backend_engineer",
+    )
+
+    with patch.object(task_runtime, "_start_task_thread") as background_start:
+        def _approve_during_review(candidate):
+            approved = task_runtime.approve_task(candidate.task_id)
+            assert approved is not None
+            background_start.assert_not_called()
+            return True
+
+        with (
+            patch.object(manager, "decompose", return_value=[task]),
+            patch("core.manager._run_security_gate", side_effect=_approve_during_review),
+            patch("agent_dispatch.dispatch") as dispatch_mock,
+            patch("api._run_eval") as eval_mock,
+        ):
+            with client.stream(
+                "POST",
+                "/manager/run-stream",
+                json={"goal": "Exercise approval race", "cloud_plan": False},
+            ) as response:
+                assert response.status_code == 200
+                events = _parse_sse_events("".join(response.iter_text()))
+
+    assert [event.get("type") for event in events] == ["plan", "blocked", "complete"]
+    background_start.assert_called_once()
+    dispatch_mock.assert_not_called()
+    eval_mock.assert_not_called()
+    task_runtime.reset_for_tests()
+
+
+@pytest.mark.parametrize("gate_crashes", [False, True])
+def test_manager_stream_blocks_before_execution_when_security_review_fails(
+    monkeypatch,
+    gate_crashes,
+):
+    from core.manager import AgentTask, manager
+
+    api, task_runtime = _patch_runtime_for_canary(monkeypatch)
+    client = TestClient(api.app)
+    task = AgentTask(
+        title="Unreviewed backend mutation",
+        description="Modify the local API implementation.",
+        agent="backend_engineer",
+        priority=5,
+        needs_security_review=False,
+    )
+
+    def _block_security(candidate):
+        if gate_crashes:
+            raise RuntimeError("reviewer unavailable")
+        candidate.security_verdict = "FAIL"
+        candidate.status = "security_blocked"
+        return False
+
+    with (
+        patch.object(manager, "decompose", return_value=[task]),
+        patch("core.manager._run_security_gate", side_effect=_block_security) as gate_mock,
+        patch.object(task_runtime, "_start_task_thread") as background_start,
+        patch("agent_dispatch.dispatch") as dispatch_mock,
+        patch("api._run_eval") as eval_mock,
+    ):
+        with client.stream(
+            "POST",
+            "/manager/run-stream",
+            json={"goal": "Attempt an unreviewed mutation", "cloud_plan": False},
+        ) as response:
+            assert response.status_code == 200
+            events = _parse_sse_events("".join(response.iter_text()))
+
+    assert [event.get("type") for event in events] == ["plan", "blocked", "complete"]
+    assert events[0]["tasks"][0]["needs_security_review"] is True
+    assert events[1]["reason"] == "security_blocked"
+    expected_verdict = "gate_error" if gate_crashes else "FAIL"
+    assert events[1]["security_verdict"] == expected_verdict
+    gate_mock.assert_called_once()
+    background_start.assert_not_called()
+    dispatch_mock.assert_not_called()
+    eval_mock.assert_not_called()
+
+    tasks = task_runtime.list_tasks(limit=5)
+    assert len(tasks) == 1
+    assert tasks[0]["status"] == "failed"
+    assert tasks[0]["error"] == expected_verdict
     task_runtime.reset_for_tests()

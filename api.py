@@ -1954,6 +1954,12 @@ async def manager_run_stream(req: ManagerRunStreamRequest, request: Request):
             yield _sse({"type": "error", "message": f"Decompose failed: {exc}"})
             return
 
+        # Do not trust the planner's needs_security_review flag. Resolve it
+        # deterministically from the assigned specialist's capabilities before
+        # exposing the plan or registering executable work.
+        for task in tasks:
+            _task_requires_manager_gate(task)
+
         plan_data = [
             {"agent": t.agent, "title": t.title,
              "priority": t.priority, "needs_security_review": t.needs_security_review}
@@ -1969,9 +1975,42 @@ async def manager_run_stream(req: ManagerRunStreamRequest, request: Request):
                 kind="code",
                 source="manager",
                 assigned_agent_id=t.agent,
+                start_immediately=False,
             )
             task_id = registered.get("id", str(uuid.uuid4()))
+            t.task_id = task_id
+
+            # The manager stream owns execution. Security review must finish
+            # before either this stream or a task-runtime worker can start it.
+            if _task_requires_manager_gate(t):
+                try:
+                    approved = await asyncio.to_thread(_run_security_gate, t)
+                except Exception:
+                    log.exception("Manager security gate crashed for task %s", task_id)
+                    t.security_verdict = "gate_error"
+                    t.status = "security_blocked"
+                    approved = False
+                if not approved:
+                    task_runtime._set_task_status(
+                        task_id,
+                        "failed",
+                        error=t.security_verdict or "security_blocked",
+                    )
+                    yield _sse({
+                        "type": "blocked",
+                        "task_id": task_id,
+                        "agent": t.agent,
+                        "title": t.title,
+                        "reason": "security_blocked",
+                        "security_verdict": t.security_verdict or "gate_error",
+                    })
+                    continue
+
             if registered.get("approval_required") or registered.get("status") == "waiting_approval":
+                # Security review is complete. Arm the task so a later approval
+                # can start it; an approval racing the review remains deferred
+                # until this exact point.
+                task_runtime.release_deferred_task(task_id)
                 yield _sse({
                     "type": "blocked",
                     "task_id": task_id,
@@ -1987,31 +2026,6 @@ async def manager_run_stream(req: ManagerRunStreamRequest, request: Request):
             task_runtime._set_task_status(task_id, "running")
             yield _sse({"type": "start", "task_id": task_id,
                         "agent": t.agent, "title": t.title})
-
-            # Security gate — fast deterministic pre-screen only in streaming pipeline.
-            # LLM-based deep review is too slow (30s+ hang); pre-screen catches real attacks.
-            # Full _run_security_gate() is reserved for the synchronous /manager/run path.
-            if _task_requires_manager_gate(t):
-                t.task_id = task_id
-                try:
-                    from infra.threat_screen import screen_payload as _screen_payload
-                    _screen = _screen_payload(json.dumps({
-                        "title": t.title, "description": t.description,
-                        "agent": t.agent, "context": t.context,
-                    }))
-                    approved = not _screen.blocked
-                    if not approved:
-                        t.security_verdict = "prescreen_blocked"
-                        log.warning("Pre-screen blocked task %s agent=%s findings=%d",
-                                    task_id, t.agent, len(_screen.findings))
-                except Exception as _exc:
-                    log.warning("Pre-screen error for task %s: %s — approving cautiously", task_id, _exc)
-                    approved = True
-                if not approved:
-                    task_runtime._set_task_status(task_id, "failed", error="prescreen_blocked")
-                    yield _sse({"type": "blocked", "task_id": task_id,
-                                "agent": t.agent, "reason": "prescreen_blocked"})
-                    continue
 
             # Run agent
             context_str = json.dumps(t.context) if t.context else ""

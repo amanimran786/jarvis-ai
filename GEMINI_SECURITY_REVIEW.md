@@ -188,12 +188,17 @@ this change and predates it).
   process. Jarvis's isolated, allowlisted code workbench remains the supported execution
   path. This removes the arbitrary-code-execution surface instead of relying on a
   source-code denylist or a partial in-process sandbox.
+- Deterministic manager security gating — manager tasks are now classified from the
+  assigned specialist's configured capabilities instead of trusting the planner's
+  boolean. The streaming manager registers work without starting a background worker,
+  completes the full fail-closed security review before execution, and blocks both
+  negative verdicts and reviewer failures. Regression coverage proves denied work never
+  reaches either execution path.
 
 ### Not yet addressed
 
 The following controls require separate, dedicated review:
 
-- Deterministic manager security gating.
 - Generated-test confinement.
 - Capability enforcement for direct specialist function calls.
 - Outbound private-data controls.

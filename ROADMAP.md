@@ -189,6 +189,14 @@ context separation require explicit review. Item 5 does not waive these findings
 2. Session writes `GEMINI_SECURITY_REVIEW.md` and fixes HIGH severity issues
 3. Verify all fixes pass `python -m harness.pre_commit_check` and CI
 
+**Phase B progress:**
+- [x] Remove the dormant unconfined `terminal.run_python` execution path.
+- [x] Derive manager review from specialist capabilities and complete review before execution.
+- [ ] Confine generated tests.
+- [ ] Enforce capabilities on direct specialist function calls.
+- [ ] Gate outbound private data.
+- [ ] Separate untrusted repository context from instructions.
+
 **Done when:** `GEMINI_SECURITY_REVIEW.md` exists, no CRITICAL/HIGH findings
 remain, CI still green.
 

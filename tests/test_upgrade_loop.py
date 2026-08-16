@@ -53,20 +53,27 @@ def test_parse_bullet_signal_and_builds_measurable_tasks():
 
 
 def test_source_url_metadata_does_not_force_review():
-    signals = [
+    signal = upgrade_loop.UpgradeSignal(
+        title="Apple Foundation Models local fast path",
+        summary="On-device local generation could reduce latency.",
+        source="watchlist",
+        source_url="https://developer.apple.com/documentation/foundationmodels/",
+        category="apple_on_device",
+    )
+    candidate = upgrade_loop.build_candidates([signal])[0]
+    candidate_without_url = upgrade_loop.build_candidates([
         upgrade_loop.UpgradeSignal(
-            title="Apple Foundation Models local fast path",
-            summary="On-device local generation could reduce latency.",
-            source="watchlist",
-            source_url="https://developer.apple.com/documentation/foundationmodels/",
-            category="apple_on_device",
+            title=signal.title,
+            summary=signal.summary,
+            source=signal.source,
+            category=signal.category,
         )
-    ]
-
-    candidate = upgrade_loop.build_candidates(signals)[0]
+    ])[0]
 
     assert candidate.risk_level == "low"
-    assert candidate.work_order["review_required_count"] == 0
+    assert candidate.work_order["review_required_count"] == candidate_without_url.work_order[
+        "review_required_count"
+    ]
     assert candidate.work_order["tasks"][0]["context"]["source_url"].startswith("https://")
     assert "https://" not in candidate.work_order["tasks"][0]["description"]
 

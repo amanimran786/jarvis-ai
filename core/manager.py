@@ -27,11 +27,18 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from brains.brain_ollama import ask_local_structured
+from config import AGENT_ROSTER as _CONFIGURED_AGENT_ROSTER
 
 log = logging.getLogger("jarvis.manager")
 
 # Agents whose tasks always get a security review pass regardless of LLM flag
 _ALWAYS_REVIEW: frozenset[str] = frozenset({"devops_release"})
+_REVIEW_REQUIRED_TOOLS: frozenset[str] = frozenset({
+    "file_write",
+    "run_tests",
+    "shell",
+})
+_EVENT_BUS_NOT_SCHEDULED = object()
 
 # ─── Data types ───────────────────────────────────────────────────────────────
 
@@ -245,7 +252,52 @@ def _truthy(value) -> bool:
 
 def _task_requires_manager_gate(task: AgentTask) -> bool:
     if task.needs_security_review or task.agent in _ALWAYS_REVIEW:
+        task.needs_security_review = True
         return True
+
+    if not isinstance(task.context, dict):
+        task.context = {}
+
+    try:
+        from infra.threat_screen import screen_payload
+        screened = screen_payload(json.dumps({
+            "title": task.title,
+            "description": task.description,
+            "agent": task.agent,
+            "context": task.context,
+        }))
+    except Exception:
+        log.exception("Manager threat screen failed for task %r", task.title)
+        task.needs_security_review = True
+        return True
+    if screened.blocked:
+        task.needs_security_review = True
+        return True
+
+    # Snapshot the configured roster at module load. Agent capabilities are
+    # runtime policy and must not change because another module replaces
+    # ``config`` in ``sys.modules`` after startup.
+    agent_spec = _CONFIGURED_AGENT_ROSTER.get(task.agent)
+
+    # The model may under-report risk. Derive the review requirement from the
+    # specialist's actual capabilities, and fail closed if its roster entry is
+    # missing or malformed.
+    if not isinstance(agent_spec, dict):
+        task.needs_security_review = True
+        return True
+    raw_tools = agent_spec.get("tools", [])
+    if not isinstance(raw_tools, (list, tuple, set, frozenset)):
+        task.needs_security_review = True
+        return True
+    tools = {
+        str(tool).strip().lower()
+        for tool in raw_tools
+        if str(tool).strip()
+    }
+    if tools & _REVIEW_REQUIRED_TOOLS:
+        task.needs_security_review = True
+        return True
+
     if task.agent == "researcher" and (
         _truthy(task.context.get("allow_cloud_research"))
         or _truthy(task.context.get("cloud_research_approved"))
@@ -260,8 +312,8 @@ def _task_requires_manager_gate(task: AgentTask) -> bool:
 def _event_bus_url() -> str:
     return os.getenv("EVENT_BUS_URL", "http://localhost:8766").rstrip("/")
 
-def _publish_via_event_bus(task: AgentTask) -> str | None:
-    """POST to event bus. Returns task_id on success, None on failure."""
+def _publish_via_event_bus(task: AgentTask) -> str | object | None:
+    """POST to event bus; only connection failures permit direct fallback."""
     try:
         import httpx
         payload = {
@@ -277,11 +329,30 @@ def _publish_via_event_bus(task: AgentTask) -> str | None:
             headers={"X-Jarvis-Agent-ID": "jarvis_manager"},
             timeout=3.0,
         )
-        if resp.status_code == 202:
-            return resp.json().get("task_id")
     except Exception as exc:
         log.debug("Event bus unreachable: %s", exc)
-    return None
+        return None
+
+    if resp.status_code == 202:
+        try:
+            data = resp.json()
+        except Exception:
+            task.security_verdict = "event_bus_invalid_response"
+        else:
+            task_id = data.get("task_id") if isinstance(data, dict) else None
+            if task_id:
+                return str(task_id)
+            task.security_verdict = str(
+                data.get("status") if isinstance(data, dict) else ""
+            ) or "event_bus_held"
+    else:
+        task.security_verdict = f"event_bus_http_{resp.status_code}"
+    log.warning(
+        "Event bus did not schedule task %r: %s",
+        task.title,
+        task.security_verdict,
+    )
+    return _EVENT_BUS_NOT_SCHEDULED
 
 
 def _publish_direct(task: AgentTask) -> str:
@@ -306,6 +377,9 @@ def _publish_direct(task: AgentTask) -> str:
 def _publish(task: AgentTask) -> str:
     """Try event bus, fall back to direct dispatch. Returns task_id."""
     task_id = _publish_via_event_bus(task)
+    if task_id is _EVENT_BUS_NOT_SCHEDULED:
+        task.status = "security_blocked"
+        return task.task_id
     if task_id:
         task.status = "scheduled"
         log.info("Published '%s' → event bus (task_id=%s)", task.title, task_id)

@@ -2496,6 +2496,7 @@ def submit_task(
     terse_mode: str = "",
     isolated_workspace: bool | None = None,
     meta: dict[str, Any] | None = None,
+    start_immediately: bool = True,
     _trusted_runtime_meta: bool = False,
 ) -> dict[str, Any]:
     bootstrap()
@@ -2552,6 +2553,7 @@ def submit_task(
         "usage": {},
         "cancel_requested": False,
         "approval_required": approval_required,
+        "start_deferred": not start_immediately,
         "approval_reason": approval_reason,
         "confidence": _copy(confidence),
         "autonomy": "human_review" if approval_required else "auto_edit",
@@ -2592,7 +2594,23 @@ def submit_task(
         )
         if workspace.get("enabled"):
             _append_event(task_id, "workspace", workspace=_copy(workspace))
-        if not approval_required:
+        if not approval_required and not task["start_deferred"]:
+            _start_task_thread(task_id)
+        return _copy(task)
+
+
+def release_deferred_task(task_id: str) -> dict[str, Any] | None:
+    """Arm a reviewed task and start it if approval already completed."""
+    bootstrap()
+    with _LOCK:
+        task = _TASKS.get(task_id)
+        if not task:
+            return None
+        if task.get("status") in _TERMINAL_TASK_STATUSES:
+            return _copy(task)
+        task["start_deferred"] = False
+        _persist_task(task_id)
+        if task.get("status") == "queued":
             _start_task_thread(task_id)
         return _copy(task)
 
@@ -2613,7 +2631,8 @@ def approve_task(task_id: str) -> dict[str, Any] | None:
             audit["approved_at"] = task["approved_at"]
             audit["approval_reason"] = task.get("approval_reason", "")
         _set_task_status(task_id, "queued", approved_at=task["approved_at"])
-        _start_task_thread(task_id)
+        if not task.get("start_deferred", False):
+            _start_task_thread(task_id)
         snapshot = _copy(task)
     audit_event(
         APPROVAL_GRANTED, actor="operator",

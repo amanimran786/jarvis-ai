@@ -134,6 +134,7 @@ def test_approve_task_then_dispatches():
 
 def test_manager_decomposes_goal_into_subtasks():
     # Arrange: stub config so the roster is controlled, then reload core.manager
+    original_manager = sys.modules.get("core.manager")
     _mock_config = MagicMock()
     _mock_config.LOCAL_DEFAULT = "glm-4.7-flash"
     _mock_config.AGENT_ROSTER = {
@@ -141,30 +142,36 @@ def test_manager_decomposes_goal_into_subtasks():
         "backend_engineer": {"role": "Backend.", "tools": ["code"],       "model": "glm-4.7-flash"},
     }
 
-    with patch.dict(sys.modules, {
-        "config": _mock_config,
-        "brains.brain_ollama": MagicMock(),
-        "infra.memory": MagicMock(),
-    }):
-        for mod in list(sys.modules):
-            if "core.manager" in mod:
-                del sys.modules[mod]
+    try:
+        with patch.dict(sys.modules, {
+            "config": _mock_config,
+            "brains.brain_ollama": MagicMock(),
+            "infra.memory": MagicMock(),
+        }):
+            for mod in list(sys.modules):
+                if "core.manager" in mod:
+                    del sys.modules[mod]
 
-        from core.manager import _decompose_via_llm
+            from core.manager import _decompose_via_llm
 
-        llm_response = json.dumps({
-            "goal_summary": "Build a research-backed API",
-            "tasks": [
-                {"title": "Research AI APIs", "description": "Find top AI API patterns",
-                 "agent": "researcher", "priority": 6, "needs_security_review": False, "context": {}},
-                {"title": "Implement endpoint", "description": "Write FastAPI endpoint",
-                 "agent": "backend_engineer", "priority": 7, "needs_security_review": False, "context": {}},
-            ],
-        })
+            llm_response = json.dumps({
+                "goal_summary": "Build a research-backed API",
+                "tasks": [
+                    {"title": "Research AI APIs", "description": "Find top AI API patterns",
+                     "agent": "researcher", "priority": 6, "needs_security_review": False, "context": {}},
+                    {"title": "Implement endpoint", "description": "Write FastAPI endpoint",
+                     "agent": "backend_engineer", "priority": 7, "needs_security_review": False, "context": {}},
+                ],
+            })
 
-        # Act
-        with patch("core.manager.ask_local_structured", return_value=llm_response):
-            tasks = _decompose_via_llm("Build a research-backed AI API", memory_ctx="")
+            # Act
+            with patch("core.manager.ask_local_structured", return_value=llm_response):
+                tasks = _decompose_via_llm("Build a research-backed AI API", memory_ctx="")
+    finally:
+        if original_manager is None:
+            sys.modules.pop("core.manager", None)
+        else:
+            sys.modules["core.manager"] = original_manager
 
     # Assert
     assert len(tasks) == 2

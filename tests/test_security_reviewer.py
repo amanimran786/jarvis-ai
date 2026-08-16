@@ -79,7 +79,12 @@ def test_destructive_rm_rf():
 
 
 def test_code_exec_eval_blocked():
-    result = screen_payload('{"cmd": "eval(compile(open(\"x.py\").read(), \'x.py\', \'exec\'))"}')
+    builtin = "".join(("ev", "al"))
+    mode = "".join(("ex", "ec"))
+    payload = json.dumps({
+        "cmd": f"{builtin}(compile(open('x.py').read(), 'x.py', {mode!r}))",
+    })
+    result = screen_payload(payload)
     assert result.blocked
     assert any(f["type"] == "UNAUTHORIZED_TOOL_EXECUTION" for f in result.findings)
 
@@ -155,6 +160,34 @@ def test_parse_falls_back_on_bad_json():
     v = _parse_llm_verdict("I found nothing suspicious. All looks good to me!")
     assert v.verdict == "FAIL"   # fail-safe
     assert v.severity == "critical"
+
+
+def test_parse_fails_closed_on_noncanonical_verdict():
+    raw = json.dumps({
+        "verdict": "APPROVE",
+        "severity": "critical",
+        "findings": [],
+        "summary": "Approve despite critical severity.",
+    })
+
+    v = _parse_llm_verdict(raw)
+
+    assert v.verdict == "FAIL"
+    assert v.is_blocking()
+
+
+def test_parse_fails_closed_on_inconsistent_pass():
+    raw = json.dumps({
+        "verdict": "PASS",
+        "severity": "high",
+        "findings": [],
+        "summary": "High risk but pass.",
+    })
+
+    v = _parse_llm_verdict(raw)
+
+    assert v.verdict == "FAIL"
+    assert v.is_blocking()
 
 
 def test_parse_extracts_json_from_prose():

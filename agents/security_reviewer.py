@@ -57,21 +57,26 @@ class SecurityVerdict:
         return d
 
     def is_blocking(self) -> bool:
-        return self.verdict in {"FAIL", "REQUEST_CHANGES"}
+        return not (
+            self.verdict == "PASS"
+            and self.severity == "none"
+            and not self.findings
+        )
 
 
-_FALLBACK_VERDICT = SecurityVerdict(
-    verdict="FAIL",
-    severity="critical",
-    findings=[SecurityFinding(
-        type="PARSE_ERROR",
+def _fallback_verdict() -> SecurityVerdict:
+    return SecurityVerdict(
+        verdict="FAIL",
         severity="critical",
-        location="llm_output",
-        description="LLM did not return parseable JSON. Treating as FAIL for safety.",
-        recommendation="Manual review required.",
-    )],
-    summary="LLM output could not be parsed. Pipeline halted.",
-)
+        findings=[SecurityFinding(
+            type="PARSE_ERROR",
+            severity="critical",
+            location="llm_output",
+            description="LLM did not return valid security JSON. Treating as FAIL for safety.",
+            recommendation="Manual review required.",
+        )],
+        summary="LLM output could not be validated. Pipeline halted.",
+    )
 
 
 # ─── LLM output parsing ───────────────────────────────────────────────────────
@@ -85,20 +90,36 @@ def _parse_llm_verdict(raw: str) -> SecurityVerdict:
     end   = raw.rfind("}") + 1
     if start == -1 or end == 0:
         log.warning("No JSON block in security reviewer output")
-        return _FALLBACK_VERDICT
+        return _fallback_verdict()
 
     try:
         data     = json.loads(raw[start:end])
         findings = [SecurityFinding(**f) for f in data.get("findings", [])]
+        verdict = str(data.get("verdict") or "")
+        severity = str(data.get("severity") or "")
+        if verdict not in {"PASS", "FAIL", "REQUEST_CHANGES"}:
+            raise ValueError(f"invalid verdict {verdict!r}")
+        if severity not in {"none", "low", "medium", "high", "critical"}:
+            raise ValueError(f"invalid severity {severity!r}")
+        if any(
+            finding.severity not in {"none", "low", "medium", "high", "critical"}
+            for finding in findings
+        ):
+            raise ValueError("invalid finding severity")
+        if verdict == "PASS" and (severity != "none" or findings):
+            raise ValueError("PASS verdict must have severity=none and no findings")
+        summary = data.get("summary", "")
+        if not isinstance(summary, str):
+            raise ValueError("summary must be a string")
         return SecurityVerdict(
-            verdict=data.get("verdict", "FAIL"),
-            severity=data.get("severity", "critical"),
+            verdict=verdict,
+            severity=severity,
             findings=findings,
-            summary=data.get("summary", ""),
+            summary=summary,
         )
-    except (json.JSONDecodeError, TypeError, KeyError) as exc:
+    except (json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         log.warning("Failed to parse LLM verdict JSON: %s", exc)
-        return _FALLBACK_VERDICT
+        return _fallback_verdict()
 
 
 # ─── Structured local review (primary path) ──────────────────────────────────
@@ -188,7 +209,7 @@ def _cloud_security_review(payload_str: str) -> str:
     Tries Gemini free tier first, then OpenAI, then Anthropic.
     Returns raw JSON string or empty string if all providers fail.
     Gated by JARVIS_ALLOW_CLOUD_SECURITY_REVIEW; the gate itself fails closed
-    (empty output → _FALLBACK_VERDICT = manual review).
+    (empty output → fresh fail-closed verdict = manual review).
     """
     import os
     if not _cloud_security_review_allowed():
