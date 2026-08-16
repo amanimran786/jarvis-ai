@@ -1,5 +1,5 @@
 """
-semantic_memory.py — TF-IDF semantic retrieval over memory/ JSON files.
+semantic_memory.py — layered semantic retrieval over memory/ JSON files.
 
 Adds a structured, queryable knowledge layer on top of Jarvis's existing
 memory.json store. Works standalone — no external dependencies beyond
@@ -13,6 +13,7 @@ Architecture:
 
 JSON = persistent source of truth.
 Embedding/TF-IDF index = in-memory search layer rebuilt per process from JSON.
+A dependency-free lexical scan remains available when optional backends fail.
 
 Usage:
     import semantic_memory as smem
@@ -304,7 +305,10 @@ def _build_index() -> None:
 
 
 def _ensure_index() -> None:
-    if (not _embed_ready and _vectorizer is None) or not _entries:
+    # Loaded entries are sufficient for the dependency-free lexical fallback.
+    # Repeatedly retrying unavailable optional backends adds latency and can
+    # repeatedly trigger native ABI import errors.
+    if not _entries:
         _build_index()
 
 
@@ -370,6 +374,54 @@ def _scores_numpy(qvec: list[float], allowed_tiers: set) -> list[tuple[int, floa
     return results
 
 
+_LEXICAL_TERM_RE = re.compile(r"[a-z0-9]+(?:[_-][a-z0-9]+)*")
+_LEXICAL_STOP_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "in", "is", "it", "of", "on", "or", "that", "the", "this", "to",
+    "was", "were", "what", "when", "where", "which", "who", "with",
+})
+
+
+def _lexical_terms(value: str) -> list[str]:
+    return [
+        term
+        for term in _LEXICAL_TERM_RE.findall((value or "").lower())
+        if term not in _LEXICAL_STOP_WORDS
+    ]
+
+
+def _lexical_retrieve(
+    query: str,
+    *,
+    top_k: int,
+    min_score: float,
+    allowed_tiers: set[str],
+    source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return deterministic token-overlap matches without optional packages."""
+    query_terms = set(_lexical_terms(query))
+    if not query_terms or top_k <= 0:
+        return []
+
+    scored: list[tuple[float, int, dict[str, Any]]] = []
+    for index, entry in enumerate(_entries):
+        if entry.get("_tier") not in allowed_tiers:
+            continue
+        if source is not None and entry.get("_source") != source:
+            continue
+        document_terms = set(_lexical_terms(_doc_text(entry)))
+        overlap = len(query_terms & document_terms)
+        if not overlap:
+            continue
+        score = overlap / len(query_terms)
+        if score < max(0.0, min_score):
+            continue
+        scored.append((score, index, {**entry, "score": round(score, 4)}))
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in scored[:top_k]]
+
+
 def retrieve(
     query: str,
     top_k: int = 5,
@@ -380,7 +432,8 @@ def retrieve(
 
     Uses Ollama embeddings (nomic-embed-text) when available for true semantic
     similarity — query vectors are LRU-cached, document matrix is numpy-vectorized.
-    Falls back to TF-IDF cosine similarity if embeddings aren't ready.
+    Falls back to TF-IDF, then deterministic lexical matching if optional
+    model or scientific-computing dependencies are unavailable.
     """
     _ensure_index()
     allowed_tiers = set(tiers) if tiers else set(_TIERS)
@@ -418,7 +471,12 @@ def retrieve(
 
     # ── TF-IDF fallback ───────────────────────────────────────────────────────
     if _vectorizer is None or _matrix is None:
-        return []
+        return _lexical_retrieve(
+            query,
+            top_k=top_k,
+            min_score=min_score,
+            allowed_tiers=allowed_tiers,
+        )
     try:
         with contextlib.redirect_stderr(io.StringIO()):
             from sklearn.metrics.pairwise import cosine_similarity
@@ -435,7 +493,12 @@ def retrieve(
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
     except Exception:
-        return []
+        return _lexical_retrieve(
+            query,
+            top_k=top_k,
+            min_score=min_score,
+            allowed_tiers=allowed_tiers,
+        )
 
 
 def retrieve_episodic_only(
@@ -446,7 +509,13 @@ def retrieve_episodic_only(
     """Retrieve only from episodic entries."""
     _ensure_index()
     if _vectorizer is None or _matrix is None:
-        return []
+        return _lexical_retrieve(
+            query,
+            top_k=top_k,
+            min_score=min_score,
+            allowed_tiers=set(_TIERS),
+            source="episodic",
+        )
     try:
         results = []
         with contextlib.redirect_stderr(io.StringIO()):
@@ -462,7 +531,13 @@ def retrieve_episodic_only(
         results.sort(key=lambda x: x["score"], reverse=True)
         return results[:top_k]
     except Exception:
-        return []
+        return _lexical_retrieve(
+            query,
+            top_k=top_k,
+            min_score=min_score,
+            allowed_tiers=set(_TIERS),
+            source="episodic",
+        )
 
 
 # ── Writing ──────────────────────────────────────────────────────────────────

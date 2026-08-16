@@ -22,6 +22,7 @@ import importlib
 import json
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import unittest
@@ -95,6 +96,27 @@ class TestSemanticMemoryPersistence(unittest.TestCase):
             any("persistence_test_unique_marker_qzx9" in c for c in contents),
             f"expected marker in hits; got: {contents}",
         )
+
+    def test_entry_is_searchable_without_embeddings_or_sklearn(self):
+        smem = self.smem
+        smem.write("public", {
+            "content": "dependency_free_memory_marker_v7n",
+            "tags": ["dependency-free", "fallback"],
+        })
+        smem.write("public", {
+            "content": "unrelated calendar preference",
+            "tags": ["calendar"],
+        })
+        smem.invalidate()
+
+        with patch.object(smem, "_build_embed_index", return_value=False), \
+             patch.dict(sys.modules, {"sklearn": None}):
+            smem._build_index()
+            hits = smem.retrieve("dependency_free_memory_marker_v7n")
+
+        self.assertIsNone(smem._vectorizer)
+        self.assertEqual(hits[0]["content"], "dependency_free_memory_marker_v7n")
+        self.assertEqual(hits[0]["score"], 1.0)
 
     def test_multiple_entries_all_reload(self):
         """Three entries written before restart — all appear in the rebuilt index."""
