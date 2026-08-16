@@ -1529,7 +1529,7 @@
     "task_type": "code",
     "description": "Reduce shared local-LLM latency with benchmark-gated role routing, bounded structured classification, and startup warming.",
     "contract_version": "1.0",
-    "task_spec_sha256": "2e08ccb0ad8ebe6ec4554f2a591cbee1ea6bd471917bfd66809219eb85a20d38",
+    "task_spec_sha256": "09a0b6f57e1d781b13f0d5f0206a362d1be198d70170cc0a9bad614ae58d7be3",
     "inputs": [
       {
         "name": "ollama_inventory",
@@ -1604,6 +1604,18 @@
         "type": "file",
         "path_template": "tests/test_specialist_model_startup.py",
         "description": "Startup inventory assertions follow configured specialist roles"
+      },
+      {
+        "name": "hermetic_verifier",
+        "type": "file",
+        "path_template": "harness/completion_verifier.py",
+        "description": "Trusted pytest bootstrap for isolated full-suite verification"
+      },
+      {
+        "name": "hermetic_verifier_regressions",
+        "type": "file",
+        "path_template": "tests/test_completion_verifier.py",
+        "description": "Safe environment and early-import bootstrap regression coverage"
       }
     ],
     "side_effects": [
