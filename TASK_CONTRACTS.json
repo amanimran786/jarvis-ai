@@ -1523,5 +1523,106 @@
       "both operative router entry points share the same gate and focused plus full suites pass"
     ],
     "gate_pre_commit": true
+  },
+  {
+    "task_id": "jarvis-local-model-latency-routing",
+    "task_type": "code",
+    "description": "Reduce shared local-LLM latency with benchmark-gated role routing, bounded structured classification, and startup warming.",
+    "contract_version": "1.0",
+    "task_spec_sha256": "066adae8537bd0117febcc3aa50f4e2250f82040bc375a9422da78793f078587",
+    "inputs": [
+      {
+        "name": "ollama_inventory",
+        "type": "str",
+        "required": true,
+        "description": "Exact installed Ollama model tags and sizes verified on the target Mac"
+      },
+      {
+        "name": "latency_probe",
+        "type": "json",
+        "required": true,
+        "description": "Fixed-output cold and warm latency plus Jarvis tool-schema correctness evidence"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "model_defaults",
+        "type": "file",
+        "path_template": "config.py",
+        "description": "Source-of-truth classifier, general, coder, and reasoning role defaults"
+      },
+      {
+        "name": "environment_template",
+        "type": "file",
+        "path_template": ".env.example",
+        "description": "Documented role-specific local model overrides"
+      },
+      {
+        "name": "bounded_classifier",
+        "type": "file",
+        "path_template": "orchestrator.py",
+        "description": "Dedicated exact-model structured classification under a hard route budget"
+      },
+      {
+        "name": "ollama_runtime",
+        "type": "file",
+        "path_template": "brains/brain_ollama.py",
+        "description": "Bounded structured requests and explicit model warming"
+      },
+      {
+        "name": "routing_order",
+        "type": "file",
+        "path_template": "model_router.py",
+        "description": "Measured fast general default before heavyweight fallback"
+      },
+      {
+        "name": "startup_warming",
+        "type": "file",
+        "path_template": "main.py",
+        "description": "Non-blocking classifier and general-model prewarm"
+      },
+      {
+        "name": "benchmark_runtime",
+        "type": "file",
+        "path_template": "local_runtime/local_model_benchmark.py",
+        "description": "Role-aware fixed-output latency measurements"
+      },
+      {
+        "name": "latency_regressions",
+        "type": "file",
+        "path_template": "tests/test_local_model_latency_routing.py",
+        "description": "Classifier bounds, routing order, and startup warm regression coverage"
+      }
+    ],
+    "side_effects": [
+      "writes_files",
+      "subprocess"
+    ],
+    "requires_capabilities": [
+      "ollama",
+      "filesystem",
+      "python"
+    ],
+    "reversible": true,
+    "requires_approval": false,
+    "entry_point": "python -m pytest tests/test_local_model_latency_routing.py tests/test_qwen3_routing.py tests/test_local_model_routing.py tests/test_brain_ollama.py -q",
+    "working_directory": "/Users/truthseeker/jarvis-ai",
+    "estimated_tokens": 9000,
+    "max_duration_seconds": 5400,
+    "preconditions": [
+      "Ollama is reachable on the local loopback endpoint",
+      "candidate model tags resolve exactly in the local Ollama inventory",
+      "model promotion is supported by fixed-output latency and correctness probes",
+      "no cloud fallback is used for verification"
+    ],
+    "postconditions": [
+      "structured classification uses a dedicated exact local model with bounded context, output, and timeout",
+      "the classifier passes the approved 6-case Jarvis tool-schema probe within the warm route budget",
+      "ordinary local chat prefers the measured 8B-class default before the 19GB GLM fallback",
+      "configured classifier and general models are prewarmed without blocking UI startup",
+      "hard-task defaults change only when the candidate beats the incumbents and fits 48GB unified memory",
+      "focused tests, full pytest, and installed Jarvis.app verification pass"
+    ],
+    "gate_pre_commit": true
   }
 ]
