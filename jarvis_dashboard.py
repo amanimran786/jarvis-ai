@@ -508,13 +508,16 @@ def approve_task(task_id: str):
             requeue_approved_task,
         )
         record, created = record_approval(task_id, approved_by="dashboard")
-        if not requeue_approved_task(task_id):
-            if created:
-                consume_approval(
-                    record["task_id"],
-                    task_contract_sha256=record["task_contract_sha256"],
-                    task_spec_sha256=record["task_spec_sha256"],
-                )
+        if not requeue_approved_task(task_id) and created:
+            # A newly recorded approval that cannot be requeued is rolled back, so
+            # the gate is never left satisfied for a task that did not move. If the
+            # approval was already on record there is nothing to undo and nothing
+            # left to requeue, which jarvis_cli.py reports as "Already approved".
+            consume_approval(
+                record["task_id"],
+                task_contract_sha256=record["task_contract_sha256"],
+                task_spec_sha256=record["task_spec_sha256"],
+            )
             return JSONResponse(
                 {"error": "approved_task_could_not_be_requeued"}, status_code=409
             )

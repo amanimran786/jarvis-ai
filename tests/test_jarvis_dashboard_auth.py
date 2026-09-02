@@ -329,3 +329,40 @@ def test_dashboard_expire_reports_mutation_failure(monkeypatch, tmp_path):
 
     assert response.status_code == 500
     assert response.json() == {"error": "expire_session_failed"}
+
+
+def test_dashboard_approve_is_idempotent_when_approval_already_recorded(
+    monkeypatch, tmp_path
+):
+    """An approval already on record is not a failure and is never rolled back."""
+    record = {
+        "task_id": "TASK-001",
+        "task_contract_sha256": "a" * 64,
+        "task_spec_sha256": "b" * 64,
+        "approved_at": "2026-07-12T00:00:00+00:00",
+        "approved_by": "dashboard",
+    }
+    consumed = []
+    monkeypatch.setattr(jarvis_dashboard, "BASE", tmp_path)
+    monkeypatch.setattr(
+        "harness.approval_workflow.record_approval",
+        lambda *_args, **_kwargs: (record, False),
+    )
+    monkeypatch.setattr(
+        "harness.approval_workflow.requeue_approved_task",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        "harness.approval_workflow.consume_approval",
+        lambda *_args, **_kwargs: consumed.append(True),
+    )
+    client = _client(monkeypatch)
+
+    response = client.post(
+        "/approve/TASK-001",
+        headers={"Authorization": "Bearer test-dashboard-token"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert consumed == []

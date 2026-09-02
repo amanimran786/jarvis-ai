@@ -359,6 +359,26 @@ def requeue_approved_task(
 _APPROVAL_ACTIONABLE_STATUSES = frozenset({"", "queued", "blocked", "proposed"})
 
 
+def _approval_already_logged(
+    task_id: str,
+    contract: Any | None,
+    task_spec: Mapping[str, Any] | None,
+    approvals_path: Path,
+) -> bool:
+    """True when a digest-bound approval already covers this contract and spec."""
+    if contract is None or task_spec is None:
+        return False
+    try:
+        return approval_logged(
+            task_id,
+            approvals_path,
+            task_contract_sha256=task_contract_digest(contract),
+            task_spec_sha256=normalized_task_spec_digest(task_spec),
+        )
+    except ContractError:
+        return False
+
+
 def list_pending_approvals(
     *,
     queue_path: Path = WORK_QUEUE_PATH,
@@ -369,26 +389,20 @@ def list_pending_approvals(
     pending: dict[str, dict[str, Any]] = {}
     contracts = load_contracts(Path(contracts_path))
     queue_status: dict[str, str] = {}
+    queue_rows: dict[str, Mapping[str, Any]] = {}
 
     for index, task in enumerate(_load_json_list(Path(queue_path), missing_ok=True)):
         if not isinstance(task, Mapping):
             continue
         task_id = _queue_task_id(task) or f"queue-entry-{index + 1}"
         queue_status.setdefault(task_id, str(task.get("status") or "").strip())
+        queue_rows.setdefault(task_id, task)
         if task.get("status") != "awaiting_approval":
             continue
         contract = contracts.get(task_id)
-        approval_matches = False
-        if contract is not None:
-            try:
-                approval_matches = approval_logged(
-                    task_id,
-                    Path(approvals_path),
-                    task_contract_sha256=task_contract_digest(contract),
-                    task_spec_sha256=normalized_task_spec_digest(task),
-                )
-            except ContractError:
-                approval_matches = False
+        approval_matches = _approval_already_logged(
+            task_id, contracts.get(task_id), task, Path(approvals_path)
+        )
         pending[task_id] = {
             "task_id": task_id,
             "status": "awaiting_approval",
@@ -410,6 +424,12 @@ def list_pending_approvals(
         if queue_status.get(task_id, "") not in _APPROVAL_ACTIONABLE_STATUSES:
             # The task already moved past the approval gate (dispatched, completed,
             # verified, or awaiting Codex review), so no human decision is pending.
+            continue
+        if _approval_already_logged(
+            task_id, contract, queue_rows.get(task_id), Path(approvals_path)
+        ):
+            # A digest-bound approval for this exact contract and spec is already on
+            # record, so the gate is satisfied and there is nothing left to approve.
             continue
         pending[task_id] = {
             "task_id": task_id,

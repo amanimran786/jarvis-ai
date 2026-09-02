@@ -536,3 +536,44 @@ def test_pending_approval_output_strips_terminal_controls(capsys) -> None:
     rendered = capsys.readouterr().out
     assert result == 0
     assert "\x1b" not in rendered
+
+
+def test_list_pending_approvals_skips_queued_task_already_approved(tmp_path: Path) -> None:
+    """A recorded digest-bound approval satisfies the gate for a queued task."""
+    contracts_path, queue_path, approvals_path = _paths(tmp_path)
+    gated = _contract("gated-task")
+    save_contracts({gated.task_id: gated}, contracts_path)
+    queue_path.write_text(
+        json.dumps(
+            [
+                {
+                    "contract_id": gated.task_id,
+                    "task": "Waiting to be dispatched",
+                    "status": "queued",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    before = list_pending_approvals(
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+    assert [item["task_id"] for item in before] == [gated.task_id]
+
+    record_approval(
+        gated.task_id,
+        approved_by="aman",
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+
+    after = list_pending_approvals(
+        queue_path=queue_path,
+        contracts_path=contracts_path,
+        approvals_path=approvals_path,
+    )
+    assert after == []
