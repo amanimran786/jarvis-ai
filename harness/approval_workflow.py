@@ -354,20 +354,29 @@ def requeue_approved_task(
         return changed
 
 
+# Queue statuses for which a contract-gated task still needs a human approval
+# decision. "" covers a contract whose task has no queue row yet.
+_APPROVAL_ACTIONABLE_STATUSES = frozenset({"", "queued", "blocked", "proposed"})
+
+
 def list_pending_approvals(
     *,
     queue_path: Path = WORK_QUEUE_PATH,
     contracts_path: Path = TASK_CONTRACTS_PATH,
     approvals_path: Path = APPROVED_TASKS_PATH,
 ) -> list[dict[str, Any]]:
-    """Return awaiting queue rows plus unapproved approval-gated contracts."""
+    """Return queue rows and approval-gated contracts still needing a decision."""
     pending: dict[str, dict[str, Any]] = {}
     contracts = load_contracts(Path(contracts_path))
+    queue_status: dict[str, str] = {}
 
     for index, task in enumerate(_load_json_list(Path(queue_path), missing_ok=True)):
-        if not isinstance(task, Mapping) or task.get("status") != "awaiting_approval":
+        if not isinstance(task, Mapping):
             continue
         task_id = _queue_task_id(task) or f"queue-entry-{index + 1}"
+        queue_status.setdefault(task_id, str(task.get("status") or "").strip())
+        if task.get("status") != "awaiting_approval":
+            continue
         contract = contracts.get(task_id)
         approval_matches = False
         if contract is not None:
@@ -397,6 +406,10 @@ def list_pending_approvals(
             pending[task_id]["sources"].append("contract")
             if not pending[task_id]["description"]:
                 pending[task_id]["description"] = contract.description
+            continue
+        if queue_status.get(task_id, "") not in _APPROVAL_ACTIONABLE_STATUSES:
+            # The task already moved past the approval gate (dispatched, completed,
+            # verified, or awaiting Codex review), so no human decision is pending.
             continue
         pending[task_id] = {
             "task_id": task_id,

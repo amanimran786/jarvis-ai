@@ -6,6 +6,7 @@ import os
 import secrets
 import sys
 import threading
+from collections import Counter
 from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
@@ -208,6 +209,15 @@ def _action_bar() -> str:
   {_btn("↻ Refresh", "/", "#555")}
 </div>"""
 
+def _pending_approvals_count() -> str:
+    """Count shown beside the heading, from the same source as the table."""
+    try:
+        from harness.approval_workflow import list_pending_approvals
+        return str(len(list_pending_approvals()))
+    except Exception:
+        return "?"
+
+
 def _pending_approvals_section() -> str:
     try:
         from harness.approval_workflow import list_pending_approvals
@@ -360,12 +370,7 @@ def index():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     total   = len(tasks)
-    in_prog = sum(1 for t in tasks if t.get("status") == "in_progress")
-    done    = sum(1 for t in tasks if t.get("status") == "done")
-    blocked = sum(1 for t in tasks if t.get("status") == "blocked")
-    needs_review = sum(1 for t in tasks if t.get("status") == "needs_review")
-    queued  = sum(1 for t in tasks if t.get("status") == "queued")
-    waiting = sum(1 for t in tasks if t.get("status") == "awaiting_approval")
+    status_counts = Counter(str(t.get("status") or "unknown") for t in tasks)
     active  = sum(1 for s in sessions if s.get("status") == "active")
     stalled = sum(1 for s in sessions if s.get("status") == "stalled")
     fired   = sum(1 for q in queue if q.get("status") == "fired")
@@ -380,6 +385,31 @@ def index():
                 f"<div style='font-size:1.8em;font-weight:bold;color:{color}'>{val}</div>"
                 f"<div style='color:#888;font-size:.78em;margin-top:4px'>{label}</div></div>")
 
+    # Render one card per task status. Every status the queue can hold is listed
+    # here; anything unrecognised is still rendered afterwards so the cards always
+    # account for all of Total instead of silently dropping rows.
+    known = (
+        ("Queued", "queued", "#f0c040"),
+        ("In Progress", "in_progress", "#f0c040"),
+        ("Running", "running", "#f0c040"),
+        ("Codex Review", "awaiting_codex_review", "#ffa726"),
+        ("Approval", "awaiting_approval", "#f0a000"),
+        ("Needs Review", "needs_review", "#ffa726"),
+        ("Unverified", "unverified", "#ef5350"),
+        ("Blocked", "blocked", "#ef5350"),
+        ("Proposed", "proposed", "#8899a6"),
+        ("Done", "done", "#66bb6a"),
+    )
+    parts = [
+        card(label, status_counts.get(key, 0),
+             colour if status_counts.get(key) else "#888")
+        for label, key, colour in known
+    ]
+    for leftover in sorted(set(status_counts) - {key for _, key, _ in known}):
+        # Status text comes from the queue file: escape it before rendering.
+        parts.append(card(escape(leftover), status_counts[leftover], "#ef5350"))
+    status_cards = "\n  ".join(parts)
+
     H = "<h2 style='color:{c};border-bottom:1px solid #333;padding-bottom:6px;margin-top:28px'>{t}</h2>"
 
     return HTMLResponse(f"""<!DOCTYPE html>
@@ -393,12 +423,7 @@ def index():
 
 <div style='display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 8px'>
   {card("Total", total)}
-  {card("Queued", queued, "#f0c040" if queued else "#888")}
-  {card("In Progress", in_prog, "#f0c040" if in_prog else "#888")}
-  {card("Done", done, "#66bb6a")}
-  {card("Blocked", blocked, "#ef5350" if blocked else "#888")}
-  {card("Needs Review", needs_review, "#ffa726" if needs_review else "#888")}
-  {card("Approval", waiting, "#f0a000" if waiting else "#888")}
+  {status_cards}
   {card("Active", active, "#4fc3f7" if active else "#888")}
   {card("Stalled", stalled, "#ef5350" if stalled else "#888")}
   {card("Fired", fired, "#ab47bc" if fired else "#888")}
@@ -407,7 +432,7 @@ def index():
 
 {_action_bar()}
 
-{H.format(c="#f0c040", t="⏳ Pending Approvals")}
+{H.format(c="#f0c040", t=f"⏳ Pending Approvals ({_pending_approvals_count()})")}
 {_pending_approvals_section()}
 
 {H.format(c="#4fc3f7", t="Work Queue")}
