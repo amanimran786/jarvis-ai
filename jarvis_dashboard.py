@@ -3,7 +3,9 @@
 import json
 import hmac
 import os
+import re
 import secrets
+import subprocess
 import sys
 import threading
 from collections import Counter
@@ -557,6 +559,80 @@ def expire_session(session_id: str):
         print(f"[dashboard] expire-session error: {exc}")
         return JSONResponse({"error": "expire_session_failed"}, status_code=500)
     return RedirectResponse(url="/", status_code=303)
+
+
+_DAEMON_LABELS = ("com.jarvis.loop", "com.jarvis.dashboard", "ai.jarvis.overnight-training")
+_PID_RE = re.compile(r'"PID"\s*=\s*(\d+);')
+_EXIT_RE = re.compile(r'"LastExitStatus"\s*=\s*(-?\d+);')
+
+
+def _daemon_status(label: str) -> dict:
+    """One launchd job's live status via `launchctl list <label>` (list args, no shell)."""
+    try:
+        result = subprocess.run(
+            ["launchctl", "list", label],
+            capture_output=True, text=True, timeout=5, shell=False,
+        )
+    except Exception as exc:
+        return {"label": label, "loaded": False, "error": str(exc)}
+    if result.returncode != 0:
+        return {"label": label, "loaded": False}
+    pid_match = _PID_RE.search(result.stdout)
+    exit_match = _EXIT_RE.search(result.stdout)
+    return {
+        "label": label,
+        "loaded": True,
+        "running": pid_match is not None,
+        "pid": int(pid_match.group(1)) if pid_match else None,
+        "last_exit_status": int(exit_match.group(1)) if exit_match else None,
+    }
+
+
+def _training_freshness() -> dict:
+    """Timestamp of the last overnight training run, from the tracked log."""
+    log_path = BASE / "training" / "overnight_log.jsonl"
+    try:
+        with log_path.open(encoding="utf-8") as handle:
+            last_line = None
+            for last_line in handle:
+                pass
+        if not last_line:
+            return {"last_run": None, "status": "no_runs_logged"}
+        entry = json.loads(last_line)
+        return {"last_run": entry.get("timestamp") or entry.get("ts"), "status": "ok"}
+    except FileNotFoundError:
+        return {"last_run": None, "status": "log_missing"}
+    except Exception as exc:
+        return {"last_run": None, "status": f"unreadable: {exc}"}
+
+
+def _git_tree_clean() -> dict:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(BASE), capture_output=True, text=True, timeout=5, shell=False,
+        )
+    except Exception as exc:
+        return {"clean": None, "error": str(exc)}
+    dirty_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    return {"clean": result.returncode == 0 and not dirty_lines, "dirty_paths": len(dirty_lines)}
+
+
+@app.get("/api/health")
+def api_health():
+    """Phase 0 health surface: daemons, training freshness, git tree, runtime mode.
+
+    Read-only, no live imports or test runs (those belong in CI, not a
+    request handler) — this answers "is the running system healthy" with
+    the same signals that previously required several manual shell checks.
+    """
+    return {
+        "daemons": [_daemon_status(label) for label in _DAEMON_LABELS],
+        "training": _training_freshness(),
+        "git": _git_tree_clean(),
+        "packaged_app": runtime_state.is_frozen_app(),
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
 @app.get("/api/status")
