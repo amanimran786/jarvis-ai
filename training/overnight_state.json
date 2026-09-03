@@ -2,21 +2,21 @@
   "baseline_eval_passed": 696,
   "baseline_eval_total": 696,
   "last_session": {
-    "timestamp": "2026-09-02T06:00:04Z",
-    "date": "2026-09-01",
+    "timestamp": "2026-09-03T06:00:05Z",
+    "date": "2026-09-02",
     "stages": {
       "build": {
         "ok": true,
-        "pack_path": "/Users/truthseeker/jarvis-ai/training/packs/overnight_2026-09-01.jsonl"
+        "pack_path": "/Users/truthseeker/jarvis-ai/training/packs/overnight_2026-09-02.jsonl"
       },
       "training": {
         "ok": true,
-        "adapter_path": "/Users/truthseeker/jarvis-ai/training/mlx_adapters/qwen3-8b/20260902_060007",
+        "adapter_path": "/Users/truthseeker/jarvis-ai/training/mlx_adapters/qwen3-8b/20260903_060007",
         "model_tag": "qwen3:8b",
         "iters": 100,
-        "duration_sec": 657.7958118915558,
+        "duration_sec": 648.9059870243073,
         "error": null,
-        "command": "/Users/truthseeker/jarvis-ai/venv/bin/python3 -m mlx_lm.lora --model mlx-community/Qwen3-8B-4bit --train --data /var/folders/4y/50lnlbfx2d1c409wsvpyrvg40000gn/T/tmpffmwl14q --iters 100 --learning-rate 1e-05 --batch-size 1 --adapter-path /Users/truthseeker/jarvis-ai/training/mlx_adapters/qwen3-8b/20260902_060007 --seed 42 --save-every 100 --steps-per-eval 50 -c /var/folders/4y/50lnlbfx2d1c409wsvpyrvg40000gn/T/tmpffmwl14q/lora_config.yaml --grad-checkpoint",
+        "command": "/Users/truthseeker/jarvis-ai/venv/bin/python3 -m mlx_lm.lora --model mlx-community/Qwen3-8B-4bit --train --data /var/folders/4y/50lnlbfx2d1c409wsvpyrvg40000gn/T/tmpeqzcisme --iters 100 --learning-rate 1e-05 --batch-size 1 --adapter-path /Users/truthseeker/jarvis-ai/training/mlx_adapters/qwen3-8b/20260903_060007 --seed 42 --save-every 100 --steps-per-eval 50 -c /var/folders/4y/50lnlbfx2d1c409wsvpyrvg40000gn/T/tmpeqzcisme/lora_config.yaml --grad-checkpoint",
         "dry_run": false,
         "examples_count": 130
       },
@@ -148,9 +148,9 @@
     "eval_passed": 696,
     "eval_total": 696,
     "examples_count": 130,
-    "duration_seconds": 657.7958118915558,
-    "run_window_date": "2026-09-01"
+    "duration_seconds": 648.9059870243073,
+    "run_window_date": "2026-09-02"
   },
-  "last_run_date": "2026-09-01",
-  "last_run_window_date": "2026-09-01"
+  "last_run_date": "2026-09-02",
+  "last_run_window_date": "2026-09-02"
 }
