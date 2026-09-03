@@ -1127,6 +1127,24 @@ class OvernightTrainer:
                 self.logger.info("Auto-commit: no artifact files found, skipping")
                 return
 
+            # git add exits non-zero if ANY argument is gitignored, which aborts
+            # the whole commit. Drop ignored paths first so one ignored artifact
+            # cannot silently suppress the rest of the night's history.
+            ignored = subprocess.run(
+                ["git", "check-ignore", *to_stage],
+                cwd=str(REPO_ROOT),
+                capture_output=True,
+                text=True,
+            ).stdout.splitlines()
+            if ignored:
+                self.logger.info(
+                    f"Auto-commit: skipping gitignored artifacts: {', '.join(ignored)}"
+                )
+                to_stage = [a for a in to_stage if a not in ignored]
+            if not to_stage:
+                self.logger.info("Auto-commit: all artifacts gitignored, skipping")
+                return
+
             subprocess.run(
                 ["git", "add", *to_stage],
                 cwd=str(REPO_ROOT),

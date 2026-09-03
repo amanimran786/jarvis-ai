@@ -184,8 +184,9 @@ def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
             mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             trainer._auto_commit_artifacts(promoted=True)
 
-    add_args = mock_run.call_args_list[0].args[0]
-    commit_args = mock_run.call_args_list[1].args[0]
+    calls = [c.args[0] for c in mock_run.call_args_list]
+    add_args = next(c for c in calls if c[:2] == ["git", "add"])
+    commit_args = next(c for c in calls if c[:2] == ["git", "commit"])
     artifact_paths = [
         "training/overnight_log.jsonl",
         "training/benchmarks.jsonl",
@@ -202,6 +203,56 @@ def test_auto_commit_artifacts_uses_pathspec_to_avoid_staged_work():
         "--",
         *artifact_paths,
     ]
+
+
+def test_auto_commit_artifacts_skips_gitignored_paths():
+    """A gitignored artifact must not abort the commit of the remaining ones.
+
+    Regression: training/dashboard.html was gitignored on 2026-06-10, so
+    `git add` exited 1 and the nightly training commit silently no-opped for
+    months behind a non-fatal warning.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        for rel_path in (
+            "training/overnight_log.jsonl",
+            "training/benchmarks.jsonl",
+            "training/dashboard.html",
+            "training/overnight_state.json",
+        ):
+            path = root / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}\n", encoding="utf-8")
+
+        trainer = local_finetune_scheduler.OvernightTrainer.__new__(
+            local_finetune_scheduler.OvernightTrainer
+        )
+        trainer.logger = MagicMock()
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:2] == ["git", "check-ignore"]:
+                return MagicMock(returncode=0, stdout="training/dashboard.html\n", stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch("local_runtime.local_finetune_scheduler.REPO_ROOT", root), \
+             patch("local_runtime.local_finetune_scheduler._today_date", return_value="2026-05-05"), \
+             patch("subprocess.run", side_effect=fake_run) as mock_run:
+            trainer._auto_commit_artifacts(promoted=False)
+
+    calls = [c.args[0] for c in mock_run.call_args_list]
+    add_args = next(c for c in calls if c[:2] == ["git", "add"])
+    commit_args = next(c for c in calls if c[:2] == ["git", "commit"])
+
+    assert "training/dashboard.html" not in add_args
+    assert "training/dashboard.html" not in commit_args
+    # the three non-ignored artifacts still get committed
+    for kept in (
+        "training/overnight_log.jsonl",
+        "training/benchmarks.jsonl",
+        "training/overnight_state.json",
+    ):
+        assert kept in add_args
+        assert kept in commit_args
 
 
 def test_quiet_overnight_mode_suppresses_training_notification():

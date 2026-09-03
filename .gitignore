@@ -112,9 +112,6 @@ kb/career/packs/youtube_pem_2026.md
 kb/career/universal_base.md
 
 # Training runtime state
-training/benchmarks.jsonl
-training/overnight_log.jsonl
-training/overnight_state.json
 
 # Runtime snapshots and training traces
 snapshots/
