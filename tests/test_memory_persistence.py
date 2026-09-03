@@ -109,8 +109,22 @@ class TestSemanticMemoryPersistence(unittest.TestCase):
         })
         smem.invalidate()
 
+        # Nulling only "sklearn" is order-dependent: if any earlier test in the
+        # same pytest process already triggered a real semantic_memory index
+        # build (e.g. test_agent_local_routing.py exercising model_router,
+        # which calls smem.retrieve as a side effect), "sklearn.feature_extraction.text"
+        # is separately cached in sys.modules. Python's import system resolves
+        # `from sklearn.feature_extraction.text import TfidfVectorizer` directly
+        # from that cached submodule without rechecking the parent "sklearn"
+        # key, so patching only "sklearn" silently fails to simulate an
+        # unavailable dependency. Null out the submodule chain too so the
+        # import is forced to fail regardless of what ran earlier.
         with patch.object(smem, "_build_embed_index", return_value=False), \
-             patch.dict(sys.modules, {"sklearn": None}):
+             patch.dict(sys.modules, {
+                 "sklearn": None,
+                 "sklearn.feature_extraction": None,
+                 "sklearn.feature_extraction.text": None,
+             }):
             smem._build_index()
             hits = smem.retrieve("dependency_free_memory_marker_v7n")
 
