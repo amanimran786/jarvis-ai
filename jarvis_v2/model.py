@@ -19,6 +19,9 @@ class LocalModelError(RuntimeError):
 class ModelTurn:
     content: str
     tool_calls: tuple[dict[str, Any], ...]
+    finish_reason: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class ModelClient(Protocol):
@@ -29,16 +32,27 @@ class ModelClient(Protocol):
     ) -> ModelTurn: ...
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Prevent a loopback request from being redirected to another destination."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class LocalMLXClient:
     """Minimal HTTP client that never sends credentials or contacts a remote host."""
 
     def __init__(self, config: LocalModelConfig) -> None:
         self.config = config
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _RejectRedirects(),
+        )
 
     def ready(self) -> bool:
         request = urllib.request.Request(self.config.models_url, method="GET")
         try:
-            with urllib.request.urlopen(  # noqa: S310 - URL is loopback-validated
+            with self._opener.open(
                 request,
                 timeout=min(self.config.request_timeout_seconds, 5.0),
             ) as response:
@@ -59,6 +73,9 @@ class LocalMLXClient:
             "tool_choice": "auto",
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_output_tokens,
+            "chat_template_kwargs": {
+                "enable_thinking": self.config.enable_thinking,
+            },
             "stream": False,
         }
         request = urllib.request.Request(
@@ -68,12 +85,13 @@ class LocalMLXClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310 - URL is loopback-validated
+            with self._opener.open(
                 request,
                 timeout=self.config.request_timeout_seconds,
             ) as response:
                 result = json.loads(response.read().decode("utf-8"))
-            message = result["choices"][0]["message"]
+            choice = result["choices"][0]
+            message = choice["message"]
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise LocalModelError("local model returned an invalid response") from exc
         except (OSError, urllib.error.URLError) as exc:
@@ -83,4 +101,11 @@ class LocalMLXClient:
         tool_calls = message.get("tool_calls") or []
         if not isinstance(content, str) or not isinstance(tool_calls, list):
             raise LocalModelError("local model returned invalid message fields")
-        return ModelTurn(content=content, tool_calls=tuple(tool_calls))
+        usage = result.get("usage") or {}
+        return ModelTurn(
+            content=content,
+            tool_calls=tuple(tool_calls),
+            finish_reason=str(choice.get("finish_reason") or ""),
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+        )

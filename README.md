@@ -37,6 +37,8 @@ The first production foundation is available now:
 ./venv/bin/python -m jarvis_v2 \
   "Inspect git status and explain what needs attention" \
   --workspace /Users/truthseeker/jarvis-ai
+./venv/bin/python scripts/run_v2_research_team.py \
+  --workspace /Users/truthseeker/jarvis-ai
 ```
 
 The installer refuses to download a model. It uses the already-cached
@@ -47,9 +49,11 @@ The V2 client rejects every non-loopback endpoint and has no credential input.
 V2 is superior to V1 at its foundation: local-only behavior is enforced by
 configuration validation instead of being a routing preference; one resident
 MLX model serves bounded agents; every run is checkpointed; malformed or
-repeated tool calls fail closed; and the initial tool surface is explicitly
-read-only. Voice, memory, broader tools, UI, and packaged-app parity remain
-tracked production gates rather than implied completed features.
+repeated tool calls fail closed; concurrent specialists exchange typed evidence
+through a coordinator-owned verifier; and the initial tool surface is explicitly
+read-only. Streaming telemetry, in-flight cancellation, voice, memory, broader
+tools, UI, and packaged-app parity remain tracked production gates rather than
+implied completed features.
 
 Development findings, failures, limitations, and evidence for future public
 updates are recorded in the [V2 build journal](docs/V2_BUILD_JOURNAL.md).

@@ -629,3 +629,34 @@ Owner tooling decision: do not use GitHub Copilot for V2 implementation,
 review, tests, documentation, or generated evidence. The permitted development
 control plane is Claude plus Codex, with local models used inside explicitly
 bounded V2 experiments.
+
+### Verified concurrent-team update — 2026-09-04 04:34 PDT
+
+Codex implemented `jarvis_v2/team.py` and the live research/benchmark scripts.
+Read `docs/V2_BUILD_JOURNAL.md` before selecting the next Claude lane. V2 now:
+
+- runs up to four bounded specialists against one resident local MLX model
+- records typed tool name, argument digest, result digest, size, and step
+- verifies required tools, exact trusted result digests, and answer markers
+- synthesizes only verified worker evidence in a separate no-tools phase
+- isolates worker and synthesis crashes and refuses false team completion
+- holds an OS run lease so one checkpoint cannot have concurrent owners
+- rejects proxy, redirect, malicious Git helper, and checkpoint escape paths
+
+Adversarial review invalidated the first 1/2/4 result because a marker-only
+answer could pass independently checked evidence requirements. The corrected
+benchmark binds tool + canonical arguments + result digest + exact count and
+requires exact structured-answer equality. That stricter rerun passed at 1/1,
+2/2, and 4/4 verified workers with zero malformed tool calls. The heterogeneous
+three-agent research run also passed its structural contracts and produced a
+conservative `Not Ready` verdict. This is promising fan-out/fan-in evidence,
+not desktop readiness. Next shared lanes are streaming/TTFT telemetry,
+deadline-aware cancellation of in-flight local calls, and repeated
+soak/adversarial-evidence tests. Do not start app packaging yet.
+
+The integration blocker is resolved with owner approval. The defect was limited
+to `reset_for_tests()`: stale test workers could retain unreachable locks after
+their thread references were cleared. Test reset now replaces those in-memory
+primitives; normal V1 bootstrap and runtime execution are unchanged. The direct
+stale-lock regression and final exact repository gate pass: 3,828 passed,
+8 skipped, 0 failed.

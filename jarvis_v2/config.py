@@ -20,6 +20,7 @@ class LocalModelConfig:
     request_timeout_seconds: float = 120.0
     max_output_tokens: int = 1024
     temperature: float = 0.0
+    enable_thinking: bool = False
 
     def __post_init__(self) -> None:
         parsed = urllib.parse.urlparse(self.base_url)

@@ -236,6 +236,24 @@ More concurrency is not automatically faster. Measure the exact model and task
 on the target Mac. Track total latency, time to first token where streaming is
 available, throughput, peak memory, task success, and malformed tool calls.
 
+Run the included heterogeneous three-agent research team:
+
+```bash
+./venv/bin/python scripts/run_v2_research_team.py --workspace "$PWD"
+```
+
+Run the strict 1/2/4-worker benchmark:
+
+```bash
+./venv/bin/python scripts/benchmark_v2_concurrency.py --workspace "$PWD"
+```
+
+The team coordinator runs specialists concurrently, captures content digests
+for successful tool calls, checks each result against its assignment contract,
+and sends only verified evidence to a separate no-tools synthesizer. Team state
+is stored under `.jarvis-v2/team-runs/`; benchmark artifacts are stored under
+`.jarvis-v2/benchmarks/`. Both directories are local and Git-ignored.
+
 Distributed inference across multiple Macs is optional and is not part of the
 single-Mac bootstrap. Apple documents it separately in
 [Explore distributed inference and training with MLX](https://developer.apple.com/videos/play/wwdc2026/233/).
@@ -267,6 +285,7 @@ Run the focused V2 tests:
 ./venv/bin/python -m pip install -r requirements-v2-dev.txt
 ./venv/bin/python -m pytest \
   tests/test_jarvis_v2_local_runtime.py \
+  tests/test_jarvis_v2_team.py \
   tests/test_install_v2_local.py -q
 ```
 
@@ -315,6 +334,7 @@ removes them.
 - [ ] Listener verified as `127.0.0.1`, never `0.0.0.0`
 - [ ] Model-only curl smoke test passed
 - [ ] V2 agent tool-loop smoke test passed
+- [ ] 1/2/4-worker verified concurrency benchmark passed
 - [ ] Checkpoint and event log created
 - [ ] Focused tests passed
 - [ ] Failures and limitations added to the build journal

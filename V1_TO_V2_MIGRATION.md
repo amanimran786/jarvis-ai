@@ -45,6 +45,8 @@ runtime must not erase the evidence required to explain or recover it.
 | Narrow tool plane | `jarvis_v2/tools.py` | Reuses typed V1 validation while initially exposing only workspace file reads and read-only Git |
 | Persistent local model server | `scripts/install_v2_local.py` | Starts one resident MLX model on `127.0.0.1:8080`, with prompt/decode concurrency and offline model loading |
 | Deterministic tests | `tests/test_jarvis_v2_local_runtime.py` | Proves local-only URL enforcement, tool-loop behavior, checkpoints, malformed-call blocking, and path containment without a model download |
+| Concurrent verified teams | `jarvis_v2/team.py` | Runs up to four local workers concurrently, records typed evidence digests, verifies assignment contracts, isolates failures, and synthesizes only verified results |
+| Local benchmark harness | `scripts/benchmark_v2_concurrency.py` | Makes concurrency claims fail closed on worker, verifier, marker, synthesis, malformed-call, or overlap failures |
 | V2 visual identity | `assets/v2/` | Original dark guardian icon with 1024px PNG, complete iconset, and validated macOS ICNS |
 
 ## Retained and upgraded from V1
@@ -98,15 +100,26 @@ credential-free V2 CLI completed a real two-step Git inspection, the V1 app and
 legacy plists were confirmed absent, legacy ports were confirmed closed, and
 the repository suite passed with 3,802 tests (8 skipped).
 
+The strict 1/2/4 concurrent-worker gate passed on 2026-09-04 with every worker
+and synthesis verified. End-to-end latency was 9.13, 11.84, and 21.99 seconds;
+two/four-worker lifetime overlap was 6.81/12.50 seconds; malformed tool-call rate
+was zero. Acceptance required exact structured answer equality and one bound
+tool/arguments/result call. The artifact and limitations are in the build journal.
+
 The next gates are:
 
-1. Live local MLX tool-loop smoke test through the committed V2 client.
-2. Concurrent 1/2/4-request benchmark on the M4 Pro.
+1. Add streaming/TTFT telemetry and deadline-aware in-flight cancellation.
+2. Run repeated soak, malicious-evidence, worker-crash, and verifier-failure trials.
 3. Add owner-approved write tools behind digest-bound grants and verification.
 4. Port memory/evidence, voice, chat, and files in that order.
 5. Package a new `Jarvis V2.app` and verify it independently of the repo.
 6. Run the full suite, local network-boundary audit, rollback drill, and
    migration-ledger reconciliation before calling V2 production-ready.
+
+The repository regression gate for this concurrency checkpoint is green:
+3,828 passed, 8 skipped, 0 failed. A migration-only test-reset repair prevents
+retired V1 workers from leaking process-local locks across tests; normal V1
+runtime behavior was not changed.
 
 ## Commands
 

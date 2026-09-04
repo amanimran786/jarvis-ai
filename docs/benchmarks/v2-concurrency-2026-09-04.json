@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-04T11:45:35.375692+00:00",
+  "hardware": {
+    "system": "Apple M4 Pro",
+    "unified_memory_gb": 48
+  },
+  "runtime": {
+    "model": "mlx-community/Qwen3-8B-4bit",
+    "mlx_lm_version": "0.31.3",
+    "endpoint": "http://127.0.0.1:8080/v1",
+    "cloud_inference": false,
+    "api_key": false
+  },
+  "acceptance_gate": {
+    "required_team_status": "completed",
+    "required_tool": "git",
+    "trusted_result_digest_required": true,
+    "unique_answer_marker_required": true,
+    "synthesis_required": true,
+    "maximum_malformed_tool_call_rate": 0.0,
+    "positive_full_overlap_required_above_one_worker": true
+  },
+  "levels": [
+    {
+      "concurrency": 1,
+      "team_status": "completed",
+      "workers_verified": 1,
+      "workers_total": 1,
+      "elapsed_seconds": 9.130633624999973,
+      "worker_lifetime_overlap_seconds": 0.0,
+      "prompt_tokens": 2205,
+      "completion_tokens": 284,
+      "peak_model_process_rss_bytes": 255803392,
+      "malformed_tool_call_rate": 0.0,
+      "team_run_id": "13f57282153a443a98fcfcb5babc54df"
+    },
+    {
+      "concurrency": 2,
+      "team_status": "completed",
+      "workers_verified": 2,
+      "workers_total": 2,
+      "elapsed_seconds": 11.841428749999977,
+      "worker_lifetime_overlap_seconds": 6.8088835409998865,
+      "prompt_tokens": 4242,
+      "completion_tokens": 464,
+      "peak_model_process_rss_bytes": 262291456,
+      "malformed_tool_call_rate": 0.0,
+      "team_run_id": "2abad891bb654096942e43d6d0ff0e85"
+    },
+    {
+      "concurrency": 4,
+      "team_status": "completed",
+      "workers_verified": 4,
+      "workers_total": 4,
+      "elapsed_seconds": 21.985915958000078,
+      "worker_lifetime_overlap_seconds": 12.498304665999967,
+      "prompt_tokens": 8284,
+      "completion_tokens": 861,
+      "peak_model_process_rss_bytes": 277807104,
+      "malformed_tool_call_rate": 0.0,
+      "team_run_id": "68a0b74da52e4a1d963a61e28b14bbbf"
+    }
+  ],
+  "unmeasured": [
+    "time to first token",
+    "decode tokens per second",
+    "long-duration stability",
+    "in-flight cancellation latency"
+  ]
+}

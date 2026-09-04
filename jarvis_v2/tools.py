@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -89,19 +90,41 @@ class ReadOnlyLocalTools:
             action = str(normalized.get("action"))
             if action not in {"status", "diff", "log", "branch", "show"}:
                 raise LocalToolError("V2 bootstrap permits read-only git actions")
-            command = ["git", action]
+            command = [
+                "/usr/bin/git",
+                "--no-pager",
+                "--no-optional-locks",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                action,
+            ]
             if action == "status":
                 command.append("--short")
+            elif action == "diff":
+                command.extend(["--no-ext-diff", "--no-textconv"])
             elif action == "log":
                 command.extend(["--oneline", f"-{normalized.get('n', 10)}"])
             elif action == "show":
                 ref = str(normalized.get("ref", "HEAD"))
                 if ref.startswith("-"):
                     raise LocalToolError("git ref cannot begin with a dash")
-                command.extend(["--stat", ref])
+                command.extend(["--no-ext-diff", "--no-textconv", "--stat", ref])
+            git_environment = {
+                key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+            }
+            git_environment.update(
+                {
+                    "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                    "GIT_OPTIONAL_LOCKS": "0",
+                }
+            )
             completed = subprocess.run(
                 command,
                 cwd=self.workspace,
+                env=git_environment,
                 capture_output=True,
                 text=True,
                 check=False,
