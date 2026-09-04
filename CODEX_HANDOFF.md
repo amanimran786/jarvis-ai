@@ -486,3 +486,132 @@ Recommended next slice:
 - Run one live dashboard manager task with safe, read-only scope and watch the SSE stream/logs.
 - If live canary is clean, wire a dashboard "Run Canary" button or documented command for periodic manager-loop checks.
 - Only after the dirty tree is staged by logical groups, run the packaged app verification path.
+
+## Jarvis V1 End-of-Life and Shared V2 Direction — 2026-09-04 03:32 PDT
+
+### Authoritative product decision
+
+Aman ended active development and update support for Jarvis V1. All new
+engineering work belongs on `codex/v2`. V1 remains preserved only as a working
+reference and rollback baseline; do not add V1 features or resume its automated
+training/development jobs unless Aman explicitly reverses this decision.
+
+Frozen baseline:
+
+- Commit: `598d0f106095fe718550baa8a43048b143a2ec33`
+- Annotated tag: `jarvis-v1-final-2026-09-04`
+- Preserved app: `/Users/truthseeker/Applications/Jarvis.app`
+- Active development branch: `codex/v2`
+
+Disabled and unloaded launch jobs:
+
+- `com.jarvis.loop`
+- `com.jarvis.dashboard`
+- `ai.jarvis.overnight-training`
+
+Their plist files were preserved under `~/Library/LaunchAgents/`, making the
+shutdown reversible. No V1 source, training history, app bundle, or rollback
+material was deleted.
+
+### Shared Claude and Codex development boundary
+
+Claude and Codex may both develop V2, but neither hosted model may become a
+dependency of the shipped runtime. V2 must remain functional with no cloud API
+key and no paid fallback. Use the coordination-v2 contract and lease flow for
+implementation, keep assignments digest-bound, and never edit
+`WORK_QUEUE.json` directly.
+
+Before editing, verify the checkout is `codex/v2`, clean, and has no conflicting
+lease. Record file ownership in the assignment. Submit committed, verified work
+for separate Codex review. V1 changes require an explicit rollback or critical
+security reason from Aman.
+
+### Verified Apple reference architecture
+
+Primary source: Apple WWDC26 session 232, "Run local agentic AI on the Mac using
+MLX": https://developer.apple.com/videos/play/wwdc2026/232/
+
+The verified four-layer stack is:
+
+1. MLX on Apple silicon.
+2. MLX-LM for model loading, quantization, and generation.
+3. `mlx_lm.server` on localhost, exposing an OpenAI-compatible chat endpoint.
+4. An agent frontend such as Xcode, OpenCode, Pi, or a Jarvis V2 controller.
+
+The Xcode screenshot supplied by Aman shows a locally hosted provider on port
+`8080` with description `MLX`. Treat this as interface evidence, not a command
+to change Xcode settings.
+
+Apple also demonstrates continuous batching for concurrent requests and
+distributed MLX inference across multiple Macs. The published distributed
+example uses `mlx.launch`, a hostfile, the JACCL backend, and a 122B-class Qwen
+model. Distributed inference is an optional later V2 capability. It is not the
+initial architecture for this single M4 Pro with 48 GB unified memory.
+
+### Social-media claims versus verified scope
+
+The accompanying post claims multiple local agents can simultaneously write,
+test, and repair code, build an iPad app in two minutes, run continuously, and
+cost nothing after setup. Preserve these as product inspiration, not acceptance
+evidence. Apple verifies local inference without cloud/API keys, agent tool use,
+continuous batching, and local coding demonstrations. V2 must independently
+benchmark concurrency, throughput, correctness, power use, memory pressure, and
+long-run stability on Aman's M4 Pro before repeating the broader claims.
+
+### V2 architecture decisions already supported by evidence
+
+- Use a bounded `observe -> plan -> act -> verify -> repeat` state machine.
+- Keep a stable prompt prefix so MLX prompt/KV caching can amortize the system
+  prompt and tool schemas across the many turns of an agentic task.
+- Compact old tool output and file content while preserving citations,
+  approvals, decisions, and immutable task evidence. Long sessions may process
+  100K+ cumulative tokens even when each tool call is small.
+- Share one resident model through continuous batching for the first
+  concurrency milestone. Do not start one full model copy per subagent.
+- Treat model-generated tool calls as untrusted. Reuse `ToolSpec`,
+  `validate_args`, approval gates, budgets, timeouts, retry caps, and result
+  verification.
+- Keep Ollama `nomic-embed-text` available for embeddings because
+  `mlx_lm.server` does not provide the embedding endpoint Jarvis memory uses.
+- Target a 35B-A3B 4-bit MLX reasoner only after a hardware benchmark. The
+  literal 35B-A3B 8-bit demo configuration leaves insufficient safe headroom on
+  this 48 GB machine.
+- Claude Opus and Codex are development/control-plane collaborators. Local
+  Hugging Face/MLX models perform V2 runtime reasoning.
+
+### Local proof completed by Codex
+
+Using installed `mlx-lm 0.31.3` and the cached
+`mlx-community/Qwen3-8B-4bit`, Codex started a localhost-only server, supplied a
+typed weather-tool schema, received a valid tool call, returned a synthetic tool
+result, and received the correct final response. The temporary server was then
+stopped. This proves the two-turn model/tool/model protocol on the target Mac;
+it does not yet prove concurrency or production reliability.
+
+### First V2 implementation assignment
+
+Build a narrow POC beside the existing orchestrator, not a broad rewrite:
+
+1. Typed task state and immutable event log.
+2. One model step producing either one validated tool call or a final answer.
+3. Tool execution through the existing registry and approval boundary.
+4. Result observation fed into the next model step.
+5. Hard limits for steps, wall time, generated tokens, retries, and repeated
+   no-progress states.
+6. Cancellation plus checkpoint/resume.
+7. Deterministic fake-model tests before any live-model benchmark.
+8. A live benchmark for 1, 2, and 4 concurrent read-only subagents against one
+   resident MLX model, recording TTFT, decode throughput, peak memory, success
+   rate, and malformed-tool-call rate.
+
+Do not restart V1 automation while building this POC.
+
+### Implementation update — 2026-09-04
+
+Codex implemented the first V2 production foundation in `jarvis_v2/`, added the
+strict-local MLX launch installer, and documented the complete transition in
+`V1_TO_V2_MIGRATION.md`. Claude should read that ledger before selecting work.
+The bootstrap deliberately exposes only read-only file and Git tools. Do not
+reconnect V1 cloud routers or add hosted fallbacks. The next shared lane is the
+measured 1/2/4-request concurrency benchmark, followed by digest-bound write
+grants and verification.
