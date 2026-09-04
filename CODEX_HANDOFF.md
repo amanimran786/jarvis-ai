@@ -615,3 +615,17 @@ The bootstrap deliberately exposes only read-only file and Git tools. Do not
 reconnect V1 cloud routers or add hosted fallbacks. The next shared lane is the
 measured 1/2/4-request concurrency benchmark, followed by digest-bound write
 grants and verification.
+
+The full clean-Mac reproduction procedure is now documented in
+`docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md`. Claude must update that guide whenever
+installation steps, ports, model requirements, concurrency flags, security
+boundaries, or verification commands change.
+
+V2 visual assets live under `assets/v2/`. Use `assets/v2/jarvis-v2.icns` for
+the future packaged app. The stale Desktop V1 symlink and ignored V1 dist app
+were removed; do not recreate a Desktop icon before a verified V2 app exists.
+
+Owner tooling decision: do not use GitHub Copilot for V2 implementation,
+review, tests, documentation, or generated evidence. The permitted development
+control plane is Claude plus Codex, with local models used inside explicitly
+bounded V2 experiments.

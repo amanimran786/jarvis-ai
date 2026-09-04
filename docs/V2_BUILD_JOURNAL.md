@@ -20,6 +20,7 @@ Ethical coworker means:
 - uncertainty, failed checks, and missing data are surfaced
 - the human remains the decision owner
 - defensive security and safety work are the intended operating domain
+- GitHub Copilot is not used for V2 development or evidence generation
 
 ## Public-claim rules
 
@@ -103,6 +104,17 @@ behavior.
 Run the same read-only evidence task at concurrency 1, 2, and 4 against one
 resident model. Save raw timings and responses, then report TTFT, total latency,
 decode throughput, peak memory, success rate, and malformed-tool-call rate.
+
+### Visual identity transition
+
+- Removed the stale Desktop V1 symlink and ignored V1 app build artifact.
+- Generated a new original dark guardian mark for V2 rather than copying an
+  existing film character or AI-company identity.
+- Verified the master PNG is 1024×1024 with alpha transparency.
+- Generated all standard macOS iconset sizes and validated
+  `assets/v2/jarvis-v2.icns` with `iconutil` and `file`.
+- The icon will not appear on the Desktop until a real V2 app package passes
+  the packaging and runtime verification gate.
 
 ## LinkedIn draft scaffold
 

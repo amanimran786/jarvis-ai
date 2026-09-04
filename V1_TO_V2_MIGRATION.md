@@ -13,6 +13,7 @@ uninstalled, retained for audit, implemented, and still planned.
 - V2 development occurs on `codex/v2` until its production gate passes.
 - Claude and Codex may develop V2. Neither is a runtime dependency. Shipped
   inference remains local and independently operable.
+- GitHub Copilot is excluded from V2 development by owner decision.
 
 ## Removed from the installed system
 
@@ -27,6 +28,8 @@ The V2 installer removes these V1 runtime surfaces when invoked with
 | `ai.jarvis.overnight-training` | V1 overnight training | Disabled, unloaded, plist removed |
 | Port `7842` dashboard | V1 status surface | No longer active |
 | Port `8765` API | V1 API and orchestration surface | No longer active |
+| `~/Desktop/Jarvis.app` | Symlink to installed V1 app | Removed after the target app was uninstalled |
+| `dist/Jarvis.app` | Ignored V1 build artifact | Removed from the local checkout |
 
 The Git tag and repository history are intentionally retained. Uninstalling a
 runtime must not erase the evidence required to explain or recover it.
@@ -42,6 +45,7 @@ runtime must not erase the evidence required to explain or recover it.
 | Narrow tool plane | `jarvis_v2/tools.py` | Reuses typed V1 validation while initially exposing only workspace file reads and read-only Git |
 | Persistent local model server | `scripts/install_v2_local.py` | Starts one resident MLX model on `127.0.0.1:8080`, with prompt/decode concurrency and offline model loading |
 | Deterministic tests | `tests/test_jarvis_v2_local_runtime.py` | Proves local-only URL enforcement, tool-loop behavior, checkpoints, malformed-call blocking, and path containment without a model download |
+| V2 visual identity | `assets/v2/` | Original dark guardian icon with 1024px PNG, complete iconset, and validated macOS ICNS |
 
 ## Retained and upgraded from V1
 
@@ -124,3 +128,5 @@ No API key is accepted or required by either command.
 
 Public development findings and future LinkedIn evidence are maintained in
 [`docs/V2_BUILD_JOURNAL.md`](docs/V2_BUILD_JOURNAL.md).
+The reusable clean-Mac installation procedure is in
+[`docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md`](docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md).
