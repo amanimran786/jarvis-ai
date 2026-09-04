@@ -59,7 +59,12 @@ class LocalMLXClient:
                 payload = json.loads(response.read().decode("utf-8"))
         except (OSError, urllib.error.URLError, json.JSONDecodeError):
             return False
-        return isinstance(payload, dict) and isinstance(payload.get("data"), list)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            return False
+        return any(
+            isinstance(item, dict) and item.get("id") == self.config.model
+            for item in payload["data"]
+        )
 
     def complete(
         self,
@@ -91,11 +96,17 @@ class LocalMLXClient:
             ) as response:
                 result = json.loads(response.read().decode("utf-8"))
             choice = result["choices"][0]
+            response_model = result["model"]
             message = choice["message"]
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise LocalModelError("local model returned an invalid response") from exc
         except (OSError, urllib.error.URLError) as exc:
             raise LocalModelError(f"local model request failed: {exc}") from exc
+
+        if response_model != self.config.model:
+            raise LocalModelError(
+                "local model response identity does not match the configured model"
+            )
 
         content = message.get("content") or ""
         tool_calls = message.get("tool_calls") or []

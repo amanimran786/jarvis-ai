@@ -178,6 +178,20 @@ holds both old primitives during reset and proves a new webhook-style task still
 reaches `succeeded`. The final exact repository gate passed: 3,828 passed,
 8 skipped, 0 failed.
 
+### Local model identity hardening
+
+The MLX `/v1/models` endpoint can advertise several compatible aliases even
+though one model is resident. Treating any non-empty model list as readiness
+could therefore hide a configuration mismatch. V2 now reports ready only when
+the configured `mlx-community/Qwen3-8B-4bit` identifier is present, and rejects
+any completion whose response metadata names a different model.
+
+The live loopback service listed the configured identifier among five entries,
+passed the stricter readiness check, and returned `LOCAL_OK` from a completion
+attributed to the exact configured model. Port 8080 was bound only to
+`127.0.0.1`; retired V1 ports 7842 and 8765 remained closed. The mandatory full
+repository gate then passed: 3,830 passed, 8 skipped, 0 failed.
+
 ### Visual identity transition
 
 - Removed the stale Desktop V1 symlink and ignored V1 app build artifact.

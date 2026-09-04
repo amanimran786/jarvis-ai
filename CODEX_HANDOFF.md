@@ -660,3 +660,17 @@ their thread references were cleared. Test reset now replaces those in-memory
 primitives; normal V1 bootstrap and runtime execution are unchanged. The direct
 stale-lock regression and final exact repository gate pass: 3,828 passed,
 8 skipped, 0 failed.
+
+### Model identity follow-up — 2026-09-04
+
+The local model client no longer treats an arbitrary non-empty `/v1/models`
+response as proof of readiness. It requires the configured model identifier and
+rejects completion responses attributed to another model. This matters because
+MLX-LM may advertise multiple aliases while serving one resident model.
+
+Live verification against the installed loopback service found the configured
+`mlx-community/Qwen3-8B-4bit` identifier, passed readiness, and returned the
+exact `LOCAL_OK` probe response under that model identity. Keep this fail-closed
+check when changing model aliases, launch configuration, or benchmark tooling.
+Focused V2 checks passed 39 tests; the mandatory full repository gate passed
+3,830 tests with 8 skipped and 0 failed.

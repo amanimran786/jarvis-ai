@@ -453,6 +453,62 @@ def test_local_model_client_rejects_http_redirect():
     assert redirected == []
 
 
+def test_local_model_readiness_requires_configured_model_identity():
+    class ModelsHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(
+                b'{"data":[{"id":"mlx-community/Different-Model"}]}'
+            )
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ModelsHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    )
+
+    try:
+        assert client.ready() is False
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_local_model_completion_rejects_wrong_model_identity():
+    class CompletionHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(
+                b'{"model":"mlx-community/Different-Model",'
+                b'"choices":[{"finish_reason":"stop",'
+                b'"message":{"content":"wrong model","tool_calls":[]}}],'
+                b'"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+            )
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), CompletionHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    )
+
+    try:
+        with pytest.raises(LocalModelError, match="identity"):
+            client.complete([{"role": "user", "content": "test"}], [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_agent_rejects_truncated_model_answer(tmp_path: Path):
     result = LocalAgentLoop(
         model=FakeModel(
