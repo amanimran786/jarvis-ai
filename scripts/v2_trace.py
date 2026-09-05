@@ -141,6 +141,40 @@ class TracingModelClient:
         return self._inner.ready()
 
     def complete(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
+        return self._complete_traced(
+            messages,
+            tools,
+            lambda: self._inner.complete(messages, tools),
+        )
+
+    def complete_cancellable(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        is_cancelled: Callable[[], bool],
+        deadline: float,
+    ) -> Any:
+        complete_cancellable = getattr(self._inner, "complete_cancellable", None)
+        if not callable(complete_cancellable):
+            return self.complete(messages, tools)
+        return self._complete_traced(
+            messages,
+            tools,
+            lambda: complete_cancellable(
+                messages,
+                tools,
+                is_cancelled=is_cancelled,
+                deadline=deadline,
+            ),
+        )
+
+    def _complete_traced(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        request: Callable[[], Any],
+    ) -> Any:
         self._count += 1
         sequence = self._count
         self._writer.emit(
@@ -156,7 +190,7 @@ class TracingModelClient:
             ),
         )
         try:
-            turn = self._inner.complete(messages, tools)
+            turn = request()
         except Exception as exc:
             self._writer.emit(
                 "model_request_failed",

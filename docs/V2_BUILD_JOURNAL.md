@@ -163,9 +163,36 @@ that dynamic reassignment and deeper multi-agent tests remain future work.
 
 ### Next experiment
 
-Add deadline-aware in-flight cancellation, then run repeated soak and
-adversarial-evidence trials. Desktop packaging begins only after those runtime
-gates and the full repository suite pass.
+Run repeated soak and adversarial-evidence trials. Deadline-aware in-flight
+cancellation is now implemented and tested at the loopback socket boundary.
+Desktop packaging begins only after the remaining runtime gates and the full
+repository suite pass.
+
+### Cancellation and dashboard continuation — 2026-09-05
+
+- Owner cancellation interrupts a stalled local HTTP request and records
+  `cancelled by owner` without waiting for the model client's long timeout.
+- Agent wall-clock expiry interrupts the same socket and records
+  `time budget exhausted`; neither outcome is retried as a validation error.
+- Cancellation after a partial SSE frame is classified as cancellation rather
+  than a misleading missing-completion-marker failure.
+- Traced clients forward the cancellable request boundary, preserving exact
+  actor timing and terminal failure records.
+- Team event streams now begin with the exact goal and ordered agent IDs. The
+  dashboard uses that record for new runs and labels its longest-common-text
+  recovery explicitly as legacy-only.
+- The dashboard reconstruction path no longer exposes raw tool arguments when
+  content visibility is disabled; it retains only their character count.
+
+The live integration probe also exposed a hardware-resource collision: a
+separate Ollama `qwen3:30b-a3b` process was resident at roughly 45 GB while the
+MLX service held eight cached sequences. The MLX process aborted with Metal
+out-of-memory and launchd restarted it. After the competing model unloaded, a
+real traced MLX tool run completed normally. This is a deployment limitation,
+not evidence that `/v1/models` readiness alone predicts generation capacity.
+
+Verification for this checkpoint: 64 focused V2/install tests passed. The exact
+repository gate passed 3,855 tests, 8 skipped, and 34 subtests with no failures.
 
 ### Integration gate outcome
 

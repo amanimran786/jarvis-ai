@@ -14,7 +14,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .model import LocalModelError, ModelClient, ModelTurn
+from .model import (
+    LocalModelCancelled,
+    LocalModelDeadlineExceeded,
+    LocalModelError,
+    ModelClient,
+    ModelTurn,
+)
 from .tools import LocalToolError, model_tool_schemas
 
 
@@ -254,20 +260,32 @@ class LocalAgentLoop:
     def _run_owned(self, state: AgentState) -> AgentResult:
         self._checkpoint(state)
         started = self.clock()
+        deadline = started + self.limits.max_seconds
 
         while state.step < self.limits.max_steps:
             if self.is_cancelled():
                 state.status = "cancelled"
                 state.reason = "cancelled by owner"
                 break
-            if self.clock() - started >= self.limits.max_seconds:
+            if self.clock() >= deadline:
                 state.status = "blocked"
                 state.reason = "time budget exhausted"
                 break
             state.step += 1
             try:
                 schemas = model_tool_schemas() if self.allow_tools else []
-                turn = self.model.complete(state.messages, schemas)
+                complete_cancellable = getattr(
+                    self.model, "complete_cancellable", None
+                )
+                if callable(complete_cancellable):
+                    turn = complete_cancellable(
+                        state.messages,
+                        schemas,
+                        is_cancelled=self.is_cancelled,
+                        deadline=deadline,
+                    )
+                else:
+                    turn = self.model.complete(state.messages, schemas)
                 if self.is_cancelled():
                     state.status = "cancelled"
                     state.reason = "cancelled by owner"
@@ -359,6 +377,14 @@ class LocalAgentLoop:
                 state.tool_calls_completed += 1
                 state.tool_evidence.append(asdict(evidence))
                 state.consecutive_errors = 0
+            except LocalModelCancelled:
+                state.status = "cancelled"
+                state.reason = "cancelled by owner"
+                break
+            except LocalModelDeadlineExceeded:
+                state.status = "blocked"
+                state.reason = "time budget exhausted"
+                break
             except Exception as exc:
                 state.consecutive_errors += 1
                 state.reason = f"{type(exc).__name__}: {exc}"

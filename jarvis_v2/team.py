@@ -300,6 +300,14 @@ class LocalAgentTeam:
                 handle.write(json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n")
             event_path.chmod(0o600)
 
+        record(
+            {
+                "event": "team_started",
+                "goal": cleaned_goal,
+                "agent_ids": [assignment.agent_id for assignment in assignments],
+            }
+        )
+
         def run_assignment(assignment: AgentAssignment) -> AgentEvidence:
             worker_started = time.monotonic()
             record({"event": "worker_started", "agent_id": assignment.agent_id})

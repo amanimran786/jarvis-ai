@@ -302,10 +302,9 @@ class Store:
         the actual tool results, not just their digests. Timing, when present,
         is attached as an overlay keyed by step.
 
-        Shape always ships: step order, tool names, tool arguments, result
-        lengths, digests. Model prose and tool output bodies ship only when
-        `include_content` is set, so the journey stays readable on every run
-        while the payload honours the same opt-in the raw conversation does.
+        Shape always ships: step order, tool names, argument/result lengths,
+        and digests. Raw arguments, model prose, and tool output bodies ship
+        only when `include_content` is set.
         """
         clip = cls._clip if include_content else (lambda _text: None)
         evidence_by_call = {
@@ -327,7 +326,14 @@ class Store:
                     entry = {
                         "call_id": call_id,
                         "name": str(function.get("name") or "?"),
-                        "arguments": str(function.get("arguments") or ""),
+                        "arguments": (
+                            cls._clip(function.get("arguments"))
+                            if include_content
+                            else None
+                        ),
+                        "arguments_chars": len(
+                            str(function.get("arguments") or "")
+                        ),
                         "result_preview": None,
                         "result_chars": None,
                     }
@@ -451,14 +457,22 @@ class Store:
         return found
 
     def _team_goal(self, records: list[dict[str, Any]]) -> str:
-        """Recover the goal, which the event stream itself never records.
+        """Read the exact goal from new events or recover it for legacy runs.
 
-        Every worker is briefed with the shared team goal wrapped in its own
+        Older worker events predate ``team_started``. Every worker was briefed
+        with the shared team goal wrapped in its own
         role and assignment, so the text common to all of the briefs is the
         goal. Deriving it by longest common substring keeps the dashboard from
         hardcoding the prompt template, which would silently break the moment
         the wording changed.
         """
+        started = next(
+            (record for record in records if record.get("event") == "team_started"),
+            None,
+        )
+        exact_goal = (started or {}).get("goal")
+        if isinstance(exact_goal, str):
+            return exact_goal
         tasks: list[str] = []
         for record in records:
             if record.get("event") != "worker_finished":
@@ -530,9 +544,20 @@ class Store:
             )
         synthesis = next((r for r in records if r.get("event") == "synthesis_finished"), {})
         finished = next((r for r in records if r.get("event") == "team_finished"), {})
+        has_recorded_goal = any(
+            record.get("event") == "team_started"
+            and isinstance(record.get("goal"), str)
+            for record in records
+        )
+        goal = self._team_goal(records)
         return {
             "team_id": team_id,
-            "goal": self._team_goal(records),
+            "goal": goal,
+            "goal_source": (
+                "recorded"
+                if has_recorded_goal
+                else "legacy-derived" if goal else "missing"
+            ),
             "status": str(finished.get("status") or "running"),
             "workers": workers,
             "tokens_recorded": any(w["tokens_recorded"] for w in workers),
@@ -1222,7 +1247,12 @@ function renderTeam(d){
   main.appendChild(head);
 
   const t = el("div","taskline");
-  t.appendChild(el("div","lbl","Team goal · derived from the text common to every worker brief"));
+  const goalNote = d.goal_source === "recorded"
+    ? "recorded when the team started"
+    : d.goal_source === "legacy-derived"
+      ? "legacy run · derived from worker briefs"
+      : "not available";
+  t.appendChild(el("div","lbl","Team goal · "+goalNote));
   t.appendChild(el("div",null, d.goal || "(not recorded in the event stream)"));
   main.appendChild(t);
 

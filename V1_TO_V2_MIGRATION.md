@@ -125,13 +125,20 @@ V2 runtime thread.
 
 The next gates are:
 
-1. Add deadline-aware in-flight cancellation.
-2. Run repeated soak, malicious-evidence, worker-crash, and verifier-failure trials.
-3. Add owner-approved write tools behind digest-bound grants and verification.
-4. Port memory/evidence, voice, chat, and files in that order.
-5. Package a new `Jarvis V2.app` and verify it independently of the repo.
-6. Run the full suite, local network-boundary audit, rollback drill, and
+1. Run repeated soak, malicious-evidence, worker-crash, and verifier-failure trials.
+2. Add owner-approved write tools behind digest-bound grants and verification.
+3. Port memory/evidence, voice, chat, and files in that order.
+4. Package a new `Jarvis V2.app` and verify it independently of the repo.
+5. Run the full suite, local network-boundary audit, rollback drill, and
    migration-ledger reconciliation before calling V2 production-ready.
+
+Deadline-aware in-flight cancellation is implemented at the loopback HTTP
+socket boundary. Owner cancellation and wall-clock expiry now interrupt a
+stalled request instead of waiting for the 120-180 second model timeout; they
+checkpoint as `cancelled` and `blocked` respectively. Tests cover cancellation
+before any SSE data, after a partial SSE frame, and at the agent deadline.
+The resulting exact repository gate passed 3,855 tests with 8 skipped and no
+failures.
 
 The repository regression gate for the current observer checkpoint is green:
 3,850 passed, 8 skipped, 0 failed. A migration-only test-reset repair prevents

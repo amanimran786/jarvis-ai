@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from jarvis_v2.config import LocalConfigurationError
-from jarvis_v2.model import ModelTurn
+from jarvis_v2.model import LocalModelCancelled, ModelTurn
 from jarvis_v2.team import AcceptanceContract, AgentAssignment, LocalAgentTeam
 from jarvis_v2.tools import model_tool_schemas
 from scripts import v2_dashboard, v2_trace
@@ -123,6 +123,38 @@ def test_dashboard_store_rejects_symlinked_source_escape(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="escapes dashboard root"):
         v2_dashboard.Store(root).list_runs()
+
+
+def test_dashboard_reconstructed_turns_hide_raw_arguments_by_default() -> None:
+    secret = "sensitive-path-sentinel"
+    messages = [
+        {
+            "role": "assistant",
+            "content": "working",
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "function": {
+                        "name": "file",
+                        "arguments": json.dumps({"path": secret}),
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": secret},
+    ]
+
+    redacted = v2_dashboard.Store.reconstruct_turns(
+        messages, [], [], include_content=False
+    )
+    visible = v2_dashboard.Store.reconstruct_turns(
+        messages, [], [], include_content=True
+    )
+
+    assert secret not in json.dumps(redacted)
+    assert redacted[0]["tool_calls"][0]["arguments"] is None
+    assert redacted[0]["tool_calls"][0]["arguments_chars"] > 0
+    assert secret in json.dumps(visible)
 
 
 def test_dashboard_api_requires_process_capability_and_sets_security_headers(
@@ -265,6 +297,43 @@ def test_trace_sensitive_content_requires_explicit_opt_in(tmp_path: Path) -> Non
     assert secret in writer.path.read_text(encoding="utf-8")
 
 
+def test_trace_forwards_cancellable_model_boundary(tmp_path: Path) -> None:
+    observed: dict[str, object] = {}
+
+    class _CancellableModel:
+        def complete_cancellable(self, messages, tools, *, is_cancelled, deadline):
+            observed.update(
+                messages=messages,
+                tools=tools,
+                is_cancelled=is_cancelled,
+                deadline=deadline,
+            )
+            raise LocalModelCancelled("cancelled by owner")
+
+    writer = v2_trace.TraceWriter(tmp_path, trace_id="e" * 32)
+    traced = v2_trace.TracingModelClient(
+        _CancellableModel(), writer, actor="worker-a"
+    )
+    def cancelled() -> bool:
+        return True
+
+    with pytest.raises(LocalModelCancelled):
+        traced.complete_cancellable(
+            [{"role": "user", "content": "inspect"}],
+            [],
+            is_cancelled=cancelled,
+            deadline=123.0,
+        )
+
+    assert observed["is_cancelled"] is cancelled
+    assert observed["deadline"] == 123.0
+    records = [
+        json.loads(line) for line in writer.path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert records[-1]["kind"] == "model_request_failed"
+    assert records[-1]["error_type"] == "LocalModelCancelled"
+
+
 class _OneTurnModel:
     def __init__(self, secret: str) -> None:
         self.secret = secret
@@ -334,7 +403,7 @@ def test_team_observer_factories_receive_exact_worker_and_synthesis_ids(
         execute_tool=lambda _name, _arguments: pytest.fail("unlabelled tool used"),
         model_factory_for_agent=model_for,
         tool_factory_for_agent=tool_for,
-        state_dir=tmp_path / "runs",
+        state_dir=tmp_path / "team-runs",
         max_workers=2,
     )
     result = team.run(
@@ -358,6 +427,18 @@ def test_team_observer_factories_receive_exact_worker_and_synthesis_ids(
     assert result.status == "completed"
     assert sorted(model_actors) == ["alpha", "beta", "synthesis"]
     assert sorted(tool_actors) == ["alpha", "beta", "synthesis"]
-    checkpoints = list((tmp_path / "runs" / "workers").glob("*.json"))
+    checkpoints = list((tmp_path / "team-runs" / "workers").glob("*.json"))
     assert checkpoints
     assert all(json.loads(path.read_text())["limits"] for path in checkpoints)
+    team_records = [
+        json.loads(line)
+        for line in result.event_log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert team_records[0] == {
+        "event": "team_started",
+        "goal": "prove actor identity",
+        "agent_ids": ["alpha", "beta"],
+    }
+    observed_team = v2_dashboard.Store(tmp_path).load_team(result.team_run_id)
+    assert observed_team["goal"] == "prove actor identity"
+    assert observed_team["goal_source"] == "recorded"

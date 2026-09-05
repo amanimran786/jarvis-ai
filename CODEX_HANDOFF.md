@@ -711,3 +711,32 @@ Focused V2/install/observer checks passed 58 tests. The exact full gate passed
 3,850 tests with 8 skipped. Pytest emitted one non-fatal retired-V1
 `task_runtime.py` thread-cleanup warning; keep it visible as legacy debt, but do
 not misattribute it to the V2 runtime.
+
+### V2 cancellation and dashboard continuation — 2026-09-05
+
+The next runtime gate is no longer in-flight cancellation. `LocalMLXClient`
+now exposes a cancellable loopback request path that closes the active socket
+when the owner cancels or the agent deadline expires. `LocalAgentLoop` records
+those as distinct terminal outcomes instead of waiting for the request timeout
+or retrying them as model-validation errors. The tracing wrapper forwards this
+boundary. Focused tests cover a stream stalled before data, a stream stalled
+after partial data, and deadline expiry.
+
+Claude's two local dashboard commits were retained after review, with two
+correctness fixes: reconstructed turns redact raw tool arguments by default,
+and new team logs record the exact goal plus ordered roster at `team_started`.
+The dashboard labels heuristic goal recovery as legacy-only. Browser validation
+showed the per-agent token split, shared-clock timing lanes, acceptance verdicts,
+and synthesis link with no console errors.
+
+A live probe found a real operational limit. A separate 45 GB Ollama
+`qwen3:30b-a3b` residency plus the MLX prompt cache caused a Metal out-of-memory
+abort. Launchd restarted MLX; after Ollama unloaded, an exact one-tool traced
+run completed. Do not infer generation capacity from `/v1/models` readiness,
+and do not assume the 48 GB machine can keep a 30B Ollama model and the V2 MLX
+worker model resident together. The next shared lane is repeated soak and
+adversarial-evidence testing. Desktop packaging remains gated.
+
+The focused V2/install gate passed 64 tests. The exact repository gate passed
+3,855 tests with 8 skipped and 34 subtests; its 87 warnings are the existing
+dependency and retired semantic-memory numerical warnings, not V2 failures.

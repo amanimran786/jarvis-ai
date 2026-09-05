@@ -334,8 +334,15 @@ Common problems:
 | Installer refuses model download | Check the Hugging Face cache path | Complete step 4 while connected, then rerun |
 | Port 8080 busy | `lsof -nP -iTCP:8080` | Stop the conflicting local process or deliberately select another loopback port |
 | Service repeatedly exits | Read `model-server.error.log` | Check model integrity, free memory, and executable paths |
+| Metal out-of-memory abort | Run `ollama ps`, `memory_pressure -Q`, then inspect `model-server.error.log` | Let other large resident models unload or stop them deliberately before retrying; one 48 GB Mac cannot be assumed to hold every local model and cache at once |
 | Agent rejects endpoint | Inspect `--endpoint` | Use explicit `http://127.0.0.1:PORT/v1`; remote and hostname URLs are intentionally rejected |
 | Mac becomes memory-constrained | Reduce model/context/concurrency | Start with a smaller 4-bit model and benchmark again |
+
+The model listing endpoint can remain healthy immediately after launchd
+restarts a crashed service. A successful `/v1/models` probe proves identity and
+reachability, not that enough unified memory exists for the next generation.
+For readiness testing, run at least one real completion after checking for
+other resident Ollama or MLX models.
 
 ## 13. Stop or uninstall V2
 

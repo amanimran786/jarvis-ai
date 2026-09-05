@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -779,6 +780,133 @@ def test_agent_cancellation_after_model_return_prevents_tool_execution(tmp_path:
     assert result.status == "cancelled"
     assert result.reason == "cancelled by owner"
     assert executed == []
+
+
+class _StalledStreamHandler(BaseHTTPRequestHandler):
+    stall = threading.Event()
+
+    def do_POST(self):
+        content_length = int(self.headers.get("Content-Length", "0"))
+        self.rfile.read(content_length)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.flush()
+        self.stall.wait(5.0)
+
+    def log_message(self, format, *args):
+        return
+
+
+class _PartialStalledStreamHandler(_StalledStreamHandler):
+    def do_POST(self):
+        content_length = int(self.headers.get("Content-Length", "0"))
+        self.rfile.read(content_length)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        event = {
+            "model": LocalModelConfig().model,
+            "choices": [
+                {"finish_reason": None, "delta": {"content": "partial"}}
+            ],
+        }
+        self.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+        self.stall.wait(5.0)
+
+
+def test_agent_cancellation_interrupts_stalled_local_model_request(tmp_path: Path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _StalledStreamHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    cancelled = threading.Event()
+    timer = threading.Timer(0.05, cancelled.set)
+    timer.start()
+    started = time.monotonic()
+
+    try:
+        result = LocalAgentLoop(
+            model=LocalMLXClient(
+                LocalModelConfig(
+                    base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                    request_timeout_seconds=5.0,
+                )
+            ),
+            execute_tool=lambda name, arguments: "unused",
+            state_dir=tmp_path,
+            is_cancelled=cancelled.is_set,
+        ).run("Inspect")
+    finally:
+        timer.cancel()
+        _StalledStreamHandler.stall.set()
+        server.shutdown()
+        server.server_close()
+        _StalledStreamHandler.stall.clear()
+
+    assert result.status == "cancelled"
+    assert result.reason == "cancelled by owner"
+    assert time.monotonic() - started < 1.0
+
+
+def test_agent_deadline_interrupts_stalled_local_model_request(tmp_path: Path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _StalledStreamHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    started = time.monotonic()
+
+    try:
+        result = LocalAgentLoop(
+            model=LocalMLXClient(
+                LocalModelConfig(
+                    base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                    request_timeout_seconds=5.0,
+                )
+            ),
+            execute_tool=lambda name, arguments: "unused",
+            state_dir=tmp_path,
+            limits=AgentLimits(max_seconds=0.1),
+        ).run("Inspect")
+    finally:
+        _StalledStreamHandler.stall.set()
+        server.shutdown()
+        server.server_close()
+        _StalledStreamHandler.stall.clear()
+
+    assert result.status == "blocked"
+    assert result.reason == "time budget exhausted"
+    assert time.monotonic() - started < 1.0
+
+
+def test_agent_cancellation_overrides_partial_stream_validation(tmp_path: Path):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _PartialStalledStreamHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    cancelled = threading.Event()
+    timer = threading.Timer(0.05, cancelled.set)
+    timer.start()
+
+    try:
+        result = LocalAgentLoop(
+            model=LocalMLXClient(
+                LocalModelConfig(
+                    base_url=f"http://127.0.0.1:{server.server_port}/v1",
+                    request_timeout_seconds=5.0,
+                )
+            ),
+            execute_tool=lambda name, arguments: "unused",
+            state_dir=tmp_path,
+            is_cancelled=cancelled.is_set,
+        ).run("Inspect")
+    finally:
+        timer.cancel()
+        _PartialStalledStreamHandler.stall.set()
+        server.shutdown()
+        server.server_close()
+        _PartialStalledStreamHandler.stall.clear()
+
+    assert result.status == "cancelled"
+    assert result.reason == "cancelled by owner"
 
 
 def test_agent_rejects_truncated_model_answer(tmp_path: Path):
