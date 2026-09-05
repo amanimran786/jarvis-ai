@@ -30,6 +30,7 @@ probe would race a starting run and could steal its lease.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hmac
 import json
 import re
@@ -153,6 +154,11 @@ class Store:
         base = self._dir("traces")
         return self._contained(base, base / f"{trace_id}.jsonl")
 
+    def team_path(self, team_id: str) -> Path:
+        validate_hex32(team_id)
+        base = self._dir("team-runs")
+        return self._contained(base, base / f"team-{team_id}.events.jsonl")
+
     # ---- discovery -----------------------------------------------------
 
     def list_runs(self) -> list[dict[str, Any]]:
@@ -235,6 +241,8 @@ class Store:
                     "trace_id": path.stem,
                     "mode": started.get("mode", "unknown"),
                     "task": started.get("task", ""),
+                    "task_chars": started.get("task_chars"),
+                    "task_sha256": started.get("task_sha256"),
                     "record_count": len(records),
                     "actors": len({r.get("actor") for r in done}),
                     "prompt_tokens": sum(int(r.get("prompt_tokens") or 0) for r in done),
@@ -395,6 +403,144 @@ class Store:
         detail["messages"] = messages if include_messages else []
         return detail
 
+    # ---- teams ---------------------------------------------------------
+    #
+    # A team run is the only place the fleet records who spent what inside one
+    # request. `worker_finished` carries agent_id, the worker's own run_id, its
+    # token counters and its model_timings, so a team stream is a complete
+    # per-agent bill for one goal. Nothing else on disk joins agents to a
+    # request: the worker checkpoints under team-runs/workers are anonymous
+    # once separated from this stream.
+
+    def list_teams(self) -> list[dict[str, Any]]:
+        directory = self._dir("team-runs")
+        if not directory.is_dir():
+            return []
+        found: list[dict[str, Any]] = []
+        for path in directory.glob("team-*.events.jsonl"):
+            team_id = path.stem[len("team-") : -len(".events")]
+            if HEX32_RE.fullmatch(team_id) is None:
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            records = self._read_jsonl(path)
+            workers = [r for r in records if r.get("event") == "worker_finished"]
+            finished = next((r for r in records if r.get("event") == "team_finished"), None)
+            status = str((finished or {}).get("status") or "running")
+            found.append(
+                {
+                    "team_id": team_id,
+                    "status": status,
+                    "liveness": self._liveness(status, time.time() - stat.st_mtime),
+                    "agents": len(workers),
+                    "prompt_tokens": sum(int(w.get("prompt_tokens") or 0) for w in workers),
+                    "completion_tokens": sum(
+                        int(w.get("completion_tokens") or 0) for w in workers
+                    ),
+                    "tokens_recorded": any(w.get("prompt_tokens") is not None for w in workers),
+                    # The goal needs the worker checkpoints, which is too much
+                    # file work for a list that repolls. The roster identifies
+                    # the team well enough here; load_team recovers the goal.
+                    "roster": [str(w.get("agent_id") or "?") for w in workers],
+                    "modified_at": stat.st_mtime,
+                }
+            )
+        found.sort(key=lambda item: item["modified_at"], reverse=True)
+        return found
+
+    def _team_goal(self, records: list[dict[str, Any]]) -> str:
+        """Recover the goal, which the event stream itself never records.
+
+        Every worker is briefed with the shared team goal wrapped in its own
+        role and assignment, so the text common to all of the briefs is the
+        goal. Deriving it by longest common substring keeps the dashboard from
+        hardcoding the prompt template, which would silently break the moment
+        the wording changed.
+        """
+        tasks: list[str] = []
+        for record in records:
+            if record.get("event") != "worker_finished":
+                continue
+            run_id = str(record.get("run_id") or "")
+            if HEX32_RE.fullmatch(run_id) is None:
+                continue
+            try:
+                payload = json.loads(self.checkpoint_path("worker", run_id).read_text())
+            except (OSError, ValueError):
+                continue
+            task = str(payload.get("task") or "")
+            if task:
+                tasks.append(task)
+        if not tasks:
+            return ""
+        shared = tasks[0]
+        for task in tasks[1:]:
+            match = difflib.SequenceMatcher(None, shared, task, autojunk=False).find_longest_match(
+                0, len(shared), 0, len(task)
+            )
+            shared = shared[match.a : match.a + match.size]
+            if not shared:
+                break
+        # The overlap starts and ends wherever the briefs happen to diverge,
+        # which lands mid-word. Keep only the lines that are wholly inside it.
+        lines = shared.split("\n")
+        if len(lines) > 2:
+            lines = lines[1:-1]
+        shared = "\n".join(lines).strip()
+        # A short overlap is coincidence, not a goal. Say nothing rather than
+        # present a fragment as the team's objective.
+        return shared if len(shared) >= 24 else ""
+
+    def load_team(self, team_id: str) -> dict[str, Any]:
+        path = self.team_path(team_id)
+        records = self._read_jsonl(path)
+        if not records:
+            raise FileNotFoundError(team_id)
+        verified = {
+            r.get("agent_id"): r
+            for r in records
+            if r.get("event") == "worker_verification_finished"
+        }
+        workers = []
+        for record in records:
+            if record.get("event") != "worker_finished":
+                continue
+            timings = [t for t in (record.get("model_timings") or []) if t.get("step")]
+            agent_id = record.get("agent_id")
+            check = verified.get(agent_id) or {}
+            workers.append(
+                {
+                    "agent_id": str(agent_id or "?"),
+                    "role": str(record.get("role") or ""),
+                    "run_id": str(record.get("run_id") or ""),
+                    "status": str(record.get("status") or "unknown"),
+                    "reason": str(record.get("reason") or ""),
+                    "steps": int(record.get("steps") or 0),
+                    "prompt_tokens": int(record.get("prompt_tokens") or 0),
+                    "completion_tokens": int(record.get("completion_tokens") or 0),
+                    "tokens_recorded": record.get("prompt_tokens") is not None,
+                    "tool_calls": len(record.get("tool_evidence") or []),
+                    "answer_chars": len(str(record.get("answer") or "")),
+                    "model_timings": timings,
+                    "accepted": check.get("passed"),
+                    "verdict": "; ".join(str(r) for r in (check.get("reasons") or [])),
+                }
+            )
+        synthesis = next((r for r in records if r.get("event") == "synthesis_finished"), {})
+        finished = next((r for r in records if r.get("event") == "team_finished"), {})
+        return {
+            "team_id": team_id,
+            "goal": self._team_goal(records),
+            "status": str(finished.get("status") or "running"),
+            "workers": workers,
+            "tokens_recorded": any(w["tokens_recorded"] for w in workers),
+            "synthesis_run_id": str(synthesis.get("run_id") or ""),
+            "synthesis_status": str(synthesis.get("status") or ""),
+            "modified_at": path.stat().st_mtime,
+        }
+
     def load_trace(self, trace_id: str) -> dict[str, Any]:
         records = self._read_jsonl(self.trace_path(trace_id))
         origin = next((r for r in records if r.get("kind") == "trace_started"), {})
@@ -426,6 +572,14 @@ class Store:
                 except OSError:
                     continue
                 parts.append(f"{path.name}:{stat.st_size}:{stat.st_mtime_ns}")
+        teams = self._dir("team-runs")
+        if teams.is_dir():
+            for path in sorted(teams.glob("team-*.events.jsonl")):
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                parts.append(f"m/{path.name}:{stat.st_size}:{stat.st_mtime_ns}")
         traces = self._dir("traces")
         if traces.is_dir():
             for path in sorted(traces.glob("*.jsonl")):
@@ -535,6 +689,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(
                     {
                         "runs": self.store.list_runs(),
+                        "teams": self.store.list_teams(),
                         "traces": self.store.list_traces(),
                         "model_server": probe_model_server(self.model_config),
                         "endpoint": self.model_config.base_url,
@@ -546,6 +701,8 @@ class Handler(BaseHTTPRequestHandler):
                 _, _, _, kind, run_id = path.split("/", 4)
                 include = query.get("messages") == ["1"]
                 self._send_json(self.store.load_run(kind, run_id, include_messages=include))
+            elif path.startswith("/api/team/"):
+                self._send_json(self.store.load_team(path.rsplit("/", 1)[-1]))
             elif path.startswith("/api/trace/"):
                 trace_id = path.rsplit("/", 1)[-1]
                 self._send_json(self.store.load_trace(trace_id))
@@ -758,6 +915,8 @@ PAGE = r"""<!doctype html>
   <nav class="rail">
     <div class="railhead">Traces <span style="color:#5d6377">sub-step</span></div>
     <div id="tracelist"></div>
+    <div class="railhead">Teams <span style="color:#5d6377">per-agent</span></div>
+    <div id="teamlist"></div>
     <div class="railhead">Runs <span style="color:#5d6377">per-step</span></div>
     <div id="runlist"></div>
   </nav>
@@ -877,9 +1036,18 @@ function renderRail(){
     n.style.padding = "4px 14px 12px"; tl.appendChild(n);
   }
   overview.traces.forEach(t => tl.appendChild(railItem({
-    type:"trace", id:t.trace_id, kind:t.mode, task:t.task,
+    type:"trace", id:t.trace_id, kind:t.mode,
+    task: t.task || (t.task_chars ? "task redacted · "+num(t.task_chars)+" chars, digest "+
+                                    String(t.task_sha256||"").slice(0,12) : ""),
     status:t.status, liveness:t.liveness,
     meta:`${t.mode} · ${t.actors||1} agent${t.actors===1?"":"s"} · ${num(t.prompt_tokens+t.completion_tokens)} tok`
+  })));
+  const ml = $("teamlist"); ml.innerHTML = "";
+  (overview.teams || []).forEach(t => ml.appendChild(railItem({
+    type:"team", id:t.team_id, kind:"team", task:t.roster.join(" · "),
+    status:t.status, liveness:t.liveness,
+    meta:`${t.agents} agent${t.agents===1?"":"s"} · ${t.tokens_recorded
+      ? num(t.prompt_tokens+t.completion_tokens)+" tok" : "tokens not recorded"}`
   })));
   const rl = $("runlist"); rl.innerHTML = "";
   overview.runs.forEach(r => rl.appendChild(railItem({
@@ -896,6 +1064,7 @@ function statusCls(status){
   if(status === "completed") return "ok";
   if(status === "running") return "warn";
   if(status === "cancelled") return "mute";
+  if(status === "partial") return "warn";
   return "bad";
 }
 
@@ -920,6 +1089,7 @@ async function renderDetail(){
   const main = $("main");
   try {
     if(selected.type === "trace"){ renderTrace(await getJSON("/api/trace/"+selected.id)); }
+    else if(selected.type === "team"){ renderTeam(await getJSON("/api/team/"+selected.id)); }
     else {
       const q = showMessages ? "?messages=1" : "";
       renderRun(await getJSON("/api/run/"+selected.kind+"/"+selected.id+q));
@@ -1038,6 +1208,172 @@ function renderRunTail(main, d, tim, wall){
       c.appendChild(r); });
     main.appendChild(c);
   }
+}
+
+/* ---- team view ----
+   A team run is the only record on disk that ties agents to one request. The
+   worker checkpoints under team-runs/workers are anonymous on their own; the
+   agent_id, the token counters and the timing all live in this event stream. */
+function renderTeam(d){
+  const main = $("main"); main.innerHTML = "";
+  const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap";
+  head.appendChild(el("span","fid ckpt","TEAM FIDELITY · one request, many agents"));
+  head.appendChild(el("span","badge "+statusCls(d.status), d.status));
+  main.appendChild(head);
+
+  const t = el("div","taskline");
+  t.appendChild(el("div","lbl","Team goal · derived from the text common to every worker brief"));
+  t.appendChild(el("div",null, d.goal || "(not recorded in the event stream)"));
+  main.appendChild(t);
+
+  const ws = d.workers;
+  const pin = ws.reduce((a,w)=>a+w.prompt_tokens,0);
+  const pout = ws.reduce((a,w)=>a+w.completion_tokens,0);
+  const tot = pin + pout;
+  const spans = teamSpan(ws);
+  main.appendChild(statStrip([
+    ["Agents", ws.length],
+    ["Tokens", d.tokens_recorded ? num(tot) : "n/a"],
+    ["Prompt in", d.tokens_recorded ? num(pin) : "n/a",
+      tot ? Math.round(pin/tot*100)+"%" : ""],
+    ["Tool calls", ws.reduce((a,w)=>a+w.tool_calls,0)],
+    ["Wall span", spans ? fx(spans.span)+"s" : "-"],
+    ["Model time", spans ? fx(spans.busy)+"s" : "-", spans && spans.span
+      ? fx(spans.busy/spans.span,1)+"x parallel" : ""],
+  ]));
+  if(!d.tokens_recorded) main.appendChild(el("p","note",
+    "These workers were checkpointed before token accounting shipped, so no usage counters "+
+    "exist for this team. Step, tool and timing figures below are real."));
+
+  if(d.tokens_recorded){
+    main.appendChild(h2("Tokens per agent", "one request, split by who spent it"));
+    const card = el("div","card");
+    const mx = Math.max(...ws.map(w=>w.prompt_tokens+w.completion_tokens), 1);
+    ws.slice().sort((a,b)=>(b.prompt_tokens+b.completion_tokens)-(a.prompt_tokens+a.completion_tokens))
+      .forEach(w => {
+      const spent = w.prompt_tokens + w.completion_tokens;
+      const row = el("div","brow");
+      const lab = el("div","blab");
+      lab.appendChild(el("span","kindtag", w.agent_id));
+      lab.appendChild(document.createTextNode(" "+w.role));
+      lab.title = w.role;
+      row.appendChild(lab);
+      const track = el("div","btrack");
+      const pb = el("div","bseg p"); pb.style.width=(w.prompt_tokens/mx*100)+"%";
+      pb.title = num(w.prompt_tokens)+" prompt tokens";
+      const cb = el("div","bseg c"); cb.style.width=(w.completion_tokens/mx*100)+"%";
+      cb.title = num(w.completion_tokens)+" completion tokens";
+      track.appendChild(pb); track.appendChild(cb); row.appendChild(track);
+      row.appendChild(el("div","bval", num(spent)+"  "+(tot?Math.round(spent/tot*100):0)+"%"));
+      if(w.run_id) row.onclick = () => { selected={type:"run",kind:"worker",id:w.run_id};
+                                         showMessages=false; renderRail(); renderDetail(); };
+      card.appendChild(row);
+    });
+    const lg = el("div","seglegend");
+    [["#3f6db3","prompt in"],["#3ddc97","completion out"]].forEach(([c,x]) => {
+      const sp=el("span"); const i=el("i"); i.style.background=c;
+      sp.appendChild(i); sp.appendChild(document.createTextNode(x)); lg.appendChild(sp); });
+    card.appendChild(lg);
+    card.appendChild(el("div","note",
+      "Click an agent to open its own checkpoint. The split is dominated by prompt tokens "+
+      "because each agent re-sends its whole conversation every step, so an agent that reads "+
+      "a large file pays for that file again on every later request it makes."));
+    main.appendChild(card);
+  }
+
+  if(spans){
+    main.appendChild(h2("Who was busy when", "shared monotonic clock; agents ran concurrently"));
+    main.appendChild(teamLanes(ws, spans));
+  }
+
+  main.appendChild(h2("Per agent", "acceptance verdict recorded by the team, not by the agent"));
+  const tc = el("div","card"); const tbl = el("table");
+  const hr = el("tr");
+  ["agent","role","status","steps","tools","prompt in","completion out","answer","accepted"]
+    .forEach(x => hr.appendChild(el("th",null,x)));
+  tbl.appendChild(hr);
+  ws.forEach(w => {
+    const tr = el("tr");
+    const c0 = el("td"); c0.appendChild(el("span","kindtag", w.agent_id)); tr.appendChild(c0);
+    tr.appendChild(el("td",null,w.role));
+    const st = el("td"); st.appendChild(el("span","badge "+statusCls(w.status), w.status)); tr.appendChild(st);
+    [w.steps, w.tool_calls, w.tokens_recorded?num(w.prompt_tokens):"n/a",
+     w.tokens_recorded?num(w.completion_tokens):"n/a", num(w.answer_chars)+" ch"]
+      .forEach(x => tr.appendChild(el("td",null,String(x))));
+    const ac = el("td");
+    if(w.accepted === null || w.accepted === undefined) ac.textContent = "not checked";
+    else { const b = el("span","badge "+(w.accepted?"ok":"bad"), w.accepted?"passed":"rejected");
+           b.title = w.verdict || ""; ac.appendChild(b); }
+    tr.appendChild(ac);
+    tbl.appendChild(tr);
+  });
+  tc.appendChild(tbl); main.appendChild(tc);
+
+  if(d.synthesis_run_id){
+    main.appendChild(h2("Synthesis", "the reducer that turned worker evidence into one answer"));
+    const sc = el("div","card");
+    const b = el("button","toggle","Open synthesis run · "+d.synthesis_run_id.slice(0,8)+
+                 " ("+(d.synthesis_status||"unknown")+")");
+    b.onclick = () => { selected={type:"run",kind:"synthesis",id:d.synthesis_run_id};
+                        showMessages=false; renderRail(); renderDetail(); };
+    sc.appendChild(b);
+    sc.appendChild(el("div","note",
+      "The synthesis agent is billed separately and is not counted in the per-agent split "+
+      "above: it is a fourth request, made after every worker returned."));
+    main.appendChild(sc);
+  }
+}
+
+/* Wall span and total model-busy time across the team. Worker timings come from
+   threads in one process, so the monotonic clock is shared and comparable. */
+function teamSpan(workers){
+  const all = workers.flatMap(w => w.model_timings);
+  if(!all.length) return null;
+  const t0 = Math.min(...all.map(x => x.request_started_at));
+  const t1 = Math.max(...all.map(x => x.completed_at));
+  const busy = all.reduce((a,x) => a + (x.completed_at - x.request_started_at), 0);
+  return {t0, t1, span: t1 - t0, busy};
+}
+
+function teamLanes(workers, spans){
+  const card = el("div","card");
+  const span = Math.max(spans.span, 1e-6);
+  workers.forEach(w => {
+    const row = el("div","brow");
+    const lab = el("div","blab"); lab.appendChild(el("span","kindtag", w.agent_id));
+    row.appendChild(lab);
+    const track = el("div","btrack"); track.style.position = "relative";
+    w.model_timings.forEach(x => {
+      const seg = el("div","bseg p");
+      seg.style.position = "absolute";
+      seg.style.left  = ((x.request_started_at - spans.t0)/span*100)+"%";
+      seg.style.width = Math.max((x.completed_at - x.request_started_at)/span*100, 0.5)+"%";
+      seg.title = "step "+x.step+" · "+fx(x.completed_at-x.request_started_at)+"s";
+      track.appendChild(seg);
+      if(x.first_delta_at){
+        const gen = el("div","bseg c");
+        gen.style.position = "absolute";
+        gen.style.left  = ((x.first_delta_at - spans.t0)/span*100)+"%";
+        gen.style.width = Math.max((x.completed_at - x.first_delta_at)/span*100, 0.3)+"%";
+        gen.title = "step "+x.step+" generation "+fx(x.completed_at-x.first_delta_at)+"s";
+        track.appendChild(gen);
+      }
+    });
+    row.appendChild(track);
+    const busy = w.model_timings.reduce((a,x)=>a+(x.completed_at-x.request_started_at),0);
+    row.appendChild(el("div","bval", fx(busy)+"s"));
+    card.appendChild(row);
+  });
+  const lg = el("div","seglegend");
+  [["#3f6db3","waiting on the model (prefill + queue)"],["#3ddc97","generating"]].forEach(([c,x]) => {
+    const sp=el("span"); const i=el("i"); i.style.background=c;
+    sp.appendChild(i); sp.appendChild(document.createTextNode(x)); lg.appendChild(sp); });
+  card.appendChild(lg);
+  card.appendChild(el("div","note",
+    "Total model time "+fx(spans.busy)+"s inside a "+fx(spans.span)+"s wall span. Anything above "+
+    "1.0x means agents were queued against the same local model at once, which is why an "+
+    "individual agent's request can look slow without any single agent being at fault."));
+  return card;
 }
 
 /* Build the cycling loop from checkpoint data: model call N, then any tool call
@@ -1244,8 +1580,14 @@ function renderTrace(d){
                       finished ? finished.status : "in flight"));
   main.appendChild(head);
 
+  // The tracer stores only the digest and length of the task unless it was run
+  // with --include-sensitive-content. Absent text means redacted, not missing.
   const t = el("div","taskline"); t.appendChild(el("div","lbl","User task"));
-  t.appendChild(el("div",null, started.task || "(none)")); main.appendChild(t);
+  t.appendChild(el("div",null, started.task || (started.task_chars
+    ? "redacted by the tracer · "+num(started.task_chars)+" chars, sha256 "+
+      String(started.task_sha256||"").slice(0,16)+"… · re-run with --include-sensitive-content "+
+      "to record the text"
+    : "(none)"))); main.appendChild(t);
 
   // Pair started/finished by (actor, sequence) so an unmatched start is in flight.
   const starts = recs.filter(r => r.kind==="model_request_started");
