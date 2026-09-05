@@ -63,6 +63,10 @@ DEFAULT_STATE_ROOT = Path(".jarvis-v2")
 STALL_SECONDS = 360.0
 POLL_SECONDS = 0.4
 
+# Cap on any model or tool text echoed into the dashboard payload. Those clips,
+# like the full conversation, ship only under the explicit messages=1 opt-in.
+PREVIEW_CHARS = 600
+
 # Mirrors jarvis_v2.agent.AgentLimits defaults. Used only to render guard gauges.
 GUARD_DEFAULTS = {
     "max_steps": 8,
@@ -185,8 +189,12 @@ class Store:
             "age_seconds": age,
             "step": payload.get("step", 0),
             "tool_calls_completed": payload.get("tool_calls_completed", 0),
-            "prompt_tokens": payload.get("prompt_tokens", 0),
-            "completion_tokens": payload.get("completion_tokens", 0),
+            "prompt_tokens": payload.get("prompt_tokens") or 0,
+            "completion_tokens": payload.get("completion_tokens") or 0,
+            # Six checkpoints on disk predate token accounting. They have no
+            # usage keys at all, which is not the same as having spent nothing,
+            # so the client must not fold them into fleet totals as zeroes.
+            "tokens_recorded": payload.get("prompt_tokens") is not None,
             "modified_at": stat.st_mtime,
             "has_timings": bool(payload.get("model_timings")),
         }
@@ -264,6 +272,85 @@ class Store:
             return []
         return records
 
+    @staticmethod
+    def _clip(text: Any) -> str:
+        raw = str(text or "")
+        return raw if len(raw) <= PREVIEW_CHARS else raw[:PREVIEW_CHARS] + "…"
+
+    @classmethod
+    def reconstruct_turns(
+        cls,
+        messages: list[dict[str, Any]],
+        tool_evidence: list[dict[str, Any]],
+        model_timings: list[dict[str, Any]],
+        *,
+        include_content: bool,
+    ) -> list[dict[str, Any]]:
+        """Rebuild the loop's turns from the conversation itself.
+
+        `model_timings` is a recent addition and is absent from most checkpoints
+        on disk, so it cannot be the spine of the journey. The message list can:
+        it is written for every run, and it holds the actual tool arguments and
+        the actual tool results, not just their digests. Timing, when present,
+        is attached as an overlay keyed by step.
+
+        Shape always ships: step order, tool names, tool arguments, result
+        lengths, digests. Model prose and tool output bodies ship only when
+        `include_content` is set, so the journey stays readable on every run
+        while the payload honours the same opt-in the raw conversation does.
+        """
+        clip = cls._clip if include_content else (lambda _text: None)
+        evidence_by_call = {
+            str(item.get("call_id")): item for item in tool_evidence if item.get("call_id")
+        }
+        timing_by_step = {
+            int(item["step"]): item for item in model_timings if item.get("step") is not None
+        }
+        turns: list[dict[str, Any]] = []
+        pending: dict[str, dict[str, Any]] = {}
+        for message in messages:
+            role = message.get("role")
+            if role == "assistant":
+                step = len(turns) + 1
+                calls = []
+                for call in message.get("tool_calls") or []:
+                    function = call.get("function") or {}
+                    call_id = str(call.get("id") or "")
+                    entry = {
+                        "call_id": call_id,
+                        "name": str(function.get("name") or "?"),
+                        "arguments": str(function.get("arguments") or ""),
+                        "result_preview": None,
+                        "result_chars": None,
+                    }
+                    evidence = evidence_by_call.get(call_id)
+                    if evidence is not None:
+                        entry["arguments_sha256"] = evidence.get("arguments_sha256")
+                        entry["result_sha256"] = evidence.get("result_sha256")
+                        entry["result_chars"] = evidence.get("result_chars")
+                    calls.append(entry)
+                    if call_id:
+                        pending[call_id] = entry
+                turns.append(
+                    {
+                        "step": step,
+                        "content_preview": clip(message.get("content")),
+                        "content_chars": len(str(message.get("content") or "")),
+                        "tool_calls": calls,
+                        "timing": timing_by_step.get(step),
+                    }
+                )
+            elif role == "tool":
+                entry = pending.pop(str(message.get("tool_call_id") or ""), None)
+                if entry is not None:
+                    content = str(message.get("content") or "")
+                    entry["result_preview"] = clip(content)
+                    # Trust the stored evidence count when present; fall back to
+                    # the message itself for checkpoints written before it.
+                    if entry.get("result_chars") is None:
+                        entry["result_chars"] = len(content)
+        return turns
+
     def load_run(self, kind: str, run_id: str, *, include_messages: bool) -> dict[str, Any]:
         path = self.checkpoint_path(kind, run_id)
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -280,8 +367,9 @@ class Store:
             "step": payload.get("step", 0),
             "reason": payload.get("reason", ""),
             "final_answer": payload.get("final_answer", ""),
-            "prompt_tokens": payload.get("prompt_tokens", 0),
-            "completion_tokens": payload.get("completion_tokens", 0),
+            "prompt_tokens": payload.get("prompt_tokens") or 0,
+            "completion_tokens": payload.get("completion_tokens") or 0,
+            "tokens_recorded": payload.get("prompt_tokens") is not None,
             "tool_calls_completed": payload.get("tool_calls_completed", 0),
             "consecutive_errors": payload.get("consecutive_errors", 0),
             "repeated_call_count": payload.get("repeated_call_count", 0),
@@ -292,6 +380,12 @@ class Store:
             "guards": payload.get("limits") or GUARD_DEFAULTS,
             "guards_source": (
                 "checkpoint" if payload.get("limits") else "legacy_assumed_defaults"
+            ),
+            "turns": self.reconstruct_turns(
+                messages,
+                payload.get("tool_evidence") or [],
+                payload.get("model_timings") or [],
+                include_content=include_messages,
             ),
             "modified_at": stat.st_mtime,
         }
@@ -430,7 +524,11 @@ class Handler(BaseHTTPRequestHandler):
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         try:
             if path == f"/{self.capability}":
-                self._send_html(PAGE.replace("__CAPABILITY_TOKEN__", self.capability))
+                self._send_html(
+                    PAGE.replace("__CAPABILITY_TOKEN__", self.capability).replace(
+                        "__PREVIEW_CHARS__", str(PREVIEW_CHARS)
+                    )
+                )
             elif path.startswith("/api/") and not self._authorized(query):
                 self._send_json({"error": "capability required"}, status=403)
             elif path == "/api/overview":
@@ -637,6 +735,8 @@ PAGE = r"""<!doctype html>
          background:var(--slate);color:#c7ccdd}
   .badge.ok{background:#12331f;color:var(--live)} .badge.bad{background:#3a1a1c;color:var(--bad)}
   .badge.warn{background:#3a2f13;color:var(--warn)}
+  .badge.mute{background:#24262f;color:var(--dim)}
+  .dot.mute{background:var(--dim)}
   .fid{font:9.5px/1 var(--mono);letter-spacing:.06em;padding:2px 6px;border-radius:3px}
   .fid.trace{background:#2a1f3d;color:#d0b3ff;border:1px solid #3d2d59}
   .fid.ckpt{background:#1b2436;color:#8fb0e8;border:1px solid #27354d}
@@ -699,22 +799,31 @@ function renderFleet(){
   main.appendChild(h2("Token burn", "every run on disk, grouped by role"));
   if(!runs.length){ main.appendChild(el("div","empty","No runs recorded yet.")); return; }
 
-  const pin = runs.reduce((a,r)=>a+r.prompt_tokens,0);
-  const pout = runs.reduce((a,r)=>a+r.completion_tokens,0);
+  // Checkpoints written before token accounting shipped carry no usage keys.
+  // Counting them as zero would understate the fleet average, so they are held
+  // out of every token figure and reported separately rather than dropped.
+  const acct = runs.filter(r => r.tokens_recorded);
+  const unmetered = runs.length - acct.length;
+  const pin = acct.reduce((a,r)=>a+r.prompt_tokens,0);
+  const pout = acct.reduce((a,r)=>a+r.completion_tokens,0);
   main.appendChild(statStrip([
     ["Runs", runs.length],
     ["Tokens burned", num(pin+pout)],
     ["Prompt in", num(pin), (pin+pout?Math.round(pin/(pin+pout)*100):0)+"%"],
     ["Completion out", num(pout), (pin+pout?Math.round(pout/(pin+pout)*100):0)+"%"],
-    ["Avg / run", num(Math.round((pin+pout)/runs.length))],
+    ["Avg / metered run", acct.length ? num(Math.round((pin+pout)/acct.length)) : "n/a"],
     ["Traces", overview.traces.length],
   ]));
+  if(unmetered) main.appendChild(el("p","note",
+    unmetered+" of "+runs.length+" checkpoints predate token accounting and carry no usage "+
+    "counters at all. They are excluded from every figure on this page rather than counted "+
+    "as zero-token runs."));
 
   const byKind = {};
-  runs.forEach(r => { const k = byKind[r.kind] = byKind[r.kind] || {n:0,p:0,c:0,tools:0,steps:0};
+  acct.forEach(r => { const k = byKind[r.kind] = byKind[r.kind] || {n:0,p:0,c:0,tools:0,steps:0};
     k.n++; k.p+=r.prompt_tokens; k.c+=r.completion_tokens; k.tools+=r.tool_calls_completed; k.steps+=r.step; });
 
-  main.appendChild(h2("Per role", "run = solo agent, worker = team member, synthesis = the reducer"));
+  main.appendChild(h2("Per role", "metered runs only · run = solo agent, worker = team member, synthesis = the reducer"));
   const kc = el("div","card"); const kt = el("table");
   const kh = el("tr"); ["role","runs","steps","tools","prompt in","completion out","total","avg / run"]
     .forEach(x => kh.appendChild(el("th",null,x))); kt.appendChild(kh);
@@ -728,9 +837,9 @@ function renderFleet(){
   kc.appendChild(kt); main.appendChild(kc);
 
   main.appendChild(h2("Heaviest requests", "top 12 by tokens burned"));
-  const max = Math.max(...runs.map(r => r.prompt_tokens + r.completion_tokens), 1);
+  const max = Math.max(...acct.map(r => r.prompt_tokens + r.completion_tokens), 1);
   const lc = el("div","card");
-  runs.slice().sort((a,b)=>(b.prompt_tokens+b.completion_tokens)-(a.prompt_tokens+a.completion_tokens))
+  acct.slice().sort((a,b)=>(b.prompt_tokens+b.completion_tokens)-(a.prompt_tokens+a.completion_tokens))
       .slice(0,12).forEach(r => {
     const tot = r.prompt_tokens + r.completion_tokens;
     const row = el("div","brow");
@@ -776,8 +885,18 @@ function renderRail(){
   overview.runs.forEach(r => rl.appendChild(railItem({
     type:"run", id:r.run_id, kind:r.kind, task:r.task,
     status:r.status, liveness:r.liveness,
-    meta:`step ${r.step} · ${r.tool_calls_completed} tools · ${num(r.prompt_tokens+r.completion_tokens)} tok`
+    meta:`step ${r.step} · ${r.tool_calls_completed} tools · ${r.tokens_recorded
+      ? num(r.prompt_tokens+r.completion_tokens)+" tok" : "tokens not recorded"}`
   })));
+}
+
+/* Status classes. "cancelled" is an owner-initiated stop, not a failure: giving
+   it the same red as an error would overstate how many runs actually broke. */
+function statusCls(status){
+  if(status === "completed") return "ok";
+  if(status === "running") return "warn";
+  if(status === "cancelled") return "mute";
+  return "bad";
 }
 
 function railItem(o){
@@ -785,7 +904,7 @@ function railItem(o){
   if(selected && selected.id===o.id) b.classList.add("sel");
   const top = el("div","top");
   top.appendChild(el("span","dot "+(o.liveness==="live"?"live":o.liveness==="stalled"?"warn":
-                     o.status==="completed"?"":"bad")));
+                     o.status==="completed"?"":statusCls(o.status))));
   top.appendChild(el("span","kindtag"+(o.type==="trace"?" trace":""), o.kind));
   top.appendChild(el("span","meta", o.id.slice(0,8)));
   b.appendChild(top);
@@ -825,7 +944,7 @@ function renderRun(d){
   const main = $("main"); main.innerHTML = "";
   const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px";
   head.appendChild(el("span","fid ckpt","CHECKPOINT FIDELITY · one sample per step"));
-  head.appendChild(el("span","badge "+(d.status==="completed"?"ok":d.status==="running"?"warn":"bad"), d.status));
+  head.appendChild(el("span","badge "+statusCls(d.status), d.status));
   if(d.liveness==="stalled") head.appendChild(el("span","badge warn","stalled · checkpoint not moving"));
   if(d.liveness==="live") head.appendChild(el("span","badge ok","live"));
   main.appendChild(head);
@@ -840,11 +959,28 @@ function renderRun(d){
     ["Steps", d.step, "/ "+d.guards.max_steps],
     ["Model calls", tim.length],
     ["Tool calls", d.tool_calls_completed],
-    ["Tokens", num(tot), "/ "+num(d.guards.max_total_tokens)],
+    d.tokens_recorded ? ["Tokens", num(tot), "/ "+num(d.guards.max_total_tokens)]
+                      : ["Tokens", "n/a", "not recorded"],
     ["Run span", fx(wall)+"s"],
     ["Decode", gen>0 ? fx(d.completion_tokens/gen,1)+" tok/s" : "-"],
   ]));
+  if(!d.tokens_recorded) main.appendChild(el("p","note",
+    "This checkpoint was written before token accounting shipped, so it carries no usage "+
+    "counters. The step and tool figures above are real; the token budget gauge below is not "+
+    "meaningful for this run."));
 
+  if(d.tokens_recorded) main.appendChild(tokenBurnCard(d, tot));
+
+  main.appendChild(h2("Request journey", "user → model → tool → model → output"));
+  main.appendChild(journeyFromCheckpoint(d));
+  renderRunTail(main, d, tim, wall);
+}
+
+/* Run-level token burn. Only called when the checkpoint actually carries usage
+   counters: an all-zero bar would read as a free run rather than an unmetered
+   one. */
+function tokenBurnCard(d, tot){
+  const main = document.createDocumentFragment();
   main.appendChild(h2("Token burn", "run totals; the per-step split is not written to the checkpoint"));
   const tk = el("div","card");
   const brow = el("div","brow");
@@ -871,9 +1007,10 @@ function renderRun(d){
       "for the exact per-request breakdown."));
   }
   main.appendChild(tk);
+  return main;
+}
 
-  main.appendChild(h2("Request journey", "user → model → tool → model → output"));
-  main.appendChild(journeyFromCheckpoint(d));
+function renderRunTail(main, d, tim, wall){
 
   if(tim.length){
     main.appendChild(h2("Timeline", "normalized to the first request; monotonic clock"));
@@ -907,20 +1044,22 @@ function renderRun(d){
    recorded at that step, then the return edge into the next model call. */
 function journeyFromCheckpoint(d){
   const wrap = el("div","cycle");
-  const toolsByStep = {};
-  d.tool_evidence.forEach(t => { (toolsByStep[t.step] = toolsByStep[t.step] || []).push(t); });
+  const turns = d.turns || [];
 
   const start = el("div","node"); const sc = el("div","nodecard");
   const sh = el("div","nodehead"); sh.appendChild(el("span","nodetitle","USER TASK"));
-  sc.appendChild(sh); sc.appendChild(el("div","pre", d.task||"(none)"));
+  const task = d.task || "(none)";
+  sc.appendChild(sh);
+  sc.appendChild(el("div","pre", task.length > 400 ? task.slice(0,400)+"…" : task));
   start.appendChild(sc); wrap.appendChild(start);
 
-  d.model_timings.forEach((t, i) => {
-    wrap.appendChild(modelNode(t, i, d.model_timings));
-    const tools = toolsByStep[t.step] || [];
-    const resends = d.model_timings.length - 1 - i;
-    tools.forEach(tool => wrap.appendChild(toolNode(tool, resends)));
-    if(tools.length && i < d.model_timings.length-1)
+  // The conversation is the spine. Timing is an overlay, present only on runs
+  // written after model_timings shipped.
+  turns.forEach((turn, i) => {
+    wrap.appendChild(turnNode(turn));
+    const resends = turns.length - 1 - i;
+    turn.tool_calls.forEach(call => wrap.appendChild(toolNode(call, resends)));
+    if(turn.tool_calls.length && i < turns.length-1)
       wrap.appendChild(el("div","retedge","tool result appended to conversation, loop continues"));
   });
 
@@ -934,17 +1073,27 @@ function journeyFromCheckpoint(d){
   return wrap;
 }
 
-function modelNode(t, i){
+/* One turn of the loop, reconstructed from the conversation. The timing bar
+   appears only when this run recorded model_timings. */
+function turnNode(turn){
   const n = el("div","node model"); const c = el("div","nodecard");
   const h = el("div","nodehead");
   const title = el("span","nodetitle"); title.appendChild(el("b","","MODEL REQUEST "));
-  title.appendChild(document.createTextNode("· step "+t.step));
+  title.appendChild(document.createTextNode("· step "+turn.step));
   h.appendChild(title);
-  const total = t.completed_at - t.request_started_at;
-  h.appendChild(el("span","ms", fx(total)+"s"));
+  const t = turn.timing;
+  h.appendChild(el("span","ms", t ? fx(t.completed_at-t.request_started_at)+"s" : "no timing recorded"));
   c.appendChild(h);
-  c.appendChild(segbar(t));
-  c.appendChild(segLegend(t));
+  if(t){ c.appendChild(segbar(t)); c.appendChild(segLegend(t)); }
+  const decided = turn.tool_calls.length
+    ? "asked for "+turn.tool_calls.map(x=>x.name).join(", ")
+    : (turn.content_chars ? "answered in "+num(turn.content_chars)+" chars" : "returned nothing");
+  const kv = el("div","kv");
+  kv.appendChild(el("div","k","outcome")); kv.appendChild(el("div",null,decided));
+  c.appendChild(kv);
+  if(turn.content_preview) c.appendChild(el("div","pre", turn.content_preview));
+  else if(turn.content_chars) c.appendChild(el("div","note","Model prose withheld. Use the "+
+    "conversation toggle above to load it."));
   n.appendChild(c); return n;
 }
 
@@ -981,16 +1130,22 @@ function toolNode(t, resends){
   const n = el("div","node tool"); const c = el("div","nodecard");
   const h = el("div","nodehead");
   const title = el("span","nodetitle"); title.appendChild(el("b","","TOOL "));
-  title.appendChild(document.createTextNode("· "+t.tool));
+  title.appendChild(document.createTextNode("· "+(t.name||t.tool)));
   h.appendChild(title);
-  h.appendChild(el("span","ms", num(t.result_chars)+" chars returned"));
+  h.appendChild(el("span","ms", t.result_chars===null||t.result_chars===undefined
+    ? "no result recorded" : num(t.result_chars)+" chars returned"));
   c.appendChild(h);
   const kv = el("div","kv");
-  const row = (k,v) => { kv.appendChild(el("div","k",k)); kv.appendChild(el("div",null,v)); };
+  const row = (k,v) => { if(v===undefined||v===null||v==="") return;
+    kv.appendChild(el("div","k",k)); kv.appendChild(el("div",null,String(v))); };
+  row("arguments", t.arguments);
   row("call id", t.call_id);
   row("arguments sha256", t.arguments_sha256);
   row("result sha256", t.result_sha256);
   c.appendChild(kv);
+  if(t.result_preview) c.appendChild(el("div","pre", t.result_preview));
+  else if(t.result_chars) c.appendChild(el("div","note","Tool output withheld. Use the "+
+    "conversation toggle above to load it."));
   const est = Math.round((t.result_chars||0)/4);
   if(est > 200 && resends > 0){
     const w = el("div","note");
@@ -999,8 +1154,11 @@ function toolNode(t, resends){
                     (resends===1?"":"s")+": ~"+num(est*resends)+" prompt tokens of downstream cost.";
     c.appendChild(w);
   }
-  c.appendChild(el("div","note","This evidence row stores digests and lengths. The local checkpoint "+
-                                "conversation may contain raw tool output; use the protected conversation toggle deliberately."));
+  if(t.result_preview)
+    c.appendChild(el("div","note","The body above is the checkpoint's own stored tool output, "+
+                                  "clipped to __PREVIEW_CHARS__ characters. The digests are the "+
+                                  "integrity record; the untruncated text is in the conversation "+
+                                  "block below."));
   n.appendChild(c); return n;
 }
 
@@ -1062,7 +1220,7 @@ function eventTable(events){
   events.slice().reverse().forEach(e => {
     const r = el("tr");
     r.appendChild(el("td",null,String(e.sequence)));
-    const st = el("td"); st.appendChild(el("span","badge "+(e.status==="completed"?"ok":e.status==="running"?"":"bad"), e.status));
+    const st = el("td"); st.appendChild(el("span","badge "+(e.status==="running"?"":statusCls(e.status)), e.status));
     r.appendChild(st);
     r.appendChild(el("td",null,String(e.step)));
     r.appendChild(el("td",null,e.reason||""));
@@ -1082,7 +1240,7 @@ function renderTrace(d){
 
   const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap";
   head.appendChild(el("span","fid trace","TRACE FIDELITY · every request and tool bracketed"));
-  head.appendChild(el("span","badge "+(finished? (finished.status==="completed"?"ok":"bad") : "warn"),
+  head.appendChild(el("span","badge "+(finished ? statusCls(finished.status) : "warn"),
                       finished ? finished.status : "in flight"));
   main.appendChild(head);
 
@@ -1445,10 +1603,13 @@ def main() -> int:
     # Loopback only. Never 0.0.0.0: this exposes prompts and model output.
     server = Server(("127.0.0.1", args.port), handler)
     url = f"http://127.0.0.1:{args.port}/{handler.capability}"
+    # The URL carries the one-time capability, so it has to reach the operator
+    # before serve_forever() blocks. stdout is block-buffered when redirected,
+    # which would otherwise hide the banner for the life of the process.
     print(f"Jarvis V2 pipeline dashboard: {url}")
     print(f"  watching  {root}")
     print(f"  model api {model_config.base_url}")
-    print("  read-only: no run is ever written, locked, or resumed from here")
+    print("  read-only: no run is ever written, locked, or resumed from here", flush=True)
     if args.open:
         import webbrowser
 
