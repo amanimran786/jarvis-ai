@@ -95,8 +95,8 @@ behavior.
 - The coordinator implements bounded fan-out, typed evidence handoff,
   deterministic acceptance verification, and synthesis. Workers do not yet
   dynamically reassign work or hold peer-to-peer conversations.
-- The client is non-streaming, so time to first token and decode throughput are
-  not yet measured separately from end-to-end latency.
+- The client records streaming request timing, but MLX-LM may buffer tool calls;
+  time to first delivered delta is not raw first-decoder-token latency.
 - Cancellation is checked between model turns; an in-flight local HTTP request
   can run until its bounded request timeout.
 - Voice, memory, browser, case management, UI, and packaged-app parity remain
@@ -129,16 +129,16 @@ pass before the team is `completed`.
 
 #### Strict 1/2/4 benchmark
 
-Raw artifact: `.jarvis-v2/benchmarks/benchmark-1788522378.json` (local, ignored,
+Raw artifact: `.jarvis-v2/benchmarks/benchmark-1788565646.json` (local, ignored,
 mode `0600`). The sanitized evidence record committed for review is
 `docs/benchmarks/v2-concurrency-2026-09-04.json`. One resident
 `mlx-community/Qwen3-8B-4bit` model served all runs.
 
-| Workers | Verified | End-to-end | Worker-lifetime overlap | Prompt / completion tokens | Peak server RSS | Malformed calls |
-|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 1/1 | 9.13 s | n/a | 2,205 / 284 | 255,803,392 B | 0% |
-| 2 | 2/2 | 11.84 s | 6.81 s | 4,242 / 464 | 262,291,456 B | 0% |
-| 4 | 4/4 | 21.99 s | 12.50 s | 8,284 / 861 | 277,807,104 B | 0% |
+| Workers | Verified | End-to-end | Peak in-flight model requests | First delivered delta range | Worker completion tok/gen s | Peak server RSS | Malformed calls |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 1/1 | 6.51 s | 1 | 0.38–0.98 s | 60.00 | 175,177,728 B | 0% |
+| 2 | 2/2 | 9.85 s | 2 | 0.68–1.35 s | 54.53 | 218,218,496 B | 0% |
+| 4 | 4/4 | 17.40 s | 4 | 0.65–2.59 s | 28.55 | 252,870,656 B | 0% |
 
 Each worker had to return JSON exactly equal to the trusted Git-status payload,
 include its unique marker, execute exactly one call matching the bound Git tool,
@@ -148,7 +148,10 @@ invalidated before commit when review found that independently checked markers
 and digests allowed a marker-only answer. The structured-equality regression now
 prevents that false positive. The benchmark exits nonzero for partial synthesis,
 wrong content, missing markers, failed verification, malformed calls, or zero
-worker-lifetime overlap above one worker.
+worker-lifetime overlap above one worker. The streaming rerun also exits nonzero
+when worker timing evidence is missing or peak concurrent in-flight model
+requests do not reach the requested concurrency. These timings prove concurrent
+requests reached MLX-LM; they do not prove simultaneous hardware decoding.
 
 #### Heterogeneous research team
 
@@ -160,9 +163,9 @@ that dynamic reassignment and deeper multi-agent tests remain future work.
 
 ### Next experiment
 
-Add streaming telemetry and deadline-aware in-flight cancellation, then run
-repeated soak and adversarial-evidence trials. Desktop packaging begins only
-after those runtime gates and the full repository suite pass.
+Add deadline-aware in-flight cancellation, then run repeated soak and
+adversarial-evidence trials. Desktop packaging begins only after those runtime
+gates and the full repository suite pass.
 
 ### Integration gate outcome
 
@@ -202,6 +205,39 @@ repository gate then passed: 3,830 passed, 8 skipped, 0 failed.
   `assets/v2/jarvis-v2.icns` with `iconutil` and `file`.
 - The icon will not appear on the Desktop until a real V2 app package passes
   the packaging and runtime verification gate.
+
+### Local pipeline dashboard audit
+
+Claude created a V2-only checkpoint and sub-step dashboard. Codex then treated
+the first live rendering as an adversarial review target. The initial
+three-worker trace completed, but the audit found that the observer could probe
+an arbitrary endpoint, followed redirects, wrote raw task/model/tool previews,
+used creation order instead of assignment identity, assumed guard values, and
+could read through a symlinked state source.
+
+The hardened observer now:
+
+- validates the model endpoint through the V2 loopback-only configuration and
+  rejects redirects
+- binds to `127.0.0.1` and requires a random per-process capability on every API
+- defaults traces to hashes, counts, timing, tool names, and actor identity
+- stores raw trace content only with `--include-sensitive-content`
+- maps model and tool events to exact assignment IDs and a separate synthesis ID
+- persists each run's actual limits and labels older limits as assumed defaults
+- rejects state directories that resolve outside the selected dashboard root
+- creates no trace when model readiness fails and emits a terminal failure if a
+  traced execution crashes
+- owns its V2 file/Git tool contracts without importing the retired V1 registry
+
+A post-fix live demo produced 23 events. All three workers completed their bound
+read-only tools, synthesis completed, trace mode was `0600`, and the default file
+contained no raw task, model preview, tool arguments, tool results, or error
+messages. This verifies a trustworthy foreground developer observer; it is not
+yet approval to package or run the dashboard as an always-on desktop service.
+Focused V2, install, and observability checks passed 58 tests. The exact full
+repository gate passed 3,850 tests with 8 skipped. It retained one warning from
+a retired-V1 background task thread observing a task record after test cleanup;
+that warning is recorded as legacy debt rather than attributed to V2.
 
 ## LinkedIn draft scaffold
 

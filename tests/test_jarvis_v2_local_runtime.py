@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from jarvis_v2.agent import AgentLimits, AgentState, LocalAgentLoop
+from jarvis_v2.__main__ import _result_payload
 from jarvis_v2.config import LocalConfigurationError, LocalModelConfig
 from jarvis_v2.model import LocalMLXClient, LocalModelError, ModelTurn
 from jarvis_v2.tools import LocalToolError, ReadOnlyLocalTools
@@ -91,6 +92,31 @@ def test_agent_executes_one_validated_tool_then_finishes(tmp_path: Path):
     events = result.event_log_path.read_text(encoding="utf-8").splitlines()
     assert len(events) == 3
     assert [json.loads(line)["sequence"] for line in events] == [1, 2, 3]
+
+
+def test_cli_payload_serializes_tool_evidence_and_model_timings(tmp_path: Path):
+    result = LocalAgentLoop(
+        model=FakeModel(
+            [
+                tool_turn("git", {"action": "status"}),
+                ModelTurn(
+                    content="Done.",
+                    tool_calls=(),
+                    request_started_at=1.0,
+                    first_delta_at=2.0,
+                    terminal_at=3.0,
+                    completed_at=4.0,
+                ),
+            ]
+        ),
+        execute_tool=lambda name, arguments: "clean",
+        state_dir=tmp_path,
+    ).run("Inspect")
+
+    encoded = json.dumps(_result_payload(result))
+
+    assert '"tool": "git"' in encoded
+    assert '"request_started_at": 1.0' in encoded
 
 
 def test_agent_blocks_after_repeated_invalid_calls(tmp_path: Path):
@@ -483,12 +509,12 @@ def test_local_model_completion_rejects_wrong_model_identity():
     class CompletionHandler(BaseHTTPRequestHandler):
         def do_POST(self):
             self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
             self.wfile.write(
-                b'{"model":"mlx-community/Different-Model",'
-                b'"choices":[{"finish_reason":"stop",'
-                b'"message":{"content":"wrong model","tool_calls":[]}}],'
-                b'"usage":{"prompt_tokens":1,"completion_tokens":1}}'
+                b'data: {"model":"mlx-community/Different-Model",'
+                b'"choices":[{"finish_reason":null,'
+                b'"delta":{"content":"wrong model"}}]}\n\n'
             )
 
         def log_message(self, format, *args):
@@ -507,6 +533,252 @@ def test_local_model_completion_rejects_wrong_model_identity():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_local_model_streams_content_tools_usage_and_timing():
+    requests: list[dict] = []
+    model = LocalModelConfig().model
+
+    class StreamingHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers["Content-Length"])
+            requests.append(json.loads(self.rfile.read(length)))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            events = [
+                {"model": model, "choices": [{"finish_reason": None, "delta": {"role": "assistant"}}]},
+                {"model": model, "choices": [{"finish_reason": None, "delta": {"content": "LOCAL"}}]},
+                {"model": model, "choices": [{"finish_reason": None, "delta": {"content": "_OK"}}]},
+                {
+                    "model": model,
+                    "choices": [
+                        {
+                            "finish_reason": None,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "git",
+                                            "arguments": '{"action":',
+                                        },
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                },
+                {
+                    "model": model,
+                    "choices": [
+                        {
+                            "finish_reason": "tool_calls",
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "function": {"arguments": '"status"}'},
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                },
+                {
+                    "model": model,
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 7,
+                        "completion_tokens": 3,
+                        "total_tokens": 10,
+                    },
+                },
+            ]
+            body = "".join(
+                f"data: {json.dumps(event)}\n\n" for event in events
+            ) + ": keepalive\n\ndata: [DONE]\n\n"
+            self.wfile.write(body.encode("utf-8"))
+            self.wfile.flush()
+
+        def log_message(self, format, *args):
+            return
+
+    ticks = iter((10.0, 10.25, 10.8, 11.0))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), StreamingHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1"),
+        clock=lambda: next(ticks),
+    )
+
+    try:
+        turn = client.complete([{"role": "user", "content": "test"}], [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert requests[0]["stream"] is True
+    assert requests[0]["stream_options"] == {"include_usage": True}
+    assert turn.content == "LOCAL_OK"
+    assert turn.tool_calls[0]["function"]["name"] == "git"
+    assert turn.finish_reason == "tool_calls"
+    assert (turn.prompt_tokens, turn.completion_tokens) == (7, 3)
+    assert turn.time_to_first_delta_seconds == pytest.approx(0.25)
+    assert turn.request_seconds == pytest.approx(1.0)
+    assert turn.generation_seconds == pytest.approx(0.55)
+
+
+def test_local_model_rejects_stream_without_done_marker():
+    model = LocalModelConfig().model
+
+    class TruncatedHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            event = {
+                "model": model,
+                "choices": [{"finish_reason": None, "delta": {"content": "partial"}}],
+            }
+            self.wfile.write(f"data: {json.dumps(event)}\n\n".encode("utf-8"))
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), TruncatedHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    )
+
+    try:
+        with pytest.raises(LocalModelError, match="completion marker"):
+            client.complete([{"role": "user", "content": "test"}], [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize(
+    ("usage", "message"),
+    [
+        (None, "valid token usage"),
+        (
+            {"prompt_tokens": True, "completion_tokens": 1, "total_tokens": 2},
+            "invalid token usage",
+        ),
+        (
+            {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 3},
+            "inconsistent token usage",
+        ),
+    ],
+)
+def test_local_model_rejects_missing_or_invalid_stream_usage(usage, message):
+    model = LocalModelConfig().model
+
+    class UsageHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            terminal = {
+                "model": model,
+                "choices": [{"finish_reason": "stop", "delta": {"content": "ok"}}],
+            }
+            body = f"data: {json.dumps(terminal)}\n\n"
+            if usage is not None:
+                body += f"data: {json.dumps({'model': model, 'choices': [], 'usage': usage})}\n\n"
+            body += "data: [DONE]\n\n"
+            self.wfile.write(body.encode("utf-8"))
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), UsageHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    )
+
+    try:
+        with pytest.raises(LocalModelError, match=message):
+            client.complete([{"role": "user", "content": "test"}], [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_local_model_rejects_done_without_terminal_reason():
+    model = LocalModelConfig().model
+
+    class MissingTerminalHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            events = [
+                {
+                    "model": model,
+                    "choices": [{"finish_reason": None, "delta": {"content": "partial"}}],
+                },
+                {
+                    "model": model,
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                },
+            ]
+            body = "".join(
+                f"data: {json.dumps(event)}\n\n" for event in events
+            ) + "data: [DONE]\n\n"
+            self.wfile.write(body.encode("utf-8"))
+
+        def log_message(self, format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), MissingTerminalHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = LocalMLXClient(
+        LocalModelConfig(base_url=f"http://127.0.0.1:{server.server_port}/v1")
+    )
+
+    try:
+        with pytest.raises(LocalModelError, match="terminal reason"):
+            client.complete([{"role": "user", "content": "test"}], [])
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_agent_cancellation_after_model_return_prevents_tool_execution(tmp_path: Path):
+    cancelled = threading.Event()
+    executed: list[str] = []
+
+    class CancellingModel:
+        def complete(self, messages, tools):
+            cancelled.set()
+            return tool_turn("git", {"action": "status"})
+
+    result = LocalAgentLoop(
+        model=CancellingModel(),
+        execute_tool=lambda name, arguments: executed.append(name) or "unused",
+        state_dir=tmp_path,
+        is_cancelled=cancelled.is_set,
+    ).run("Inspect")
+
+    assert result.status == "cancelled"
+    assert result.reason == "cancelled by owner"
+    assert executed == []
 
 
 def test_agent_rejects_truncated_model_answer(tmp_path: Path):

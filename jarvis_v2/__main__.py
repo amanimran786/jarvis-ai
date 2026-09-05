@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 from pathlib import Path
 
-from .agent import AgentLimits, LocalAgentLoop
+from .agent import AgentLimits, AgentResult, LocalAgentLoop
 from .config import LocalModelConfig
 from .model import LocalMLXClient
 from .tools import ReadOnlyLocalTools
+
+
+def _result_payload(result: AgentResult) -> dict:
+    payload = asdict(result)
+    payload["checkpoint_path"] = str(result.checkpoint_path)
+    payload["event_log_path"] = str(result.event_log_path)
+    return payload
 
 
 def main() -> int:
@@ -36,12 +44,7 @@ def main() -> int:
         limits=AgentLimits(max_steps=args.max_steps),
     )
     result = loop.run(args.task, resume_run_id=args.resume)
-    payload = {
-        **result.__dict__,
-        "checkpoint_path": str(result.checkpoint_path),
-        "event_log_path": str(result.event_log_path),
-    }
-    print(json.dumps(payload, indent=2))
+    print(json.dumps(_result_payload(result), indent=2))
     return 0 if result.status == "completed" else 2
 
 

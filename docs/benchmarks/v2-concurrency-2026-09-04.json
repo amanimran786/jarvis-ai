@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "created_at": "2026-09-04T11:45:35.375692+00:00",
+  "schema_version": 2,
+  "created_at": "2026-09-04T23:46:52.656620+00:00",
   "hardware": {
     "system": "Apple M4 Pro",
     "unified_memory_gb": 48
@@ -10,7 +10,8 @@
     "mlx_lm_version": "0.31.3",
     "endpoint": "http://127.0.0.1:8080/v1",
     "cloud_inference": false,
-    "api_key": false
+    "api_key": false,
+    "streaming": true
   },
   "acceptance_gate": {
     "required_team_status": "completed",
@@ -19,52 +20,119 @@
     "unique_answer_marker_required": true,
     "synthesis_required": true,
     "maximum_malformed_tool_call_rate": 0.0,
-    "positive_full_overlap_required_above_one_worker": true
+    "peak_concurrent_worker_model_requests_must_equal_concurrency": true
   },
+  "timing_note": "Time to first delivered delta measures the first semantic SSE delta emitted by MLX-LM, not the first raw decoder token. Tool calls may be buffered by the server.",
   "levels": [
     {
       "concurrency": 1,
       "team_status": "completed",
       "workers_verified": 1,
       "workers_total": 1,
-      "elapsed_seconds": 9.130633624999973,
+      "elapsed_seconds": 6.507722292000835,
       "worker_lifetime_overlap_seconds": 0.0,
-      "prompt_tokens": 2205,
-      "completion_tokens": 284,
-      "peak_model_process_rss_bytes": 255803392,
+      "peak_concurrent_worker_model_requests": 1,
+      "time_to_first_delivered_delta_seconds": [
+        0.9818171249935403,
+        0.3809475000016391
+      ],
+      "model_request_seconds": [
+        1.005794541000796,
+        1.9073585830046795
+      ],
+      "generation_seconds": [
+        0.023893333003798034,
+        1.526228832997731
+      ],
+      "worker_completion_tokens_per_generation_second": 59.995271366184866,
+      "prompt_tokens": 2015,
+      "completion_tokens": 177,
+      "peak_model_process_rss_bytes": 175177728,
       "malformed_tool_call_rate": 0.0,
-      "team_run_id": "13f57282153a443a98fcfcb5babc54df"
+      "team_run_id": "1f60be47b1cd4f5a81c916e0230e469e"
     },
     {
       "concurrency": 2,
       "team_status": "completed",
       "workers_verified": 2,
       "workers_total": 2,
-      "elapsed_seconds": 11.841428749999977,
-      "worker_lifetime_overlap_seconds": 6.8088835409998865,
-      "prompt_tokens": 4242,
-      "completion_tokens": 464,
-      "peak_model_process_rss_bytes": 262291456,
+      "elapsed_seconds": 9.84858591700322,
+      "worker_lifetime_overlap_seconds": 3.8277495829970576,
+      "peak_concurrent_worker_model_requests": 2,
+      "time_to_first_delivered_delta_seconds": [
+        1.3457007909964886,
+        0.6757095420034602,
+        1.3461450000031618,
+        0.6750668329987093
+      ],
+      "model_request_seconds": [
+        1.3801486660013325,
+        2.3471670420040027,
+        1.3805570409967913,
+        2.3462145000012242
+      ],
+      "generation_seconds": [
+        0.03434700000070734,
+        1.6714060829981463,
+        0.03435091599385487,
+        1.6710284169967053
+      ],
+      "worker_completion_tokens_per_generation_second": 54.52734673334277,
+      "prompt_tokens": 3847,
+      "completion_tokens": 313,
+      "peak_model_process_rss_bytes": 218218496,
       "malformed_tool_call_rate": 0.0,
-      "team_run_id": "2abad891bb654096942e43d6d0ff0e85"
+      "team_run_id": "5f57594944894b9692e445bda2cf22bb"
     },
     {
       "concurrency": 4,
       "team_status": "completed",
       "workers_verified": 4,
       "workers_total": 4,
-      "elapsed_seconds": 21.985915958000078,
-      "worker_lifetime_overlap_seconds": 12.498304665999967,
-      "prompt_tokens": 8284,
-      "completion_tokens": 861,
-      "peak_model_process_rss_bytes": 277807104,
+      "elapsed_seconds": 17.400429584005906,
+      "worker_lifetime_overlap_seconds": 6.793065291996754,
+      "peak_concurrent_worker_model_requests": 4,
+      "time_to_first_delivered_delta_seconds": [
+        2.482689958997071,
+        0.6519904579981812,
+        2.5934882080036914,
+        1.2561045409966027,
+        2.482784541003639,
+        0.6520065829972737,
+        2.594296041999769,
+        1.2554359580026357
+      ],
+      "model_request_seconds": [
+        2.5430545839990373,
+        4.1644425409976975,
+        2.631227083002159,
+        4.164469666000514,
+        2.5393666660020244,
+        4.161717416995089,
+        2.6324471670013736,
+        4.1641220830060774
+      ],
+      "generation_seconds": [
+        0.060277791002590675,
+        3.512394666999171,
+        0.0377018750004936,
+        2.908068208998884,
+        0.05647891699481988,
+        3.5095928750015446,
+        0.038041708001401275,
+        2.908473542003776
+      ],
+      "worker_completion_tokens_per_generation_second": 28.547245449943524,
+      "prompt_tokens": 7522,
+      "completion_tokens": 537,
+      "peak_model_process_rss_bytes": 252870656,
       "malformed_tool_call_rate": 0.0,
-      "team_run_id": "68a0b74da52e4a1d963a61e28b14bbbf"
+      "team_run_id": "cc91d34df4dc4dcf88ad438535afe6d5"
     }
   ],
   "unmeasured": [
-    "time to first token",
-    "decode tokens per second",
+    "raw first decoder-token latency",
+    "simultaneous hardware decoding",
     "long-duration stability",
     "in-flight cancellation latency"
   ]

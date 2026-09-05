@@ -7,8 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-import tool_registry
-
 
 class LocalToolError(RuntimeError):
     """Raised when a proposed local tool call is invalid or unsafe."""
@@ -16,47 +14,95 @@ class LocalToolError(RuntimeError):
 
 READ_ONLY_TOOLS = ("file", "git")
 
+_TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+    "file": {
+        "description": "Read one UTF-8 text file inside the configured workspace.",
+        "properties": {
+            "action": {"type": "string", "enum": ["read"]},
+            "path": {"type": "string", "maxLength": 4096},
+        },
+        "required": ["action", "path"],
+    },
+    "git": {
+        "description": "Inspect the configured Git workspace without modifying it.",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["status", "diff", "log", "branch", "show"],
+            },
+            "n": {"type": "integer", "minimum": 1, "maximum": 50},
+            "ref": {"type": "string", "maxLength": 200},
+        },
+        "required": ["action"],
+    },
+}
+
 
 def model_tool_schemas() -> list[dict[str, Any]]:
-    """Expose only the read-only portions of the existing typed registry."""
-    schemas: list[dict[str, Any]] = []
-    for name in READ_ONLY_TOOLS:
-        spec = tool_registry.get_tool_spec(name)
-        if spec is None:
-            continue
-        properties: dict[str, Any] = {}
-        for arg_name, meta in spec.args_schema.items():
-            schema_type = {
-                "bool": "boolean",
-                "int": "integer",
-                "float": "number",
-            }.get(meta.get("type", "string"), meta.get("type", "string"))
-            prop: dict[str, Any] = {"type": schema_type}
-            choices = meta.get("choices")
-            if choices is not None:
-                allowed = list(choices)
-                if name == "file" and arg_name == "action":
-                    allowed = ["read"]
-                if name == "git" and arg_name == "action":
-                    allowed = ["status", "diff", "log", "branch", "show"]
-                prop["enum"] = allowed
-            properties[arg_name] = prop
-        schemas.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": spec.description,
-                    "parameters": {
-                        "type": "object",
-                        "properties": properties,
-                        "required": list(spec.required),
-                        "additionalProperties": False,
-                    },
+    """Expose only the self-contained V2 read-only tool contract."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": _TOOL_SCHEMAS[name]["description"],
+                "parameters": {
+                    "type": "object",
+                    "properties": _TOOL_SCHEMAS[name]["properties"],
+                    "required": _TOOL_SCHEMAS[name]["required"],
+                    "additionalProperties": False,
                 },
-            }
+            },
+        }
+        for name in READ_ONLY_TOOLS
+    ]
+
+
+def _validate_args(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if name not in _TOOL_SCHEMAS:
+        raise LocalToolError(f"tool is not enabled in V2 bootstrap: {name}")
+    if not isinstance(arguments, dict):
+        raise LocalToolError("tool arguments must be an object")
+    contract = _TOOL_SCHEMAS[name]
+    properties = contract["properties"]
+    action = arguments.get("action")
+    if name == "file" and action != "read":
+        raise LocalToolError("V2 bootstrap permits file reads only")
+    if name == "git" and action not in properties["action"]["enum"]:
+        raise LocalToolError("V2 bootstrap permits read-only git actions")
+    unknown = sorted(set(arguments) - set(properties))
+    if unknown:
+        raise LocalToolError(
+            f"unknown argument(s) for tool '{name}': {', '.join(unknown)}"
         )
-    return schemas
+    missing = [
+        key
+        for key in contract["required"]
+        if key not in arguments or not str(arguments[key]).strip()
+    ]
+    if missing:
+        raise LocalToolError(f"missing required argument '{missing[0]}' for tool '{name}'")
+    normalized = dict(arguments)
+    if "path" in normalized:
+        normalized["path"] = str(normalized["path"])
+        if len(normalized["path"]) > properties["path"]["maxLength"]:
+            raise LocalToolError("file path is too long")
+    if "ref" in normalized:
+        normalized["ref"] = str(normalized["ref"])
+        if len(normalized["ref"]) > properties["ref"]["maxLength"]:
+            raise LocalToolError("git ref is too long")
+    if "n" in normalized:
+        value = normalized["n"]
+        if isinstance(value, bool):
+            raise LocalToolError("git log count must be an integer")
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as exc:
+            raise LocalToolError("git log count must be an integer") from exc
+        if not properties["n"]["minimum"] <= value <= properties["n"]["maximum"]:
+            raise LocalToolError("git log count must be between 1 and 50")
+        normalized["n"] = value
+    return normalized
 
 
 class ReadOnlyLocalTools:
@@ -76,9 +122,7 @@ class ReadOnlyLocalTools:
         return candidate
 
     def __call__(self, name: str, arguments: dict[str, Any]) -> str:
-        valid, normalized, error = tool_registry.validate_args(name, arguments)
-        if not valid:
-            raise LocalToolError(error)
+        normalized = _validate_args(name, arguments)
         if name == "file":
             if normalized.get("action") != "read":
                 raise LocalToolError("V2 bootstrap permits file reads only")

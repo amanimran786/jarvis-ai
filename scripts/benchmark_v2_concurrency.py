@@ -55,6 +55,21 @@ def process_rss_bytes(pid: int) -> int | None:
         return None
 
 
+def peak_overlapping_request_count(intervals: list[tuple[float, float]]) -> int:
+    events = [
+        event
+        for started, completed in intervals
+        for event in ((started, 1), (completed, -1))
+        if completed > started
+    ]
+    active = 0
+    peak = 0
+    for _, delta in sorted(events, key=lambda event: (event[0], event[1])):
+        active += delta
+        peak = max(peak, active)
+    return peak
+
+
 def benchmark_level(
     *,
     concurrency: int,
@@ -149,6 +164,24 @@ def benchmark_level(
         f"EVIDENCE-{index + 1}" in item.answer
         for index, item in enumerate(result.evidence)
     )
+    worker_timings = [
+        timing for evidence in result.evidence for timing in evidence.model_timings
+    ]
+    request_intervals = [
+        (timing.request_started_at, timing.completed_at) for timing in worker_timings
+    ]
+    first_delta_samples = [
+        timing.first_delta_at - timing.request_started_at
+        for timing in worker_timings
+        if timing.first_delta_at is not None
+    ]
+    generation_samples = [
+        timing.terminal_at - timing.first_delta_at
+        for timing in worker_timings
+        if timing.first_delta_at is not None
+    ]
+    worker_completion_tokens = sum(item.completion_tokens for item in result.evidence)
+    total_generation_seconds = sum(generation_samples)
     return {
         "concurrency": concurrency,
         "team_status": result.status,
@@ -163,8 +196,24 @@ def benchmark_level(
         "prompt_tokens": result.prompt_tokens,
         "completion_tokens": result.completion_tokens,
         "peak_model_process_rss_bytes": max(rss_samples) if rss_samples else None,
-        "ttft_seconds": None,
-        "ttft_note": "non-streaming client; first-token telemetry is a future gate",
+        "time_to_first_delivered_delta_seconds": first_delta_samples,
+        "model_request_seconds": [
+            timing.completed_at - timing.request_started_at
+            for timing in worker_timings
+        ],
+        "generation_seconds": generation_samples,
+        "worker_completion_tokens_per_generation_second": (
+            worker_completion_tokens / total_generation_seconds
+            if total_generation_seconds > 0
+            else None
+        ),
+        "peak_concurrent_worker_model_requests": peak_overlapping_request_count(
+            request_intervals
+        ),
+        "timing_note": (
+            "TTFD measures the first semantic SSE delta delivered by MLX-LM, not "
+            "the first raw decoder token; tool calls may be buffered by the server"
+        ),
         "team_run_id": result.team_run_id,
         "event_log_path": str(result.event_log_path),
     }
@@ -177,6 +226,8 @@ def benchmark_passed(levels: list[dict]) -> bool:
         and level["workers_verified"] == level["workers_total"]
         and level["required_markers_present"] == level["workers_total"]
         and level["malformed_tool_call_rate"] == 0.0
+        and bool(level["time_to_first_delivered_delta_seconds"])
+        and level["peak_concurrent_worker_model_requests"] >= level["concurrency"]
         and (
             level["concurrency"] == 1
             or level["worker_lifetime_overlap_seconds"] > 0

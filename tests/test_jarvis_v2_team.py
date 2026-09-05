@@ -18,7 +18,10 @@ from jarvis_v2.team import (
     LocalAgentTeam,
     ToolCallContract,
 )
-from scripts.benchmark_v2_concurrency import benchmark_passed
+from scripts.benchmark_v2_concurrency import (
+    benchmark_passed,
+    peak_overlapping_request_count,
+)
 
 
 class CoordinatedFakeModel:
@@ -341,6 +344,8 @@ def test_benchmark_gate_rejects_team_or_overlap_failure():
         "required_markers_present": 2,
         "malformed_tool_call_rate": 0.0,
         "worker_lifetime_overlap_seconds": 0.5,
+        "time_to_first_delivered_delta_seconds": [0.25, 0.4],
+        "peak_concurrent_worker_model_requests": 2,
     }
 
     assert benchmark_passed([passing]) is True
@@ -348,3 +353,14 @@ def test_benchmark_gate_rejects_team_or_overlap_failure():
     assert benchmark_passed(
         [{**passing, "worker_lifetime_overlap_seconds": 0.0}]
     ) is False
+    assert benchmark_passed(
+        [{**passing, "time_to_first_delivered_delta_seconds": []}]
+    ) is False
+    assert benchmark_passed(
+        [{**passing, "peak_concurrent_worker_model_requests": 1}]
+    ) is False
+
+
+def test_peak_request_overlap_counts_in_flight_intervals():
+    assert peak_overlapping_request_count([(0.0, 3.0), (1.0, 2.0), (1.5, 4.0)]) == 3
+    assert peak_overlapping_request_count([(0.0, 1.0), (1.0, 2.0)]) == 1

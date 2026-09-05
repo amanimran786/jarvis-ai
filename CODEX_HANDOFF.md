@@ -650,9 +650,13 @@ requires exact structured-answer equality. That stricter rerun passed at 1/1,
 2/2, and 4/4 verified workers with zero malformed tool calls. The heterogeneous
 three-agent research run also passed its structural contracts and produced a
 conservative `Not Ready` verdict. This is promising fan-out/fan-in evidence,
-not desktop readiness. Next shared lanes are streaming/TTFT telemetry,
-deadline-aware cancellation of in-flight local calls, and repeated
-soak/adversarial-evidence tests. Do not start app packaging yet.
+not desktop readiness. The streaming rerun now records first delivered semantic
+delta, request, generation, and worker-only request-overlap evidence. Peak
+in-flight worker requests reached 1/2/4 at requested concurrency 1/2/4, with all
+workers verified. This does not prove simultaneous hardware decoding or raw
+first-decoder-token timing. Next shared lanes are deadline-aware cancellation of
+in-flight local calls and repeated soak/adversarial-evidence tests. Do not start
+app packaging yet.
 
 The integration blocker is resolved with owner approval. The defect was limited
 to `reset_for_tests()`: stale test workers could retain unreachable locks after
@@ -674,3 +678,36 @@ exact `LOCAL_OK` probe response under that model identity. Keep this fail-closed
 check when changing model aliases, launch configuration, or benchmark tooling.
 Focused V2 checks passed 39 tests; the mandatory full repository gate passed
 3,830 tests with 8 skipped and 0 failed.
+
+### V2 dashboard and trace audit — 2026-09-04
+
+Claude added `scripts/v2_dashboard.py`, `scripts/v2_trace.py`, and the historical
+audit note at `docs/ai/claude_v2_audit_note.md`. Codex live-tested the observer,
+then closed concrete security and evidence gaps before adopting it:
+
+- dashboard model probes use the loopback-only V2 configuration, disable
+  proxies, and reject redirects
+- every dashboard API requires a random per-process capability; the printed URL
+  is the entry point
+- state-source symlinks cannot escape `.jarvis-v2`
+- default traces contain hashes, sizes, timing, actor IDs, and tool names but no
+  raw task/model/argument/result/error content
+- worker and synthesis events are bound to exact actor IDs
+- actual agent limits are stored in new checkpoints; old checkpoints are
+  explicitly labelled as assumed defaults
+- V2 owns its minimal read-only file/Git contracts and no longer imports the V1
+  tool registry
+
+The post-fix live `--team` trace completed all three workers and synthesis with
+23 records and owner-only mode `0600`. Keep the dashboard foreground-only; it is
+not the packaged desktop app. Start it with:
+
+```bash
+./venv/bin/python scripts/v2_dashboard.py --open
+./venv/bin/python scripts/v2_trace.py --team
+```
+
+Focused V2/install/observer checks passed 58 tests. The exact full gate passed
+3,850 tests with 8 skipped. Pytest emitted one non-fatal retired-V1
+`task_runtime.py` thread-cleanup warning; keep it visible as legacy debt, but do
+not misattribute it to the V2 runtime.

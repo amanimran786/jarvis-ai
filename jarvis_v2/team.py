@@ -11,7 +11,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
-from .agent import AgentLimits, AgentResult, LocalAgentLoop, ToolEvidence
+from .agent import (
+    AgentLimits,
+    AgentResult,
+    LocalAgentLoop,
+    ModelTimingEvidence,
+    ToolEvidence,
+)
 from .model import ModelClient
 
 
@@ -91,6 +97,7 @@ class AgentEvidence:
     run_id: str
     prompt_tokens: int
     completion_tokens: int
+    model_timings: tuple[ModelTimingEvidence, ...]
     tool_evidence: tuple[ToolEvidence, ...]
 
 
@@ -114,6 +121,7 @@ class TeamResult:
     event_log_path: Path
     prompt_tokens: int
     completion_tokens: int
+    synthesis_model_timings: tuple[ModelTimingEvidence, ...]
 
 
 class LocalAgentTeam:
@@ -128,6 +136,11 @@ class LocalAgentTeam:
         limits: AgentLimits | None = None,
         max_workers: int = 4,
         require_worker_evidence: bool = True,
+        model_factory_for_agent: Callable[[str], ModelClient] | None = None,
+        tool_factory_for_agent: Callable[
+            [str], Callable[[str, dict], str]
+        ]
+        | None = None,
     ) -> None:
         if not 1 <= max_workers <= 4:
             raise ValueError("max_workers must be between 1 and 4")
@@ -139,6 +152,18 @@ class LocalAgentTeam:
         self.limits = limits or AgentLimits(max_steps=4, max_seconds=240.0)
         self.max_workers = max_workers
         self.require_worker_evidence = require_worker_evidence
+        self.model_factory_for_agent = model_factory_for_agent
+        self.tool_factory_for_agent = tool_factory_for_agent
+
+    def _model_for(self, actor: str) -> ModelClient:
+        if self.model_factory_for_agent is not None:
+            return self.model_factory_for_agent(actor)
+        return self.model_factory()
+
+    def _tool_for(self, actor: str) -> Callable[[str, dict], str]:
+        if self.tool_factory_for_agent is not None:
+            return self.tool_factory_for_agent(actor)
+        return self.execute_tool
 
     @staticmethod
     def _validate_assignments(
@@ -165,6 +190,7 @@ class LocalAgentTeam:
             run_id=result.run_id,
             prompt_tokens=result.prompt_tokens,
             completion_tokens=result.completion_tokens,
+            model_timings=result.model_timings,
             tool_evidence=result.tool_evidence,
         )
 
@@ -278,8 +304,8 @@ class LocalAgentTeam:
             worker_started = time.monotonic()
             record({"event": "worker_started", "agent_id": assignment.agent_id})
             loop = LocalAgentLoop(
-                model=self.model_factory(),
-                execute_tool=self.execute_tool,
+                model=self._model_for(assignment.agent_id),
+                execute_tool=self._tool_for(assignment.agent_id),
                 state_dir=self.state_dir / "workers",
                 limits=self.limits,
                 is_cancelled=is_cancelled,
@@ -319,6 +345,7 @@ class LocalAgentTeam:
                         run_id="",
                         prompt_tokens=0,
                         completion_tokens=0,
+                        model_timings=(),
                         tool_evidence=(),
                     )
                     record({"event": "worker_crashed", **asdict(item)})
@@ -337,11 +364,12 @@ class LocalAgentTeam:
         status = "blocked"
         synthesis_prompt_tokens = 0
         synthesis_completion_tokens = 0
+        synthesis_model_timings: tuple[ModelTimingEvidence, ...] = ()
         if verified_workers:
             try:
                 synthesis_loop = LocalAgentLoop(
-                    model=self.model_factory(),
-                    execute_tool=self.execute_tool,
+                    model=self._model_for("synthesis"),
+                    execute_tool=self._tool_for("synthesis"),
                     state_dir=self.state_dir / "synthesis",
                     limits=self.limits,
                     is_cancelled=is_cancelled,
@@ -361,6 +389,7 @@ class LocalAgentTeam:
                 synthesis = synthesis_result.answer
                 synthesis_prompt_tokens = synthesis_result.prompt_tokens
                 synthesis_completion_tokens = synthesis_result.completion_tokens
+                synthesis_model_timings = synthesis_result.model_timings
                 status = (
                     "completed"
                     if synthesis_result.status == "completed"
@@ -400,4 +429,5 @@ class LocalAgentTeam:
             + synthesis_prompt_tokens,
             completion_tokens=sum(item.completion_tokens for item in ordered)
             + synthesis_completion_tokens,
+            synthesis_model_timings=synthesis_model_timings,
         )

@@ -45,6 +45,15 @@ class AgentLimits:
             raise ValueError("all agent limits must be positive")
 
 
+@dataclass(frozen=True)
+class ModelTimingEvidence:
+    step: int
+    request_started_at: float
+    first_delta_at: float | None
+    terminal_at: float
+    completed_at: float
+
+
 @dataclass
 class AgentState:
     run_id: str
@@ -59,6 +68,8 @@ class AgentState:
     tool_evidence: list[dict[str, Any]] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    model_timings: list[dict[str, Any]] = field(default_factory=list)
+    limits: dict[str, Any] = field(default_factory=dict)
     final_answer: str = ""
     reason: str = ""
 
@@ -74,6 +85,7 @@ class AgentResult:
     event_log_path: Path
     prompt_tokens: int
     completion_tokens: int
+    model_timings: tuple[ModelTimingEvidence, ...]
     tool_evidence: tuple["ToolEvidence", ...]
 
 
@@ -181,6 +193,7 @@ class LocalAgentLoop:
         return AgentState(
             run_id=run_id,
             task=task,
+            limits=asdict(self.limits),
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": task},
@@ -255,8 +268,28 @@ class LocalAgentLoop:
             try:
                 schemas = model_tool_schemas() if self.allow_tools else []
                 turn = self.model.complete(state.messages, schemas)
+                if self.is_cancelled():
+                    state.status = "cancelled"
+                    state.reason = "cancelled by owner"
+                    break
                 state.prompt_tokens += turn.prompt_tokens
                 state.completion_tokens += turn.completion_tokens
+                if (
+                    turn.request_started_at is not None
+                    and turn.terminal_at is not None
+                    and turn.completed_at is not None
+                ):
+                    state.model_timings.append(
+                        asdict(
+                            ModelTimingEvidence(
+                                step=state.step,
+                                request_started_at=turn.request_started_at,
+                                first_delta_at=turn.first_delta_at,
+                                terminal_at=turn.terminal_at,
+                                completed_at=turn.completed_at,
+                            )
+                        )
+                    )
                 if state.prompt_tokens + state.completion_tokens > self.limits.max_total_tokens:
                     raise LocalModelError("cumulative token budget exhausted")
                 if turn.finish_reason == "length":
@@ -294,6 +327,10 @@ class LocalAgentLoop:
                 if state.repeated_call_count > self.limits.max_repeated_call:
                     raise LocalToolError("model repeated the same tool call without progress")
 
+                if self.is_cancelled():
+                    state.status = "cancelled"
+                    state.reason = "cancelled by owner"
+                    break
                 result = self.execute_tool(name, arguments)
                 evidence = ToolEvidence(
                     call_id=call_id,
@@ -350,5 +387,8 @@ class LocalAgentLoop:
             event_log_path=self._event_path(state.run_id),
             prompt_tokens=state.prompt_tokens,
             completion_tokens=state.completion_tokens,
+            model_timings=tuple(
+                ModelTimingEvidence(**item) for item in state.model_timings
+            ),
             tool_evidence=tuple(ToolEvidence(**item) for item in state.tool_evidence),
         )

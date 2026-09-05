@@ -258,7 +258,43 @@ Distributed inference across multiple Macs is optional and is not part of the
 single-Mac bootstrap. Apple documents it separately in
 [Explore distributed inference and training with MLX](https://developer.apple.com/videos/play/wwdc2026/233/).
 
-## 10. Security boundary
+## 10. Watch a run in the local pipeline dashboard
+
+Start the read-only developer dashboard in one terminal:
+
+```bash
+./venv/bin/python scripts/v2_dashboard.py --open
+```
+
+The command prints and opens a process-specific capability URL on
+`127.0.0.1:7878`. The dashboard does not start agents or acquire their run
+leases. It observes checkpoints under `.jarvis-v2/` and probes only the validated
+loopback model endpoint. Keep the capability URL private and stop the foreground
+server with Control-C when finished.
+
+Run an instrumented single agent or the three-worker demo in another terminal:
+
+```bash
+./venv/bin/python scripts/v2_trace.py \
+  "Inspect git status and report what needs attention"
+./venv/bin/python scripts/v2_trace.py --team
+```
+
+Trace files default to metadata only: actor IDs, event timing, tool names,
+character counts, and SHA-256 evidence. Raw task text, model previews, tool
+arguments, results, and exception messages are omitted. For deliberate
+foreground debugging they can be included with `--include-sensitive-content`.
+
+Agent checkpoints are different: they contain the full local conversation so a
+run can be resumed. They are mode `0600`, and the dashboard fetches those
+messages only after the protected **Show conversation** control is selected.
+Treat `.jarvis-v2/` as sensitive local work data.
+
+This dashboard is a developer observer, not the future packaged desktop UI. It
+must remain foreground-only until the desktop-app phase adds a stronger process
+and user-session boundary.
+
+## 11. Security boundary
 
 The upstream MLX-LM server documentation says the server is not recommended as
 a production network service because it implements only basic security checks.
@@ -277,7 +313,7 @@ Do not:
 Local ownership removes hosted-provider control over inference. It does not
 make model output correct or safe by default.
 
-## 11. Test and diagnose
+## 12. Test and diagnose
 
 Run the focused V2 tests:
 
@@ -286,6 +322,7 @@ Run the focused V2 tests:
 ./venv/bin/python -m pytest \
   tests/test_jarvis_v2_local_runtime.py \
   tests/test_jarvis_v2_team.py \
+  tests/test_v2_observability.py \
   tests/test_install_v2_local.py -q
 ```
 
@@ -300,7 +337,7 @@ Common problems:
 | Agent rejects endpoint | Inspect `--endpoint` | Use explicit `http://127.0.0.1:PORT/v1`; remote and hostname URLs are intentionally rejected |
 | Mac becomes memory-constrained | Reduce model/context/concurrency | Start with a smaller 4-bit model and benchmark again |
 
-## 12. Stop or uninstall V2
+## 13. Stop or uninstall V2
 
 Stop the service without deleting weights:
 
