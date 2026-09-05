@@ -157,6 +157,11 @@ def test_dashboard_reconstructed_turns_hide_raw_arguments_by_default() -> None:
     assert secret in json.dumps(visible)
 
 
+def test_dashboard_renders_redacted_argument_shape_and_digest() -> None:
+    assert 'num(t.arguments_chars)+" chars"+digest' in v2_dashboard.PAGE
+    assert 'String(t.arguments_sha256).slice(0,12)' in v2_dashboard.PAGE
+
+
 def test_dashboard_api_requires_process_capability_and_sets_security_headers(
     tmp_path: Path,
 ) -> None:

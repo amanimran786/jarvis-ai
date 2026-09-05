@@ -1504,9 +1504,16 @@ function toolNode(t, resends){
   const kv = el("div","kv");
   const row = (k,v) => { if(v===undefined||v===null||v==="") return;
     kv.appendChild(el("div","k",k)); kv.appendChild(el("div",null,String(v))); };
-  row("arguments", t.arguments);
+  if(t.arguments!==undefined&&t.arguments!==null&&t.arguments!=="") {
+    row("arguments", t.arguments);
+  } else if(t.arguments_chars!==undefined&&t.arguments_chars!==null) {
+    const digest = t.arguments_sha256 ? ", sha256 "+String(t.arguments_sha256).slice(0,12) : "";
+    row("arguments", num(t.arguments_chars)+" chars"+digest);
+  }
   row("call id", t.call_id);
-  row("arguments sha256", t.arguments_sha256);
+  if(t.arguments!==undefined&&t.arguments!==null&&t.arguments!=="") {
+    row("arguments sha256", t.arguments_sha256);
+  }
   row("result sha256", t.result_sha256);
   c.appendChild(kv);
   if(t.result_preview) c.appendChild(el("div","pre", t.result_preview));
