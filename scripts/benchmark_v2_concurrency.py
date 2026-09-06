@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,63 @@ from jarvis_v2.team import (
     ToolCallContract,
 )
 from jarvis_v2.tools import ReadOnlyLocalTools
+
+
+def benchmark_assignments(
+    *,
+    concurrency: int,
+    expected_status: str,
+    expected_status_digest: str,
+) -> list[AgentAssignment]:
+    """Build assignments whose instructions match their exact evidence contract."""
+    status_arguments = {"action": "status"}
+    canonical_arguments = json.dumps(
+        status_arguments,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    arguments_digest = hashlib.sha256(canonical_arguments.encode("utf-8")).hexdigest()
+    return [
+        AgentAssignment(
+            agent_id=f"observer-{index + 1}",
+            role="independent repository observer",
+            task=(
+                "Use Git status exactly once with exactly this arguments object: "
+                f"{canonical_arguments}. Do not add n, ref, or any other argument. "
+                "Report the exact modified and untracked paths by returning only this "
+                "JSON object, with the git_status value copied exactly from the tool "
+                "result and no Markdown: "
+                + json.dumps(
+                    {
+                        "marker": f"EVIDENCE-{index + 1}",
+                        "git_status": expected_status,
+                    },
+                    sort_keys=True,
+                )
+            ),
+            acceptance=AcceptanceContract(
+                required_tools=("git",),
+                required_answer_markers=(f"EVIDENCE-{index + 1}",),
+                required_calls=(
+                    ToolCallContract(
+                        tool="git",
+                        arguments_sha256=arguments_digest,
+                        result_sha256=expected_status_digest,
+                    ),
+                ),
+                expected_answer_json=json.dumps(
+                    {
+                        "marker": f"EVIDENCE-{index + 1}",
+                        "git_status": expected_status,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                exact_total_tool_calls=1,
+            ),
+        )
+        for index in range(concurrency)
+    ]
 
 
 def model_server_pid(port: int = 8080) -> int | None:
@@ -94,51 +152,11 @@ def benchmark_level(
     status_arguments = {"action": "status"}
     expected_status = tools("git", status_arguments)
     expected_status_digest = hashlib.sha256(expected_status.encode("utf-8")).hexdigest()
-    assignments = [
-        AgentAssignment(
-            agent_id=f"observer-{index + 1}",
-            role="independent repository observer",
-            task=(
-                "Use Git status exactly once. Report the exact modified and untracked "
-                "paths by returning only this JSON object, with the git_status value "
-                "copied exactly from the tool result and no Markdown: "
-                + json.dumps(
-                    {
-                        "marker": f"EVIDENCE-{index + 1}",
-                        "git_status": expected_status,
-                    },
-                    sort_keys=True,
-                )
-            ),
-            acceptance=AcceptanceContract(
-                required_tools=("git",),
-                required_answer_markers=(f"EVIDENCE-{index + 1}",),
-                required_calls=(
-                    ToolCallContract(
-                        tool="git",
-                        arguments_sha256=hashlib.sha256(
-                            json.dumps(
-                                status_arguments,
-                                sort_keys=True,
-                                separators=(",", ":"),
-                            ).encode("utf-8")
-                        ).hexdigest(),
-                        result_sha256=expected_status_digest,
-                    ),
-                ),
-                expected_answer_json=json.dumps(
-                    {
-                        "marker": f"EVIDENCE-{index + 1}",
-                        "git_status": expected_status,
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                exact_total_tool_calls=1,
-            ),
-        )
-        for index in range(concurrency)
-    ]
+    assignments = benchmark_assignments(
+        concurrency=concurrency,
+        expected_status=expected_status,
+        expected_status_digest=expected_status_digest,
+    )
     started = time.monotonic()
     try:
         result = LocalAgentTeam(
@@ -240,14 +258,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
     parser.add_argument("--output-dir", type=Path, default=Path(".jarvis-v2/benchmarks"))
+    parser.add_argument("--endpoint", default="http://127.0.0.1:8080/v1")
+    parser.add_argument("--model", default="mlx-community/Qwen3-8B-4bit")
     args = parser.parse_args()
-    config = LocalModelConfig(max_output_tokens=512, request_timeout_seconds=180.0)
+    config = LocalModelConfig(
+        base_url=args.endpoint,
+        model=args.model,
+        max_output_tokens=512,
+        request_timeout_seconds=180.0,
+    )
     if not LocalMLXClient(config).ready():
         parser.error(f"local MLX server is not ready at {config.base_url}")
     output_dir = args.output_dir.expanduser().resolve(strict=False)
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     output_dir.chmod(0o700)
-    pid = model_server_pid()
+    port = urllib.parse.urlparse(config.base_url).port or 80
+    pid = model_server_pid(port)
     payload = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model": config.model,

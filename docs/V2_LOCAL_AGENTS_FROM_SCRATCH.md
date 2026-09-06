@@ -248,6 +248,24 @@ Run the strict 1/2/4-worker benchmark:
 ./venv/bin/python scripts/benchmark_v2_concurrency.py --workspace "$PWD"
 ```
 
+To evaluate a candidate already running on a separate loopback port without
+changing the production default, pass its exact endpoint and advertised model
+identifier:
+
+```bash
+./venv/bin/python scripts/benchmark_v2_concurrency.py \
+  --workspace "$PWD" \
+  --endpoint http://127.0.0.1:8082/v1 \
+  --model mlx-community/CANDIDATE-MODEL
+```
+
+The benchmark task names the exact canonical tool arguments required by its
+acceptance contract. A model that adds optional arguments, returns approximate
+JSON, omits evidence, or fails at any requested concurrency exits nonzero.
+Passing this structural benchmark is necessary but not sufficient for model
+promotion; separately test authorized capability, unsupported-target handling,
+quality, latency, memory pressure, and repeated-run stability.
+
 The team coordinator runs specialists concurrently, captures content digests
 for successful tool calls, checks each result against its assignment contract,
 and sends only verified evidence to a separate no-tools synthesizer. Team state

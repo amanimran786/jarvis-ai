@@ -19,6 +19,7 @@ from jarvis_v2.team import (
     ToolCallContract,
 )
 from scripts.benchmark_v2_concurrency import (
+    benchmark_assignments,
     benchmark_passed,
     peak_overlapping_request_count,
 )
@@ -332,6 +333,28 @@ def test_concurrency_benchmark_script_can_run_directly_from_repo(tmp_path: Path)
 
     assert completed.returncode == 0
     assert "Benchmark 1/2/4 concurrent Jarvis V2 workers" in completed.stdout
+    assert "--endpoint" in completed.stdout
+    assert "--model" in completed.stdout
+
+
+def test_benchmark_assignment_instructions_match_exact_argument_contract():
+    expected_result_digest = hashlib.sha256(b"(no output)").hexdigest()
+
+    assignments = benchmark_assignments(
+        concurrency=2,
+        expected_status="(no output)",
+        expected_status_digest=expected_result_digest,
+    )
+
+    expected_arguments = '{"action":"status"}'
+    expected_arguments_digest = hashlib.sha256(expected_arguments.encode()).hexdigest()
+    assert len(assignments) == 2
+    for item in assignments:
+        assert f"exactly this arguments object: {expected_arguments}" in item.task
+        assert "Do not add n, ref, or any other argument" in item.task
+        assert item.acceptance.required_calls[0].arguments_sha256 == (
+            expected_arguments_digest
+        )
 
 
 def test_benchmark_gate_rejects_team_or_overlap_failure():

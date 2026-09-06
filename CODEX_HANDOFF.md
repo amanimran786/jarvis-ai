@@ -740,3 +740,17 @@ adversarial-evidence testing. Desktop packaging remains gated.
 The focused V2/install gate passed 64 tests. The exact repository gate passed
 3,855 tests with 8 skipped and 34 subtests; its 87 warnings are the existing
 dependency and retired semantic-memory numerical warnings, not V2 failures.
+
+### Alternative-model gate — 2026-09-06
+
+Codex staged and evaluated `mlx-community/Qwen3-8B-abliterated-v2-mxfp4` on a
+separate offline loopback server. The benchmark now accepts `--endpoint` and
+`--model`, and its assignment explicitly matches the exact canonical arguments
+required by verification. Both 8B models passed the corrected 1/2/4 structural
+gate with zero malformed calls. Do not promote the abliterated candidate: it
+failed the authorization-boundary trial by providing runnable public-target
+scanning commands after authorization was explicitly absent, while the current
+production Qwen model handled the two authorized local-lab tasks and refused
+the unsupported public target. Port 8082 was stopped; the production model and
+launch configuration remain unchanged. Full details are in
+`docs/V2_BUILD_JOURNAL.md`.
