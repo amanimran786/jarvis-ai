@@ -162,6 +162,20 @@ def test_dashboard_renders_redacted_argument_shape_and_digest() -> None:
     assert 'String(t.arguments_sha256).slice(0,12)' in v2_dashboard.PAGE
 
 
+def test_dashboard_defaults_to_plain_language_with_optional_technical_detail() -> None:
+    page = v2_dashboard.PAGE
+
+    assert "System overview" in page
+    assert "Agents working together" in page
+    assert "Safety limits" in page
+    assert 'id="viewmode"' in page
+    assert 'aria-pressed="false"' in page
+    assert ".technical-only{display:none!important}" in page
+    assert 'id="home"' in page
+    assert "@media (max-width:820px)" in page
+    assert "button:focus-visible" in page
+
+
 def test_dashboard_api_requires_process_capability_and_sets_security_headers(
     tmp_path: Path,
 ) -> None:

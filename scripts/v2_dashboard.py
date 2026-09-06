@@ -788,53 +788,64 @@ PAGE = r"""<!doctype html>
     --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 var(--sans);
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--sans);
        -webkit-font-smoothing:antialiased}
   a{color:var(--model);text-decoration:none}
-  .app{display:grid;grid-template-columns:290px 1fr;height:100vh}
+  button:focus-visible{outline:3px solid rgba(91,141,239,.55);outline-offset:2px}
+  .app{display:grid;grid-template-columns:300px minmax(0,1fr);height:100vh}
   /* ---- top bar ---- */
-  header{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 16px;height:52px;
+  header{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 20px;height:64px;
          background:linear-gradient(180deg,#141824,#0f121b);border-bottom:1px solid var(--line)}
-  .brand{font-weight:640;letter-spacing:.14em;font-size:11px;color:var(--dim)}
-  .brand b{color:var(--text);letter-spacing:.06em;font-size:13px;display:block;letter-spacing:.1em}
+  .brand{font-weight:650;font-size:17px;color:var(--text);line-height:1.15;white-space:nowrap}
+  .brand b{color:var(--muted);font-size:12px;display:block;letter-spacing:.02em;font-weight:500;margin-top:3px}
   .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
-        background:var(--panel2);border:1px solid var(--line);font:11px/1.4 var(--mono);color:var(--dim)}
+        background:var(--panel2);border:1px solid var(--line);font:12px/1.4 var(--sans);color:var(--dim)}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
   .dot.live{background:var(--live);box-shadow:0 0 0 0 rgba(61,220,151,.7);animation:pulse 1.8s infinite}
   .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
   @keyframes pulse{70%{box-shadow:0 0 0 7px rgba(61,220,151,0)}100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
   .spacer{flex:1}
   /* ---- rail ---- */
-  .rail{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto}
-  .railhead{padding:11px 14px 7px;font:10px/1 var(--mono);letter-spacing:.13em;color:var(--muted);
-            text-transform:uppercase;position:sticky;top:0;background:var(--panel);z-index:2}
-  .run{padding:9px 14px;border-bottom:1px solid #1a1e2b;cursor:pointer;display:block;width:100%;
-       text-align:left;background:none;border-left:2px solid transparent;color:inherit;font:inherit}
+  .rail{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding-bottom:24px}
+  .railhome{display:block;width:calc(100% - 24px);margin:14px 12px 6px;padding:11px 12px;border-radius:8px;
+            border:1px solid var(--line);background:var(--panel2);color:var(--text);text-align:left;
+            font:600 14px/1.2 var(--sans);cursor:pointer}
+  .railhome:hover,.railhome.sel{border-color:var(--model);background:#192237}
+  .railhead{padding:20px 16px 8px;font:600 13px/1.2 var(--sans);color:var(--text)}
+  .railhead span{display:block;color:var(--muted)!important;font-size:12px;font-weight:400;margin-top:4px}
+  .run{padding:11px 16px;border:0;border-bottom:1px solid #1a1e2b;cursor:pointer;display:block;width:100%;
+       text-align:left;background:none;border-left:3px solid transparent;color:inherit;font:inherit}
   .run:hover{background:var(--panel2)}
   .run.sel{background:#1a1f2e;border-left-color:var(--model)}
+  .railmore{padding:9px 16px;color:var(--muted);font-size:12px}
+  .technical-view .railmore{display:none}
   .run .top{display:flex;align-items:center;gap:7px;margin-bottom:3px}
-  .run .task{color:var(--dim);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;
+  .run .task{color:var(--dim);font-size:13px;line-height:1.45;overflow:hidden;text-overflow:ellipsis;
              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .kindtag{font:9px/1 var(--mono);padding:2px 5px;border-radius:3px;background:var(--slate);
+  .kindtag{font:11px/1 var(--mono);padding:3px 6px;border-radius:4px;background:var(--slate);
            color:#b9bed0;letter-spacing:.06em;text-transform:uppercase}
   .kindtag.trace{background:#3a2a52;color:#d9bcff}
-  .meta{font:10px/1 var(--mono);color:var(--muted);margin-top:4px}
+  .meta{font:12px/1.35 var(--sans);color:var(--muted);margin-top:5px}
   /* ---- main ---- */
-  main{overflow-y:auto;padding:18px 22px 60px}
+  main{overflow-y:auto;padding:28px clamp(20px,4vw,56px) 80px;scroll-behavior:smooth}
+  .pagehead{max-width:820px;margin-bottom:22px}
+  .pagehead h1{font-size:28px;line-height:1.2;margin:0;color:var(--text);letter-spacing:-.02em}
+  .pagehead p{font-size:15px;color:var(--dim);margin:8px 0 0;max-width:68ch}
   .empty{color:var(--muted);padding:60px 0;text-align:center}
-  h2{font-size:12px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);
-     margin:26px 0 11px;font-weight:600;display:flex;align-items:center;gap:9px}
-  h2 .hint{text-transform:none;letter-spacing:0;font-size:11px;color:#5d6377;font-weight:400}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px 16px}
+  h2{font-size:17px;color:var(--text);margin:30px 0 12px;font-weight:650;display:flex;
+     align-items:baseline;gap:10px;flex-wrap:wrap}
+  h2 .hint{font-size:13px;color:var(--muted);font-weight:400}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;
+        overflow-x:auto}
   .strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;
          background:var(--line);border:1px solid var(--line);border-radius:9px;overflow:hidden}
-  .stat{background:var(--panel);padding:11px 13px}
-  .stat .k{font:9.5px/1 var(--mono);letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
-  .stat .v{font:17px/1.35 var(--mono);color:var(--text);margin-top:5px}
-  .stat .v small{font-size:11px;color:var(--muted)}
+  .stat{background:var(--panel);padding:15px 16px;min-height:76px}
+  .stat .k{font:12px/1.25 var(--sans);color:var(--muted)}
+  .stat .v{font:22px/1.3 var(--mono);color:var(--text);margin-top:7px}
+  .stat .v small{font-size:12px;color:var(--muted)}
   .taskline{background:var(--panel2);border:1px solid var(--line);border-left:2px solid var(--slate3);
             border-radius:7px;padding:11px 13px;margin-bottom:4px}
-  .taskline .lbl{font:9.5px/1 var(--mono);letter-spacing:.1em;color:var(--muted);text-transform:uppercase;
+  .taskline .lbl{font:12px/1 var(--sans);color:var(--muted);
                  margin-bottom:6px}
   /* ---- journey ---- */
   .cycle{position:relative;padding-left:26px}
@@ -850,9 +861,9 @@ PAGE = r"""<!doctype html>
   .nodecard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:11px 13px}
   .node.inflight .nodecard{border-color:#4a3d1c;background:#16150f}
   .nodehead{display:flex;align-items:center;gap:9px;margin-bottom:9px}
-  .nodetitle{font:11.5px/1 var(--mono);letter-spacing:.05em;color:var(--text)}
+  .nodetitle{font:13px/1.2 var(--mono);letter-spacing:.03em;color:var(--text)}
   .nodetitle b{color:var(--model)} .node.tool .nodetitle b{color:var(--tool)}
-  .ms{font:10.5px/1 var(--mono);color:var(--muted);margin-left:auto}
+  .ms{font:12px/1 var(--mono);color:var(--muted);margin-left:auto}
   /* segmented request bar */
   .segbar{display:flex;height:22px;border-radius:5px;overflow:hidden;background:#0e1119;
           border:1px solid var(--line)}
@@ -864,12 +875,12 @@ PAGE = r"""<!doctype html>
   .seg.pending{background:repeating-linear-gradient(45deg,#3a3320,#3a3320 7px,#4a4028 7px,#4a4028 14px);
                color:#f0d9a0;flex:1;animation:shift 1s linear infinite}
   @keyframes shift{to{background-position:20px 0}}
-  .seglegend{display:flex;gap:13px;margin-top:7px;font:9.5px/1 var(--mono);color:var(--muted);flex-wrap:wrap}
+  .seglegend{display:flex;gap:13px;margin-top:9px;font:12px/1.3 var(--sans);color:var(--muted);flex-wrap:wrap}
   .seglegend i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:-1px}
-  .kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font:10.5px/1.6 var(--mono);
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;font:12px/1.6 var(--mono);
       color:var(--dim);margin-top:9px}
   .kv .k{color:var(--muted)}
-  .pre{font:10.5px/1.55 var(--mono);color:#c3c8d8;background:#0e1119;border:1px solid var(--line);
+  .pre{font:12px/1.6 var(--mono);color:#c3c8d8;background:#0e1119;border:1px solid var(--line);
        border-radius:6px;padding:9px 11px;margin-top:9px;white-space:pre-wrap;word-break:break-word;
        max-height:200px;overflow:auto}
   .retedge{font:10px/1 var(--mono);color:var(--muted);margin:-4px 0 12px 2px;display:flex;
@@ -878,7 +889,7 @@ PAGE = r"""<!doctype html>
   /* ---- waterfall ---- */
   .wf{position:relative;overflow-x:auto}
   .wfrow{display:grid;grid-template-columns:104px 1fr;gap:11px;align-items:center;margin-bottom:6px}
-  .wflabel{font:10.5px/1 var(--mono);color:var(--dim);text-align:right;overflow:hidden;
+  .wflabel{font:12px/1 var(--mono);color:var(--dim);text-align:right;overflow:hidden;
            text-overflow:ellipsis;white-space:nowrap}
   .wftrack{position:relative;height:19px;background:#0e1119;border:1px solid var(--line);border-radius:4px}
   .wfbar{position:absolute;top:0;bottom:0;border-radius:3px;display:flex;overflow:hidden}
@@ -890,8 +901,8 @@ PAGE = r"""<!doctype html>
   /* ---- guards ---- */
   .guards{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:10px}
   .guard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-  .guard .gk{font:9.5px/1 var(--mono);letter-spacing:.09em;color:var(--muted);text-transform:uppercase}
-  .guard .gv{font:13px/1 var(--mono);margin:7px 0 8px;color:var(--text)}
+  .guard .gk{font:12px/1.2 var(--sans);color:var(--muted)}
+  .guard .gv{font:15px/1 var(--mono);margin:9px 0 10px;color:var(--text)}
   .bar{height:5px;background:#0e1119;border-radius:3px;overflow:hidden}
   .bar i{display:block;height:100%;background:var(--live);border-radius:3px;transition:width .35s}
   .bar i.warn{background:var(--warn)} .bar i.bad{background:var(--bad)}
@@ -899,19 +910,19 @@ PAGE = r"""<!doctype html>
   .brow{display:grid;grid-template-columns:210px 1fr 118px;gap:11px;align-items:center;
         padding:5px 0;cursor:default}
   .card .brow:hover{background:#161a26}
-  .blab{font:10.5px/1.5 var(--mono);color:var(--dim);overflow:hidden;text-overflow:ellipsis;
+  .blab{font:12px/1.5 var(--sans);color:var(--dim);overflow:hidden;text-overflow:ellipsis;
         white-space:nowrap}
   .btrack{display:flex;height:15px;background:#0e1119;border:1px solid var(--line);
           border-radius:4px;overflow:hidden}
   .bseg{height:100%} .bseg.p{background:#3f6db3} .bseg.c{background:#3ddc97}
-  .bval{font:10.5px/1.5 var(--mono);color:var(--text);text-align:right;white-space:pre}
-  .gk{font:9.5px/1 var(--mono);letter-spacing:.09em;color:var(--muted);text-transform:uppercase;
+  .bval{font:12px/1.5 var(--mono);color:var(--text);text-align:right;white-space:pre}
+  .gk{font:12px/1.2 var(--sans);color:var(--muted);
       margin-bottom:8px}
   /* ---- events ---- */
-  table{width:100%;border-collapse:collapse;font:10.5px/1.6 var(--mono)}
+  table{width:100%;border-collapse:collapse;font:12px/1.6 var(--mono)}
   th{text-align:left;color:var(--muted);font-weight:500;padding:5px 9px;border-bottom:1px solid var(--line);
-     letter-spacing:.06em;text-transform:uppercase;font-size:9.5px}
-  td{padding:5px 9px;border-bottom:1px solid #171b26;color:var(--dim);vertical-align:top}
+     letter-spacing:.04em;text-transform:uppercase;font-size:11px}
+  td{padding:8px 9px;border-bottom:1px solid #171b26;color:var(--dim);vertical-align:top}
   td.hash{color:#5d6377;word-break:break-all}
   .badge{display:inline-block;padding:2px 7px;border-radius:4px;font:9.5px/1.5 var(--mono);
          background:var(--slate);color:#c7ccdd}
@@ -922,30 +933,49 @@ PAGE = r"""<!doctype html>
   .fid{font:9.5px/1 var(--mono);letter-spacing:.06em;padding:2px 6px;border-radius:3px}
   .fid.trace{background:#2a1f3d;color:#d0b3ff;border:1px solid #3d2d59}
   .fid.ckpt{background:#1b2436;color:#8fb0e8;border:1px solid #27354d}
-  .note{color:var(--muted);font-size:11px;margin:9px 0 0;line-height:1.6}
+  .note{color:var(--muted);font-size:13px;margin:10px 0 0;line-height:1.55;max-width:78ch}
   .toggle{background:var(--panel2);border:1px solid var(--line);color:var(--dim);border-radius:6px;
-          padding:5px 11px;font:10.5px/1 var(--mono);cursor:pointer}
+          padding:8px 12px;font:600 13px/1 var(--sans);cursor:pointer}
   .toggle:hover{color:var(--text);border-color:var(--slate3)}
+  .technical-only{display:none!important}
+  .technical-view .technical-only{display:revert!important}
+  .technical-view .technical-only.section{display:block!important}
+  .technical-view .technical-only.chip{display:inline-flex!important}
+  .technical-view .technical-only.techbar{display:flex!important}
+  .section{max-width:1180px}
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr;grid-template-rows:auto minmax(180px,32vh) 1fr;height:100dvh}
+    header{height:auto;min-height:64px;flex-wrap:wrap;padding:12px 16px}
+    .rail{border-right:0;border-bottom:1px solid var(--line)}
+    main{padding:22px 16px 64px}
+    .strip{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .brow{grid-template-columns:minmax(120px,1fr) minmax(120px,2fr);gap:8px}
+    .bval{grid-column:2}
+    .wfrow,.wfaxis{grid-template-columns:76px minmax(420px,1fr)}
+  }
+  @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important}}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
-    <div class="brand">JARVIS<b>V2 PIPELINE</b></div>
+    <div class="brand">Jarvis V2<b>Local agent activity</b></div>
     <span class="chip" id="mlx"><span class="dot"></span>model server</span>
-    <span class="chip" id="rootchip">.jarvis-v2</span>
+    <span class="chip technical-only" id="rootchip">.jarvis-v2</span>
     <div class="spacer"></div>
+    <button class="toggle" id="viewmode" type="button" aria-pressed="false">Show technical details</button>
     <span class="chip" id="conn"><span class="dot"></span>connecting</span>
   </header>
-  <nav class="rail">
-    <div class="railhead">Traces <span style="color:#5d6377">sub-step</span></div>
+  <nav class="rail" aria-label="Agent activity">
+    <button class="railhome sel" id="home" type="button">Overview</button>
+    <div class="railhead">Detailed activity <span>Every model and tool step</span></div>
     <div id="tracelist"></div>
-    <div class="railhead">Teams <span style="color:#5d6377">per-agent</span></div>
+    <div class="railhead">Agent teams <span>Several agents on one goal</span></div>
     <div id="teamlist"></div>
-    <div class="railhead">Runs <span style="color:#5d6377">per-step</span></div>
+    <div class="railhead">Individual runs <span>One agent's progress</span></div>
     <div id="runlist"></div>
   </nav>
-  <main id="main"><div class="empty">Select a run or trace.</div></main>
+  <main id="main"><div class="empty">Loading local activity…</div></main>
 </div>
 <script>
 "use strict";
@@ -961,6 +991,7 @@ const apiURL = (path) => { const u = new URL(path, window.location.origin);
 let selected = null;        // {type:'run'|'trace', kind, id}
 let overview = null;
 let showMessages = false;
+let technicalView = false;
 
 /* ---------- data ---------- */
 async function getJSON(url){ const r = await fetch(apiURL(url)); if(!r.ok) throw new Error((await r.json()).error||r.status); return r.json(); }
@@ -972,7 +1003,7 @@ async function refresh(){
   const m = $("mlx"), up = overview.model_server.up;
   m.innerHTML = "";
   m.appendChild(el("span", "dot " + (up ? "live" : "bad")));
-  m.appendChild(document.createTextNode(up ? "MLX 8080 up" : "MLX 8080 down"));
+  m.appendChild(document.createTextNode(up ? "Local AI ready" : "Local AI offline"));
   if (selected) await renderDetail(); else renderFleet();
 }
 
@@ -980,7 +1011,8 @@ async function refresh(){
 function renderFleet(){
   const main = $("main"); main.innerHTML = "";
   const runs = overview.runs;
-  main.appendChild(h2("Token burn", "every run on disk, grouped by role"));
+  main.appendChild(pageTitle("System overview",
+    "See what your local agents completed, how much work they processed, and where to investigate next."));
   if(!runs.length){ main.appendChild(el("div","empty","No runs recorded yet.")); return; }
 
   // Checkpoints written before token accounting shipped carry no usage keys.
@@ -991,12 +1023,12 @@ function renderFleet(){
   const pin = acct.reduce((a,r)=>a+r.prompt_tokens,0);
   const pout = acct.reduce((a,r)=>a+r.completion_tokens,0);
   main.appendChild(statStrip([
-    ["Runs", runs.length],
-    ["Tokens burned", num(pin+pout)],
-    ["Prompt in", num(pin), (pin+pout?Math.round(pin/(pin+pout)*100):0)+"%"],
-    ["Completion out", num(pout), (pin+pout?Math.round(pout/(pin+pout)*100):0)+"%"],
-    ["Avg / metered run", acct.length ? num(Math.round((pin+pout)/acct.length)) : "n/a"],
-    ["Traces", overview.traces.length],
+    ["Activity records", runs.length],
+    ["Model work processed", num(pin+pout), "tokens"],
+    ["Information read", num(pin), (pin+pout?Math.round(pin/(pin+pout)*100):0)+"%"],
+    ["Answers generated", num(pout), (pin+pout?Math.round(pout/(pin+pout)*100):0)+"%"],
+    ["Average per run", acct.length ? num(Math.round((pin+pout)/acct.length)) : "n/a"],
+    ["Detailed traces", overview.traces.length],
   ]));
   if(unmetered) main.appendChild(el("p","note",
     unmetered+" of "+runs.length+" checkpoints predate token accounting and carry no usage "+
@@ -1007,9 +1039,10 @@ function renderFleet(){
   acct.forEach(r => { const k = byKind[r.kind] = byKind[r.kind] || {n:0,p:0,c:0,tools:0,steps:0};
     k.n++; k.p+=r.prompt_tokens; k.c+=r.completion_tokens; k.tools+=r.tool_calls_completed; k.steps+=r.step; });
 
-  main.appendChild(h2("Per role", "metered runs only · run = solo agent, worker = team member, synthesis = the reducer"));
+  const roleSection = el("section","section technical-only");
+  roleSection.appendChild(h2("Work by agent type", "Technical accounting for recorded runs"));
   const kc = el("div","card"); const kt = el("table");
-  const kh = el("tr"); ["role","runs","steps","tools","prompt in","completion out","total","avg / run"]
+  const kh = el("tr"); ["agent type","runs","steps","tools","read","generated","total","average"]
     .forEach(x => kh.appendChild(el("th",null,x))); kt.appendChild(kh);
   Object.entries(byKind).sort((a,b)=>(b[1].p+b[1].c)-(a[1].p+a[1].c)).forEach(([k,v]) => {
     const tr = el("tr");
@@ -1018,9 +1051,9 @@ function renderFleet(){
       .forEach(x => tr.appendChild(el("td",null,String(x))));
     kt.appendChild(tr);
   });
-  kc.appendChild(kt); main.appendChild(kc);
+  kc.appendChild(kt); roleSection.appendChild(kc); main.appendChild(roleSection);
 
-  main.appendChild(h2("Heaviest requests", "top 12 by tokens burned"));
+  main.appendChild(h2("Most demanding tasks", "The 12 runs that asked the local model to process the most information"));
   const max = Math.max(...acct.map(r => r.prompt_tokens + r.completion_tokens), 1);
   const lc = el("div","card");
   acct.slice().sort((a,b)=>(b.prompt_tokens+b.completion_tokens)-(a.prompt_tokens+a.completion_tokens))
@@ -1049,38 +1082,47 @@ function renderFleet(){
   lc.appendChild(lg);
   main.appendChild(lc);
   main.appendChild(el("p","note",
-    "Prompt tokens dominate because the agent loop re-sends the whole conversation on every step. "+
-    "Open a trace to see the per-request split and the re-send factor."));
+    "Longer bars mean more local model work. Choose a task to see how the agent moved from the request to its result."));
 }
 
 /* ---------- rail ---------- */
 function renderRail(){
+  $("home").classList.toggle("sel", !selected);
   const tl = $("tracelist"); tl.innerHTML = "";
   if(!overview.traces.length){
     const n = el("div","meta","no traces yet - run scripts/v2_trace.py");
     n.style.padding = "4px 14px 12px"; tl.appendChild(n);
   }
-  overview.traces.forEach(t => tl.appendChild(railItem({
+  overview.traces.forEach((t,i) => tl.appendChild(railItem({
     type:"trace", id:t.trace_id, kind:t.mode,
     task: t.task || (t.task_chars ? "task redacted · "+num(t.task_chars)+" chars, digest "+
                                     String(t.task_sha256||"").slice(0,12) : ""),
     status:t.status, liveness:t.liveness,
-    meta:`${t.mode} · ${t.actors||1} agent${t.actors===1?"":"s"} · ${num(t.prompt_tokens+t.completion_tokens)} tok`
+    meta:`${t.mode} · ${t.actors||1} agent${t.actors===1?"":"s"} · ${num(t.prompt_tokens+t.completion_tokens)} tok`,
+    extra:i>=6
   })));
+  if(overview.traces.length>6) tl.appendChild(el("div","railmore",
+    (overview.traces.length-6)+" older records · show technical details to view"));
   const ml = $("teamlist"); ml.innerHTML = "";
-  (overview.teams || []).forEach(t => ml.appendChild(railItem({
+  (overview.teams || []).forEach((t,i) => ml.appendChild(railItem({
     type:"team", id:t.team_id, kind:"team", task:t.roster.join(" · "),
     status:t.status, liveness:t.liveness,
     meta:`${t.agents} agent${t.agents===1?"":"s"} · ${t.tokens_recorded
-      ? num(t.prompt_tokens+t.completion_tokens)+" tok" : "tokens not recorded"}`
+      ? num(t.prompt_tokens+t.completion_tokens)+" tok" : "tokens not recorded"}`,
+    extra:i>=6
   })));
+  if((overview.teams || []).length>6) ml.appendChild(el("div","railmore",
+    (overview.teams.length-6)+" older records · show technical details to view"));
   const rl = $("runlist"); rl.innerHTML = "";
-  overview.runs.forEach(r => rl.appendChild(railItem({
+  overview.runs.forEach((r,i) => rl.appendChild(railItem({
     type:"run", id:r.run_id, kind:r.kind, task:r.task,
     status:r.status, liveness:r.liveness,
     meta:`step ${r.step} · ${r.tool_calls_completed} tools · ${r.tokens_recorded
-      ? num(r.prompt_tokens+r.completion_tokens)+" tok" : "tokens not recorded"}`
+      ? num(r.prompt_tokens+r.completion_tokens)+" tok" : "tokens not recorded"}`,
+    extra:i>=6
   })));
+  if(overview.runs.length>6) rl.appendChild(el("div","railmore",
+    (overview.runs.length-6)+" older records · show technical details to view"));
 }
 
 /* Status classes. "cancelled" is an owner-initiated stop, not a failure: giving
@@ -1095,6 +1137,7 @@ function statusCls(status){
 
 function railItem(o){
   const b = el("button","run");
+  if(o.extra) b.classList.add("technical-only");
   if(selected && selected.id===o.id) b.classList.add("sel");
   const top = el("div","top");
   top.appendChild(el("span","dot "+(o.liveness==="live"?"live":o.liveness==="stalled"?"warn":
@@ -1134,11 +1177,27 @@ function statStrip(pairs){
 function h2(text, hint){ const h = el("h2",null,text);
   if(hint) h.appendChild(el("span","hint",hint)); return h; }
 
+function pageTitle(title, description){
+  const head = el("div","pagehead");
+  head.appendChild(el("h1",null,title));
+  if(description) head.appendChild(el("p",null,description));
+  return head;
+}
+
+function technicalSection(main, title, hint, content){
+  const section = el("section","section technical-only");
+  section.appendChild(h2(title, hint));
+  section.appendChild(content);
+  main.appendChild(section);
+}
+
 /* ---- checkpoint-fidelity run view ---- */
 function renderRun(d){
   const main = $("main"); main.innerHTML = "";
+  main.appendChild(pageTitle("Individual agent run",
+    "Follow the agent's path from your request to its final result."));
   const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px";
-  head.appendChild(el("span","fid ckpt","CHECKPOINT FIDELITY · one sample per step"));
+  head.appendChild(el("span","fid ckpt technical-only","CHECKPOINT · one saved state per step"));
   head.appendChild(el("span","badge "+statusCls(d.status), d.status));
   if(d.liveness==="stalled") head.appendChild(el("span","badge warn","stalled · checkpoint not moving"));
   if(d.liveness==="live") head.appendChild(el("span","badge ok","live"));
@@ -1166,7 +1225,7 @@ function renderRun(d){
 
   if(d.tokens_recorded) main.appendChild(tokenBurnCard(d, tot));
 
-  main.appendChild(h2("Request journey", "user → model → tool → model → output"));
+  main.appendChild(h2("What happened", "Your request → local AI → tools → result"));
   main.appendChild(journeyFromCheckpoint(d));
   renderRunTail(main, d, tim, wall);
 }
@@ -1208,18 +1267,18 @@ function tokenBurnCard(d, tot){
 function renderRunTail(main, d, tim, wall){
 
   if(tim.length){
-    main.appendChild(h2("Timeline", "normalized to the first request; monotonic clock"));
-    main.appendChild(waterfallFromCheckpoint(d));
+    technicalSection(main, "Timing details", "Each local model request on a shared clock",
+                     waterfallFromCheckpoint(d));
   }
 
-  main.appendChild(h2("Termination guards", d.guards_source === "checkpoint"
+  main.appendChild(h2("Safety limits", d.guards_source === "checkpoint"
     ? "recorded by this run" : "legacy checkpoint · assumed shipped defaults"));
   main.appendChild(guardPanel(d, wall));
 
-  main.appendChild(h2("Checkpoint chain", d.events.length + " atomic transitions"));
-  main.appendChild(eventTable(d.events));
+  technicalSection(main, "Saved-state history", d.events.length + " verified transitions",
+                   eventTable(d.events));
 
-  const bar = el("div"); bar.style.cssText="margin-top:22px;display:flex;gap:9px;align-items:center";
+  const bar = el("div","technical-only techbar"); bar.style.cssText="margin-top:22px;gap:9px;align-items:center;flex-wrap:wrap";
   const btn = el("button","toggle", showMessages ? "Hide conversation" : "Show conversation ("+d.message_count+" messages)");
   btn.onclick = () => { showMessages = !showMessages; renderDetail(); };
   bar.appendChild(btn);
@@ -1241,8 +1300,10 @@ function renderRunTail(main, d, tim, wall){
    agent_id, the token counters and the timing all live in this event stream. */
 function renderTeam(d){
   const main = $("main"); main.innerHTML = "";
+  main.appendChild(pageTitle("Agent team",
+    "See how several local agents divided one goal, worked in parallel, and combined their findings."));
   const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap";
-  head.appendChild(el("span","fid ckpt","TEAM FIDELITY · one request, many agents"));
+  head.appendChild(el("span","fid ckpt technical-only","TEAM RECORD · one goal, many agents"));
   head.appendChild(el("span","badge "+statusCls(d.status), d.status));
   main.appendChild(head);
 
@@ -1276,7 +1337,7 @@ function renderTeam(d){
     "exist for this team. Step, tool and timing figures below are real."));
 
   if(d.tokens_recorded){
-    main.appendChild(h2("Tokens per agent", "one request, split by who spent it"));
+    main.appendChild(h2("Work by agent", "How much information each agent processed"));
     const card = el("div","card");
     const mx = Math.max(...ws.map(w=>w.prompt_tokens+w.completion_tokens), 1);
     ws.slice().sort((a,b)=>(b.prompt_tokens+b.completion_tokens)-(a.prompt_tokens+a.completion_tokens))
@@ -1312,11 +1373,12 @@ function renderTeam(d){
   }
 
   if(spans){
-    main.appendChild(h2("Who was busy when", "shared monotonic clock; agents ran concurrently"));
+    main.appendChild(h2("Agents working together", "Overlapping bars show agents running at the same time"));
     main.appendChild(teamLanes(ws, spans));
   }
 
-  main.appendChild(h2("Per agent", "acceptance verdict recorded by the team, not by the agent"));
+  const agentSection = el("section","section technical-only");
+  agentSection.appendChild(h2("Agent audit table", "Detailed outcomes and verification verdicts"));
   const tc = el("div","card"); const tbl = el("table");
   const hr = el("tr");
   ["agent","role","status","steps","tools","prompt in","completion out","answer","accepted"]
@@ -1337,10 +1399,10 @@ function renderTeam(d){
     tr.appendChild(ac);
     tbl.appendChild(tr);
   });
-  tc.appendChild(tbl); main.appendChild(tc);
+  tc.appendChild(tbl); agentSection.appendChild(tc); main.appendChild(agentSection);
 
   if(d.synthesis_run_id){
-    main.appendChild(h2("Synthesis", "the reducer that turned worker evidence into one answer"));
+    main.appendChild(h2("Combined result", "The final agent joined the team's findings into one answer"));
     const sc = el("div","card");
     const b = el("button","toggle","Open synthesis run · "+d.synthesis_run_id.slice(0,8)+
                  " ("+(d.synthesis_status||"unknown")+")");
@@ -1611,8 +1673,11 @@ function renderTrace(d){
   const finished = recs.find(r => r.kind==="run_finished");
   const t0 = d.monotonic_origin ?? (recs[0] ? recs[0].t : 0);
 
+  main.appendChild(pageTitle("Detailed activity",
+    "A step-by-step view of local model requests, tool use, and agent collaboration."));
+
   const head = el("div"); head.style.cssText="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap";
-  head.appendChild(el("span","fid trace","TRACE FIDELITY · every request and tool bracketed"));
+  head.appendChild(el("span","fid trace technical-only","TRACE · every request and tool recorded"));
   head.appendChild(el("span","badge "+(finished ? statusCls(finished.status) : "warn"),
                       finished ? finished.status : "in flight"));
   main.appendChild(head);
@@ -1648,9 +1713,9 @@ function renderTrace(d){
     ["Trace span", fx(last-t0)+"s"],
   ]));
 
-  main.appendChild(h2("Concurrency", actors.length>1
-    ? "one lane per worker; overlap proves requests reached MLX-LM together"
-    : "single agent"));
+  main.appendChild(h2("Agents working together", actors.length>1
+    ? "Each row is one agent; overlapping bars mean they worked at the same time"
+    : "This task used one agent"));
   main.appendChild(traceWaterfall(reqs, toolStarts, toolFins, t0, last));
   if(actors.length>1){
     main.appendChild(el("p","note",
@@ -1658,10 +1723,10 @@ function renderTrace(d){
       "simultaneous hardware decoding, which this dashboard cannot observe."));
   }
 
-  main.appendChild(h2("Token economics", "exact per-request accounting from the model's own usage block"));
-  main.appendChild(tokenPanel(fins, actors));
+  technicalSection(main, "Model workload", "Exact per-request accounting from the local model",
+                   tokenPanel(fins, actors));
 
-  main.appendChild(h2("Request journey","live, including requests still in flight"));
+  main.appendChild(h2("What happened", "A live sequence, including work still in progress"));
   main.appendChild(traceJourney(recs, t0));
 }
 
@@ -1927,11 +1992,18 @@ function connect(){
   const es = new EventSource(apiURL("/api/stream"));
   const c = $("conn");
   es.onopen = () => { c.innerHTML=""; c.appendChild(el("span","dot live"));
-                      c.appendChild(document.createTextNode("live")); };
+                      c.appendChild(document.createTextNode("Live updates")); };
   es.addEventListener("changed", () => refresh());
   es.onerror = () => { c.innerHTML=""; c.appendChild(el("span","dot bad"));
-                       c.appendChild(document.createTextNode("reconnecting")); };
+                       c.appendChild(document.createTextNode("Reconnecting")); };
 }
+$("home").onclick = () => { selected=null; showMessages=false; renderRail(); renderFleet(); };
+$("viewmode").onclick = () => {
+  technicalView = !technicalView;
+  document.body.classList.toggle("technical-view", technicalView);
+  $("viewmode").setAttribute("aria-pressed", String(technicalView));
+  $("viewmode").textContent = technicalView ? "Hide technical details" : "Show technical details";
+};
 refresh().then(connect).catch(e => {
   $("main").innerHTML=""; $("main").appendChild(el("div","empty","Failed to load: "+e.message));
 });
