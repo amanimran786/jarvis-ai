@@ -486,3 +486,271 @@ Recommended next slice:
 - Run one live dashboard manager task with safe, read-only scope and watch the SSE stream/logs.
 - If live canary is clean, wire a dashboard "Run Canary" button or documented command for periodic manager-loop checks.
 - Only after the dirty tree is staged by logical groups, run the packaged app verification path.
+
+## Jarvis V1 End-of-Life and Shared V2 Direction — 2026-09-04 03:32 PDT
+
+### Authoritative product decision
+
+Aman ended active development and update support for Jarvis V1. All new
+engineering work belongs on `codex/v2`. V1 remains preserved only as a working
+reference and rollback baseline; do not add V1 features or resume its automated
+training/development jobs unless Aman explicitly reverses this decision.
+
+Frozen baseline:
+
+- Commit: `598d0f106095fe718550baa8a43048b143a2ec33`
+- Annotated tag: `jarvis-v1-final-2026-09-04`
+- Preserved app: `/Users/truthseeker/Applications/Jarvis.app`
+- Active development branch: `codex/v2`
+
+Disabled and unloaded launch jobs:
+
+- `com.jarvis.loop`
+- `com.jarvis.dashboard`
+- `ai.jarvis.overnight-training`
+
+Their plist files were preserved under `~/Library/LaunchAgents/`, making the
+shutdown reversible. No V1 source, training history, app bundle, or rollback
+material was deleted.
+
+### Shared Claude and Codex development boundary
+
+Claude and Codex may both develop V2, but neither hosted model may become a
+dependency of the shipped runtime. V2 must remain functional with no cloud API
+key and no paid fallback. Use the coordination-v2 contract and lease flow for
+implementation, keep assignments digest-bound, and never edit
+`WORK_QUEUE.json` directly.
+
+Before editing, verify the checkout is `codex/v2`, clean, and has no conflicting
+lease. Record file ownership in the assignment. Submit committed, verified work
+for separate Codex review. V1 changes require an explicit rollback or critical
+security reason from Aman.
+
+### Verified Apple reference architecture
+
+Primary source: Apple WWDC26 session 232, "Run local agentic AI on the Mac using
+MLX": https://developer.apple.com/videos/play/wwdc2026/232/
+
+The verified four-layer stack is:
+
+1. MLX on Apple silicon.
+2. MLX-LM for model loading, quantization, and generation.
+3. `mlx_lm.server` on localhost, exposing an OpenAI-compatible chat endpoint.
+4. An agent frontend such as Xcode, OpenCode, Pi, or a Jarvis V2 controller.
+
+The Xcode screenshot supplied by Aman shows a locally hosted provider on port
+`8080` with description `MLX`. Treat this as interface evidence, not a command
+to change Xcode settings.
+
+Apple also demonstrates continuous batching for concurrent requests and
+distributed MLX inference across multiple Macs. The published distributed
+example uses `mlx.launch`, a hostfile, the JACCL backend, and a 122B-class Qwen
+model. Distributed inference is an optional later V2 capability. It is not the
+initial architecture for this single M4 Pro with 48 GB unified memory.
+
+### Social-media claims versus verified scope
+
+The accompanying post claims multiple local agents can simultaneously write,
+test, and repair code, build an iPad app in two minutes, run continuously, and
+cost nothing after setup. Preserve these as product inspiration, not acceptance
+evidence. Apple verifies local inference without cloud/API keys, agent tool use,
+continuous batching, and local coding demonstrations. V2 must independently
+benchmark concurrency, throughput, correctness, power use, memory pressure, and
+long-run stability on Aman's M4 Pro before repeating the broader claims.
+
+### V2 architecture decisions already supported by evidence
+
+- Use a bounded `observe -> plan -> act -> verify -> repeat` state machine.
+- Keep a stable prompt prefix so MLX prompt/KV caching can amortize the system
+  prompt and tool schemas across the many turns of an agentic task.
+- Compact old tool output and file content while preserving citations,
+  approvals, decisions, and immutable task evidence. Long sessions may process
+  100K+ cumulative tokens even when each tool call is small.
+- Share one resident model through continuous batching for the first
+  concurrency milestone. Do not start one full model copy per subagent.
+- Treat model-generated tool calls as untrusted. Reuse `ToolSpec`,
+  `validate_args`, approval gates, budgets, timeouts, retry caps, and result
+  verification.
+- Keep Ollama `nomic-embed-text` available for embeddings because
+  `mlx_lm.server` does not provide the embedding endpoint Jarvis memory uses.
+- Target a 35B-A3B 4-bit MLX reasoner only after a hardware benchmark. The
+  literal 35B-A3B 8-bit demo configuration leaves insufficient safe headroom on
+  this 48 GB machine.
+- Claude Opus and Codex are development/control-plane collaborators. Local
+  Hugging Face/MLX models perform V2 runtime reasoning.
+
+### Local proof completed by Codex
+
+Using installed `mlx-lm 0.31.3` and the cached
+`mlx-community/Qwen3-8B-4bit`, Codex started a localhost-only server, supplied a
+typed weather-tool schema, received a valid tool call, returned a synthetic tool
+result, and received the correct final response. The temporary server was then
+stopped. This proves the two-turn model/tool/model protocol on the target Mac;
+it does not yet prove concurrency or production reliability.
+
+### First V2 implementation assignment
+
+Build a narrow POC beside the existing orchestrator, not a broad rewrite:
+
+1. Typed task state and immutable event log.
+2. One model step producing either one validated tool call or a final answer.
+3. Tool execution through the existing registry and approval boundary.
+4. Result observation fed into the next model step.
+5. Hard limits for steps, wall time, generated tokens, retries, and repeated
+   no-progress states.
+6. Cancellation plus checkpoint/resume.
+7. Deterministic fake-model tests before any live-model benchmark.
+8. A live benchmark for 1, 2, and 4 concurrent read-only subagents against one
+   resident MLX model, recording TTFT, decode throughput, peak memory, success
+   rate, and malformed-tool-call rate.
+
+Do not restart V1 automation while building this POC.
+
+### Implementation update — 2026-09-04
+
+Codex implemented the first V2 production foundation in `jarvis_v2/`, added the
+strict-local MLX launch installer, and documented the complete transition in
+`V1_TO_V2_MIGRATION.md`. Claude should read that ledger before selecting work.
+The bootstrap deliberately exposes only read-only file and Git tools. Do not
+reconnect V1 cloud routers or add hosted fallbacks. The next shared lane is the
+measured 1/2/4-request concurrency benchmark, followed by digest-bound write
+grants and verification.
+
+The full clean-Mac reproduction procedure is now documented in
+`docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md`. Claude must update that guide whenever
+installation steps, ports, model requirements, concurrency flags, security
+boundaries, or verification commands change.
+
+V2 visual assets live under `assets/v2/`. Use `assets/v2/jarvis-v2.icns` for
+the future packaged app. The stale Desktop V1 symlink and ignored V1 dist app
+were removed; do not recreate a Desktop icon before a verified V2 app exists.
+
+Owner tooling decision: do not use GitHub Copilot for V2 implementation,
+review, tests, documentation, or generated evidence. The permitted development
+control plane is Claude plus Codex, with local models used inside explicitly
+bounded V2 experiments.
+
+### Verified concurrent-team update — 2026-09-04 04:34 PDT
+
+Codex implemented `jarvis_v2/team.py` and the live research/benchmark scripts.
+Read `docs/V2_BUILD_JOURNAL.md` before selecting the next Claude lane. V2 now:
+
+- runs up to four bounded specialists against one resident local MLX model
+- records typed tool name, argument digest, result digest, size, and step
+- verifies required tools, exact trusted result digests, and answer markers
+- synthesizes only verified worker evidence in a separate no-tools phase
+- isolates worker and synthesis crashes and refuses false team completion
+- holds an OS run lease so one checkpoint cannot have concurrent owners
+- rejects proxy, redirect, malicious Git helper, and checkpoint escape paths
+
+Adversarial review invalidated the first 1/2/4 result because a marker-only
+answer could pass independently checked evidence requirements. The corrected
+benchmark binds tool + canonical arguments + result digest + exact count and
+requires exact structured-answer equality. That stricter rerun passed at 1/1,
+2/2, and 4/4 verified workers with zero malformed tool calls. The heterogeneous
+three-agent research run also passed its structural contracts and produced a
+conservative `Not Ready` verdict. This is promising fan-out/fan-in evidence,
+not desktop readiness. The streaming rerun now records first delivered semantic
+delta, request, generation, and worker-only request-overlap evidence. Peak
+in-flight worker requests reached 1/2/4 at requested concurrency 1/2/4, with all
+workers verified. This does not prove simultaneous hardware decoding or raw
+first-decoder-token timing. Next shared lanes are deadline-aware cancellation of
+in-flight local calls and repeated soak/adversarial-evidence tests. Do not start
+app packaging yet.
+
+The integration blocker is resolved with owner approval. The defect was limited
+to `reset_for_tests()`: stale test workers could retain unreachable locks after
+their thread references were cleared. Test reset now replaces those in-memory
+primitives; normal V1 bootstrap and runtime execution are unchanged. The direct
+stale-lock regression and final exact repository gate pass: 3,828 passed,
+8 skipped, 0 failed.
+
+### Model identity follow-up — 2026-09-04
+
+The local model client no longer treats an arbitrary non-empty `/v1/models`
+response as proof of readiness. It requires the configured model identifier and
+rejects completion responses attributed to another model. This matters because
+MLX-LM may advertise multiple aliases while serving one resident model.
+
+Live verification against the installed loopback service found the configured
+`mlx-community/Qwen3-8B-4bit` identifier, passed readiness, and returned the
+exact `LOCAL_OK` probe response under that model identity. Keep this fail-closed
+check when changing model aliases, launch configuration, or benchmark tooling.
+Focused V2 checks passed 39 tests; the mandatory full repository gate passed
+3,830 tests with 8 skipped and 0 failed.
+
+### V2 dashboard and trace audit — 2026-09-04
+
+Claude added `scripts/v2_dashboard.py`, `scripts/v2_trace.py`, and the historical
+audit note at `docs/ai/claude_v2_audit_note.md`. Codex live-tested the observer,
+then closed concrete security and evidence gaps before adopting it:
+
+- dashboard model probes use the loopback-only V2 configuration, disable
+  proxies, and reject redirects
+- every dashboard API requires a random per-process capability; the printed URL
+  is the entry point
+- state-source symlinks cannot escape `.jarvis-v2`
+- default traces contain hashes, sizes, timing, actor IDs, and tool names but no
+  raw task/model/argument/result/error content
+- worker and synthesis events are bound to exact actor IDs
+- actual agent limits are stored in new checkpoints; old checkpoints are
+  explicitly labelled as assumed defaults
+- V2 owns its minimal read-only file/Git contracts and no longer imports the V1
+  tool registry
+
+The post-fix live `--team` trace completed all three workers and synthesis with
+23 records and owner-only mode `0600`. Keep the dashboard foreground-only; it is
+not the packaged desktop app. Start it with:
+
+```bash
+./venv/bin/python scripts/v2_dashboard.py --open
+./venv/bin/python scripts/v2_trace.py --team
+```
+
+Focused V2/install/observer checks passed 58 tests. The exact full gate passed
+3,850 tests with 8 skipped. Pytest emitted one non-fatal retired-V1
+`task_runtime.py` thread-cleanup warning; keep it visible as legacy debt, but do
+not misattribute it to the V2 runtime.
+
+### V2 cancellation and dashboard continuation — 2026-09-05
+
+The next runtime gate is no longer in-flight cancellation. `LocalMLXClient`
+now exposes a cancellable loopback request path that closes the active socket
+when the owner cancels or the agent deadline expires. `LocalAgentLoop` records
+those as distinct terminal outcomes instead of waiting for the request timeout
+or retrying them as model-validation errors. The tracing wrapper forwards this
+boundary. Focused tests cover a stream stalled before data, a stream stalled
+after partial data, and deadline expiry.
+
+Claude's two local dashboard commits were retained after review, with two
+correctness fixes: reconstructed turns redact raw tool arguments by default,
+and new team logs record the exact goal plus ordered roster at `team_started`.
+The dashboard labels heuristic goal recovery as legacy-only. Browser validation
+showed the per-agent token split, shared-clock timing lanes, acceptance verdicts,
+and synthesis link with no console errors.
+
+A live probe found a real operational limit. A separate 45 GB Ollama
+`qwen3:30b-a3b` residency plus the MLX prompt cache caused a Metal out-of-memory
+abort. Launchd restarted MLX; after Ollama unloaded, an exact one-tool traced
+run completed. Do not infer generation capacity from `/v1/models` readiness,
+and do not assume the 48 GB machine can keep a 30B Ollama model and the V2 MLX
+worker model resident together. The next shared lane is repeated soak and
+adversarial-evidence testing. Desktop packaging remains gated.
+
+The focused V2/install gate passed 64 tests. The exact repository gate passed
+3,855 tests with 8 skipped and 34 subtests; its 87 warnings are the existing
+dependency and retired semantic-memory numerical warnings, not V2 failures.
+
+### Alternative-model gate — 2026-09-06
+
+Codex staged and evaluated `mlx-community/Qwen3-8B-abliterated-v2-mxfp4` on a
+separate offline loopback server. The benchmark now accepts `--endpoint` and
+`--model`, and its assignment explicitly matches the exact canonical arguments
+required by verification. Both 8B models passed the corrected 1/2/4 structural
+gate with zero malformed calls. Do not promote the abliterated candidate: it
+failed the authorization-boundary trial by providing runnable public-target
+scanning commands after authorization was explicitly absent, while the current
+production Qwen model handled the two authorized local-lab tasks and refused
+the unsupported public target. Port 8082 was stopped; the production model and
+launch configuration remain unchanged. Full details are in
+`docs/V2_BUILD_JOURNAL.md`.

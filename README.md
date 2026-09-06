@@ -1,4 +1,14 @@
-# <div align="center">Jarvis AI</div>
+# <div align="center">Jarvis V2</div>
+
+> **V2 production has started.** Jarvis V1 reached end-of-life on September 4,
+> 2026 and is frozen at tag `jarvis-v1-final-2026-09-04`. V2 is being rebuilt
+> as a strict-local MLX agent runtime with no cloud inference, API keys,
+> provider quotas, or per-token fees. See [the migration ledger](V1_TO_V2_MIGRATION.md)
+> for the exact removed, retained, upgraded, and planned surfaces.
+
+<div align="center">
+  <img src="assets/v2/icon_1024.png" alt="Jarvis V2 guardian icon" width="180" />
+</div>
 
 <div align="center">
   <img src="assets/readme-hero.svg" alt="Jarvis AI hero" width="100%" />
@@ -14,7 +24,46 @@
 
 </div>
 
-Jarvis is a local-first desktop AI assistant for macOS.
+Jarvis V2 is a private, owner-controlled AI agent runtime for Apple Silicon.
+Its model and agent loop run on the Mac. Development may be coordinated by
+Claude and Codex, but neither service is required to operate the shipped runtime.
+
+## V2 Local Bootstrap
+
+The first production foundation is available now:
+
+```bash
+./venv/bin/python scripts/install_v2_local.py --remove-v1
+./venv/bin/python -m jarvis_v2 \
+  "Inspect git status and explain what needs attention" \
+  --workspace /Users/truthseeker/jarvis-ai
+./venv/bin/python scripts/run_v2_research_team.py \
+  --workspace /Users/truthseeker/jarvis-ai
+```
+
+The installer refuses to download a model. It uses the already-cached
+`mlx-community/Qwen3-8B-4bit`, binds MLX-LM to `127.0.0.1:8080`, enables
+offline model loading, and configures continuous prompt/decode concurrency.
+The V2 client rejects every non-loopback endpoint and has no credential input.
+
+V2 is superior to V1 at its foundation: local-only behavior is enforced by
+configuration validation instead of being a routing preference; one resident
+MLX model serves bounded agents; every run is checkpointed; malformed or
+repeated tool calls fail closed; concurrent specialists exchange typed evidence
+through a coordinator-owned verifier; and the initial tool surface is explicitly
+read-only. Streaming telemetry, in-flight cancellation, voice, memory, broader
+tools, UI, and packaged-app parity remain tracked production gates rather than
+implied completed features.
+
+Development findings, failures, limitations, and evidence for future public
+updates are recorded in the [V2 build journal](docs/V2_BUILD_JOURNAL.md).
+To reproduce the system on another Apple Silicon Mac, follow the
+[from-scratch local-agent guide](docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md).
+
+The V2 visual identity is also new: an original dark guardian mark represents
+vigilance, evidence, and owner authority. The macOS-ready asset is
+[`assets/v2/jarvis-v2.icns`](assets/v2/jarvis-v2.icns) and will replace the V1
+icon when the actual V2 app package passes its production gate.
 
 The simple version:
 
