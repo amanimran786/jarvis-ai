@@ -29,6 +29,9 @@ Use tools when evidence is needed. Never claim a tool ran unless its result appe
 in this conversation. When the task is complete, answer directly with evidence.
 All inference and tool execution occurs on the user's Mac."""
 
+_RUNTIME_FEEDBACK_PREFIX = "RUNTIME VALIDATION FEEDBACK:"
+_LEGACY_VALIDATION_PREFIX = "Previous step failed validation:"
+
 _RUN_ID_RE = re.compile(r"[0-9a-f]{32}")
 
 
@@ -218,7 +221,47 @@ class LocalAgentLoop:
             isinstance(message, dict) for message in state.messages
         ):
             raise ValueError("checkpoint messages must be a list of objects")
+        state.messages = self._normalize_legacy_feedback(state.messages)
         return state
+
+    @staticmethod
+    def _runtime_feedback(exc: Exception) -> dict[str, str]:
+        """Return fixed, non-user feedback without elevating raw exception text."""
+        return {
+            "role": "system",
+            "content": (
+                f"{_RUNTIME_FEEDBACK_PREFIX} The previous model step was rejected "
+                f"as {type(exc).__name__}. Follow the supplied tool schema and task "
+                "constraints, then try again. This is runtime feedback, not a user "
+                "message."
+            ),
+        }
+
+    @staticmethod
+    def _normalize_legacy_feedback(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Repair validation errors written as user turns by older checkpoints."""
+        normalized: list[dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            item = dict(message)
+            content = str(item.get("content") or "")
+            if (
+                index > 1
+                and item.get("role") == "user"
+                and content.startswith(_LEGACY_VALIDATION_PREFIX)
+            ):
+                item = {
+                    "role": "system",
+                    "content": (
+                        f"{_RUNTIME_FEEDBACK_PREFIX} A previous model step was "
+                        "rejected by an older Jarvis runtime. Follow the supplied "
+                        "tool schema and task constraints, then try again. This is "
+                        "runtime feedback, not a user message."
+                    ),
+                }
+            normalized.append(item)
+        return normalized
 
     @staticmethod
     def _parse_tool_call(turn: ModelTurn) -> tuple[str, str, dict[str, Any]]:
@@ -388,9 +431,7 @@ class LocalAgentLoop:
             except Exception as exc:
                 state.consecutive_errors += 1
                 state.reason = f"{type(exc).__name__}: {exc}"
-                state.messages.append(
-                    {"role": "user", "content": f"Previous step failed validation: {exc}"}
-                )
+                state.messages.append(self._runtime_feedback(exc))
                 if state.consecutive_errors >= self.limits.max_consecutive_errors:
                     state.status = "blocked"
                     break

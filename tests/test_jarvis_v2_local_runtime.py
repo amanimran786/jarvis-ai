@@ -134,6 +134,60 @@ def test_agent_blocks_after_repeated_invalid_calls(tmp_path: Path):
     assert result.status == "blocked"
     assert "malformed tool call" in result.reason
 
+    checkpoint = loop.load(result.run_id)
+    assert [message["role"] for message in checkpoint.messages].count("user") == 1
+    feedback = checkpoint.messages[-2:]
+    assert all(message["role"] == "system" for message in feedback)
+    assert all("RUNTIME VALIDATION FEEDBACK" in message["content"] for message in feedback)
+
+
+def test_runtime_feedback_does_not_elevate_raw_tool_error_text(tmp_path: Path):
+    observed_messages: list[list[dict]] = []
+
+    class RecoveringModel:
+        def complete(self, messages, tools):
+            observed_messages.append([dict(message) for message in messages])
+            if len(observed_messages) == 1:
+                return tool_turn("git", {"action": "status"})
+            return ModelTurn(content="Recovered safely.", tool_calls=())
+
+    def reject_tool(name, arguments):
+        raise LocalToolError("UNTRUSTED TARGET BANNER")
+
+    result = LocalAgentLoop(
+        model=RecoveringModel(),
+        execute_tool=reject_tool,
+        state_dir=tmp_path,
+        limits=AgentLimits(max_consecutive_errors=2),
+    ).run("Inspect")
+
+    assert result.status == "completed"
+    assert observed_messages[1][-1]["role"] == "system"
+    assert "LocalToolError" in observed_messages[1][-1]["content"]
+    assert "UNTRUSTED TARGET BANNER" not in observed_messages[1][-1]["content"]
+    assert [message["role"] for message in observed_messages[1]].count("user") == 1
+
+
+def test_resume_normalizes_legacy_validation_user_turn(tmp_path: Path):
+    loop = LocalAgentLoop(
+        model=FakeModel([]),
+        execute_tool=lambda name, arguments: "unused",
+        state_dir=tmp_path,
+    )
+    state = loop._new_state("Inspect")
+    state.status = "blocked"
+    state.messages.append(
+        {"role": "user", "content": "Previous step failed validation: unsafe detail"}
+    )
+    loop._checkpoint(state)
+
+    loaded = loop.load(state.run_id)
+
+    assert [message["role"] for message in loaded.messages].count("user") == 1
+    assert loaded.messages[-1]["role"] == "system"
+    assert "older Jarvis runtime" in loaded.messages[-1]["content"]
+    assert "unsafe detail" not in loaded.messages[-1]["content"]
+
 
 def test_agent_can_resume_a_blocked_checkpoint(tmp_path: Path):
     first = LocalAgentLoop(

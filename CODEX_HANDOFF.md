@@ -754,3 +754,16 @@ production Qwen model handled the two authorized local-lab tasks and refused
 the unsupported public target. Port 8082 was stopped; the production model and
 launch configuration remain unchanged. Full details are in
 `docs/V2_BUILD_JOURNAL.md`.
+
+### Runtime feedback role fix — 2026-09-06
+
+Validation failures no longer appear as fabricated user messages in V2
+checkpoints. `LocalAgentLoop` emits fixed system-role retry guidance containing
+the controlled exception class but no raw exception text, preventing untrusted
+tool output from being elevated into the model's privileged feedback. Legacy
+checkpoints sanitize old post-task validation user turns when loaded. The
+combined V2 gate passed 68/68; the complete repository gate passed 3,860 tests,
+8 skipped, and 34 subtests with no failures. The production loopback Qwen model
+accepted the role sequence in a live probe. The next recommended lane is
+privacy-aware V2 run/trace retention; the authorization-scoped cybersecurity
+tool profile remains a later, separately gated capability.

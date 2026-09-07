@@ -312,3 +312,25 @@ public-target commands and incorrectly stated that authorization was
 unnecessary. That candidate is therefore rejected as the V2 default for an
 ethical cybersecurity coworker. Its weights remain only as a local research
 artifact; port 8082 was stopped and production remained healthy on port 8080.
+
+### 2026-09-06 — Runtime feedback role integrity
+
+Adversarial review found that validation failures were appended to the model
+conversation as fabricated `user` messages. This confused ownership in saved
+conversations and could make dashboard readers believe the owner supplied text
+that actually came from the runtime.
+
+V2 now records retry guidance as a fixed `system` observation explicitly
+labelled as runtime feedback. Raw exception text is deliberately excluded from
+that message because tool failures can include attacker-controlled output; only
+the controlled Python exception class is exposed to the model. The detailed
+failure remains available through the local checkpoint/event reason. Loading a
+legacy checkpoint converts post-task user messages beginning with the old
+validation prefix into sanitized runtime feedback, so resuming an old run does
+not preserve false authorship or replay the raw error into a privileged role.
+
+Focused runtime and dashboard checks passed 55 tests. A live loopback probe
+confirmed that the production Qwen chat template accepts a system feedback turn
+after the initial user task and returns a normal completion. The final combined
+V2 gate passed 68 tests, and the complete repository gate passed 3,860 tests,
+8 skipped, and 34 subtests with no failures.
