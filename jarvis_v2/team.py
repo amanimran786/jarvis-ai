@@ -9,7 +9,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from .agent import (
     AgentLimits,
@@ -141,6 +141,10 @@ class LocalAgentTeam:
             [str], Callable[[str, dict], str]
         ]
         | None = None,
+        tool_schemas_factory_for_agent: Callable[
+            [str], list[dict[str, Any]]
+        ]
+        | None = None,
     ) -> None:
         if not 1 <= max_workers <= 4:
             raise ValueError("max_workers must be between 1 and 4")
@@ -154,6 +158,7 @@ class LocalAgentTeam:
         self.require_worker_evidence = require_worker_evidence
         self.model_factory_for_agent = model_factory_for_agent
         self.tool_factory_for_agent = tool_factory_for_agent
+        self.tool_schemas_factory_for_agent = tool_schemas_factory_for_agent
 
     def _model_for(self, actor: str) -> ModelClient:
         if self.model_factory_for_agent is not None:
@@ -164,6 +169,11 @@ class LocalAgentTeam:
         if self.tool_factory_for_agent is not None:
             return self.tool_factory_for_agent(actor)
         return self.execute_tool
+
+    def _tool_schemas_for(self, actor: str) -> list[dict[str, Any]] | None:
+        if self.tool_schemas_factory_for_agent is not None:
+            return self.tool_schemas_factory_for_agent(actor)
+        return None
 
     @staticmethod
     def _validate_assignments(
@@ -318,6 +328,7 @@ class LocalAgentTeam:
                 limits=self.limits,
                 is_cancelled=is_cancelled,
                 require_tool_evidence=self.require_worker_evidence,
+                tool_schemas=self._tool_schemas_for(assignment.agent_id),
             )
             result = loop.run(
                 f"Role: {assignment.role}\nTeam goal: {cleaned_goal}\n"

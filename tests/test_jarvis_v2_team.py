@@ -12,6 +12,7 @@ import pytest
 
 from jarvis_v2.agent import AgentLimits
 from jarvis_v2.model import ModelTurn
+from jarvis_v2.security_tools import authorized_security_tool_schemas
 from jarvis_v2.team import (
     AcceptanceContract,
     AgentAssignment,
@@ -67,6 +68,38 @@ def test_team_workers_overlap_and_synthesizer_receives_typed_evidence(tmp_path: 
     events = [json.loads(line) for line in result.event_log_path.read_text().splitlines()]
     assert sum(event["event"] == "worker_started" for event in events) == 2
     assert events[-1] == {"event": "team_finished", "status": "completed"}
+
+
+def test_team_can_expose_security_tools_to_one_authorized_specialist(tmp_path: Path):
+    observed: dict[str, set[str]] = {}
+
+    class SchemaModel:
+        def __init__(self, actor: str) -> None:
+            self.actor = actor
+
+        def complete(self, messages, tools):
+            observed[self.actor] = {item["function"]["name"] for item in tools}
+            return ModelTurn(content=f"{self.actor} done", tool_calls=())
+
+    result = LocalAgentTeam(
+        model_factory=lambda: SchemaModel("fallback"),
+        model_factory_for_agent=SchemaModel,
+        execute_tool=lambda name, arguments: "unused",
+        state_dir=tmp_path,
+        max_workers=2,
+        require_worker_evidence=False,
+        tool_schemas_factory_for_agent=lambda actor: (
+            authorized_security_tool_schemas() if actor == "blue" else []
+        ),
+    ).run(
+        goal="Review one authorized artifact",
+        assignments=[assignment("blue"), assignment("observer")],
+    )
+
+    assert result.status == "completed"
+    assert observed["blue"] == {"file", "git", "security"}
+    assert observed["observer"] == set()
+    assert observed["synthesis"] == set()
 
 
 def test_team_isolates_worker_crash_and_returns_partial_result(tmp_path: Path):

@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import uuid
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -122,6 +123,7 @@ class LocalAgentLoop:
         is_cancelled: Callable[[], bool] = lambda: False,
         require_tool_evidence: bool = False,
         allow_tools: bool = True,
+        tool_schemas: list[dict[str, Any]] | None = None,
     ) -> None:
         self.model = model
         self.execute_tool = execute_tool
@@ -133,6 +135,9 @@ class LocalAgentLoop:
         self.is_cancelled = is_cancelled
         self.require_tool_evidence = require_tool_evidence
         self.allow_tools = allow_tools
+        self.tool_schemas = (
+            deepcopy(tool_schemas) if tool_schemas is not None else None
+        )
         self._checkpoint_lock = threading.Lock()
 
     def _path(self, run_id: str) -> Path:
@@ -316,7 +321,11 @@ class LocalAgentLoop:
                 break
             state.step += 1
             try:
-                schemas = model_tool_schemas() if self.allow_tools else []
+                schemas = (
+                    deepcopy(self.tool_schemas)
+                    if self.allow_tools and self.tool_schemas is not None
+                    else model_tool_schemas() if self.allow_tools else []
+                )
                 complete_cancellable = getattr(
                     self.model, "complete_cancellable", None
                 )

@@ -268,6 +268,33 @@ that warning is recorded as legacy debt rather than attributed to V2.
 
 ## LinkedIn draft scaffold
 
+### 2026-09-06 — Cyber capability threshold and first authorized tool slice
+
+The owner set an explicit product threshold: every defined red-, blue-, and
+purple-team capability must measure at least 8/10 before Jarvis V2 is called an
+expert cyber coworker. The new capability-gate document defines the fixtures,
+evidence, failure caps, and three-run promotion rule. This preserves a sharp
+line between implemented features and demonstrated competence.
+
+The first implementation slice adds a separate owner-authorized security
+profile. Its grant is explicit, expiring, per-action, and represented by a
+SHA-256 digest in every result. It can hash an artifact or perform deterministic
+Python AST checks for dynamic execution, shell parsing, unsafe deserialization,
+insecure temporary paths, and disabled TLS verification. Paths remain inside
+the selected workspace, including after symlink resolution. Output contains
+findings and evidence metadata rather than source contents.
+
+The normal V2 agents still receive only file-read and read-only Git tools.
+Concurrent teams can now give the security schema to a named specialist while
+giving other workers no security tool at all; synthesis remains tool-free. This
+is capability separation under controls owned locally by the user, not a cloud
+provider restriction.
+
+Not implemented in this slice: network reconnaissance, exploit execution,
+malware execution, log/SIEM ingestion, detection-rule validation, writes,
+containment, remediation, or continuous replay. Those dimensions retain their
+previous scores until their own evaluation gates pass.
+
 Use this only after substituting verified benchmark values:
 
 > I started rebuilding Jarvis V2 as a fully local ethical coworker for AI

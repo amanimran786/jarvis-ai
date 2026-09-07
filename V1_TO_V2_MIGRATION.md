@@ -43,6 +43,7 @@ runtime must not erase the evidence required to explain or recover it.
 | Bounded agent loop | `jarvis_v2/agent.py` | Explicit step, time, retry, malformed-call, and no-progress limits |
 | Durable checkpoints and event log | `jarvis_v2/agent.py` | Every run has an atomic checkpoint, append-only evidence log, owner cancellation, and blocked-run resume |
 | Narrow tool plane | `jarvis_v2/tools.py` | Owns a self-contained V2 schema and validator exposing only workspace file reads and read-only Git; no V1 registry import remains |
+| Owner-authorized security profile | `jarvis_v2/security_tools.py` | Adds expiring, digest-bound grants and deterministic read-only artifact hashing/Python security scanning without changing the default tool profile |
 | Persistent local model server | `scripts/install_v2_local.py` | Starts one resident MLX model on `127.0.0.1:8080`, with prompt/decode concurrency and offline model loading |
 | Deterministic tests | `tests/test_jarvis_v2_local_runtime.py` | Proves local-only URL enforcement, tool-loop behavior, checkpoints, malformed-call blocking, and path containment without a model download |
 | Concurrent verified teams | `jarvis_v2/team.py` | Runs up to four local workers concurrently, records typed evidence digests, verifies assignment contracts, isolates failures, and synthesizes only verified results |
@@ -131,6 +132,14 @@ The next gates are:
 4. Package a new `Jarvis V2.app` and verify it independently of the repo.
 5. Run the full suite, local network-boundary audit, rollback drill, and
    migration-ledger reconciliation before calling V2 production-ready.
+
+Cyber expertise is governed separately by
+[`docs/V2_CYBER_CAPABILITY_GATES.md`](docs/V2_CYBER_CAPABILITY_GATES.md). Every
+red-, blue-, and purple-team dimension must score at least 8/10 on reproducible
+local fixtures before V2 is described as an expert cyber coworker. The first
+implemented slice earns only its measured artifact-hashing and Python-scanning
+credit; it does not imply reconnaissance, exploit validation, malware analysis,
+containment, or continuous-control-validation readiness.
 
 Deadline-aware in-flight cancellation is implemented at the loopback HTTP
 socket boundary. Owner cancellation and wall-clock expiry now interrupt a

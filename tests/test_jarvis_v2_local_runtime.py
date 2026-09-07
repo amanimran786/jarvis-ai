@@ -17,6 +17,7 @@ from jarvis_v2.agent import AgentLimits, AgentState, LocalAgentLoop
 from jarvis_v2.__main__ import _result_payload
 from jarvis_v2.config import LocalConfigurationError, LocalModelConfig
 from jarvis_v2.model import LocalMLXClient, LocalModelError, ModelTurn
+from jarvis_v2.security_tools import authorized_security_tool_schemas
 from jarvis_v2.tools import LocalToolError, ReadOnlyLocalTools
 
 
@@ -93,6 +94,27 @@ def test_agent_executes_one_validated_tool_then_finishes(tmp_path: Path):
     events = result.event_log_path.read_text(encoding="utf-8").splitlines()
     assert len(events) == 3
     assert [json.loads(line)["sequence"] for line in events] == [1, 2, 3]
+
+
+def test_agent_accepts_an_explicit_tool_schema_profile(tmp_path: Path):
+    observed_schema_names: list[set[str]] = []
+
+    class ProfileAwareModel:
+        def complete(self, messages, tools):
+            observed_schema_names.append(
+                {item["function"]["name"] for item in tools}
+            )
+            return ModelTurn(content="Profile loaded.", tool_calls=())
+
+    result = LocalAgentLoop(
+        model=ProfileAwareModel(),
+        execute_tool=lambda name, arguments: "unused",
+        state_dir=tmp_path,
+        tool_schemas=authorized_security_tool_schemas(),
+    ).run("Load the security profile")
+
+    assert result.status == "completed"
+    assert observed_schema_names == [{"file", "git", "security"}]
 
 
 def test_cli_payload_serializes_tool_evidence_and_model_timings(tmp_path: Path):
