@@ -46,7 +46,7 @@ def test_security_profile_has_no_shell_network_or_write_tool():
     )
     assert set(
         security["function"]["parameters"]["properties"]["action"]["enum"]
-    ) == {"hash_file", "scan_python"}
+    ) == {"hash_file", "scan_python", "triage_auth_log"}
 
 
 def test_hash_file_returns_evidence_without_file_contents(tmp_path: Path):
@@ -182,3 +182,32 @@ def test_security_profile_normalizes_missing_paths_to_tool_error(tmp_path: Path)
 
     with pytest.raises(LocalToolError, match="does not exist"):
         tools("security", {"action": "hash_file", "path": "missing.bin"})
+
+
+def test_security_snapshot_rejects_symlink_swap_after_validation(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "artifact.bin"
+    target.write_bytes(b"inside")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"PRIVATE-CANARY")
+    tools = AuthorizedSecurityTools(workspace, grant("hash_file"), clock=lambda: 100)
+
+    def swap_path(raw):
+        target.unlink()
+        target.symlink_to(outside)
+        return target
+
+    monkeypatch.setattr(tools, "_path", swap_path)
+    with pytest.raises(LocalToolError, match="opened safely"):
+        tools("security", {"action": "hash_file", "path": "artifact.bin"})
+
+
+def test_hash_rejects_fifo_without_waiting(tmp_path):
+    import os
+
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    tools = AuthorizedSecurityTools(tmp_path, grant("hash_file"), clock=lambda: 100)
+    with pytest.raises(LocalToolError, match="regular"):
+        tools("security", {"action": "hash_file", "path": "pipe"})

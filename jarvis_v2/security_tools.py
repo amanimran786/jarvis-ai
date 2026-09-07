@@ -6,15 +6,18 @@ import ast
 import hashlib
 import json
 import math
+import os
+import stat
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 from .tools import LocalToolError, READ_ONLY_TOOLS, ReadOnlyLocalTools, model_tool_schemas
+from .auth_logs import MAX_LOG_BYTES, analyze_auth_log
 
 
-SECURITY_ACTIONS = frozenset({"hash_file", "scan_python"})
+SECURITY_ACTIONS = frozenset({"hash_file", "scan_python", "triage_auth_log"})
 _MAX_HASH_BYTES = 100 * 1024 * 1024
 _MAX_SCAN_BYTES = 2 * 1024 * 1024
 
@@ -24,7 +27,8 @@ _SECURITY_SCHEMA: dict[str, Any] = {
         "name": "security",
         "description": (
             "Perform an owner-authorized, read-only security check on one file "
-            "inside the configured workspace."
+            "inside the configured workspace. triage_auth_log analyzes normalized "
+            "authentication JSONL and returns bounded alerts with source line evidence."
         ),
         "parameters": {
             "type": "object",
@@ -54,7 +58,7 @@ class OwnerSecurityGrant:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowed_actions", frozenset(self.allowed_actions))
-        if not self.authorized_by_owner:
+        if self.authorized_by_owner is not True:
             raise LocalToolError("security tools require explicit owner authorization")
         if not self.engagement_id.strip() or self.engagement_id != self.engagement_id.strip():
             raise LocalToolError("engagement id must be non-empty and trimmed")
@@ -180,13 +184,41 @@ class AuthorizedSecurityTools:
             raise LocalToolError(f"unknown security argument(s): {', '.join(unknown)}")
         action = arguments.get("action")
         path = arguments.get("path")
-        if action not in SECURITY_ACTIONS:
+        if not isinstance(action, str) or action not in SECURITY_ACTIONS:
             raise LocalToolError("unsupported security action")
         if not isinstance(path, str) or not path.strip():
             raise LocalToolError("security path must be a non-empty string")
         if len(path) > 4096:
             raise LocalToolError("security path is too long")
         return action, path
+
+    def _read_snapshot(self, path: Path, limit: int) -> bytes:
+        """Open relative to pinned directory descriptors; reject symlink swaps."""
+        directory = os.open(self.workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            parts = path.relative_to(self.workspace).parts
+            for part in parts[:-1]:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=directory)
+            with os.fdopen(descriptor, "rb") as handle:
+                before = os.fstat(handle.fileno())
+                if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+                    raise LocalToolError("security artifact is not regular or exceeds the size limit")
+                data = handle.read(limit + 1)
+                after = os.fstat(handle.fileno())
+                if len(data) > limit:
+                    raise LocalToolError("security artifact exceeds the size limit")
+                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_size, after.st_mtime_ns, after.st_ctime_ns
+                ):
+                    raise LocalToolError("security artifact changed during reading; retry on a stable copy")
+                return data
+        except OSError as exc:
+            raise LocalToolError("security artifact could not be opened safely") from exc
+        finally:
+            os.close(directory)
 
     def __call__(self, name: str, arguments: dict[str, Any]) -> str:
         if name in READ_ONLY_TOOLS:
@@ -196,22 +228,28 @@ class AuthorizedSecurityTools:
         action, raw_path = self._validate_arguments(arguments)
         self._authorize(action)
         path = self._path(raw_path)
-        size = path.stat().st_size
+        limit = _MAX_HASH_BYTES if action == "hash_file" else MAX_LOG_BYTES if action == "triage_auth_log" else _MAX_SCAN_BYTES
+        data = self._read_snapshot(path, limit)
+        size = len(data)
+        artifact_digest = hashlib.sha256(data).hexdigest()
+        self._authorize(action)
         relative_path = str(path.relative_to(self.workspace))
         if action == "hash_file":
             if size > _MAX_HASH_BYTES:
                 raise LocalToolError("file exceeds the security hash size limit")
-            digest = hashlib.sha256()
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
             payload = {
                 "action": action,
                 "engagement_id": self.grant.engagement_id,
                 "grant_sha256": self.grant.sha256,
                 "path": relative_path,
-                "sha256": digest.hexdigest(),
+                "sha256": artifact_digest,
                 "size_bytes": size,
+            }
+        elif action == "triage_auth_log":
+            payload = {
+                **analyze_auth_log(data), "action": action,
+                "engagement_id": self.grant.engagement_id,
+                "grant_sha256": self.grant.sha256, "path": relative_path,
             }
         else:
             if path.suffix.lower() not in {".py", ".pyw"}:
@@ -219,7 +257,7 @@ class AuthorizedSecurityTools:
             if size > _MAX_SCAN_BYTES:
                 raise LocalToolError("file exceeds the Python scan size limit")
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8", errors="strict"))
+                tree = ast.parse(data.decode("utf-8", errors="strict"))
             except (SyntaxError, UnicodeDecodeError) as exc:
                 raise LocalToolError("Python source could not be parsed safely") from exc
             visitor = _PythonSecurityVisitor()
@@ -233,7 +271,7 @@ class AuthorizedSecurityTools:
                 "engagement_id": self.grant.engagement_id,
                 "grant_sha256": self.grant.sha256,
                 "path": relative_path,
-                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "sha256": artifact_digest,
                 "findings": findings,
                 "finding_count": len(findings),
                 "scanner": "jarvis-v2-python-ast-v1",

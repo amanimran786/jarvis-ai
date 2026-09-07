@@ -57,6 +57,9 @@ implied completed features.
 
 Development findings, failures, limitations, and evidence for future public
 updates are recorded in the [V2 build journal](docs/V2_BUILD_JOURNAL.md).
+Local authentication-log investigation is available through the
+[triage walkthrough](docs/V2_AUTH_LOG_TRIAGE.md), including a synthetic incident,
+optional local Qwen summary, and a reproducible ten-case detector benchmark.
 To reproduce the system on another Apple Silicon Mac, follow the
 [from-scratch local-agent guide](docs/V2_LOCAL_AGENTS_FROM_SCRATCH.md).
 

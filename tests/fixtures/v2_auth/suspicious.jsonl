@@ -1,0 +1,6 @@
+{"event_id":"e1","timestamp":"2026-09-06T10:00:00Z","event_type":"authentication","outcome":"failure","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}
+{"event_id":"e2","timestamp":"2026-09-06T10:00:10Z","event_type":"authentication","outcome":"failure","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}
+{"event_id":"e3","timestamp":"2026-09-06T10:00:20Z","event_type":"authentication","outcome":"failure","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}
+{"event_id":"e4","timestamp":"2026-09-06T10:00:30Z","event_type":"authentication","outcome":"failure","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}
+{"event_id":"e5","timestamp":"2026-09-06T10:00:40Z","event_type":"authentication","outcome":"failure","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}
+{"event_id":"e6","timestamp":"2026-09-06T10:00:50Z","event_type":"authentication","outcome":"success","user":"synthetic-analyst","host":"synthetic-workstation","source_ip":"192.0.2.10"}

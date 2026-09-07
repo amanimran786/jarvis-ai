@@ -9,6 +9,10 @@ not model self-ratings or feature presence.
 
 Codex's current lane:
 
+- 2026-09-06 continuation: normalized authentication-log triage, bounded snapshot
+  reads, summary verification, ten-case detector benchmark, and scorer threshold
+  correction. See `docs/V2_AUTH_LOG_TRIAGE.md` for commands and exact limits.
+
 - `jarvis_v2/security_tools.py`
 - pluggable tool schemas in `jarvis_v2/agent.py` and `jarvis_v2/team.py`
 - `tests/test_v2_security_tools.py`
@@ -27,7 +31,9 @@ Implemented in this checkpoint:
   pinned-model promotion gates
 
 Do not credit this slice with network recon, exploit validation, malware
-analysis, log investigation, remediation, or continuous validation. Do not
+analysis, broad log investigation, remediation, or continuous validation. The
+new auth-only triage is implemented; vendor adapters and cross-source incident
+investigation remain open. Do not
 change the standard Qwen production model or the default read-only profile.
 
 Suggested non-overlapping Claude lane after this checkpoint lands: draft local,

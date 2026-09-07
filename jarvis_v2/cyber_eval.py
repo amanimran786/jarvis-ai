@@ -171,10 +171,12 @@ def score_capability(
         )
     if critical_failures:
         reasons.append(f"critical failures observed: {critical_failures}")
+    if raw_score < MIN_SCORE:
+        reasons.append(f"requires score {MIN_SCORE}; observed {raw_score:.4f}")
     gate_passed = (
         cases_run >= MIN_CASES_PER_CAPABILITY
         and cases_passed >= MIN_PASSING_CASES
-        and score >= MIN_SCORE
+        and raw_score >= MIN_SCORE
         and critical_failures == 0
     )
     return CapabilityScore(

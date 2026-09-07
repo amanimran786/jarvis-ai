@@ -78,3 +78,19 @@ slice and receive no capability credit yet.
 The evaluation ledger and scorer are implemented, but no complete 18-capability
 suite has passed. Therefore this infrastructure changes measurement quality,
 not the current red-, blue-, or purple-team scores.
+
+### Evaluation limits and current component evidence
+
+The ledger validates supplied verifier outcomes; it does not establish their
+truth or independently execute the fixtures. Unique run IDs do not prove
+independent executions. A hash chain detects inconsistent edits, but an owner
+can rewrite the entire chain or remove its tail unless the head/count is
+anchored elsewhere. These limitations must be resolved before the promotion
+helper can serve as an autonomous release authority. No automatic model swap
+is enabled by that helper.
+
+The authentication detector now has a ten-case reproducible component suite and
+a live Qwen summary probe, documented in `V2_AUTH_LOG_TRIAGE.md`. Its component
+pass count receives no broad cyber rating. Future model evaluations need larger
+held-out datasets, calibrated false-positive/false-negative measurements, and
+independent assessment of investigative recommendations.

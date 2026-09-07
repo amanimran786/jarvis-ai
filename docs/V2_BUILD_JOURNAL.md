@@ -378,3 +378,40 @@ confirmed that the production Qwen chat template accepts a system feedback turn
 after the initial user task and returns a normal completion. The final combined
 V2 gate passed 68 tests, and the complete repository gate passed 3,860 tests,
 8 skipped, and 34 subtests with no failures.
+
+### 2026-09-06 — Evidence-bound local authentication investigation
+
+V2 can now inspect a normalized authentication JSONL export without a model,
+API key, or cloud service. Two deterministic rules identify repeated failures
+and a success following failures for the same user, host, and source. Reports
+include the source artifact digest, original line citations, true counts,
+truncation flags, and explicit coverage limits. The optional local Qwen summary
+has no tools and must reproduce the exact event/alert counts and citations.
+See [the reproducible walkthrough](V2_AUTH_LOG_TRIAGE.md).
+
+The first free-form model trial suggested password spraying from a fixture
+containing only one user. We tightened the output contract and added independent
+factual checks; a live rerun passed. This does not validate the model's prose or
+investigative judgment on unfamiliar incidents. Raw EVTX/syslog ingestion,
+cross-user spraying, distributed-source correlation, and containment remain open.
+
+Review also exposed two evidence-integrity gaps. Security tools previously read
+the source separately for parsing and hashing, allowing a changed file to produce
+a mismatched report. They now parse and hash one bounded snapshot, traverse using
+directory descriptors, reject symlink swaps/nonregular files, and detect observed
+mutation. The cyber scoring helper used rounded scores for its threshold and
+could give a passing explanation for a failing score. It now compares the raw
+score and reports that failure explicitly. Neither fix makes caller-supplied
+verifier results independently trustworthy; the ledger limitations are documented.
+
+Verification on this checkpoint: 49 focused tests passed; the independent
+synthetic detector benchmark passed 10/10 cases; live Qwen3-8B-4bit returned
+verified counts/citations for the six-event fixture. Security scan and compilation
+passed on all eight changed Python files. The mandatory full repository suite
+passed 3,911 tests and 34 subtests, with 8 skipped and zero failures. A second
+read-only Python/security reviewer found no blocking issue after the fixes.
+
+This is a tested CLI/runtime increment, not a packaged desktop release or an
+8/10 broad cyber capability claim. Existing dashboard, model defaults, Claude
+rendering lanes, and frozen V1 runtime were not changed. No queue status was
+manually edited or worker submission represented as accepted.

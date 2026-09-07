@@ -45,6 +45,7 @@ runtime must not erase the evidence required to explain or recover it.
 | Narrow tool plane | `jarvis_v2/tools.py` | Owns a self-contained V2 schema and validator exposing only workspace file reads and read-only Git; no V1 registry import remains |
 | Owner-authorized security profile | `jarvis_v2/security_tools.py` | Adds expiring, digest-bound grants and deterministic read-only artifact hashing/Python security scanning without changing the default tool profile |
 | Cyber capability evaluation ledger | `jarvis_v2/cyber_eval.py`, `scripts/score_v2_cyber_eval.py` | Replaces subjective capability claims with owner-only hash-chained evidence, critical-failure score caps, and a three-run pinned-model promotion gate |
+| Authentication-log triage | `jarvis_v2/auth_logs.py`, `scripts/run_v2_auth_triage.py` | Adds normalized-event correlation, bounded source-line evidence, and local Qwen summaries with verified counts/citations |
 | Persistent local model server | `scripts/install_v2_local.py` | Starts one resident MLX model on `127.0.0.1:8080`, with prompt/decode concurrency and offline model loading |
 | Deterministic tests | `tests/test_jarvis_v2_local_runtime.py` | Proves local-only URL enforcement, tool-loop behavior, checkpoints, malformed-call blocking, and path containment without a model download |
 | Concurrent verified teams | `jarvis_v2/team.py` | Runs up to four local workers concurrently, records typed evidence digests, verifies assignment contracts, isolates failures, and synthesizes only verified results |

@@ -88,6 +88,20 @@ def test_duplicate_case_ids_are_rejected():
         score_capability("red.threat_modeling", [record(1), record(1)])
 
 
+def test_below_threshold_reports_failure_even_when_minimum_pass_count_met():
+    records = [record(n, passed=n < 8) for n in range(11)]
+    score = score_capability("red.threat_modeling", records)
+    assert not score.gate_passed
+    assert "capability gate passed" not in score.reasons
+    assert any("requires score" in reason for reason in score.reasons)
+
+
+def test_rounding_cannot_turn_less_than_eighty_percent_into_a_pass():
+    records = [record(n, passed=n < 1599) for n in range(2000)]
+    score = score_capability("red.threat_modeling", records)
+    assert not score.gate_passed
+
+
 def test_suite_reports_every_required_capability():
     report = score_suite([record(case_number) for case_number in range(1, 11)])
 
