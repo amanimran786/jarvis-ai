@@ -42,6 +42,7 @@ training/beta/
 # Python
 __pycache__/
 *.py[cod]
+.jarvis-v2/
 *.pyo
 venv/
 .venv/

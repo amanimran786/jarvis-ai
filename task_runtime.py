@@ -461,7 +461,19 @@ def bootstrap(force_reset: bool = False) -> None:
 
 
 def reset_for_tests() -> None:
+    global _MODEL_SEMAPHORE
     bootstrap(force_reset=True)
+    # A timed-out test worker may still hold one of the old execution
+    # primitives after its thread reference has been cleared. Those primitives
+    # are process-local coordination state, not persisted runtime state. Replace
+    # them so the next isolated test cannot inherit an unreachable lock owner.
+    with _AGENT_LOCKS_MUTEX:
+        _AGENT_LOCKS.clear()
+    _MODEL_SEMAPHORE = threading.Semaphore(
+        _parse_max_concurrent(
+            os.getenv("JARVIS_MAX_CONCURRENT_TASKS", str(os.cpu_count() or 4))
+        )
+    )
 
 
 def _append_event(task_id: str, event_type: str, **payload: Any) -> dict[str, Any]:

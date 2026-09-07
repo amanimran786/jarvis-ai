@@ -1,0 +1,2 @@
+# Jarvis V2 model runtime verified on the M4 Pro transition host.
+mlx-lm==0.31.3

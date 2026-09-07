@@ -141,6 +141,57 @@ class TestAtomicCheckAndClaim:
         assert smart_stream_called.is_set(), "_run_task must invoke smart_stream for a queued task"
 
 
+class TestResetIsolation:
+    def test_reset_replaces_execution_primitives_held_by_untracked_worker(self):
+        old_agent_lock = task_runtime._get_agent_lock("chat-router")
+        old_semaphore = task_runtime._MODEL_SEMAPHORE
+        assert old_agent_lock.acquire(blocking=False)
+        assert old_semaphore.acquire(blocking=False)
+
+        try:
+            task_runtime.reset_for_tests()
+            replacement_lock = task_runtime._get_agent_lock("chat-router")
+            assert replacement_lock is not old_agent_lock
+            assert task_runtime._MODEL_SEMAPHORE is not old_semaphore
+            assert replacement_lock.acquire(blocking=False)
+            replacement_lock.release()
+            assert task_runtime._MODEL_SEMAPHORE.acquire(blocking=False)
+            task_runtime._MODEL_SEMAPHORE.release()
+        finally:
+            old_semaphore.release()
+            old_agent_lock.release()
+
+    def test_reset_allows_new_task_while_stale_primitives_remain_held(self):
+        old_agent_lock = task_runtime._get_agent_lock("jarvis-manager")
+        old_semaphore = task_runtime._MODEL_SEMAPHORE
+        assert old_agent_lock.acquire(blocking=False)
+        assert old_semaphore.acquire(blocking=False)
+
+        try:
+            task_runtime.reset_for_tests()
+            with patch(
+                "task_runtime.smart_stream",
+                return_value=(iter(["ok"]), "UnitTestModel"),
+            ), patch(
+                "task_runtime.evals.log_interaction",
+                return_value={"id": "interaction_test"},
+            ):
+                task = task_runtime.submit_task(
+                    "bounded webhook test",
+                    kind="task",
+                    source="webhook",
+                )
+                if task.get("status") == "waiting_approval":
+                    task_runtime.approve_task(str(task["id"]))
+                completed = task_runtime.wait_for_task(str(task["id"]), timeout=2.0)
+
+            assert completed is not None
+            assert completed["status"] == "succeeded"
+        finally:
+            old_semaphore.release()
+            old_agent_lock.release()
+
+
 # ── TTL watchdog / lease expiry ──────────────────────────────────────────────
 
 class TestLeaseExpiry:
