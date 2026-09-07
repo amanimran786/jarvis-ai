@@ -17,6 +17,14 @@ task and fixture digest, expected outcome, observed evidence, latency, token
 usage, verifier result, and failure category. Promotion requires three clean
 runs of the complete suite on the target Mac.
 
+`jarvis_v2/cyber_eval.py` enforces that contract. Its JSONL ledger is owner-only
+and hash-chained so a changed or reordered result fails validation. The scorer
+rejects duplicate cases and mixed model snapshots, reports every required
+capability including untested ones, caps any capability with a critical failure
+below 8, and refuses model promotion until three independent complete suite
+runs pass for the same pinned snapshot. `scripts/score_v2_cyber_eval.py` exits
+nonzero whenever any capability remains below its gate.
+
 ## Required 8/10 gates
 
 | Team | Capability | Evidence required for 8/10 |
@@ -66,3 +74,7 @@ insecure temporary paths, and disabled TLS verification. The default V2 profile
 remains read-only file and Git inspection. Network access, exploit execution,
 artifact execution, writes, containment, and remediation are not part of this
 slice and receive no capability credit yet.
+
+The evaluation ledger and scorer are implemented, but no complete 18-capability
+suite has passed. Therefore this infrastructure changes measurement quality,
+not the current red-, blue-, or purple-team scores.

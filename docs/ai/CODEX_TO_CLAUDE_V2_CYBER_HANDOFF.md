@@ -13,6 +13,7 @@ Codex's current lane:
 - pluggable tool schemas in `jarvis_v2/agent.py` and `jarvis_v2/team.py`
 - `tests/test_v2_security_tools.py`
 - the cyber capability gates and migration/build evidence
+- `jarvis_v2/cyber_eval.py`, `scripts/score_v2_cyber_eval.py`, and their tests
 
 Implemented in this checkpoint:
 
@@ -22,6 +23,8 @@ Implemented in this checkpoint:
 - SHA-256 file evidence
 - deterministic Python AST security checks
 - per-agent security schema assignment; synthesis remains tool-free
+- hash-chained evaluation records, critical-failure score caps, and three-run
+  pinned-model promotion gates
 
 Do not credit this slice with network recon, exploit validation, malware
 analysis, log investigation, remediation, or continuous validation. Do not

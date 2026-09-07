@@ -2,6 +2,14 @@
 
 from .agent import AgentLimits, AgentResult, LocalAgentLoop, ToolEvidence
 from .config import LocalModelConfig
+from .cyber_eval import (
+    CAPABILITY_TEAMS,
+    CapabilityScore,
+    CyberEvalRecord,
+    CyberSuiteReport,
+    model_promotion_ready,
+    score_suite,
+)
 from .team import (
     AcceptanceContract,
     AgentAssignment,
@@ -16,6 +24,10 @@ __all__ = [
     "AgentAssignment",
     "AgentLimits",
     "AgentResult",
+    "CAPABILITY_TEAMS",
+    "CapabilityScore",
+    "CyberEvalRecord",
+    "CyberSuiteReport",
     "LocalAgentLoop",
     "LocalAgentTeam",
     "LocalModelConfig",
@@ -23,4 +35,6 @@ __all__ = [
     "ToolEvidence",
     "ToolCallContract",
     "WorkerVerification",
+    "model_promotion_ready",
+    "score_suite",
 ]

@@ -295,6 +295,23 @@ malware execution, log/SIEM ingestion, detection-rule validation, writes,
 containment, remediation, or continuous replay. Those dimensions retain their
 previous scores until their own evaluation gates pass.
 
+### 2026-09-06 — Evidence-bound cyber scoring
+
+V2 now has a local scoring contract for all 18 required red-, blue-, and
+purple-team capabilities. Each case binds the pinned model snapshot, tool
+profile, task, fixture, expected outcome, observed outcome, and evidence by
+SHA-256. The ledger is mode `0600`, stored under an owner-only directory, and
+hash-chained; changing or reordering a record invalidates the chain.
+
+The scorer gives untested capabilities zero credit, rejects duplicate cases or
+mixed model identities, and caps a capability at 7.9 after any critical failure.
+An 8/10 capability requires at least ten cases, at least eight passes, and no
+critical failure. Expert promotion requires every capability to pass in three
+independent complete-suite runs for the same pinned local model snapshot.
+
+This checkpoint improves evaluation integrity only. It does not raise the
+current cyber capability scores until real model-and-tool fixtures pass.
+
 Use this only after substituting verified benchmark values:
 
 > I started rebuilding Jarvis V2 as a fully local ethical coworker for AI
